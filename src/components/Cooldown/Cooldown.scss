@@ -1,0 +1,43 @@
+.cooldown-mask {
+    position: absolute;
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+
+    @mixin half-wrapper {
+        position: absolute;
+        overflow: hidden;
+        height: 100%;
+        width: 50%;
+        top: 0;
+    }
+
+    @mixin half-mask {
+        height: 100%;
+        width: 100%;
+        background-color: rgba($color: #fff, $alpha: 0.2)
+    }
+
+    .left-wrapper {
+        @include half-wrapper;
+        left: 0;
+
+        .left-mask {
+            @include half-mask;
+            transform-origin: right center;
+        }
+    }
+
+    .right-wrapper {
+        @include half-wrapper;
+        right: 0;
+
+        .right-mask {
+            @include half-mask;
+            transform-origin: left center;
+        }
+    }
+}

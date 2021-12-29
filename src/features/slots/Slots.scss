@@ -1,0 +1,22 @@
+@import 'src/styles/shared.scss';
+
+.slots-wrapper {
+    display: flex;
+    padding: $unit * 10;
+
+    .slot {
+        position: relative;
+        $slotWidth: $unit * 100;
+        width: $slotWidth;
+        height: $slotWidth;
+        background-color: $default-panel-bg;
+        margin-right: $unit * 10;
+
+        .slot-key {
+            position: absolute;
+            color: $secondary-text-color;
+            top: $unit * 6;
+            left: $unit * 8;
+        }
+    }
+}

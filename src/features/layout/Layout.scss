@@ -1,0 +1,13 @@
+@import 'src/styles/shared.scss';
+
+.layout-wrapper {
+    position: relative;
+    background-color: black;
+    height: 100%;
+
+    .layout-slots {
+        position: absolute;
+        bottom: $unit * 100;
+        left: $unit * 100;
+    }
+}
