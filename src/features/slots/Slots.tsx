@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo } from "react";
-import { castSkillOnEnemy } from "redux/enemies";
+import { castSkillOnEnemy } from "redux/raid";
 import { addLog } from "redux/log";
 import { Skill, triggerSkillCooldown } from "redux/skill";
 import eventBus from "util/eventBus";

@@ -6,7 +6,8 @@ import { v4 as uuid } from 'uuid';
 export interface Log {
     id: string,
     type: 'battle' | 'warning',
-    content: string
+    content?: string,
+    time: number
 }
 
 interface LogState {

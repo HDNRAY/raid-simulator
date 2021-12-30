@@ -5,7 +5,7 @@ const Enemies = (props: {
     className?: string
 }) => {
     const { className } = props;
-    const enemies = useAppSelector(state => state.enemies.enemies)
+    const enemies = useAppSelector(state => state.raid.enemies)
     return <div className={`enemies-wrapper ${className}`}>
         {enemies.map(enemy => {
             const { id, health, name, status } = enemy;

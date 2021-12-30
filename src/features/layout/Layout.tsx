@@ -1,7 +1,7 @@
 import { enemies } from "data/enemies"
 import Enemies from "features/enemies/Enemies"
 import { useCallback, useEffect, useRef } from "react"
-import { initEnemies } from "redux/enemies"
+import { initEnemies } from "redux/raid"
 import { initSlots } from "redux/slots"
 import { useAppDispatch } from "redux/store"
 import { updateTime } from "redux/universal"

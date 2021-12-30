@@ -1,6 +1,7 @@
 @import 'src/styles/shared.scss';
 
-.logs-wrapper {
+.logs-wrapper,
+.damage-logs-wrapper {
     overflow-x: hidden;
     overflow-y: auto;
     height: $unit * 200;
@@ -13,4 +14,8 @@
     .warning {
         color: yellow;
     }
+}
+
+.damage-logs-wrapper {
+    margin-top: $unit * 10;
 }

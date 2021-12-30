@@ -1,4 +1,4 @@
-import { Enemy } from "redux/enemies";
+import { Enemy } from "redux/raid";
 
 export const enemies: Array<Enemy> = [{
     id: '1',

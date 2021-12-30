@@ -2,11 +2,29 @@
 
 import { createSlice } from "@reduxjs/toolkit";
 import { v4 as uuid } from 'uuid';
+import { Log } from "./log";
 
 export interface Enemy {
     id: string,
     name: string,
     health: number
+}
+
+export interface DamageLog extends Log {
+    type: 'battle',
+    value: number,
+    target: {
+        id?: string,
+        name: string
+    }
+    caster: {
+        id?: string,
+        name: string
+    },
+    skill: {
+        name: string,
+        id: string
+    }
 }
 
 export interface EnemyInBattle extends Enemy {
@@ -15,16 +33,19 @@ export interface EnemyInBattle extends Enemy {
     }
 }
 
-interface EnemiesState {
+interface RaidState {
+    raidStartTime?: number,
     enemies: Array<EnemyInBattle>,
+    effectHistory: Array<DamageLog>
 }
 
-const initialState: EnemiesState = {
+const initialState: RaidState = {
     enemies: [],
+    effectHistory: []
 }
 
-const enemiesSlice = createSlice({
-    name: 'enemies',
+const raidSlice = createSlice({
+    name: 'raid',
     initialState,
     reducers: {
         initEnemies: (state, { payload }) => {
@@ -50,6 +71,19 @@ const enemiesSlice = createSlice({
                 skill.effect.forEach((effect: any) => {
                     if (effect.type === 'damage') {
                         target.status.health = target.status.health - effect.value;
+                        state.effectHistory.push({
+                            id: uuid(),
+                            time: new Date().getTime(),
+                            type: 'battle',
+                            value: effect.value,
+                            target,
+                            caster: {
+                                name: '你'
+                            },
+                            skill: {
+                                ...skill
+                            }
+                        })
                     }
                 })
             }
@@ -57,5 +91,5 @@ const enemiesSlice = createSlice({
     }
 })
 
-export const { addEnemies, initEnemies, castSkillOnEnemy } = enemiesSlice.actions
-export default enemiesSlice.reducer
+export const { addEnemies, initEnemies, castSkillOnEnemy } = raidSlice.actions
+export default raidSlice.reducer
