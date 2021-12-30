@@ -1,13 +1,28 @@
 
 
 import { createSlice } from "@reduxjs/toolkit";
+import { skills } from "data/skills";
+
+export interface Effect {
+    type: 'damage' | 'dot',
+    value: number,
+    duration?: number,
+    interval?: number
+}
+
+export interface Cost {
+    type: 'mana',
+    value: number
+}
 
 export interface Skill {
     id: string,
     name: string,
-    cd: number,
+    icon?: string,
+    cooldown: number,
+    cost: Array<Cost>,
+    effect: Array<Effect>
     lastTriggerTime?: number,
-    icon?: string
 }
 
 interface SkillState {
@@ -15,11 +30,7 @@ interface SkillState {
 }
 
 const initialState: SkillState = {
-    skills: [{
-        id: '1',
-        name: '寒冰箭',
-        cd: 2500
-    }]
+    skills
 }
 
 const skillSlice = createSlice({

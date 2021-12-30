@@ -1,4 +1,5 @@
 import { createSlice } from "@reduxjs/toolkit";
+import { slots } from "data/slots";
 import { Skill } from "./skill";
 
 export interface Slot {
@@ -6,9 +7,11 @@ export interface Slot {
     key?: string,
     link?: {
         type: 'skill',
-        id: string
+        id: string,
+        skill?: Skill
     }
 }
+
 interface SlotsState {
     slots: Array<Slot>,
     sharedCooldownTriggerTime?: number,
@@ -29,31 +32,7 @@ const slotsSlice = createSlice({
             state.sharedCooldownTriggerTime = new Date().getTime();
         },
         initSlots: (state) => {
-            state.slots = [{
-                key: '1',
-                link: {
-                    type: 'skill',
-                    id: '1'
-                }
-            }, {
-                key: '2'
-            }, {
-                key: '3'
-            }, {
-                key: '4'
-            }, {
-                key: 'Q'
-            }, {
-                key: ''
-            }, {
-                key: ''
-            }, {
-                key: ''
-            }, {
-                key: ''
-            }, {
-                key: ''
-            }]
+            state.slots = slots as Array<Slot>;
         }
     }
 })

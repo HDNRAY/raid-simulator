@@ -1,0 +1,16 @@
+@import 'src/styles/shared.scss';
+
+.logs-wrapper {
+    overflow-x: hidden;
+    overflow-y: auto;
+    height: $unit * 200;
+    width: $unit * 300;
+    background-color: $default-panel-bg;
+    padding: $unit * 4;
+    color: $primary-text-color;
+    font-size: $unit * 14;
+
+    .warning {
+        color: yellow;
+    }
+}

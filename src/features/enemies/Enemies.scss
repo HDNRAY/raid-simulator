@@ -1,0 +1,75 @@
+@import 'src/styles/shared.scss';
+
+.enemies-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    .enemy-wrapper {
+        display: flex;
+        position: relative;
+        width: $unit * 420;
+        height: $unit * 420;
+
+        &:hover {
+            .corner {
+                border-color: white !important;
+            }
+        }
+
+        .health {
+            display: flex;
+            align-items: center;
+            width: 100%;
+            height: 5.6%;
+            border: $unit * 1 solid red;
+            font-size: $unit * 20;
+            padding-left: $unit * 6;
+        }
+
+        .name {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: $unit * 42;
+        }
+
+        .corner {
+            position: absolute;
+            border-color: #999 !important;
+            border-style: solid !important;
+            border-width: 0;
+            width: $unit * 30;
+            height: $unit * 30;
+        }
+
+        .left-top-corner {
+            top: 6%;
+            left: 0;
+            border-left: $unit * 1;
+            border-top: $unit * 1;
+        }
+
+        .left-bottom-corner {
+            bottom: 0;
+            left: 0;
+            border-left: $unit * 1;
+            border-bottom: $unit * 1;
+        }
+
+        .right-top-corner {
+            top: 6%;
+            right: 0;
+            border-right: $unit * 1;
+            border-top: $unit * 1;
+        }
+
+        .right-bottom-corner {
+            right: 0;
+            bottom: 0;
+            border-right: $unit * 1;
+            border-bottom: $unit * 1;
+        }
+    }
+}

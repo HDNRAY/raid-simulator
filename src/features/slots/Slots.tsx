@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo } from "react";
+import { castSkillOnEnemy } from "redux/enemies";
+import { addLog } from "redux/log";
 import { Skill, triggerSkillCooldown } from "redux/skill";
 import eventBus from "util/eventBus";
 import Cooldown from "../../components/Cooldown/Cooldown";
@@ -15,7 +17,7 @@ const Slots = (props: {
 
     const slots = useAppSelector(state => state.slots.slots);
     const skills = useAppSelector(state => state.skill.skills);
-    const skillMap = useMemo(() => {
+    const skillMap: { [key: string]: Skill } = useMemo(() => {
         const data = skills.reduce((result: any, skill: Skill) => {
             result[skill.id] = skill;
             return result;
@@ -23,14 +25,22 @@ const Slots = (props: {
         return data;
     }, [skills]);
 
-    const slotsWithSkills = useMemo(() => {
+    const slotsWithSkills: Array<Slot> = useMemo(() => {
         return slots.map(slot => {
-            const link = slot.link ? skillMap[slot.link?.id] : undefined;
+            const skill = slot.link ? skillMap[slot.link?.id] : undefined;
 
-            return {
-                ...slot,
-                link: skillMap[link?.id]
+            const result: any = {
+                ...slot
             }
+
+            if (skill) {
+                result.link = {
+                    ...slot.link,
+                    skill
+                }
+            }
+
+            return result
         })
     }, [slots, skillMap])
     const sharedCooldownTriggerTime = useAppSelector(state => state.slots.sharedCooldownTriggerTime);
@@ -53,23 +63,47 @@ const Slots = (props: {
         return _keyMap;
     }, [slots])
 
+    // const checkCost = useCallback(() => {
+
+    // }, []);
+
+    const doEffect = useCallback((skill: Skill) => {
+        dispatch(castSkillOnEnemy({ skill, targetId: '1' }))
+    }, [dispatch]);
+
     const onSlotClick = useCallback((slot: Slot) => {
         console.log(slot);
-        if (shareCooldownRemain > 0) {
-            console.error('in gcd')
-        } else if (slot?.link) {
-            const skill = skillMap[slot.link.id];
-            if (time - skill.lastTriggerTime) {
-                console.error('skill in cd')
-            } else {
-                dispatch(triggerSkillCooldown(slot.link.id));
-                dispatch(triggerSharedCooldown());
-            }
+        if (!slot?.link) {
+            console.info('no binding')
+            return
         }
-    }, [dispatch, shareCooldownRemain, skillMap]);
+
+        if (shareCooldownRemain > 0) {
+            dispatch(addLog({
+                type: 'warning',
+                content: 'In GCD'
+            }));
+            return;
+        }
+
+        const skill = skillMap[slot.link.id];
+        if (skill.lastTriggerTime && time - skill.lastTriggerTime <= skill.cooldown) {
+            dispatch(addLog({
+                type: 'warning',
+                content: '我还不能使用这个技能'
+            }));
+            return
+        }
+
+        doEffect(skill);
+        dispatch(triggerSkillCooldown(slot.link.id));
+        dispatch(triggerSharedCooldown());
+
+    }, [dispatch, doEffect, shareCooldownRemain, skillMap, time]);
 
     useEffect(() => {
-        const keyboardListener = (key: string) => {
+        const keyboardListener = (event: CustomEvent) => {
+            const key: string = event.detail;
             onSlotClick(keyMap[key.toLowerCase()])
         }
 
@@ -84,22 +118,32 @@ const Slots = (props: {
     return <div className={`slots-wrapper ${className}`}>
         {slotsWithSkills.map((slot, index) => {
             const { key, link } = slot;
+
             let cd, total;
-            if (link && link.lastTriggerTime && (time - link.lastTriggerTime < link.cd)) {
-                cd = time - link.lastTriggerTime;
-                total = link.cd;
+            let skillElement = null;
+            if (link) {
+                const { skill } = link
+                if (skill) {
+                    skillElement = <div className="slot-link">
+                        {skill.icon && <img src={skill.icon} alt={skill.name} />}
+                        <div className="slot-link-name">{skill.name}</div>
+                    </div>
+
+                    if (skill.lastTriggerTime && (time - skill.lastTriggerTime < skill.cooldown)) {
+                        cd = time - skill.lastTriggerTime;
+                        total = skill.cooldown;
+                    }
+                }
             } else {
                 cd = shareCooldownRemain;
                 total = sharedCooldown;
             }
-            return <div className="slot" key={index}>
+            return <div className="slot" key={index} onClick={() => onSlotClick(slot)}>
                 <Cooldown value={cd} total={total} ></Cooldown>
                 <div className="slot-key">
                     {key}
                 </div>
-                {link ? <div className="slot-link">
-                    <img src={link.icon} alt={link.name} />
-                </div> : null}
+                {skillElement}
             </div>
         })}
     </div>

@@ -1,8 +1,11 @@
+import { enemies } from "data/enemies"
+import Enemies from "features/enemies/Enemies"
 import { useCallback, useEffect, useRef } from "react"
+import { initEnemies } from "redux/enemies"
 import { initSlots } from "redux/slots"
 import { useAppDispatch } from "redux/store"
 import { updateTime } from "redux/universal"
-import Log from "../log/Log"
+import Logs from "../logs/Logs"
 import Slots from "../slots/Slots"
 import './Layout.scss'
 
@@ -12,7 +15,8 @@ const Layout = () => {
     const requestAnimationFrameRef = useRef<number>();
 
     useEffect(() => {
-        dispatch(initSlots())
+        dispatch(initSlots());
+        dispatch(initEnemies(enemies));
     }, [dispatch]);
 
     const loop = useCallback(() => {
@@ -32,7 +36,8 @@ const Layout = () => {
     }, [loop]);
 
     return <div className='layout-wrapper'>
-        <Log></Log>
+        <Enemies className="layout-enemies"></Enemies>
+        <Logs className="layout-logs"></Logs>
         <Slots className="layout-slots"></Slots>
     </div>
 }

@@ -1,13 +1,35 @@
 @import 'src/styles/shared.scss';
 
+* {
+    font-size: $unit * 14;
+    color: $primary-text-color;
+}
+
 .layout-wrapper {
     position: relative;
     background-color: black;
     height: 100%;
 
+    $paddingToScreen: $unit * 60;
+
     .layout-slots {
         position: absolute;
-        bottom: $unit * 100;
-        left: $unit * 100;
+        bottom: $paddingToScreen;
+        left: $paddingToScreen;
+    }
+
+    .layout-logs {
+        position: absolute;
+        top: $paddingToScreen;
+        left: $paddingToScreen;
+    }
+
+    .layout-enemies {
+        position: absolute;
+        top: 46%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: $unit * 1000;
+        height: $unit * 600;
     }
 }

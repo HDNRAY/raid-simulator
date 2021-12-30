@@ -5,8 +5,9 @@
     padding: $unit * 10;
 
     .slot {
+        $slotWidth: $unit * 60;
+
         position: relative;
-        $slotWidth: $unit * 100;
         width: $slotWidth;
         height: $slotWidth;
         background-color: $default-panel-bg;
@@ -15,8 +16,26 @@
         .slot-key {
             position: absolute;
             color: $secondary-text-color;
-            top: $unit * 6;
-            left: $unit * 8;
+            top: $unit * 2;
+            left: $unit * 4;
+        }
+
+        .slot-link {
+            position: relative;
+            width: 100%;
+            height: 100%;
+
+            .slot-link-name {
+                position: absolute;
+                font-size: $unit * 14;
+                color: $secondary-text-color;
+                bottom: $unit * 6;
+                left: $unit * 4;
+                width: 70%;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
         }
     }
 }

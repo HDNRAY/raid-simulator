@@ -1,5 +1,7 @@
 import { configureStore, ThunkAction, Action } from '@reduxjs/toolkit';
 import { TypedUseSelectorHook, useDispatch, useSelector } from 'react-redux';
+import enemies from './enemies';
+import log from './log';
 import skill from './skill';
 import slots from './slots';
 import universal from './universal';
@@ -8,7 +10,9 @@ export const store = configureStore({
     reducer: {
         slots,
         skill,
-        universal
+        universal,
+        log,
+        enemies
     },
 });
 
