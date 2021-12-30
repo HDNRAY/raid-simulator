@@ -134,7 +134,9 @@ const Slots = (props: {
                         total = skill.cooldown;
                     }
                 }
-            } else {
+            }
+
+            if (!cd) {
                 cd = shareCooldownRemain;
                 total = sharedCooldown;
             }

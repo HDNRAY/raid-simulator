@@ -34,12 +34,14 @@ export interface EnemyInBattle extends Enemy {
 }
 
 interface RaidState {
+    raidStatus: 'stopped' | 'started',
     raidStartTime?: number,
     enemies: Array<EnemyInBattle>,
     effectHistory: Array<DamageLog>
 }
 
 const initialState: RaidState = {
+    raidStatus: 'stopped',
     enemies: [],
     effectHistory: []
 }
@@ -63,6 +65,14 @@ const raidSlice = createSlice({
                 id: uuid(),
                 ...payload
             });
+        },
+        startRaid: (state) => {
+            state.raidStartTime = new Date().getTime();
+            state.raidStatus = 'started';
+        },
+        stopRaid: (state) => {
+            state.raidStartTime = undefined
+            state.raidStatus = 'stopped';
         },
         castSkillOnEnemy: (state, { payload }) => {
             const { targetId, skill } = payload;
@@ -91,5 +101,5 @@ const raidSlice = createSlice({
     }
 })
 
-export const { addEnemies, initEnemies, castSkillOnEnemy } = raidSlice.actions
+export const { addEnemies, initEnemies, startRaid, stopRaid, castSkillOnEnemy } = raidSlice.actions
 export default raidSlice.reducer

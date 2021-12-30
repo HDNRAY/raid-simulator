@@ -1,5 +1,7 @@
 import { enemies } from "data/enemies"
+import Character from "features/character/Character"
 import Enemies from "features/enemies/Enemies"
+import Info from "features/info/Info"
 import { useCallback, useEffect, useRef } from "react"
 import { initEnemies } from "redux/raid"
 import { initSlots } from "redux/slots"
@@ -36,9 +38,11 @@ const Layout = () => {
     }, [loop]);
 
     return <div className='layout-wrapper'>
+        <Info className="layout-info"></Info>
         <Enemies className="layout-enemies"></Enemies>
         <Logs className="layout-logs"></Logs>
         <Slots className="layout-slots"></Slots>
+        <Character className="layout-character"></Character>
     </div>
 }
 

@@ -26,10 +26,23 @@
 
     .layout-enemies {
         position: absolute;
-        top: 46%;
+        top: 40%;
         left: 50%;
         transform: translate(-50%, -50%);
         width: $unit * 1000;
         height: $unit * 600;
+    }
+
+    .layout-info {
+        position: absolute;
+        top: $paddingToScreen;
+        right: $paddingToScreen;
+    }
+
+    .layout-character {
+        width: $unit * 400;
+        position: absolute;
+        bottom: $paddingToScreen;
+        left: 40%;
     }
 }
