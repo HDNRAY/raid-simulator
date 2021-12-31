@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo } from "react";
-import { castSkillOnEnemy } from "redux/raid";
 import { addLog } from "redux/log";
 import { Skill, triggerSkillCooldown } from "redux/skill";
 import eventBus from "util/eventBus";
@@ -7,6 +6,7 @@ import Cooldown from "../../components/Cooldown/Cooldown";
 import { initSlots, Slot, triggerSharedCooldown } from "../../redux/slots";
 import { useAppDispatch, useAppSelector } from "../../redux/store";
 import './Slots.scss';
+import { startCasting } from "redux/character";
 
 const Slots = (props: {
     className?: string
@@ -67,16 +67,10 @@ const Slots = (props: {
         return _keyMap;
     }, [slots])
 
-    // const checkCost = useCallback(() => {
-
-    // }, []);
-
-    const doEffect = useCallback((skill: Skill) => {
-        dispatch(castSkillOnEnemy({ skill, targetId: '1' }))
-    }, [dispatch]);
+    const castingSkill = useAppSelector(state => state.character.mainCharacter?.castingSkill);
 
     const onSlotClick = useCallback((slot: Slot) => {
-        console.log(slot);
+        console.info(slot);
         if (!slot?.link) {
             console.info('no binding')
             return
@@ -99,11 +93,19 @@ const Slots = (props: {
             return
         }
 
-        doEffect(skill);
-        dispatch(triggerSkillCooldown(slot.link.id));
+        if (castingSkill) {
+            dispatch(addLog({
+                type: 'warning',
+                content: '我正在施法'
+            }));
+            return
+        }
+
+        dispatch(startCasting(skill))
+        dispatch(triggerSkillCooldown(skill.id));
         dispatch(triggerSharedCooldown());
 
-    }, [dispatch, doEffect, shareCooldownRemain, skillMap, time]);
+    }, [castingSkill, dispatch, shareCooldownRemain, skillMap, time]);
 
     useEffect(() => {
         const keyboardListener = (event: CustomEvent) => {

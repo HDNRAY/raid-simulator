@@ -53,9 +53,30 @@ const characterSlice = createSlice({
                 },
                 realtimeAttributes: staticAttributes
             };
+        },
+        startCasting: (state, { payload }) => {
+            const character = state.mainCharacter;
+            if (character) {
+                character.castingSkill = payload;
+                character.castingTime = new Date().getTime();
+            }
+        },
+        doneCasting: (state) => {
+            const character = state.mainCharacter;
+            if (character) {
+                character.castingSkill = undefined;
+                character.castingTime = undefined
+            }
+        },
+        cancelCasting: (state, { payload }) => {
+            const character = state.mainCharacter;
+            if (character) {
+                character.castingSkill = undefined;
+                character.castingTime = undefined
+            }
         }
     }
 })
 
-export const { setMainCharacter } = characterSlice.actions
+export const { setMainCharacter, startCasting, doneCasting, cancelCasting } = characterSlice.actions
 export default characterSlice.reducer

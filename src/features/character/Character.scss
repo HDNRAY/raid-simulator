@@ -2,6 +2,26 @@
 
 .character-wrapper {
     display: flex;
+    flex-wrap: wrap;
+
+    .character-casting-wrapper {
+        width: 100%;
+        height: $unit * 24;
+        margin-bottom: $unit * 10;
+        flex-shrink: 0;
+        display: flex;
+
+        .character-casting-name {
+            // width: $unit * 100;
+            padding-right: $unit * 10;
+            font-size: $unit * 20;
+        }
+
+        .character-casting {
+            flex: 1;
+            color: black;
+        }
+    }
 
     .character-resources-wrapper {
         flex: 1;

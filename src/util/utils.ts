@@ -19,4 +19,12 @@ const timeShorter = (value: number, toSecond: boolean = true) => {
     return result;
 }
 
-export { timeShorter }
+const getPercentage = (dividend?: number, divisor?: number) => {
+    if (!divisor || !dividend) {
+        return 0
+    }
+
+    return Math.round(1000 * dividend / divisor) / 10;
+}
+
+export { timeShorter, getPercentage }

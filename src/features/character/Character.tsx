@@ -1,7 +1,11 @@
+import ProgressBar from "components/ProgressBar/ProgressBar";
 import { you } from "data/character";
-import { useEffect } from "react";
-import { Character, setMainCharacter } from "redux/character";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { Character, doneCasting, setMainCharacter, startCasting } from "redux/character";
+import { castSkillOnEnemy } from "redux/raid";
+import { Skill } from "redux/skill";
 import { useAppDispatch, useAppSelector } from "redux/store";
+import { getPercentage } from "util/utils";
 import './Character.scss';
 
 const CharacterPanel = (props: {
@@ -11,35 +15,58 @@ const CharacterPanel = (props: {
 
     const dispatch = useAppDispatch();
     const character: Character | undefined = useAppSelector(state => state.character.mainCharacter);
+    const time = useAppSelector(state => state.universal.time);
 
     useEffect(() => {
         dispatch(setMainCharacter(you));
     }, [dispatch]);
 
+    const doEffect = useCallback((skill: Skill) => {
+        dispatch(castSkillOnEnemy({ skill, targetId: '1' }))
+    }, [dispatch]);
+
+    const { staticResource, realtimeResource, realtimeAttributes, name, castingSkill, castingTime } = character || {};
+
+    const castingTimePast = castingTime ? time - castingTime : 0;
+    const castingPercentage = getPercentage(castingTimePast, castingSkill?.castTime);
+
+    const castingTimeRemain = castingSkill ? Math.max(castingSkill?.castTime - castingTimePast, 0) / 1000 : 0
+
+    useEffect(() => {
+        if (castingSkill) {
+            if (castingSkill.castTime === 0) {
+                doEffect(castingSkill);
+                dispatch(doneCasting())
+            } else if (castingTimePast >= castingSkill.castTime) {
+                doEffect(castingSkill);
+                dispatch(doneCasting())
+            }
+        }
+    }, [castingSkill, castingTimePast, dispatch, doEffect])
+
     if (!character) {
         return null;
     }
 
-    const { staticResource, realtimeResource, realtimeAttributes } = character;
     const resources = [{
         label: '血量',
         value: realtimeResource?.health,
-        cap: staticResource.health,
+        cap: staticResource?.health ?? 100,
         color: 'red'
     }, {
         label: '蓝',
         value: realtimeResource?.mana,
-        cap: staticResource.mana,
+        cap: staticResource?.mana ?? 100,
         color: 'blue'
     }, {
         label: '能量',
         value: realtimeResource?.energy,
-        cap: staticResource.energy,
+        cap: staticResource?.energy ?? 100,
         color: 'yellow'
     }, {
         label: '怒气',
         value: realtimeResource?.fury,
-        cap: staticResource.fury,
+        cap: staticResource?.fury ?? 100,
         color: 'green'
     }];
 
@@ -58,18 +85,17 @@ const CharacterPanel = (props: {
     }]
 
     return <div className={`character-wrapper ${className}`}>
+        <div className="character-casting-wrapper">
+            <div className="character-casting-name">{name}</div>
+            <ProgressBar className="character-casting" percentage={castingPercentage} color="#eee">{castingTimeRemain}s</ProgressBar>
+        </div>
         <div className="character-resources-wrapper">
             {resources.filter(r => r.cap > 0).map(resource => {
                 const { label, value, cap, color } = resource;
-                const percentage = Math.round(100 * (value ?? 0) / cap);
-                const style = {
-                    background: `linear-gradient(90deg, ${color} ${percentage}%,transparent ${percentage}%)`
-                }
+                const percentage = getPercentage(value, cap);
                 return <div className="character-resource" key={label}>
                     <div className="character-resource-label">{label}</div>
-                    <div className="character-resource-value" style={style}>
-                        {value}
-                    </div>
+                    <ProgressBar className="character-resource-value" percentage={percentage} border={false} color={color}>{value}</ProgressBar>
                 </div>
             })}
         </div>
