@@ -4,6 +4,8 @@ import { startRaid, initEnemies, stopRaid } from "redux/raid";
 import { useAppDispatch, useAppSelector } from "redux/store";
 import { enemies } from "data/enemies";
 import { timeShorter } from "util/utils";
+import { setMainCharacter } from "redux/character";
+import { you } from "data/character";
 
 const Info = (props: {
     className?: string
@@ -13,10 +15,11 @@ const Info = (props: {
 
     const time = useAppSelector(state => state.universal.time);
     const raidStartTime = useAppSelector(state => state.raid.raidStartTime);
-    const raidStatus = useAppSelector(state => state.raid.raidStatus);
+    const raidStatus = 'started'// useAppSelector(state => state.raid.raidStatus);
 
     const initRaid = useCallback(() => {
         dispatch(initEnemies(enemies));
+        dispatch(setMainCharacter(you));
     }, [dispatch]);
 
     const onClick = useCallback(() => {

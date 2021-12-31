@@ -1,10 +1,7 @@
-import { enemies } from "data/enemies"
 import Character from "features/character/Character"
 import Enemies from "features/enemies/Enemies"
 import Info from "features/info/Info"
 import { useCallback, useEffect, useRef } from "react"
-import { initEnemies } from "redux/raid"
-import { initSlots } from "redux/slots"
 import { useAppDispatch } from "redux/store"
 import { updateTime } from "redux/universal"
 import Logs from "../logs/Logs"
@@ -15,11 +12,6 @@ const Layout = () => {
     const dispatch = useAppDispatch();
 
     const requestAnimationFrameRef = useRef<number>();
-
-    useEffect(() => {
-        dispatch(initSlots());
-        dispatch(initEnemies(enemies));
-    }, [dispatch]);
 
     const loop = useCallback(() => {
         setTimeout(() => {

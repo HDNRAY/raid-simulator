@@ -5,6 +5,7 @@ import log from './log';
 import skill from './skill';
 import slots from './slots';
 import universal from './universal';
+import character from './character';
 
 export const store = configureStore({
     reducer: {
@@ -12,7 +13,8 @@ export const store = configureStore({
         skill,
         universal,
         log,
-        raid
+        raid,
+        character
     },
 });
 

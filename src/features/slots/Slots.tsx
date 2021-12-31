@@ -4,7 +4,7 @@ import { addLog } from "redux/log";
 import { Skill, triggerSkillCooldown } from "redux/skill";
 import eventBus from "util/eventBus";
 import Cooldown from "../../components/Cooldown/Cooldown";
-import { Slot, triggerSharedCooldown } from "../../redux/slots";
+import { initSlots, Slot, triggerSharedCooldown } from "../../redux/slots";
 import { useAppDispatch, useAppSelector } from "../../redux/store";
 import './Slots.scss';
 
@@ -14,6 +14,10 @@ const Slots = (props: {
     const { className } = props;
 
     const dispatch = useAppDispatch();
+
+    useEffect(() => {
+        dispatch(initSlots());
+    }, [dispatch]);
 
     const slots = useAppSelector(state => state.slots.slots);
     const skills = useAppSelector(state => state.skill.skills);

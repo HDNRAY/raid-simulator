@@ -1,7 +1,7 @@
 
 
-import { createSlice } from "@reduxjs/toolkit";
-import { v4 as uuid } from 'uuid';
+import { createSlice, PayloadAction } from "@reduxjs/toolkit";
+import { Skill } from "./skill";
 
 export interface CharacterResource {
     health: number,
@@ -20,32 +20,42 @@ export interface CharacterAttributes {
 export interface Character {
     id: string,
     name: string,
+    castingSkill?: Skill,
+    castingTime?: number,
     staticResource: CharacterResource,
-    realtimeResource: CharacterResource,
+    realtimeResource?: CharacterResource,
     staticAttributes: CharacterAttributes,
-    realtimeAttributes: CharacterAttributes
+    realtimeAttributes?: CharacterAttributes
 }
 
 interface CharacterState {
-    characters: Array<Character>
+    mainCharacter?: Character,
 }
 
 const initialState: CharacterState = {
-    characters: []
+
 }
 
 const characterSlice = createSlice({
     name: 'character',
     initialState,
     reducers: {
-        addCharacter: (state, { payload }) => {
-            state.characters.push({
-                id: uuid(),
-                ...payload
-            });
+        setMainCharacter: (state, { payload }: PayloadAction<Character>) => {
+            const { staticAttributes, staticResource } = payload
+            const { health, mana, energy } = staticResource;
+            state.mainCharacter = {
+                ...payload,
+                realtimeResource: {
+                    health,
+                    mana,
+                    energy,
+                    fury: 0
+                },
+                realtimeAttributes: staticAttributes
+            };
         }
     }
 })
 
-export const { addCharacter } = characterSlice.actions
+export const { setMainCharacter } = characterSlice.actions
 export default characterSlice.reducer

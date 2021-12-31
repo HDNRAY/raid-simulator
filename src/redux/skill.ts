@@ -19,6 +19,7 @@ export interface Skill {
     id: string,
     name: string,
     icon?: string,
+    castTime: number,
     cooldown: number,
     cost: Array<Cost>,
     effect: Array<Effect>

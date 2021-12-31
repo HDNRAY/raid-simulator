@@ -1,43 +1,88 @@
-const Character = (props: {
+import { you } from "data/character";
+import { useEffect } from "react";
+import { Character, setMainCharacter } from "redux/character";
+import { useAppDispatch, useAppSelector } from "redux/store";
+import './Character.scss';
+
+const CharacterPanel = (props: {
     className?: string
 }) => {
     const { className } = props;
+
+    const dispatch = useAppDispatch();
+    const character: Character | undefined = useAppSelector(state => state.character.mainCharacter);
+
+    useEffect(() => {
+        dispatch(setMainCharacter(you));
+    }, [dispatch]);
+
+    if (!character) {
+        return null;
+    }
+
+    const { staticResource, realtimeResource, realtimeAttributes } = character;
     const resources = [{
-        name: '血量',
-        value: 1000,
-        cap: 1000,
+        label: '血量',
+        value: realtimeResource?.health,
+        cap: staticResource.health,
         color: 'red'
     }, {
-        name: '蓝',
-        value: 900,
-        cap: 1000,
+        label: '蓝',
+        value: realtimeResource?.mana,
+        cap: staticResource.mana,
         color: 'blue'
     }, {
-        name: '能量',
-        value: 90,
-        cap: 120,
+        label: '能量',
+        value: realtimeResource?.energy,
+        cap: staticResource.energy,
         color: 'yellow'
     }, {
-        name: '怒气',
-        value: 10,
-        cap: 120,
+        label: '怒气',
+        value: realtimeResource?.fury,
+        cap: staticResource.fury,
         color: 'green'
     }];
-    return <div className={className}>
-        <div>
-            {resources.map(resource => {
-                const { name, value, cap, color } = resource;
-                const percentage = Math.round(100 * value / cap);
-                return <div>
-                    <div>{name}</div>
-                    <div style={{ background: `linear-gradient(90deg, ${color} ${percentage}%,transparent ${percentage}%)` }}>{value}</div>
+
+    const attributes = [{
+        label: '力量',
+        value: realtimeAttributes?.strength
+    }, {
+        label: '敏捷',
+        value: realtimeAttributes?.agility
+    }, {
+        label: '智力',
+        value: realtimeAttributes?.intelligence
+    }, {
+        label: '精神',
+        value: realtimeAttributes?.spirit
+    }]
+
+    return <div className={`character-wrapper ${className}`}>
+        <div className="character-resources-wrapper">
+            {resources.filter(r => r.cap > 0).map(resource => {
+                const { label, value, cap, color } = resource;
+                const percentage = Math.round(100 * (value ?? 0) / cap);
+                const style = {
+                    background: `linear-gradient(90deg, ${color} ${percentage}%,transparent ${percentage}%)`
+                }
+                return <div className="character-resource" key={label}>
+                    <div className="character-resource-label">{label}</div>
+                    <div className="character-resource-value" style={style}>
+                        {value}
+                    </div>
                 </div>
             })}
         </div>
-        <div>
-            属性
+        <div className="character-attributes-wrapper">
+            {attributes.map(attribute => {
+                const { label, value } = attribute;
+                return <div className="character-attribute" key={label}>
+                    <div className="character-attribute-label">{label}</div>
+                    <div className="character-attribute-value">{value}</div>
+                </div>
+            })}
         </div>
     </div>
 }
 
-export default Character
+export default CharacterPanel

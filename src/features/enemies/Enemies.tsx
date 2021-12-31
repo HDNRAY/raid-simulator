@@ -1,13 +1,22 @@
-import { useAppSelector } from "redux/store";
+import { enemies } from "data/enemies";
+import { useEffect } from "react";
+import { initEnemies } from "redux/raid";
+import { useAppDispatch, useAppSelector } from "redux/store";
 import './Enemies.scss';
 
 const Enemies = (props: {
     className?: string
 }) => {
+    const dispatch = useAppDispatch();
     const { className } = props;
-    const enemies = useAppSelector(state => state.raid.enemies)
+    const selectedEnemies = useAppSelector(state => state.raid.enemies)
+
+    useEffect(() => {
+        dispatch(initEnemies(enemies));
+    }, [dispatch]);
+
     return <div className={`enemies-wrapper ${className}`}>
-        {enemies.map(enemy => {
+        {selectedEnemies.map(enemy => {
             const { id, health, name, status } = enemy;
             const percentage = Math.round(100 * status.health / health);
             return <div className="enemy-wrapper" key={id}>

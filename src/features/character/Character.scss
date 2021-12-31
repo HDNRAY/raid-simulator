@@ -1,0 +1,45 @@
+@import 'src/styles/shared.scss';
+
+.character-wrapper {
+    display: flex;
+
+    .character-resources-wrapper {
+        flex: 1;
+        padding: $unit * 10;
+
+        .character-resource {
+            display: flex;
+            margin-bottom: $unit * 10;
+
+            .character-resource-label {
+                width: $unit * 64;
+                font-size: $unit * 18;
+            }
+
+            .character-resource-value {
+                flex: 1
+            }
+        }
+    }
+
+    .character-attributes-wrapper {
+        flex: 1;
+        padding: $unit * 10;
+        display: flex;
+        flex-direction: column;
+
+        .character-attribute {
+            display: flex;
+            height: $unit * 24;
+
+            .character-attribute-label {
+                width: $unit * 64;
+                font-size: $unit * 18;
+            }
+
+            .character-attribute-value {
+                font-size: $unit * 18;
+            }
+        }
+    }
+}
