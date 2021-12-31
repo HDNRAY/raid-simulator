@@ -1,5 +1,8 @@
-const BuffPanel = () => {
-    return <div>
+const BuffPanel = (props: {
+    className?: string
+}) => {
+    const { className } = props;
+    return <div className={`${className}`}>
         <div></div>
         <div>
 

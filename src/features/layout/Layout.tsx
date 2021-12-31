@@ -1,3 +1,4 @@
+import BuffPanel from "features/buff/BuffPanel"
 import Character from "features/character/Character"
 import Enemies from "features/enemies/Enemies"
 import Info from "features/info/Info"
@@ -14,7 +15,6 @@ const Layout = () => {
     const requestAnimationFrameRef = useRef<number>();
 
     const loop = useCallback((time: number) => {
-        console.log(time.toFixed(0))
         dispatch(updateTime(time.toFixed(0)));
         setTimeout(() => {
             requestAnimationFrameRef.current = requestAnimationFrame(loop);
@@ -22,7 +22,6 @@ const Layout = () => {
     }, [dispatch])
 
     useEffect(() => {
-
         requestAnimationFrame(loop)
 
         return () => {
@@ -36,6 +35,7 @@ const Layout = () => {
         <Logs className="layout-logs"></Logs>
         <Slots className="layout-slots"></Slots>
         <Character className="layout-character"></Character>
+        <BuffPanel className="layout-buff"></BuffPanel>
     </div>
 }
 

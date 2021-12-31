@@ -22,6 +22,7 @@
         position: absolute;
         top: $paddingToScreen;
         left: $paddingToScreen;
+        width: $unit * 300;
     }
 
     .layout-enemies {
@@ -44,5 +45,12 @@
         position: absolute;
         bottom: $paddingToScreen;
         left: 40%;
+    }
+
+    .layout-buff {
+        width: $unit * 400;
+        position: absolute;
+        top: 40%;
+        right: $paddingToScreen;
     }
 }
