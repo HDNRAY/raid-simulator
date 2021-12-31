@@ -55,10 +55,11 @@ const characterSlice = createSlice({
             };
         },
         startCasting: (state, { payload }) => {
+            const { skill, time } = payload;
             const character = state.mainCharacter;
             if (character) {
-                character.castingSkill = payload;
-                character.castingTime = new Date().getTime();
+                character.castingSkill = skill;
+                character.castingTime = time;
             }
         },
         doneCasting: (state) => {

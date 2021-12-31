@@ -39,9 +39,10 @@ const skillSlice = createSlice({
     initialState,
     reducers: {
         triggerSkillCooldown: (state, { payload }) => {
-            const skill = state.skills.find(s => s.id === payload)
+            const { skillId, time } = payload;
+            const skill = state.skills.find(s => s.id === skillId)
             if (skill) {
-                skill.lastTriggerTime = new Date().getTime();
+                skill.lastTriggerTime = time;
             }
         }
     }

@@ -28,8 +28,8 @@ const slotsSlice = createSlice({
     name: 'slots',
     initialState,
     reducers: {
-        triggerSharedCooldown: (state) => {
-            state.sharedCooldownTriggerTime = new Date().getTime();
+        triggerSharedCooldown: (state, { payload }) => {
+            state.sharedCooldownTriggerTime = payload;
         },
         initSlots: (state) => {
             state.slots = slots as Array<Slot>;

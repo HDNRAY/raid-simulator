@@ -27,9 +27,9 @@ const Info = (props: {
             dispatch(stopRaid());
             initRaid()
         } else if (raidStatus === 'stopped') {
-            dispatch(startRaid());
+            dispatch(startRaid(time));
         }
-    }, [dispatch, initRaid, raidStatus]);
+    }, [dispatch, initRaid, time]);
 
     return <div className={className}>
         <div>{raidStartTime ? timeShorter(time - raidStartTime) : '--'}</div>

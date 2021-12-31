@@ -5,15 +5,15 @@ interface universalState {
 }
 
 const initialState: universalState = {
-    time: new Date().getTime()
+    time: 0
 }
 
 const slotsSlice = createSlice({
     name: 'universal',
     initialState,
     reducers: {
-        updateTime: (state) => {
-            state.time = new Date().getTime();
+        updateTime: (state, { payload }) => {
+            state.time = payload;
         }
     }
 })

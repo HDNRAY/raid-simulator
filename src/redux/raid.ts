@@ -66,8 +66,8 @@ const raidSlice = createSlice({
                 ...payload
             });
         },
-        startRaid: (state) => {
-            state.raidStartTime = new Date().getTime();
+        startRaid: (state, { payload }) => {
+            state.raidStartTime = payload;
             state.raidStatus = 'started';
         },
         stopRaid: (state) => {
@@ -75,7 +75,7 @@ const raidSlice = createSlice({
             state.raidStatus = 'stopped';
         },
         castSkillOnEnemy: (state, { payload }) => {
-            const { targetId, skill } = payload;
+            const { targetId, skill, time } = payload;
             const target = state.enemies.find(i => i.id === targetId);
             if (target) {
                 skill.effect.forEach((effect: any) => {
@@ -83,7 +83,7 @@ const raidSlice = createSlice({
                         target.status.health = target.status.health - effect.value;
                         state.effectHistory.push({
                             id: uuid(),
-                            time: new Date().getTime(),
+                            time,
                             type: 'battle',
                             value: effect.value,
                             target,

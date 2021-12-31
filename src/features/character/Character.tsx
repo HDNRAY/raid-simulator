@@ -1,7 +1,7 @@
 import ProgressBar from "components/ProgressBar/ProgressBar";
 import { you } from "data/character";
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import { Character, doneCasting, setMainCharacter, startCasting } from "redux/character";
+import { useCallback, useEffect } from "react";
+import { Character, doneCasting, setMainCharacter } from "redux/character";
 import { castSkillOnEnemy } from "redux/raid";
 import { Skill } from "redux/skill";
 import { useAppDispatch, useAppSelector } from "redux/store";
@@ -22,24 +22,23 @@ const CharacterPanel = (props: {
     }, [dispatch]);
 
     const doEffect = useCallback((skill: Skill) => {
-        dispatch(castSkillOnEnemy({ skill, targetId: '1' }))
-    }, [dispatch]);
+        dispatch(castSkillOnEnemy({ skill, targetId: '1', time }))
+        dispatch(doneCasting())
+    }, [dispatch, time]);
 
     const { staticResource, realtimeResource, realtimeAttributes, name, castingSkill, castingTime } = character || {};
 
     const castingTimePast = castingTime ? time - castingTime : 0;
     const castingPercentage = getPercentage(castingTimePast, castingSkill?.castTime);
 
-    const castingTimeRemain = castingSkill ? Math.max(castingSkill?.castTime - castingTimePast, 0) / 1000 : 0
+    const castingTimeRemain = castingSkill ? Math.max(castingSkill.castTime - castingTimePast, 0) / 1000 : 0
 
     useEffect(() => {
         if (castingSkill) {
             if (castingSkill.castTime === 0) {
                 doEffect(castingSkill);
-                dispatch(doneCasting())
             } else if (castingTimePast >= castingSkill.castTime) {
                 doEffect(castingSkill);
-                dispatch(doneCasting())
             }
         }
     }, [castingSkill, castingTimePast, dispatch, doEffect])
@@ -87,7 +86,7 @@ const CharacterPanel = (props: {
     return <div className={`character-wrapper ${className}`}>
         <div className="character-casting-wrapper">
             <div className="character-casting-name">{name}</div>
-            <ProgressBar className="character-casting" percentage={castingPercentage} color="#eee">{castingTimeRemain}s</ProgressBar>
+            <ProgressBar className="character-casting" percentage={castingPercentage} color="#eee">{castingTimeRemain.toFixed(1)}s</ProgressBar>
         </div>
         <div className="character-resources-wrapper">
             {resources.filter(r => r.cap > 0).map(resource => {

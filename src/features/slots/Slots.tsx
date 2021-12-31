@@ -101,9 +101,9 @@ const Slots = (props: {
             return
         }
 
-        dispatch(startCasting(skill))
-        dispatch(triggerSkillCooldown(skill.id));
-        dispatch(triggerSharedCooldown());
+        dispatch(startCasting({ skill, time }))
+        dispatch(triggerSkillCooldown({ skillId: skill.id, time }));
+        dispatch(triggerSharedCooldown(time));
 
     }, [castingSkill, dispatch, shareCooldownRemain, skillMap, time]);
 
