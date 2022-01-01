@@ -1,32 +1,7 @@
 
 
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
-import { Skill } from "./skill";
-
-export interface CharacterResource {
-    health: number,
-    mana: number,
-    energy: number,
-    fury: number,
-}
-
-export interface CharacterAttributes {
-    strength: number,
-    agility: number,
-    intelligence: number,
-    spirit: number,
-}
-
-export interface Character {
-    id: string,
-    name: string,
-    castingSkill?: Skill,
-    castingTime?: number,
-    staticResource: CharacterResource,
-    realtimeResource?: CharacterResource,
-    staticAttributes: CharacterAttributes,
-    realtimeAttributes?: CharacterAttributes
-}
+import { Character } from "types/types";
 
 interface CharacterState {
     mainCharacter?: Character,

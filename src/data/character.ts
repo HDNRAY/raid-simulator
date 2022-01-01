@@ -1,4 +1,5 @@
-import { Character } from "redux/character";
+
+import { Character } from 'types/types';
 import { v4 as uuid } from 'uuid';
 
 export const you: Character = {
@@ -15,5 +16,25 @@ export const you: Character = {
         agility: 100,
         intelligence: 100,
         spirit: 100
-    }
+    },
+    skills: ['1', '2'],
+    slots: [{
+        key: '1',
+        link: {
+            type: 'skill',
+            id: '1'
+        }
+    }, {
+        key: '2',
+        link: {
+            type: 'skill',
+            id: '2'
+        }
+    }, {
+        key: '3'
+    }, {
+        key: '4'
+    }, {
+        key: 'Q'
+    }]
 }

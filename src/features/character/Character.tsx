@@ -1,10 +1,13 @@
 import ProgressBar from "components/ProgressBar/ProgressBar";
 import { you } from "data/character";
+import { skillMap } from "data/skills";
 import { useCallback, useEffect } from "react";
-import { Character, doneCasting, setMainCharacter } from "redux/character";
+import { doneCasting, setMainCharacter } from "redux/character";
 import { castSkillOnEnemy } from "redux/raid";
-import { Skill } from "redux/skill";
+import { setupSkills } from "redux/skill";
+import { setupSlots } from "redux/slots";
 import { useAppDispatch, useAppSelector } from "redux/store";
+import { Character, Skill } from "types/types";
 import { getPercentage } from "util/utils";
 import './Character.scss';
 
@@ -19,6 +22,8 @@ const CharacterPanel = (props: {
 
     useEffect(() => {
         dispatch(setMainCharacter(you));
+        dispatch(setupSkills(you.skills.map(s => skillMap[s])));
+        dispatch(setupSlots(you.slots));
     }, [dispatch]);
 
     const doEffect = useCallback((skill: Skill) => {
@@ -48,25 +53,25 @@ const CharacterPanel = (props: {
     }
 
     const resources = [{
-        label: '血量',
+        label: '生命',
         value: realtimeResource?.health,
         cap: staticResource?.health ?? 100,
-        color: 'red'
+        color: 'orangered'
     }, {
-        label: '蓝',
+        label: '念力',
         value: realtimeResource?.mana,
         cap: staticResource?.mana ?? 100,
-        color: 'blue'
+        color: 'cyan'
     }, {
-        label: '能量',
+        label: '体力',
         value: realtimeResource?.energy,
         cap: staticResource?.energy ?? 100,
-        color: 'yellow'
+        color: 'lightgoldenrodyellow'
     }, {
-        label: '怒气',
+        label: '惯性',
         value: realtimeResource?.fury,
         cap: staticResource?.fury ?? 100,
-        color: 'green'
+        color: 'lightgreen'
     }];
 
     const attributes = [{

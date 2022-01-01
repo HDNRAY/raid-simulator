@@ -6,10 +6,12 @@ const ProgressBar = (props: {
     border?: boolean,
     percentage?: number,
     color?: string,
+    textColor?: string,
     className?: string
 }) => {
-    const { className, color = '#999', percentage = 100, border = true, children } = props;
+    const { className, color = '#999', textColor = 'black', percentage = 100, border = true, children } = props;
     const style: CSSProperties = {
+        color: textColor,
         borderColor: color,
         borderStyle: border ? 'solid' : undefined,
         background: `linear-gradient(90deg, ${color} ${percentage}%,transparent ${percentage}%)`

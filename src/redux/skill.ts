@@ -1,43 +1,23 @@
 
 
 import { createSlice } from "@reduxjs/toolkit";
-import { skills } from "data/skills";
-
-export interface Effect {
-    type: 'damage' | 'dot',
-    value: number,
-    duration?: number,
-    interval?: number
-}
-
-export interface Cost {
-    type: 'mana',
-    value: number
-}
-
-export interface Skill {
-    id: string,
-    name: string,
-    icon?: string,
-    castTime: number,
-    cooldown: number,
-    cost: Array<Cost>,
-    effect: Array<Effect>
-    lastTriggerTime?: number,
-}
+import { Skill } from "types/types";
 
 interface SkillState {
     skills: Array<Skill>
 }
 
 const initialState: SkillState = {
-    skills
+    skills: []
 }
 
 const skillSlice = createSlice({
     name: 'skill',
     initialState,
     reducers: {
+        setupSkills: (state, { payload }) => {
+            state.skills = payload;
+        },
         triggerSkillCooldown: (state, { payload }) => {
             const { skillId, time } = payload;
             const skill = state.skills.find(s => s.id === skillId)
@@ -48,5 +28,5 @@ const skillSlice = createSlice({
     }
 })
 
-export const { triggerSkillCooldown } = skillSlice.actions
+export const { triggerSkillCooldown, setupSkills } = skillSlice.actions
 export default skillSlice.reducer

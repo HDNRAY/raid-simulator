@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { addLog } from "redux/log";
-import { Skill, triggerSkillCooldown } from "redux/skill";
+import { triggerSkillCooldown } from "redux/skill";
 import eventBus from "util/eventBus";
 import Cooldown from "../../components/Cooldown/Cooldown";
-import { initSlots, Slot, triggerSharedCooldown } from "../../redux/slots";
+import { triggerSharedCooldown } from "../../redux/slots";
 import { useAppDispatch, useAppSelector } from "../../redux/store";
 import './Slots.scss';
 import { startCasting } from "redux/character";
+import { Skill, Slot } from "types/types";
 
 const Slots = (props: {
     className?: string
@@ -14,10 +15,6 @@ const Slots = (props: {
     const { className } = props;
 
     const dispatch = useAppDispatch();
-
-    useEffect(() => {
-        dispatch(initSlots());
-    }, [dispatch]);
 
     const slots = useAppSelector(state => state.slots.slots);
     const skills = useAppSelector(state => state.skill.skills);

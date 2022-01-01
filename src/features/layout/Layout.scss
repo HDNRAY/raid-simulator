@@ -25,15 +25,6 @@
         width: $unit * 300;
     }
 
-    .layout-enemies {
-        position: absolute;
-        top: 40%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        width: $unit * 1000;
-        height: $unit * 600;
-    }
-
     .layout-info {
         position: absolute;
         top: $paddingToScreen;
@@ -52,5 +43,13 @@
         position: absolute;
         top: 40%;
         right: $paddingToScreen;
+    }
+
+    .layout-battle {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        top: 0;
+        left: 0;
     }
 }

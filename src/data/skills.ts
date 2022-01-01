@@ -1,4 +1,4 @@
-import { Skill } from "redux/skill";
+import { Skill } from "types/types";
 
 export const skills: Array<Skill> = [{
     id: '1',
@@ -21,3 +21,8 @@ export const skills: Array<Skill> = [{
         value: 1500
     }]
 }]
+
+export const skillMap: { [key: string]: Skill } = skills.reduce((result: any, skill) => {
+    result[skill.id] = skill;
+    return result;
+}, {})

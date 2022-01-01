@@ -1,16 +1,5 @@
 import { createSlice } from "@reduxjs/toolkit";
-import { slots } from "data/slots";
-import { Skill } from "./skill";
-
-export interface Slot {
-    // id: number
-    key?: string,
-    link?: {
-        type: 'skill',
-        id: string,
-        skill?: Skill
-    }
-}
+import { Slot } from "types/types";
 
 interface SlotsState {
     slots: Array<Slot>,
@@ -31,11 +20,11 @@ const slotsSlice = createSlice({
         triggerSharedCooldown: (state, { payload }) => {
             state.sharedCooldownTriggerTime = payload;
         },
-        initSlots: (state) => {
-            state.slots = slots as Array<Slot>;
+        setupSlots: (state, { payload }) => {
+            state.slots = payload;
         }
     }
 })
 
-export const { initSlots, triggerSharedCooldown } = slotsSlice.actions
+export const { setupSlots, triggerSharedCooldown } = slotsSlice.actions
 export default slotsSlice.reducer

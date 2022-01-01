@@ -1,6 +1,6 @@
+import BattleScene from "features/battle/Battle"
 import BuffPanel from "features/buff/BuffPanel"
 import Character from "features/character/Character"
-import Enemies from "features/enemies/Enemies"
 import Info from "features/info/Info"
 import { useCallback, useEffect, useRef } from "react"
 import { useAppDispatch } from "redux/store"
@@ -8,6 +8,7 @@ import { updateTime } from "redux/universal"
 import Logs from "../logs/Logs"
 import Slots from "../slots/Slots"
 import './Layout.scss'
+import { Routes, Route, Navigate } from 'react-router-dom'
 
 const Layout = () => {
     const dispatch = useAppDispatch();
@@ -31,11 +32,15 @@ const Layout = () => {
 
     return <div className='layout-wrapper'>
         <Info className="layout-info"></Info>
-        <Enemies className="layout-enemies"></Enemies>
         <Logs className="layout-logs"></Logs>
         <Slots className="layout-slots"></Slots>
         <Character className="layout-character"></Character>
         <BuffPanel className="layout-buff"></BuffPanel>
+        {/* <BattleScene className="layout-battle"></BattleScene> */}
+        <Routes>
+            <Route path='battle' element={<BattleScene className="layout-battle"></BattleScene>}></Route>
+            <Route path='*' element={<Navigate to="battle"></Navigate>}></Route>
+        </Routes>
     </div>
 }
 
