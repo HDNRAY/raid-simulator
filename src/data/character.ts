@@ -17,21 +17,25 @@ export const you: Character = {
         intelligence: 100,
         spirit: 100
     },
-    skills: ['1', '2'],
+    skills: ['11', '12', '00'],
     slots: [{
         key: '1',
         link: {
             type: 'skill',
-            id: '1'
+            id: '11'
         }
     }, {
         key: '2',
         link: {
             type: 'skill',
-            id: '2'
+            id: '12'
         }
     }, {
-        key: '3'
+        key: 'R',
+        link: {
+            type: 'skill',
+            id: '00'
+        }
     }, {
         key: '4'
     }, {

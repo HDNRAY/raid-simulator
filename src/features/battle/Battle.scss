@@ -11,4 +11,12 @@
         width: $unit * 1000;
         height: $unit * 600;
     }
+
+    .battle-statistics {
+        position: absolute;
+        top: 60%;
+        left: $unit * 60;
+        width: $unit * 300;
+        height: $unit * 600;
+    }
 }

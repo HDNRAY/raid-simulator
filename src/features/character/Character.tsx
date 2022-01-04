@@ -1,8 +1,8 @@
 import ProgressBar from "components/ProgressBar/ProgressBar";
 import { you } from "data/character";
 import { skillMap } from "data/skills";
-import { useCallback, useEffect } from "react";
-import { doneCasting, setMainCharacter } from "redux/character";
+import { useCallback, useEffect, useRef } from "react";
+import { costOnCharacter, doneCasting, setMainCharacter, updateCost } from "redux/character";
 import { castSkillOnEnemy } from "redux/raid";
 import { setupSkills } from "redux/skill";
 import { setupSlots } from "redux/slots";
@@ -18,39 +18,69 @@ const CharacterPanel = (props: {
 
     const dispatch = useAppDispatch();
     const character: Character | undefined = useAppSelector(state => state.character.mainCharacter);
+
+    const { staticResource, realtimeResource, realtimeAttributes, name, castingSkill, castingTime } = character || {} as Character;
+
     const time = useAppSelector(state => state.universal.time);
 
+    // 初始化
     useEffect(() => {
         dispatch(setMainCharacter(you));
         dispatch(setupSkills(you.skills.map(s => skillMap[s])));
         dispatch(setupSlots(you.slots));
     }, [dispatch]);
 
+    // 使用技能
+    const doCost = useCallback((skill: Skill) => {
+        dispatch(costOnCharacter(skill));
+    }, [dispatch]);
+
     const doEffect = useCallback((skill: Skill) => {
-        dispatch(castSkillOnEnemy({ skill, targetId: '1', time }))
+        dispatch(castSkillOnEnemy({ skill, targetId: '1', time, caster: character }))
         dispatch(doneCasting())
-    }, [dispatch, time]);
+    }, [character, dispatch, time]);
 
-    const { staticResource, realtimeResource, realtimeAttributes, name, castingSkill, castingTime } = character || {};
-
+    // 读条时间
     const castingTimePast = castingTime ? time - castingTime : 0;
+    // 读条百分比
     const castingPercentage = getPercentage(castingTimePast, castingSkill?.castTime);
-
+    // 读条剩余时间
     const castingTimeRemain = castingSkill ? Math.max(castingSkill.castTime - castingTimePast, 0) / 1000 : 0
 
+    // 使用技能
     useEffect(() => {
         if (castingSkill) {
-            if (castingSkill.castTime === 0) {
-                doEffect(castingSkill);
-            } else if (castingTimePast >= castingSkill.castTime) {
+            // 无需读条 或 读条完成
+            if (castingSkill.castTime === 0 || castingTimePast >= castingSkill.castTime) {
+                doCost(castingSkill);
                 doEffect(castingSkill);
             }
         }
-    }, [castingSkill, castingTimePast, dispatch, doEffect])
+    }, [castingSkill, castingTimePast, dispatch, doCost, doEffect]);
 
-    if (!character) {
-        return null;
-    }
+    // 体力回复
+    const lastTimeRegenerateEnergy = useRef<number>(0);
+    useEffect(() => {
+        if (realtimeResource && realtimeResource?.energy < staticResource.energy && time > lastTimeRegenerateEnergy.current + 100) {
+            lastTimeRegenerateEnergy.current = time;
+            dispatch(updateCost({
+                type: 'energy',
+                value: realtimeResource.energy + 1
+            }))
+        }
+    }, [dispatch, realtimeResource, staticResource, time])
+
+    // 念力回复
+    const lastTimeRegenerateMana = useRef<number>(0);
+    useEffect(() => {
+        if (realtimeResource && realtimeResource?.mana < staticResource.mana && time > lastTimeRegenerateMana.current + 100) {
+            lastTimeRegenerateMana.current = time;
+            dispatch(updateCost({
+                type: 'mana',
+                value: realtimeResource.mana + (realtimeAttributes!.spirit) * 0.01
+            }))
+        }
+    }, [dispatch, realtimeAttributes, realtimeResource, staticResource, time])
 
     const resources = [{
         label: '生命',

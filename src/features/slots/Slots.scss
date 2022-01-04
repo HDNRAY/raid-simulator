@@ -5,7 +5,7 @@
     padding: $unit * 10;
 
     .slot {
-        $slotWidth: $unit * 60;
+        $slotWidth: $unit * 54;
 
         position: relative;
         width: $slotWidth;
@@ -27,7 +27,7 @@
 
             .slot-link-name {
                 position: absolute;
-                font-size: $unit * 14;
+                font-size: $unit * 12;
                 color: $secondary-text-color;
                 bottom: $unit * 6;
                 left: $unit * 4;

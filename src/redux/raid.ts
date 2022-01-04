@@ -75,7 +75,7 @@ const raidSlice = createSlice({
             state.raidStatus = 'stopped';
         },
         castSkillOnEnemy: (state, { payload }) => {
-            const { targetId, skill, time } = payload;
+            const { targetId, skill, time, caster } = payload;
             const target = state.enemies.find(i => i.id === targetId);
             if (target) {
                 skill.effect.forEach((effect: any) => {
@@ -87,9 +87,7 @@ const raidSlice = createSlice({
                             type: 'battle',
                             value: effect.value,
                             target,
-                            caster: {
-                                name: '你'
-                            },
+                            caster,
                             skill: {
                                 ...skill
                             }

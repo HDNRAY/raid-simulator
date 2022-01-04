@@ -16,6 +16,9 @@ const Slots = (props: {
 
     const dispatch = useAppDispatch();
 
+    // 角色
+    const character = useAppSelector(state => state.character.mainCharacter);
+
     const slots = useAppSelector(state => state.slots.slots);
     const skills = useAppSelector(state => state.skill.skills);
     const skillMap: { [key: string]: Skill } = useMemo(() => {
@@ -66,13 +69,8 @@ const Slots = (props: {
 
     const castingSkill = useAppSelector(state => state.character.mainCharacter?.castingSkill);
 
-    const onSlotClick = useCallback((slot: Slot) => {
-        console.info(slot);
-        if (!slot?.link) {
-            console.info('no binding')
-            return
-        }
-
+    const onSkillCast = useCallback((skill: Skill) => {
+        // 检查GCD
         if (shareCooldownRemain > 0) {
             dispatch(addLog({
                 type: 'warning',
@@ -81,7 +79,7 @@ const Slots = (props: {
             return;
         }
 
-        const skill = skillMap[slot.link.id];
+        // 检查技能CD
         if (skill.lastTriggerTime && time - skill.lastTriggerTime <= skill.cooldown) {
             dispatch(addLog({
                 type: 'warning',
@@ -90,6 +88,7 @@ const Slots = (props: {
             return
         }
 
+        // 是否正在施法
         if (castingSkill) {
             dispatch(addLog({
                 type: 'warning',
@@ -98,11 +97,40 @@ const Slots = (props: {
             return
         }
 
+        // 检查代价是否足够
+        const costEnough = skill.cost.every(cost => {
+            const remains = character?.realtimeResource?.[cost.type];
+            return !!remains && remains > cost.value;
+        });
+        if (!costEnough) {
+            dispatch(addLog({
+                type: 'warning',
+                content: '代价不够'
+            }));
+            return
+        }
+
         dispatch(startCasting({ skill, time }))
         dispatch(triggerSkillCooldown({ skillId: skill.id, time }));
         dispatch(triggerSharedCooldown(time));
 
-    }, [castingSkill, dispatch, shareCooldownRemain, skillMap, time]);
+    }, [castingSkill, character?.realtimeResource, dispatch, shareCooldownRemain, time]);
+
+    const onSlotClick = useCallback((slot: Slot) => {
+        console.info(slot);
+
+        // 检查是有否绑定
+        if (!slot?.link) {
+            console.info('no binding')
+            return
+        }
+
+        if (slot?.link.type === 'skill') {
+            const skill = skillMap[slot.link.id];
+            !!skill && onSkillCast(skill);
+        }
+
+    }, [onSkillCast, skillMap]);
 
     useEffect(() => {
         const keyboardListener = (event: CustomEvent) => {

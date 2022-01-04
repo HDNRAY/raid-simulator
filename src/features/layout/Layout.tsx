@@ -16,7 +16,7 @@ const Layout = () => {
     const requestAnimationFrameRef = useRef<number>();
 
     const loop = useCallback((time: number) => {
-        dispatch(updateTime(time.toFixed(0)));
+        dispatch(updateTime(+time.toFixed(0)));
         setTimeout(() => {
             requestAnimationFrameRef.current = requestAnimationFrame(loop);
         }, 10);

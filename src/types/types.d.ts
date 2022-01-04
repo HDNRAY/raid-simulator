@@ -33,7 +33,7 @@ export interface Effect {
 }
 
 export interface Cost {
-    type: 'mana',
+    type: 'mana' | 'energy' | 'health' | 'fury',
     value: number
 }
 
