@@ -9,6 +9,7 @@ export const skills: Array<Skill> = [{
         type: 'mana',
         value: 250
     }],
+    target: 'all',
     effect: [{
         type: 'damage',
         value: 300
@@ -18,6 +19,7 @@ export const skills: Array<Skill> = [{
     name: '豪火球',
     cooldown: 10000,
     castTime: 2500,
+    target: 'all',
     cost: [{
         type: 'mana',
         value: 560
@@ -29,6 +31,7 @@ export const skills: Array<Skill> = [{
 }, {
     id: '13',
     name: '龙破斩',
+    target: 'all',
     cooldown: 0,
     castTime: 2500,
     cost: [{
@@ -42,6 +45,7 @@ export const skills: Array<Skill> = [{
 }, {
     id: '00',
     name: '翻滚',
+    target: 'self',
     cooldown: 0,
     castTime: 0,
     cost: [{

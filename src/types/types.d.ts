@@ -61,7 +61,8 @@ export interface Skill {
     castTime: number,
     cooldown: number,
     cost: Array<Cost>,
-    effect: Array<Effect>
+    effect: Array<Effect>,
+    target: 'enemy' | 'ally' | 'all' | 'self'
     lastTriggerTime?: number,
 }
 

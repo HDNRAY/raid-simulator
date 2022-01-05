@@ -1,4 +1,5 @@
 import { CSSProperties } from 'react';
+import { unit } from 'util/constants';
 import './ProgressBar.scss';
 
 const ProgressBar = (props: {
@@ -19,7 +20,7 @@ const ProgressBar = (props: {
         borderColor: 'transparent',
         borderTopStyle: border ? 'solid' : undefined,
         borderBottomStyle: border ? 'solid' : undefined,
-        width: `${percentage}%`
+        width: percentage === 100 ? `calc(${percentage}% + ${2 * unit}vw)` : `${percentage}%`
     }
     return <div className={`progress-bar-outer ${className}`} style={outerStyle}>
         <div className='text-outer' style={{ color }}>{children}</div>

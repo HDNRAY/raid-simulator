@@ -19,4 +19,18 @@
         width: $unit * 300;
         height: $unit * 600;
     }
+
+    .battle-messages-wrapper {
+        position: absolute;
+        top: 30%;
+        right: 24%;
+        width: $unit * 320;
+        height: $unit * 320;
+        color: white;
+
+        .battle-message {
+            position: absolute;
+            font-size: $unit * 28;
+        }
+    }
 }

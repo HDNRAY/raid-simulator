@@ -13,6 +13,7 @@ export interface Enemy {
 export interface DamageLog extends Log {
     type: 'battle',
     value: number,
+    shown: boolean,
     target: {
         id?: string,
         name: string
@@ -75,13 +76,22 @@ const raidSlice = createSlice({
             state.effectHistory = [];
             state.raidStatus = 'stopped';
         },
+        updateEffectHistory: (state, { payload }) => {
+            const ehIndex = state.effectHistory.findIndex(i => i.id === payload.id);
+            if (ehIndex > -1) {
+                state.effectHistory[ehIndex] = {
+                    ...state.effectHistory[ehIndex],
+                    ...payload
+                }
+            }
+        },
         castSkillOnEnemy: (state, { payload }) => {
-            const { targetId, skill, time, caster } = payload;
-            const target = state.enemies.find(i => i.id === targetId);
-            if (target) {
+            const { target, skill, time, caster } = payload;
+            const targetState = state.enemies.find(e => e.id === target);
+            if (targetState) {
                 skill.effect.forEach((effect: any) => {
                     if (effect.type === 'damage') {
-                        target.status.health = target.status.health - effect.value;
+                        targetState.status.health = targetState.status.health - effect.value;
                         state.effectHistory.push({
                             id: uuid(),
                             time,
@@ -89,6 +99,7 @@ const raidSlice = createSlice({
                             value: effect.value,
                             target,
                             caster,
+                            shown: false,
                             skill: {
                                 ...skill
                             }
@@ -104,5 +115,5 @@ const raidSlice = createSlice({
     }
 })
 
-export const { addEnemies, initEnemies, startRaid, stopRaid, castSkillOnEnemy } = raidSlice.actions
+export const { addEnemies, initEnemies, startRaid, stopRaid, castSkillOnEnemy, updateEffectHistory } = raidSlice.actions
 export default raidSlice.reducer

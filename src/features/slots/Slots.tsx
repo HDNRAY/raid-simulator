@@ -72,28 +72,19 @@ const Slots = (props: {
     const onSkillCast = useCallback((skill: Skill) => {
         // 检查GCD
         if (shareCooldownRemain > 0) {
-            dispatch(addLog({
-                type: 'warning',
-                content: 'In GCD'
-            }));
+            dispatch(addLog({ type: 'warning', content: 'In GCD' }));
             return;
         }
 
         // 检查技能CD
         if (skill.lastTriggerTime && time - skill.lastTriggerTime <= skill.cooldown) {
-            dispatch(addLog({
-                type: 'warning',
-                content: '我还不能使用这个技能'
-            }));
+            dispatch(addLog({ type: 'warning', content: '我还不能使用这个技能' }));
             return
         }
 
         // 是否正在施法
         if (castingSkill) {
-            dispatch(addLog({
-                type: 'warning',
-                content: '我正在施法'
-            }));
+            dispatch(addLog({ type: 'warning', content: '我正在施法' }));
             return
         }
 
@@ -103,12 +94,11 @@ const Slots = (props: {
             return !!remains && remains > cost.value;
         });
         if (!costEnough) {
-            dispatch(addLog({
-                type: 'warning',
-                content: '代价不够'
-            }));
+            dispatch(addLog({ type: 'warning', content: '代价不够' }));
             return
         }
+
+        // 检查目标是否合法
 
         dispatch(startCasting({ skill, time }))
         dispatch(triggerSkillCooldown({ skillId: skill.id, time }));

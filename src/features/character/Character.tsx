@@ -2,7 +2,7 @@ import ProgressBar from "components/ProgressBar/ProgressBar";
 import { you } from "data/character";
 import { skillMap } from "data/skills";
 import { useCallback, useEffect, useRef } from "react";
-import { costOnCharacter, doneCasting, setMainCharacter, updateCost } from "redux/character";
+import { costOnCharacter, doneCasting, setMainCharacter, setTarget, updateCost } from "redux/character";
 import { castSkillOnEnemy } from "redux/raid";
 import { setupSkills } from "redux/skill";
 import { setupSlots } from "redux/slots";
@@ -18,16 +18,23 @@ const CharacterPanel = (props: {
 
     const dispatch = useAppDispatch();
     const character: Character | undefined = useAppSelector(state => state.character.mainCharacter);
+    const target = useAppSelector(state => state.character.target);
+    const enemy = useAppSelector(state => state.raid.enemies[0]);
 
     const { staticResource, realtimeResource, realtimeAttributes, realtimeEnhancements, name, castingSkill, castingTime } = character || {} as Character;
 
     const time = useAppSelector(state => state.universal.time);
+
+    useEffect(() => {
+        dispatch(setTarget(enemy?.id))
+    }, [dispatch, enemy?.id])
 
     // 初始化
     useEffect(() => {
         dispatch(setMainCharacter(you));
         dispatch(setupSkills(you.skills.map(s => skillMap[s])));
         dispatch(setupSlots(you.slots));
+
     }, [dispatch]);
 
     // 使用技能
@@ -36,9 +43,14 @@ const CharacterPanel = (props: {
     }, [dispatch]);
 
     const doEffect = useCallback((skill: Skill) => {
-        dispatch(castSkillOnEnemy({ skill, targetId: '1', time, caster: character }))
+        if (skill.target === 'self') {
+
+        } else {
+            dispatch(castSkillOnEnemy({ skill, target, time, caster: character }))
+        }
+
         dispatch(doneCasting())
-    }, [character, dispatch, time]);
+    }, [character, dispatch, target, time]);
 
     // 读条时间
     const castingTimePast = castingTime ? time - castingTime : 0;

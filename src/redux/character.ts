@@ -2,9 +2,11 @@
 
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 import { Character, Cost, Skill } from "types/types";
+import { Enemy } from "./raid";
 
 interface CharacterState {
     mainCharacter?: Character,
+    target?: Character | Enemy | Array<Character | Enemy>
 }
 
 const initialState: CharacterState = {
@@ -29,6 +31,9 @@ const characterSlice = createSlice({
                 realtimeAttributes: staticAttributes,
                 realtimeEnhancements: staticEnhancements
             };
+        },
+        setTarget: (state, { payload }) => {
+            state.target = payload;
         },
         startCasting: (state, { payload }) => {
             const { skill, time } = payload;
@@ -71,5 +76,5 @@ const characterSlice = createSlice({
     }
 })
 
-export const { setMainCharacter, startCasting, doneCasting, cancelCasting, costOnCharacter, updateCost } = characterSlice.actions
+export const { setMainCharacter, setTarget, startCasting, doneCasting, cancelCasting, costOnCharacter, updateCost } = characterSlice.actions
 export default characterSlice.reducer
