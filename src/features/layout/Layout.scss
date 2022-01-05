@@ -13,12 +13,14 @@
     $paddingToScreen: $unit * 60;
 
     .layout-slots {
+        z-index: 20;
         position: absolute;
         bottom: $paddingToScreen;
         left: $paddingToScreen;
     }
 
     .layout-logs {
+        z-index: 20;
         position: absolute;
         top: $paddingToScreen;
         left: $paddingToScreen;
@@ -26,12 +28,14 @@
     }
 
     .layout-info {
+        z-index: 20;
         position: absolute;
         top: $paddingToScreen;
         right: $paddingToScreen;
     }
 
     .layout-character {
+        z-index: 20;
         width: $unit * 500;
         position: absolute;
         bottom: $paddingToScreen;
@@ -39,6 +43,7 @@
     }
 
     .layout-buff {
+        z-index: 20;
         width: $unit * 400;
         position: absolute;
         top: 40%;
@@ -46,6 +51,7 @@
     }
 
     .layout-battle {
+        z-index: 10;
         position: absolute;
         width: 100%;
         height: 100%;

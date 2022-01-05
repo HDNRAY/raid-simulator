@@ -8,7 +8,7 @@ import { setupSkills } from "redux/skill";
 import { setupSlots } from "redux/slots";
 import { useAppDispatch, useAppSelector } from "redux/store";
 import { Character, Skill } from "types/types";
-import { getPercentage } from "util/utils";
+import { getPercentage, numberToPercentage } from "util/utils";
 import './Character.scss';
 
 const CharacterPanel = (props: {
@@ -19,7 +19,7 @@ const CharacterPanel = (props: {
     const dispatch = useAppDispatch();
     const character: Character | undefined = useAppSelector(state => state.character.mainCharacter);
 
-    const { staticResource, realtimeResource, realtimeAttributes, name, castingSkill, castingTime } = character || {} as Character;
+    const { staticResource, realtimeResource, realtimeAttributes, realtimeEnhancements, name, castingSkill, castingTime } = character || {} as Character;
 
     const time = useAppSelector(state => state.universal.time);
 
@@ -118,6 +118,25 @@ const CharacterPanel = (props: {
         value: realtimeAttributes?.spirit
     }]
 
+    const enhancements = [{
+        label: '暴击',
+        value: realtimeEnhancements?.criticalChance
+    }, {
+        label: '爆伤',
+        value: realtimeEnhancements?.criticalDamage
+    }, {
+        label: '急速',
+        value: realtimeEnhancements?.haste
+    }]
+
+    const elements = [{
+        label: '火',
+        value: realtimeEnhancements?.elementMastery?.fire
+    }, {
+        label: '水',
+        value: realtimeEnhancements?.elementMastery?.water
+    }]
+
     return <div className={`character-wrapper ${className}`}>
         <div className="character-casting-wrapper">
             <div className="character-casting-name">{name}</div>
@@ -141,6 +160,24 @@ const CharacterPanel = (props: {
                     <div className="character-attribute-value">{value}</div>
                 </div>
             })}
+        </div>
+        <div className="character-attributes-wrapper">
+            {enhancements.map(enhance => {
+                const { label, value } = enhance;
+                return <div className="character-attribute" key={label}>
+                    <div className="character-attribute-label">{label}</div>
+                    <div className="character-attribute-value">{numberToPercentage(value)}</div>
+                </div>
+            })}
+            <div className="character-elements-wrapper">
+                {elements.map(element => {
+                    const { label, value } = element;
+                    return <div className="character-element" key={label}>
+                        <div className="character-element-label">{label}</div>
+                        <div className="character-element-value">{numberToPercentage(value)}</div>
+                    </div>
+                })}
+            </div>
         </div>
     </div>
 }

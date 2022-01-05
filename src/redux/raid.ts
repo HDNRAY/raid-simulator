@@ -71,7 +71,8 @@ const raidSlice = createSlice({
             state.raidStatus = 'started';
         },
         stopRaid: (state) => {
-            state.raidStartTime = undefined
+            state.raidStartTime = undefined;
+            state.effectHistory = [];
             state.raidStatus = 'stopped';
         },
         castSkillOnEnemy: (state, { payload }) => {
@@ -94,6 +95,10 @@ const raidSlice = createSlice({
                         })
                     }
                 })
+                if (state.raidStatus === 'stopped') {
+                    state.raidStatus = 'started';
+                    state.raidStartTime = time;
+                }
             }
         }
     }

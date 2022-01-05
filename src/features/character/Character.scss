@@ -10,6 +10,7 @@
         margin-bottom: $unit * 10;
         flex-shrink: 0;
         display: flex;
+        padding: 0 $unit * 8;
 
         .character-casting-name {
             // width: $unit * 100;
@@ -25,7 +26,8 @@
     }
 
     .character-resources-wrapper {
-        flex: 1;
+        flex-shrink: 0;
+        width: 48%;
         padding: $unit * 10;
 
         .character-resource {
@@ -45,14 +47,17 @@
         }
     }
 
-    .character-attributes-wrapper {
+    .character-attributes-wrapper,
+    .character-enhancement-wrapper {
         flex: 1;
         padding: $unit * 10;
         display: flex;
         flex-direction: column;
+        justify-content: space-between;
 
         .character-attribute {
             display: flex;
+            justify-content: space-between;
             height: $unit * 24;
 
             .character-attribute-label {
@@ -62,6 +67,15 @@
 
             .character-attribute-value {
                 font-size: $unit * 18;
+            }
+        }
+
+        .character-elements-wrapper {
+            display: flex;
+            justify-content: space-between;
+
+            .character-element {
+                display: flex;
             }
         }
     }

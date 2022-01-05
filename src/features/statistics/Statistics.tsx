@@ -39,7 +39,7 @@ const Statistics = (props: {
     return <div className={`${className}`}>
         {list.map((item: any) => {
             const { name, value } = item;
-            return <ProgressBar className="" percentage={100 * value / total} key={name} border={false}>{name}:{value}</ProgressBar>
+            return <ProgressBar className="" percentage={100 * (total ? value / total : 1)} key={name} border={false}>{name}:{value}</ProgressBar>
         })}
     </div>
 }

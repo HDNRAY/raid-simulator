@@ -16,7 +16,7 @@ const characterSlice = createSlice({
     initialState,
     reducers: {
         setMainCharacter: (state, { payload }: PayloadAction<Character>) => {
-            const { staticAttributes, staticResource } = payload
+            const { staticAttributes, staticResource, staticEnhancements } = payload
             const { health, mana, energy } = staticResource;
             state.mainCharacter = {
                 ...payload,
@@ -26,7 +26,8 @@ const characterSlice = createSlice({
                     energy,
                     fury: 0
                 },
-                realtimeAttributes: staticAttributes
+                realtimeAttributes: staticAttributes,
+                realtimeEnhancements: staticEnhancements
             };
         },
         startCasting: (state, { payload }) => {

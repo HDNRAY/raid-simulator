@@ -27,4 +27,12 @@ const getPercentage = (dividend?: number, divisor?: number) => {
     return Math.round(1000 * dividend / divisor) / 10;
 }
 
-export { timeShorter, getPercentage }
+const checkTrigger = (threshold: number, options: {
+
+} = {}) => {
+    return Math.random() < threshold;
+}
+
+const numberToPercentage = (value?: number) => `${100 * (value ?? 0)}%`;
+
+export { timeShorter, getPercentage, checkTrigger, numberToPercentage }

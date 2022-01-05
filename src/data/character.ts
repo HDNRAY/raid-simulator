@@ -17,6 +17,15 @@ export const you: Character = {
         intelligence: 100,
         spirit: 100
     },
+    staticEnhancements: {
+        criticalChance: 0.05,
+        criticalDamage: 1.5,
+        haste: 0,
+        elementMastery: {
+            fire: 0,
+            water: 0
+        }
+    },
     skills: ['11', '12', '00'],
     slots: [{
         key: '1',

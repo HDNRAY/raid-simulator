@@ -1,3 +1,5 @@
+export type ElementType = 'fire' | 'water'// | 'wind' |'water'  
+
 export interface CharacterResource {
     health: number,
     mana: number,
@@ -12,6 +14,19 @@ export interface CharacterAttributes {
     spirit: number,
 }
 
+export interface CharacterEnhancements {
+    // 暴击率
+    criticalChance: number,
+    // 暴击伤害
+    criticalDamage: number,
+    // 急速
+    haste: number,
+    // 元素精通
+    elementMastery: {
+        [key in ElementType]: number
+    },
+}
+
 export interface Character {
     id: string,
     name: string,
@@ -21,6 +36,8 @@ export interface Character {
     realtimeResource?: CharacterResource,
     staticAttributes: CharacterAttributes,
     realtimeAttributes?: CharacterAttributes,
+    staticEnhancements: CharacterEnhancements,
+    realtimeEnhancements?: CharacterEnhancements,
     skills: Array<string>,
     slots: Array<Slot>
 }
