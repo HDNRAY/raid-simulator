@@ -34,7 +34,6 @@ const CharacterPanel = (props: {
         dispatch(setMainCharacter(you));
         dispatch(setupSkills(you.skills.map(s => skillMap[s])));
         dispatch(setupSlots(you.slots));
-
     }, [dispatch]);
 
     // 使用技能

@@ -27,7 +27,7 @@ export interface CharacterEnhancements {
     },
 }
 
-export interface Character {
+export interface CharacterObject {
     id: string,
     name: string,
     castingSkill?: Skill,
@@ -38,8 +38,16 @@ export interface Character {
     realtimeAttributes?: CharacterAttributes,
     staticEnhancements: CharacterEnhancements,
     realtimeEnhancements?: CharacterEnhancements,
+    continuesEffect?: Array<Effect>
+}
+
+export interface Character extends CharacterObject {
     skills: Array<string>,
     slots: Array<Slot>
+}
+
+export interface Enemy extends CharacterObject {
+
 }
 
 export interface Effect {

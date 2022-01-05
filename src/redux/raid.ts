@@ -1,14 +1,9 @@
 
 
 import { createSlice } from "@reduxjs/toolkit";
+import { Enemy } from "types/types";
 import { v4 as uuid } from 'uuid';
 import { Log } from "./log";
-
-export interface Enemy {
-    id: string,
-    name: string,
-    health: number
-}
 
 export interface DamageLog extends Log {
     type: 'battle',
@@ -28,16 +23,10 @@ export interface DamageLog extends Log {
     }
 }
 
-export interface EnemyInBattle extends Enemy {
-    status: {
-        health: number
-    }
-}
-
 interface RaidState {
     raidStatus: 'stopped' | 'started',
     raidStartTime?: number,
-    enemies: Array<EnemyInBattle>,
+    enemies: Array<Enemy>,
     effectHistory: Array<DamageLog>
 }
 
@@ -53,11 +42,18 @@ const raidSlice = createSlice({
     reducers: {
         initEnemies: (state, { payload }) => {
             state.enemies = payload.map((item: Enemy) => {
+                const { staticAttributes, staticResource, staticEnhancements } = item;
+                const { health, mana, energy } = staticResource;
                 return {
                     ...item,
-                    status: {
-                        ...item
-                    }
+                    realtimeResource: {
+                        health,
+                        mana,
+                        energy,
+                        fury: 0
+                    },
+                    realtimeAttributes: staticAttributes,
+                    realtimeEnhancements: staticEnhancements
                 }
             });
         },
@@ -91,7 +87,7 @@ const raidSlice = createSlice({
             if (targetState) {
                 skill.effect.forEach((effect: any) => {
                     if (effect.type === 'damage') {
-                        targetState.status.health = targetState.status.health - effect.value;
+                        targetState.realtimeResource!.health = targetState.realtimeResource!.health - effect.value;
                         state.effectHistory.push({
                             id: uuid(),
                             time,

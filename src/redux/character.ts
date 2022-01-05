@@ -1,8 +1,7 @@
 
 
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
-import { Character, Cost, Skill } from "types/types";
-import { Enemy } from "./raid";
+import { Character, Cost, Skill, Enemy } from "types/types";
 
 interface CharacterState {
     mainCharacter?: Character,
