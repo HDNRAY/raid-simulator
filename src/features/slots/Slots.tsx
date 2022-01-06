@@ -107,7 +107,7 @@ const Slots = (props: {
 
         // 检查目标是否合法
 
-        dispatch(startCasting({ skill, time }))
+        dispatch(startCasting({ skillId: skill.id, time }))
         dispatch(triggerSkillCooldown({ skillId: skill.id, time }));
         dispatch(triggerSharedCooldown(time));
 

@@ -1,4 +1,4 @@
-import { Skill } from "types/types";
+import { EffectValueProps, Skill } from "types/types";
 
 export const skills: Array<Skill> = [{
     id: '11',
@@ -10,7 +10,7 @@ export const skills: Array<Skill> = [{
         value: 250
     }],
     target: 'all',
-    effect: [{
+    effects: [{
         type: 'damage',
         value: 300
     }]
@@ -24,7 +24,7 @@ export const skills: Array<Skill> = [{
         type: 'mana',
         value: 560
     }],
-    effect: [{
+    effects: [{
         type: 'damage',
         value: 1500
     }]
@@ -38,9 +38,9 @@ export const skills: Array<Skill> = [{
         type: 'mana',
         value: 1000
     }],
-    effect: [{
+    effects: [{
         type: 'damage',
-        value: 2000
+        value: (props: EffectValueProps) => 21 * props.caster.realtimeAttributes.intelligence
     }]
 }, {
     id: '00',
@@ -52,7 +52,7 @@ export const skills: Array<Skill> = [{
         type: 'energy',
         value: 30
     }],
-    effect: []
+    effects: []
 }]
 
 export const skillMap: { [key: string]: Skill } = skills.reduce((result: any, skill) => {

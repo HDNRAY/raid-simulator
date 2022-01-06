@@ -1,7 +1,7 @@
 
 
 import { createSlice } from "@reduxjs/toolkit";
-import { Enemy } from "types/types";
+import { Enemy, RealtimeEnemy } from "types/types";
 import { v4 as uuid } from 'uuid';
 import { Log } from "./log";
 
@@ -17,16 +17,13 @@ export interface DamageLog extends Log {
         id?: string,
         name: string
     },
-    skill: {
-        name: string,
-        id: string
-    }
+    skillId: string
 }
 
 interface RaidState {
     raidStatus: 'stopped' | 'started',
     raidStartTime?: number,
-    enemies: Array<Enemy>,
+    enemies: Array<RealtimeEnemy>,
     effectHistory: Array<DamageLog>
 }
 
@@ -53,7 +50,7 @@ const raidSlice = createSlice({
                         fury: 0
                     },
                     realtimeAttributes: staticAttributes,
-                    realtimeEnhancements: staticEnhancements
+                    realtimeEnhancements: staticEnhancements,
                 }
             });
         },
@@ -82,26 +79,21 @@ const raidSlice = createSlice({
             }
         },
         castSkillOnEnemy: (state, { payload }) => {
-            const { target, skill, time, caster } = payload;
-            const targetState = state.enemies.find(e => e.id === target);
-            if (targetState) {
-                skill.effect.forEach((effect: any) => {
-                    if (effect.type === 'damage') {
-                        targetState.realtimeResources!.health = targetState.realtimeResources!.health - effect.value;
-                        state.effectHistory.push({
-                            id: uuid(),
-                            time,
-                            type: 'battle',
-                            value: effect.value,
-                            target,
-                            caster,
-                            shown: false,
-                            skill: {
-                                ...skill
-                            }
-                        })
-                    }
-                })
+            const { type, targetId, value, skillId, time, caster } = payload;
+            const target = state.enemies.find(e => e.id === targetId);
+            console.log(target, targetId, value, skillId, time, caster)
+            if (target) {
+                if (type === 'health') {
+                    target.realtimeResources.health = target.realtimeResources!.health - value;
+                    state.effectHistory.push({
+                        id: uuid(), time, type: 'battle',
+                        value,
+                        target,
+                        caster,
+                        shown: false,
+                        skillId
+                    })
+                }
                 if (state.raidStatus === 'stopped') {
                     state.raidStatus = 'started';
                     state.raidStartTime = time;

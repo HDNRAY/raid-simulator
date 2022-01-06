@@ -6,7 +6,7 @@ import { costOnCharacter, doneCasting, setMainCharacter, setTarget, updateCost }
 import { castSkillOnEnemy } from "redux/raid";
 import { setupSlots } from "redux/slots";
 import { useAppDispatch, useAppSelector } from "redux/store";
-import { Character, Skill } from "types/types";
+import { RealtimeCharacter, Skill } from "types/types";
 import { getPercentage, numberToPercentage } from "util/utils";
 import './Character.scss';
 
@@ -16,11 +16,11 @@ const CharacterPanel = (props: {
     const { className } = props;
 
     const dispatch = useAppDispatch();
-    const character: Character | undefined = useAppSelector(state => state.character.mainCharacter);
+    const character: RealtimeCharacter | undefined = useAppSelector(state => state.character.mainCharacter);
     const target = useAppSelector(state => state.character.target);
     const enemy = useAppSelector(state => state.raid.enemies[0]);
 
-    const { staticResources, realtimeResources, realtimeAttributes, realtimeEnhancements, name, castingSkillId, castingTime } = character || {} as Character;
+    const { staticResources, realtimeResources, realtimeAttributes, realtimeEnhancements, name, castingSkillId, castingTime } = character || {} as RealtimeCharacter;
     const castingSkill: any = useMemo(() => castingSkillId && skillMap[castingSkillId], [castingSkillId])
 
     const time = useAppSelector(state => state.universal.time);
@@ -37,15 +37,32 @@ const CharacterPanel = (props: {
 
     // 使用技能
     const doCost = useCallback((skill: Skill) => {
-        dispatch(costOnCharacter(skill));
-    }, [dispatch]);
+        skill.cost.forEach(c => {
+            const value = typeof c.value === 'number' ? c.value : c.value({
+                caster: character!,
+                skill
+            });
+            dispatch(costOnCharacter({ type: c.type, value }))
+        })
+    }, [character, dispatch]);
 
     const doEffect = useCallback((skill: Skill) => {
-        if (skill.target === 'self') {
+        skill.effects.forEach(effect => {
+            if (skill.target === 'self') {
 
-        } else {
-            dispatch(castSkillOnEnemy({ skill, target, time, caster: character }))
-        }
+            } else {
+                if (target && !Array.isArray(target)) {
+                    const value = typeof effect.value === 'number' ? effect.value : effect.value({
+                        target,
+                        caster: character!,
+                        skill
+                    });
+                    const type = effect.on || 'health';
+                    console.log(effect, value, target, time)
+                    dispatch(castSkillOnEnemy({ type, targetId: target, value, skillId: skill.id, time, caster: character }))
+                }
+            }
+        })
 
         dispatch(doneCasting())
     }, [character, dispatch, target, time]);

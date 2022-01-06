@@ -1,4 +1,5 @@
 import ProgressBar from "components/ProgressBar/ProgressBar";
+import { skillMap } from "data/skills";
 import { useMemo } from "react";
 import { DamageLog } from "redux/raid";
 import { useAppSelector } from "redux/store";
@@ -13,20 +14,20 @@ const Statistics = (props: {
 
     const { list, total } = useMemo(() => {
         let total = 0;
-        const skillMap = effectHistory.filter(i => i.caster.id === character?.id).reduce((result: any, item: DamageLog) => {
-            const { skill, value } = item;
-            if (!result[skill.id]) {
-                result[skill.id] = {
-                    name: skill.name,
+        const logMap = effectHistory.filter(i => i.caster.id === character?.id).reduce((result: any, item: DamageLog) => {
+            const { skillId, value } = item;
+            if (!result[skillId]) {
+                result[skillId] = {
+                    name: skillMap[skillId].name,
                     value: 0
                 }
             }
-            result[skill.id].value += value;
+            result[skillId].value += value;
             total += value;
             return result;
         }, {});
 
-        const result = Object.values(skillMap).filter(i => !!i).sort().reverse();
+        const result = Object.values(logMap).filter(i => !!i).sort().reverse();
 
         result.unshift({
             name: '总计',

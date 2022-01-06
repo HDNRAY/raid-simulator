@@ -1,11 +1,11 @@
 
 
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
-import { Character, Cost, Skill, Enemy } from "types/types";
+import { Character, RealtimeCharacter, CharacterResource, RealtimeEnemy } from "types/types";
 
 interface CharacterState {
-    mainCharacter?: Character,
-    target?: Character | Enemy | Array<Character | Enemy>
+    mainCharacter?: RealtimeCharacter,
+    target?: RealtimeCharacter | RealtimeEnemy | Array<RealtimeCharacter | RealtimeEnemy>
 }
 
 const initialState: CharacterState = {
@@ -28,7 +28,8 @@ const characterSlice = createSlice({
                     fury: 0
                 },
                 realtimeAttributes: staticAttributes,
-                realtimeEnhancements: staticEnhancements
+                realtimeEnhancements: staticEnhancements,
+                continuesEffect: []
             };
         },
         setTarget: (state, { payload }) => {
@@ -42,10 +43,10 @@ const characterSlice = createSlice({
             }
         },
         startCasting: (state, { payload }) => {
-            const { skill, time } = payload;
+            const { skillId, time } = payload;
             const character = state.mainCharacter;
             if (character) {
-                character.castingSkillId = skill.id;
+                character.castingSkillId = skillId;
                 character.castingTime = time;
             }
         },
@@ -63,20 +64,24 @@ const characterSlice = createSlice({
                 character.castingTime = undefined
             }
         },
-        costOnCharacter: (state, { payload }: PayloadAction<Skill>) => {
-            const { cost } = payload as Skill;
+        costOnCharacter: (state, { payload }: PayloadAction<{
+            type: CharacterResource,
+            value: number
+        }>) => {
+            const { type, value } = payload;
             const character = state.mainCharacter;
             if (character) {
-                cost.forEach(c => {
-                    character.realtimeResources![c.type] -= c.value;
-                })
+                character.realtimeResources[type] -= value;
             }
         },
-        updateCost: (state, { payload }: PayloadAction<Cost>) => {
-            const { type, value } = payload as Cost;
+        updateCost: (state, { payload }: PayloadAction<{
+            type: CharacterResource,
+            value: number
+        }>) => {
+            const { type, value } = payload;
             const character = state.mainCharacter;
             if (character) {
-                character.realtimeResources![type] = value;
+                character.realtimeResources[type] = value;
             }
         }
     }

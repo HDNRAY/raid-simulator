@@ -36,15 +36,18 @@ export interface CharacterEnhancements {
 export interface CharacterObject {
     id: string,
     name: string,
+    staticResources: CharacterResources,
+    staticAttributes: CharacterAttributes,
+    staticEnhancements: CharacterEnhancements
+}
+
+export interface RealtimeCharacterObject extends CharacterObject {
     castingSkillId?: string,
     castingTime?: number,
-    staticResources: CharacterResources,
-    realtimeResources?: CharacterResources,
-    staticAttributes: CharacterAttributes,
-    realtimeAttributes?: CharacterAttributes,
-    staticEnhancements: CharacterEnhancements,
-    realtimeEnhancements?: CharacterEnhancements,
-    continuesEffect?: Array<{
+    realtimeResources: CharacterResources,
+    realtimeAttributes: CharacterAttributes,
+    realtimeEnhancements: CharacterEnhancements,
+    continuesEffect: Array<{
         effectId: string,
         startTime: number
     }>
@@ -60,8 +63,14 @@ export interface Character extends CharacterObject {
     slots: Array<Slot>
 }
 
-export interface Enemy extends CharacterObject {
+export interface RealtimeCharacter extends RealtimeCharacterObject {
+    skills: Array<CharacterSkill>,
+    slots: Array<Slot>
+}
 
+export interface RealtimeEnemy extends RealtimeCharacterObject {
+}
+export interface Enemy extends CharacterObject {
 }
 
 export interface Slot {
@@ -78,11 +87,16 @@ export interface Slot {
  * 模型 开始
  * 即属性里有可能有function类型，只作为静态数据的数据结构，其他模块引用
  */
+export interface EffectValueProps {
+    caster: RealtimeCharacterObject,
+    skill: Skill,
+    target?: RealtimeCharacterObject
+}
 export type EffectType = 'damage' | 'heal' | ContinuesEffectType;
 export interface Effect {
     type: EffectType,
     on?: string,
-    value: number
+    value: number | ((props: EffectValueProps) => number)
 }
 
 export type ContinuesEffectType = 'dot' | 'buff' | 'hot' | 'debuff';
@@ -93,9 +107,13 @@ export interface ContinuesEffect extends Effect {
     duration: number
 }
 
+export interface costValueProps {
+    caster: Character,
+    skill: Skill
+}
 export interface Cost {
     type: CharacterResource,
-    value: number
+    value: number | ((props: costValueProps) => number)
 }
 
 export interface Skill {
@@ -105,7 +123,7 @@ export interface Skill {
     castTime: number,
     cooldown: number,
     cost: Array<Cost>,
-    effect: Array<Effect | ContinuesEffect>,
+    effects: Array<Effect | ContinuesEffect>,
     target: 'enemy' | 'ally' | 'all' | 'self'
 }
 // 模型 结束

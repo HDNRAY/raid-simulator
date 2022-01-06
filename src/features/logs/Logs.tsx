@@ -1,3 +1,4 @@
+import { skillMap } from "data/skills";
 import { useEffect, useRef } from "react";
 import { Log } from "redux/log";
 import { DamageLog } from "redux/raid";
@@ -35,7 +36,8 @@ const Logs = (props: {
         </div>
         <div className={`damage-logs-wrapper`} ref={damageLogsWraper}>
             {damageLogs.map(log => {
-                const { skill, caster, target, value } = log;
+                const { caster, target, value, skillId } = log;
+                const skill = skillMap[skillId]
                 return <div className={`log-wrapper`} key={log.id}>{`${caster.name}的${skill.name}对${target.name}造成${value}点伤害`}</div>
             })}
         </div>
