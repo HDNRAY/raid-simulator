@@ -1,12 +1,18 @@
+/**
+ * 纯数据类型 开始
+ * 即属性里没有function类型，单纯作为数据结构的约束
+ */
 export type ElementType = 'fire' | 'water'// | 'wind' |'water'  
 
-export interface CharacterResource {
+export type CharacterResource = keyof CharacterResources
+export interface CharacterResources {
     health: number,
     mana: number,
     energy: number,
     fury: number,
 }
 
+export type CharacterAttribute = keyof CharacterAttributes
 export interface CharacterAttributes {
     strength: number,
     agility: number,
@@ -22,7 +28,7 @@ export interface CharacterEnhancements {
     // 急速
     haste: number,
     // 元素精通
-    elementMastery: {
+    mastery: {
         [key in ElementType]: number
     },
 }
@@ -30,19 +36,27 @@ export interface CharacterEnhancements {
 export interface CharacterObject {
     id: string,
     name: string,
-    castingSkill?: Skill,
+    castingSkillId?: string,
     castingTime?: number,
-    staticResource: CharacterResource,
-    realtimeResource?: CharacterResource,
+    staticResources: CharacterResources,
+    realtimeResources?: CharacterResources,
     staticAttributes: CharacterAttributes,
     realtimeAttributes?: CharacterAttributes,
     staticEnhancements: CharacterEnhancements,
     realtimeEnhancements?: CharacterEnhancements,
-    continuesEffect?: Array<Effect>
+    continuesEffect?: Array<{
+        effectId: string,
+        startTime: number
+    }>
+}
+
+export interface CharacterSkill {
+    skillId: string,
+    lastTriggerTime?: number
 }
 
 export interface Character extends CharacterObject {
-    skills: Array<string>,
+    skills: Array<CharacterSkill>,
     slots: Array<Slot>
 }
 
@@ -50,15 +64,37 @@ export interface Enemy extends CharacterObject {
 
 }
 
+export interface Slot {
+    // id: number
+    key?: string,
+    link?: {
+        type: 'skill',
+        id: string
+    }
+}
+// 纯数据类型 结束
+
+/**
+ * 模型 开始
+ * 即属性里有可能有function类型，只作为静态数据的数据结构，其他模块引用
+ */
+export type EffectType = 'damage' | 'heal' | ContinuesEffectType;
 export interface Effect {
-    type: 'damage' | 'dot',
-    value: number,
-    duration?: number,
-    interval?: number
+    type: EffectType,
+    on?: string,
+    value: number
+}
+
+export type ContinuesEffectType = 'dot' | 'buff' | 'hot' | 'debuff';
+export interface ContinuesEffect extends Effect {
+    type: ContinuesEffectType,
+    name: string,
+    repeat: number,
+    duration: number
 }
 
 export interface Cost {
-    type: 'mana' | 'energy' | 'health' | 'fury',
+    type: CharacterResource,
     value: number
 }
 
@@ -69,17 +105,7 @@ export interface Skill {
     castTime: number,
     cooldown: number,
     cost: Array<Cost>,
-    effect: Array<Effect>,
+    effect: Array<Effect | ContinuesEffect>,
     target: 'enemy' | 'ally' | 'all' | 'self'
-    lastTriggerTime?: number,
 }
-
-export interface Slot {
-    // id: number
-    key?: string,
-    link?: {
-        type: 'skill',
-        id: string,
-        skill?: Skill
-    }
-}
+// 模型 结束

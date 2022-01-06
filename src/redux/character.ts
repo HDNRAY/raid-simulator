@@ -17,11 +17,11 @@ const characterSlice = createSlice({
     initialState,
     reducers: {
         setMainCharacter: (state, { payload }: PayloadAction<Character>) => {
-            const { staticAttributes, staticResource, staticEnhancements } = payload
+            const { staticAttributes, staticResources: staticResource, staticEnhancements } = payload
             const { health, mana, energy } = staticResource;
             state.mainCharacter = {
                 ...payload,
-                realtimeResource: {
+                realtimeResources: {
                     health,
                     mana,
                     energy,
@@ -34,25 +34,32 @@ const characterSlice = createSlice({
         setTarget: (state, { payload }) => {
             state.target = payload;
         },
+        triggerSkillCooldown: (state, { payload }) => {
+            const { skillId, time } = payload;
+            const skill = state.mainCharacter?.skills.find(s => s.skillId === skillId)
+            if (skill) {
+                skill.lastTriggerTime = time;
+            }
+        },
         startCasting: (state, { payload }) => {
             const { skill, time } = payload;
             const character = state.mainCharacter;
             if (character) {
-                character.castingSkill = skill;
+                character.castingSkillId = skill.id;
                 character.castingTime = time;
             }
         },
         doneCasting: (state) => {
             const character = state.mainCharacter;
             if (character) {
-                character.castingSkill = undefined;
+                character.castingSkillId = undefined;
                 character.castingTime = undefined
             }
         },
         cancelCasting: (state, { payload }) => {
             const character = state.mainCharacter;
             if (character) {
-                character.castingSkill = undefined;
+                character.castingSkillId = undefined;
                 character.castingTime = undefined
             }
         },
@@ -61,7 +68,7 @@ const characterSlice = createSlice({
             const character = state.mainCharacter;
             if (character) {
                 cost.forEach(c => {
-                    character.realtimeResource![c.type] -= c.value;
+                    character.realtimeResources![c.type] -= c.value;
                 })
             }
         },
@@ -69,11 +76,11 @@ const characterSlice = createSlice({
             const { type, value } = payload as Cost;
             const character = state.mainCharacter;
             if (character) {
-                character.realtimeResource![type] = value;
+                character.realtimeResources![type] = value;
             }
         }
     }
 })
 
-export const { setMainCharacter, setTarget, startCasting, doneCasting, cancelCasting, costOnCharacter, updateCost } = characterSlice.actions
+export const { setMainCharacter, setTarget, triggerSkillCooldown, startCasting, doneCasting, cancelCasting, costOnCharacter, updateCost } = characterSlice.actions
 export default characterSlice.reducer

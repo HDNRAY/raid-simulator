@@ -5,7 +5,7 @@ import { v4 as uuid } from 'uuid';
 export const you: Character = {
     id: uuid(),
     name: "张语寒",
-    staticResource: {
+    staticResources: {
         health: 10000,
         mana: 10000,
         energy: 120,
@@ -21,12 +21,12 @@ export const you: Character = {
         criticalChance: 0.05,
         criticalDamage: 1.5,
         haste: 0,
-        elementMastery: {
+        mastery: {
             fire: 0,
             water: 0
         }
     },
-    skills: ['11', '12', '00'],
+    skills: [{ skillId: '11' }, { skillId: '12' }, { skillId: '00' }],
     slots: [{
         key: '1',
         link: {

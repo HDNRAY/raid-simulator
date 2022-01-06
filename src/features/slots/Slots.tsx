@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { addLog } from "redux/log";
-import { triggerSkillCooldown } from "redux/skill";
 import eventBus from "util/eventBus";
 import Cooldown from "../../components/Cooldown/Cooldown";
 import { triggerSharedCooldown } from "../../redux/slots";
 import { useAppDispatch, useAppSelector } from "../../redux/store";
 import './Slots.scss';
-import { startCasting } from "redux/character";
-import { Skill, Slot } from "types/types";
+import { startCasting, triggerSkillCooldown } from "redux/character";
+import { CharacterSkill, Skill, Slot } from "types/types";
+import { skillMap } from "data/skills";
 
 const Slots = (props: {
     className?: string
@@ -20,14 +20,14 @@ const Slots = (props: {
     const character = useAppSelector(state => state.character.mainCharacter);
 
     const slots = useAppSelector(state => state.slots.slots);
-    const skills = useAppSelector(state => state.skill.skills);
-    const skillMap: { [key: string]: Skill } = useMemo(() => {
-        const data = skills.reduce((result: any, skill: Skill) => {
-            result[skill.id] = skill;
-            return result;
-        }, {})
-        return data;
-    }, [skills]);
+    // const skills = useAppSelector(state => state.skill.skills);
+    // const skillMap: { [key: string]: Skill } = useMemo(() => {
+    //     const data = skills.reduce((result: any, skill: Skill) => {
+    //         result[skill.id] = skill;
+    //         return result;
+    //     }, {})
+    //     return data;
+    // }, [skills]);
 
     const slotsWithSkills: Array<Slot> = useMemo(() => {
         return slots.map(slot => {
@@ -46,7 +46,7 @@ const Slots = (props: {
 
             return result
         })
-    }, [slots, skillMap])
+    }, [slots])
     const sharedCooldownTriggerTime = useAppSelector(state => state.slots.sharedCooldownTriggerTime);
     const sharedCooldown = useAppSelector(state => state.slots.sharedCooldown);
 
@@ -67,9 +67,16 @@ const Slots = (props: {
         return _keyMap;
     }, [slots])
 
-    const castingSkill = useAppSelector(state => state.character.mainCharacter?.castingSkill);
+    const castingSkillId = useAppSelector(state => state.character.mainCharacter?.castingSkillId);
+    const castingSkill = useMemo(() => castingSkillId && skillMap[castingSkillId], [castingSkillId]);
+    const characterSkills = useAppSelector(state => state.character.mainCharacter?.skills);
+    const characterSkillMap: { [key: string]: CharacterSkill } = useMemo(() => characterSkills?.reduce((result: any, item) => {
+        result[item.skillId] = item;
+        return result;
+    }, {}), [characterSkills])
 
     const onSkillCast = useCallback((skill: Skill) => {
+        const characterSkill = characterSkillMap[skill.id];
         // 检查GCD
         if (shareCooldownRemain > 0) {
             dispatch(addLog({ type: 'warning', content: 'In GCD' }));
@@ -77,7 +84,7 @@ const Slots = (props: {
         }
 
         // 检查技能CD
-        if (skill.lastTriggerTime && time - skill.lastTriggerTime <= skill.cooldown) {
+        if (characterSkill.lastTriggerTime && time - characterSkill.lastTriggerTime <= skill.cooldown) {
             dispatch(addLog({ type: 'warning', content: '我还不能使用这个技能' }));
             return
         }
@@ -90,7 +97,7 @@ const Slots = (props: {
 
         // 检查代价是否足够
         const costEnough = skill.cost.every(cost => {
-            const remains = character?.realtimeResource?.[cost.type];
+            const remains = character?.realtimeResources?.[cost.type];
             return !!remains && remains > cost.value;
         });
         if (!costEnough) {
@@ -104,7 +111,7 @@ const Slots = (props: {
         dispatch(triggerSkillCooldown({ skillId: skill.id, time }));
         dispatch(triggerSharedCooldown(time));
 
-    }, [castingSkill, character?.realtimeResource, dispatch, shareCooldownRemain, time]);
+    }, [castingSkill, character?.realtimeResources, characterSkillMap, dispatch, shareCooldownRemain, time]);
 
     const onSlotClick = useCallback((slot: Slot) => {
         console.info(slot);
@@ -120,7 +127,7 @@ const Slots = (props: {
             !!skill && onSkillCast(skill);
         }
 
-    }, [onSkillCast, skillMap]);
+    }, [onSkillCast]);
 
     useEffect(() => {
         const keyboardListener = (event: CustomEvent) => {
@@ -143,17 +150,17 @@ const Slots = (props: {
             let cd, total;
             let skillElement = null;
             if (link) {
-                const { skill } = link
-                if (skill) {
-                    skillElement = <div className="slot-link">
-                        {skill.icon && <img src={skill.icon} alt={skill.name} />}
-                        <div className="slot-link-name">{skill.name}</div>
-                    </div>
+                const skill = skillMap[link.id];
+                const characterSkill = characterSkillMap[link.id];
 
-                    if (skill.lastTriggerTime && (time - skill.lastTriggerTime < skill.cooldown)) {
-                        cd = time - skill.lastTriggerTime;
-                        total = skill.cooldown;
-                    }
+                skillElement = <div className="slot-link">
+                    {skill.icon && <img src={skill.icon} alt={skill.name} />}
+                    <div className="slot-link-name">{skill.name}</div>
+                </div>
+
+                if (characterSkill.lastTriggerTime && (time - characterSkill.lastTriggerTime < skill.cooldown)) {
+                    cd = time - characterSkill.lastTriggerTime;
+                    total = skill.cooldown;
                 }
             }
 

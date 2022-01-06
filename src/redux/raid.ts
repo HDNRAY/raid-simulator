@@ -42,11 +42,11 @@ const raidSlice = createSlice({
     reducers: {
         initEnemies: (state, { payload }) => {
             state.enemies = payload.map((item: Enemy) => {
-                const { staticAttributes, staticResource, staticEnhancements } = item;
-                const { health, mana, energy } = staticResource;
+                const { staticAttributes, staticResources, staticEnhancements } = item;
+                const { health, mana, energy } = staticResources;
                 return {
                     ...item,
-                    realtimeResource: {
+                    realtimeResources: {
                         health,
                         mana,
                         energy,
@@ -87,7 +87,7 @@ const raidSlice = createSlice({
             if (targetState) {
                 skill.effect.forEach((effect: any) => {
                     if (effect.type === 'damage') {
-                        targetState.realtimeResource!.health = targetState.realtimeResource!.health - effect.value;
+                        targetState.realtimeResources!.health = targetState.realtimeResources!.health - effect.value;
                         state.effectHistory.push({
                             id: uuid(),
                             time,
