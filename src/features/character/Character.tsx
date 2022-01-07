@@ -7,7 +7,7 @@ import { effectOnEnemy } from "redux/raid";
 import { setupSlots } from "redux/slots";
 import { useAppDispatch, useAppSelector } from "redux/store";
 import { RealtimeCharacter, Skill } from "types/types";
-import { getPercentage, numberToPercentage } from "util/utils";
+import { computeCritical, getPercentage, numberToPercentage } from "util/utils";
 import './Character.scss';
 
 const CharacterPanel = (props: {
@@ -58,15 +58,19 @@ const CharacterPanel = (props: {
                 if (selectedTarget && !Array.isArray(selectedTarget) && selectedTarget.type === 'enemy') {
                     // 计算效果数字
                     const target = enemies.find(e => e.id === selectedTarget.id);
+                    // 增加减少
                     const positiveTypes = ['heal', 'buff'];
-                    const pon = positiveTypes.includes(effect.type) ? 1 : -1
-                    const value = typeof effect.value === 'number' ? effect.value : effect.value({ skill, target, caster: character! });
+                    const pon = positiveTypes.includes(effect.type) ? 1 : -1;
+                    // 计算技能原始数值
+                    const valueFromSkill = typeof effect.value === 'number' ? effect.value : effect.value({ skill, target, caster: character! });
+                    // 检查暴击
+                    const { criticalChance, criticalDamage } = character!.enhancements;
+                    const [value, critical] = computeCritical(valueFromSkill, criticalChance, criticalDamage);
 
                     // 效果形式属性
                     const effected = effect.on || 'health';
 
-                    // 效果方向
-                    dispatch(effectOnEnemy({ pon, effected, targetId: selectedTarget.id, value, skillId: skill.id, time, caster: character! }))
+                    dispatch(effectOnEnemy({ pon, effected, targetId: selectedTarget.id, value, critical, skillId: skill.id, time, caster: character! }))
                 } else {
 
                 }

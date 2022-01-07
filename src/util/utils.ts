@@ -37,4 +37,11 @@ const numberToPercentage = (value?: number) => `${100 * (value ?? 0)}%`;
 
 const unit = (value: number = 1) => `${value * 100 / 1920}vw`;
 
-export { timeShorter, getPercentage, checkTrigger, numberToPercentage, unit }
+const computeCritical: (value: number, chance: number, criticalDamage: number) => [number, boolean]
+    = (value: number, chance: number, criticalDamage: number) => {
+        const critical = checkTrigger(chance);
+        const result = critical ? parseInt((value * criticalDamage).toFixed(0)) : value;
+        return [result, critical]
+    }
+
+export { timeShorter, getPercentage, checkTrigger, computeCritical, numberToPercentage, unit }

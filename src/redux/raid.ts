@@ -9,6 +9,7 @@ export interface DamageLog extends Log {
     type: 'battle',
     value: number,
     shown: boolean,
+    critical?: boolean,
     target: {
         id?: string,
         name: string
@@ -80,6 +81,7 @@ const raidSlice = createSlice({
         },
         effectOnEnemy: (state, { payload }: PayloadAction<{
             effected: CharacterResource,
+            critical: boolean,
             targetId: string,
             skillId: string,
             caster: CharacterObject,
@@ -87,7 +89,7 @@ const raidSlice = createSlice({
             time: number,
             pon: 1 | -1
         }>) => {
-            const { effected, targetId, value, skillId, time, caster, pon } = payload;
+            const { effected, targetId, value, skillId, time, caster, pon, critical } = payload;
             const target = state.enemies.find(e => e.id === targetId);
 
             if (target) {
@@ -96,7 +98,7 @@ const raidSlice = createSlice({
                 }
 
                 state.effectHistory.push({
-                    id: uuid(), time, type: 'battle', shown: false,
+                    id: uuid(), time, type: 'battle', shown: false, critical,
                     value,
                     target,
                     caster,
