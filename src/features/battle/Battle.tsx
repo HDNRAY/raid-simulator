@@ -64,7 +64,13 @@ const BattleScene = (props: {
     // 角色
     const character: RealtimeCharacter | undefined = useAppSelector(state => state.character.mainCharacter);
 
-    // 角色使用技能
+    /**
+     * 公共方法
+     */
+
+    /**
+     * 角色使用技能
+     */
     const selectedTarget = useAppSelector(state => state.character.target);
     const castingSkill: any = useMemo(() => character?.castingSkillId && skillMap[character.castingSkillId], [character]);
     // 读条时间
@@ -130,6 +136,18 @@ const BattleScene = (props: {
             }
         }
     }, [castingSkill, castingTimePast, dispatch, doCost, doEffect]);
+
+    /**
+     * 敌人释放技能
+     */
+
+    /**
+     * 角色持续效果update
+     */
+
+    /**
+     * 敌人持续效果update
+     */
 
     return <div className={`battle-scene-wrapper ${className}`}>
         <Enemies className="battle-enemies"></Enemies>
