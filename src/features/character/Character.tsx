@@ -1,13 +1,12 @@
 import ProgressBar from "components/ProgressBar/ProgressBar";
 import { you } from "data/character";
 import { skillMap } from "data/skills";
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import { costOnCharacter, doneCasting, recoverCost, setMainCharacter, setTarget, updateCost } from "redux/character";
-import { effectOnEnemy } from "redux/raid";
+import { useEffect, useMemo, useRef } from "react";
+import { recoverCost, setMainCharacter, setTarget } from "redux/character";
 import { setupSlots } from "redux/slots";
 import { useAppDispatch, useAppSelector } from "redux/store";
-import { Effect, RealtimeCharacter, Skill } from "types/types";
-import { computeCritical, getPercentage, numberToPercentage } from "util/utils";
+import { RealtimeCharacter } from "types/types";
+import { getPercentage, numberToPercentage } from "util/utils";
 import './Character.scss';
 
 const CharacterPanel = (props: {
@@ -17,11 +16,10 @@ const CharacterPanel = (props: {
 
     const dispatch = useAppDispatch();
     const character: RealtimeCharacter | undefined = useAppSelector(state => state.character.mainCharacter);
-    const selectedTarget = useAppSelector(state => state.character.target);
+
     const enemies = useAppSelector(state => state.raid.enemies);
 
     const { staticResources, resources, attributes, enhancements, name, castingSkillId, castingTime } = character || {} as RealtimeCharacter;
-    const castingSkill: any = useMemo(() => castingSkillId && skillMap[castingSkillId], [castingSkillId])
 
     const time = useAppSelector(state => state.universal.time);
 
@@ -38,74 +36,14 @@ const CharacterPanel = (props: {
         dispatch(setupSlots(you.slots));
     }, [dispatch]);
 
-    // 消耗代价
-    const doCost = useCallback((skill: Skill) => {
-        skill.cost.forEach(c => {
-            const value = typeof c.value === 'number' ? c.value : c.value({
-                caster: character!,
-                skill
-            });
-            dispatch(costOnCharacter({ type: c.type, value }))
-        })
-    }, [character, dispatch]);
-
-    // 产生效果
-    const doEffect = useCallback((effect: Effect, skill: Skill) => {
-        console.log(effect, skill);
-        if (effect.target === 'self') {
-
-        } else if (effect.target === 'enemy') {
-            if (selectedTarget && !Array.isArray(selectedTarget) && selectedTarget.type === 'enemy') {
-                // 计算效果数字
-                const target = enemies.find(e => e.id === selectedTarget.id);
-                // 增加减少
-                const positiveTypes = ['heal', 'buff'];
-                const pon = positiveTypes.includes(effect.type) ? 1 : -1;
-                // 计算技能原始数值
-                const valueFromSkill = typeof effect.value === 'number' ? effect.value : effect.value({ skill, target, caster: character! });
-                // 检查暴击
-                const { criticalChance, criticalDamage } = character!.enhancements;
-                const [value, critical] = computeCritical(valueFromSkill, criticalChance, criticalDamage);
-
-                // 效果形式属性
-                const effected = effect.on || 'health';
-
-                // 增加储能
-                dispatch(recoverCost({
-                    type: 'fury',
-                    value: value * 0.01
-                }))
-
-                // 产生效果
-                dispatch(effectOnEnemy({ pon, effected, targetId: selectedTarget.id, value, critical, skillId: skill.id, time, caster: character! }))
-            } else {
-
-            }
-        }
-
-    }, [character, dispatch, enemies, selectedTarget, time]);
-
+    // 正在释放技能
+    const castingSkill: any = useMemo(() => castingSkillId && skillMap[castingSkillId], [castingSkillId]);
     // 读条时间
     const castingTimePast = castingTime ? time - castingTime : 0;
     // 读条百分比
     const castingPercentage = getPercentage(castingTimePast, castingSkill?.castTime);
     // 读条剩余时间
     const castingTimeRemain = castingSkill ? Math.max(castingSkill.castTime - castingTimePast, 0) / 1000 : 0
-
-    // 使用技能
-    useEffect(() => {
-        if (castingSkill) {
-            // 无需读条 或 读条完成
-            if (castingSkill.castTime === 0 || castingTimePast >= castingSkill.castTime) {
-                // 代价
-                doCost(castingSkill);
-                // 效果
-                castingSkill.effects.forEach((effect: Effect) => doEffect(effect, castingSkill));
-                // 完成
-                dispatch(doneCasting());
-            }
-        }
-    }, [castingSkill, castingTimePast, dispatch, doCost, doEffect]);
 
     // 体力回复
     const lastTimeRegenerateEnergy = useRef<number>(0);
@@ -138,57 +76,57 @@ const CharacterPanel = (props: {
 
         const resourceLines = [{
             label: '生命',
-            value: resources?.health,
+            value: resources.health,
             cap: staticResources.health ?? 100,
             color: 'orangered'
         }, {
             label: '魔力',
-            value: resources?.mana,
+            value: resources.mana,
             cap: staticResources.mana ?? 100,
             color: 'cyan'
         }, {
             label: '体力',
-            value: resources?.energy,
+            value: resources.energy,
             cap: staticResources.energy ?? 100,
             color: 'lightgoldenrodyellow'
         }, {
             label: '储能',
-            value: resources?.fury,
+            value: resources.fury,
             cap: staticResources.fury ?? 100,
             color: 'lightgreen'
         }];
 
         const attributeLines = [{
             label: '力量',
-            value: attributes?.strength
+            value: attributes.strength
         }, {
             label: '敏捷',
-            value: attributes?.agility
+            value: attributes.agility
         }, {
             label: '智力',
-            value: attributes?.intelligence
+            value: attributes.intelligence
         }, {
             label: '精神',
-            value: attributes?.spirit
+            value: attributes.spirit
         }]
 
         const enhancementLines = [{
             label: '暴击',
-            value: enhancements?.criticalChance
+            value: enhancements.criticalChance
         }, {
             label: '暴伤',
-            value: enhancements?.criticalDamage
+            value: enhancements.criticalDamage
         }, {
             label: '急速',
-            value: enhancements?.haste
+            value: enhancements.haste
         }]
 
         const elements = [{
             label: '火',
-            value: enhancements?.mastery?.fire
+            value: enhancements.mastery.fire
         }, {
             label: '水',
-            value: enhancements?.mastery?.water
+            value: enhancements.mastery.water
         }]
 
         return <>
