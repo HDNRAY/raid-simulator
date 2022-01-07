@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import eventBus from 'util/eventBus';
 import './App.css';
 import Layout from './features/layout/Layout';
-import { BrowserRouter } from 'react-router-dom'
+import { BrowserRouter, HashRouter } from 'react-router-dom'
 
 function App() {
     useEffect(() => {
@@ -16,9 +16,9 @@ function App() {
             window.removeEventListener('keydown', keyboardListener);
         }
     }, [])
-    return <BrowserRouter>
+    return <HashRouter>
         <Layout></Layout>
-    </BrowserRouter>
+    </HashRouter>
 }
 
 export default App;

@@ -18,7 +18,7 @@ export const you: Character = {
         spirit: 100
     },
     staticEnhancements: {
-        criticalChance: 0.05,
+        criticalChance: 0.5,
         criticalDamage: 1.5,
         haste: 0,
         mastery: {
