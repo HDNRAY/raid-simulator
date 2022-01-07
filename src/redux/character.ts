@@ -87,11 +87,22 @@ const characterSlice = createSlice({
             const { type, value } = payload;
             const character = state.mainCharacter;
             if (character) {
-                character.resources[type] = value;
+                character.resources[type] = Math.round(value);
             }
-        }
+        },
+        recoverCost: (state, { payload }: PayloadAction<{
+            type: CharacterResource,
+            value: number
+        }>) => {
+            const { type, value } = payload;
+            const character = state.mainCharacter;
+            if (character) {
+                const newValue = character.resources[type] + value;
+                character.resources[type] = Math.min(character.staticResources[type], Math.round(newValue));
+            }
+        },
     }
 })
 
-export const { setMainCharacter, setTarget, triggerSkillCooldown, startCasting, doneCasting, cancelCasting, costOnCharacter, updateCost } = characterSlice.actions
+export const { setMainCharacter, setTarget, triggerSkillCooldown, startCasting, doneCasting, cancelCasting, costOnCharacter, updateCost, recoverCost } = characterSlice.actions
 export default characterSlice.reducer

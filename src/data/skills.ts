@@ -7,43 +7,45 @@ export const skills: Array<Skill> = [{
     castTime: 2000,
     cost: [{
         type: 'mana',
-        value: 250
+        value: 400
     }],
     target: 'enemy',
     effects: [{
         type: 'damage',
         target: 'enemy',
-        value: 300
+        value: 100
     }]
 }, {
     id: '12',
-    name: '豪火球',
-    cooldown: 10000,
-    castTime: 2500,
-    target: 'enemy',
-    cost: [{
-        type: 'mana',
-        value: 560
-    }],
-    effects: [{
-        type: 'damage',
-        target: 'enemy',
-        value: 1500
-    }]
-}, {
-    id: '13',
     name: '龙破斩',
     target: 'enemy',
-    cooldown: 0,
+    cooldown: 10000,
     castTime: 2500,
     cost: [{
         type: 'mana',
-        value: 1000
+        value: 2000
     }],
     effects: [{
         type: 'damage',
         target: 'enemy',
-        value: (props: EffectValueProps) => 21 * props.caster.attributes.intelligence
+        value: (props: EffectValueProps) => 8 * props.caster.attributes.intelligence
+    }]
+}, {
+    id: '21',
+    name: '割裂',
+    target: 'enemy',
+    cooldown: 0,
+    castTime: 0,
+    cost: [{
+        type: 'fury',
+        value: 10
+    }],
+    effects: [{
+        type: 'dot',
+        target: 'enemy',
+        value: (props: EffectValueProps) => 0.5 * props.caster.attributes.strength,
+        repeat: 7,
+        duration: 2000
     }]
 }, {
     id: '00',

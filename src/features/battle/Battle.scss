@@ -14,7 +14,7 @@
 
     .battle-statistics {
         position: absolute;
-        top: $unit * 480;
+        top: $unit * 460;
         left: $unit * 60;
         width: $unit * 300;
         height: 26vh;
@@ -22,8 +22,8 @@
 
     .battle-messages-wrapper {
         position: absolute;
-        top: 30%;
-        right: 24%;
+        top: $unit * 280;
+        right: $unit * 480;
         width: $unit * 320;
         height: $unit * 320;
         color: white;

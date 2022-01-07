@@ -9,7 +9,7 @@ export const you: Character = {
         health: 10000,
         mana: 10000,
         energy: 120,
-        fury: 0
+        fury: 100
     },
     staticAttributes: {
         strength: 100,
@@ -26,7 +26,7 @@ export const you: Character = {
             water: 0
         }
     },
-    skills: [{ skillId: '11' }, { skillId: '12' }, { skillId: '13' }, { skillId: '00' }],
+    skills: [{ skillId: '11' }, { skillId: '12' }, { skillId: '21' }, { skillId: '00' }],
     slots: [{
         key: '1',
         link: {
@@ -49,7 +49,7 @@ export const you: Character = {
         key: '3',
         link: {
             type: 'skill',
-            id: '13'
+            id: '21'
         }
     }, {
         key: 'Q'
