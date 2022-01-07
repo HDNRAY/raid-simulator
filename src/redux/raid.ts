@@ -1,7 +1,7 @@
 
 
-import { createSlice } from "@reduxjs/toolkit";
-import { Enemy, RealtimeEnemy } from "types/types";
+import { createSlice, PayloadAction } from "@reduxjs/toolkit";
+import { CharacterObject, CharacterResource, Enemy, RealtimeEnemy } from "types/types";
 import { v4 as uuid } from 'uuid';
 import { Log } from "./log";
 
@@ -43,14 +43,14 @@ const raidSlice = createSlice({
                 const { health, mana, energy } = staticResources;
                 return {
                     ...item,
-                    realtimeResources: {
+                    resources: {
                         health,
                         mana,
                         energy,
                         fury: 0
                     },
-                    realtimeAttributes: staticAttributes,
-                    realtimeEnhancements: staticEnhancements,
+                    attributes: staticAttributes,
+                    enhancements: staticEnhancements,
                 }
             });
         },
@@ -78,30 +78,38 @@ const raidSlice = createSlice({
                 }
             }
         },
-        castSkillOnEnemy: (state, { payload }) => {
-            const { type, targetId, value, skillId, time, caster } = payload;
+        effectOnEnemy: (state, { payload }: PayloadAction<{
+            effected: CharacterResource,
+            targetId: string,
+            skillId: string,
+            caster: CharacterObject,
+            value: number,
+            time: number,
+            pon: 1 | -1
+        }>) => {
+            const { effected, targetId, value, skillId, time, caster, pon } = payload;
             const target = state.enemies.find(e => e.id === targetId);
-            console.log(target, targetId, value, skillId, time, caster)
+
             if (target) {
-                if (type === 'health') {
-                    target.realtimeResources.health = target.realtimeResources!.health - value;
-                    state.effectHistory.push({
-                        id: uuid(), time, type: 'battle',
-                        value,
-                        target,
-                        caster,
-                        shown: false,
-                        skillId
-                    })
+                if (effected === 'health') {
+                    target.resources.health = target.resources.health + pon * value;
                 }
-                if (state.raidStatus === 'stopped') {
-                    state.raidStatus = 'started';
-                    state.raidStartTime = time;
-                }
+
+                state.effectHistory.push({
+                    id: uuid(), time, type: 'battle', shown: false,
+                    value,
+                    target,
+                    caster,
+                    skillId
+                })
+            }
+            if (state.raidStatus === 'stopped') {
+                state.raidStatus = 'started';
+                state.raidStartTime = time;
             }
         }
     }
 })
 
-export const { addEnemies, initEnemies, startRaid, stopRaid, castSkillOnEnemy, updateEffectHistory } = raidSlice.actions
+export const { addEnemies, initEnemies, startRaid, stopRaid, effectOnEnemy, updateEffectHistory } = raidSlice.actions
 export default raidSlice.reducer

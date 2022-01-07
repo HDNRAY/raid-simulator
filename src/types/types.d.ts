@@ -4,6 +4,8 @@
  */
 export type ElementType = 'fire' | 'water'// | 'wind' |'water'  
 
+export type TargetType = 'enemy' | 'ally' | 'self';
+
 export type CharacterResource = keyof CharacterResources
 export interface CharacterResources {
     health: number,
@@ -44,9 +46,9 @@ export interface CharacterObject {
 export interface RealtimeCharacterObject extends CharacterObject {
     castingSkillId?: string,
     castingTime?: number,
-    realtimeResources: CharacterResources,
-    realtimeAttributes: CharacterAttributes,
-    realtimeEnhancements: CharacterEnhancements,
+    resources: CharacterResources,
+    attributes: CharacterAttributes,
+    enhancements: CharacterEnhancements,
     continuesEffect: Array<{
         effectId: string,
         startTime: number
@@ -95,7 +97,8 @@ export interface EffectValueProps {
 export type EffectType = 'damage' | 'heal' | ContinuesEffectType;
 export interface Effect {
     type: EffectType,
-    on?: string,
+    target: TargetType,
+    on?: CharacterResource,
     value: number | ((props: EffectValueProps) => number)
 }
 
@@ -124,6 +127,6 @@ export interface Skill {
     cooldown: number,
     cost: Array<Cost>,
     effects: Array<Effect | ContinuesEffect>,
-    target: 'enemy' | 'ally' | 'all' | 'self'
+    target: TargetType
 }
 // 模型 结束

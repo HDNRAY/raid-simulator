@@ -3,7 +3,7 @@ import { you } from "data/character";
 import { skillMap } from "data/skills";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { costOnCharacter, doneCasting, setMainCharacter, setTarget, updateCost } from "redux/character";
-import { castSkillOnEnemy } from "redux/raid";
+import { effectOnEnemy } from "redux/raid";
 import { setupSlots } from "redux/slots";
 import { useAppDispatch, useAppSelector } from "redux/store";
 import { RealtimeCharacter, Skill } from "types/types";
@@ -17,17 +17,20 @@ const CharacterPanel = (props: {
 
     const dispatch = useAppDispatch();
     const character: RealtimeCharacter | undefined = useAppSelector(state => state.character.mainCharacter);
-    const target = useAppSelector(state => state.character.target);
-    const enemy = useAppSelector(state => state.raid.enemies[0]);
+    const selectedTarget = useAppSelector(state => state.character.target);
+    const enemies = useAppSelector(state => state.raid.enemies);
 
-    const { staticResources, realtimeResources, realtimeAttributes, realtimeEnhancements, name, castingSkillId, castingTime } = character || {} as RealtimeCharacter;
+    const { staticResources, resources, attributes, enhancements, name, castingSkillId, castingTime } = character || {} as RealtimeCharacter;
     const castingSkill: any = useMemo(() => castingSkillId && skillMap[castingSkillId], [castingSkillId])
 
     const time = useAppSelector(state => state.universal.time);
 
     useEffect(() => {
-        dispatch(setTarget(enemy?.id))
-    }, [dispatch, enemy?.id])
+        dispatch(setTarget({
+            id: enemies[0]?.id,
+            type: 'enemy'
+        }))
+    }, [dispatch, enemies])
 
     // 初始化
     useEffect(() => {
@@ -48,24 +51,30 @@ const CharacterPanel = (props: {
 
     const doEffect = useCallback((skill: Skill) => {
         skill.effects.forEach(effect => {
+
             if (skill.target === 'self') {
 
-            } else {
-                if (target && !Array.isArray(target)) {
-                    const value = typeof effect.value === 'number' ? effect.value : effect.value({
-                        target,
-                        caster: character!,
-                        skill
-                    });
-                    const type = effect.on || 'health';
-                    console.log(effect, value, target, time)
-                    dispatch(castSkillOnEnemy({ type, targetId: target, value, skillId: skill.id, time, caster: character }))
+            } else if (skill.target === 'enemy') {
+                if (selectedTarget && !Array.isArray(selectedTarget) && selectedTarget.type === 'enemy') {
+                    // 计算效果数字
+                    const target = enemies.find(e => e.id === selectedTarget.id);
+                    const positiveTypes = ['heal', 'buff'];
+                    const pon = positiveTypes.includes(effect.type) ? 1 : -1
+                    const value = typeof effect.value === 'number' ? effect.value : effect.value({ skill, target, caster: character! });
+
+                    // 效果形式属性
+                    const effected = effect.on || 'health';
+
+                    // 效果方向
+                    dispatch(effectOnEnemy({ pon, effected, targetId: selectedTarget.id, value, skillId: skill.id, time, caster: character! }))
+                } else {
+
                 }
             }
         })
 
         dispatch(doneCasting())
-    }, [character, dispatch, target, time]);
+    }, [character, dispatch, enemies, selectedTarget, time]);
 
     // 读条时间
     const castingTimePast = castingTime ? time - castingTime : 0;
@@ -88,80 +97,80 @@ const CharacterPanel = (props: {
     // 体力回复
     const lastTimeRegenerateEnergy = useRef<number>(0);
     useEffect(() => {
-        if (realtimeResources && realtimeResources?.energy < staticResources.energy && time > lastTimeRegenerateEnergy.current + 100) {
+        if (resources && resources?.energy < staticResources.energy && time > lastTimeRegenerateEnergy.current + 100) {
             lastTimeRegenerateEnergy.current = time;
             dispatch(updateCost({
                 type: 'energy',
-                value: realtimeResources.energy + 1
+                value: resources.energy + 1
             }))
         }
-    }, [dispatch, realtimeResources, staticResources, time])
+    }, [dispatch, resources, staticResources, time])
 
     // 念力回复
     const lastTimeRegenerateMana = useRef<number>(0);
     useEffect(() => {
-        if (realtimeResources && realtimeResources?.mana < staticResources.mana && time > lastTimeRegenerateMana.current + 100) {
+        if (resources && resources?.mana < staticResources.mana && time > lastTimeRegenerateMana.current + 100) {
             lastTimeRegenerateMana.current = time;
             dispatch(updateCost({
                 type: 'mana',
-                value: realtimeResources.mana + (realtimeAttributes!.spirit) * 0.01
+                value: resources.mana + (attributes!.spirit) * 0.01
             }))
         }
-    }, [dispatch, realtimeAttributes, realtimeResources, staticResources, time])
+    }, [dispatch, attributes, resources, staticResources, time])
 
-    const resources = [{
+    const resourceLines = [{
         label: '生命',
-        value: realtimeResources?.health,
+        value: resources?.health,
         cap: staticResources?.health ?? 100,
         color: 'orangered'
     }, {
         label: '魔力',
-        value: realtimeResources?.mana,
+        value: resources?.mana,
         cap: staticResources?.mana ?? 100,
         color: 'cyan'
     }, {
         label: '体力',
-        value: realtimeResources?.energy,
+        value: resources?.energy,
         cap: staticResources?.energy ?? 100,
         color: 'lightgoldenrodyellow'
     }, {
         label: '惯性',
-        value: realtimeResources?.fury,
+        value: resources?.fury,
         cap: staticResources?.fury ?? 100,
         color: 'lightgreen'
     }];
 
-    const attributes = [{
+    const attributeLines = [{
         label: '力量',
-        value: realtimeAttributes?.strength
+        value: attributes?.strength
     }, {
         label: '敏捷',
-        value: realtimeAttributes?.agility
+        value: attributes?.agility
     }, {
         label: '智力',
-        value: realtimeAttributes?.intelligence
+        value: attributes?.intelligence
     }, {
         label: '精神',
-        value: realtimeAttributes?.spirit
+        value: attributes?.spirit
     }]
 
-    const enhancements = [{
+    const enhancementLines = [{
         label: '暴击',
-        value: realtimeEnhancements?.criticalChance
+        value: enhancements?.criticalChance
     }, {
         label: '暴伤',
-        value: realtimeEnhancements?.criticalDamage
+        value: enhancements?.criticalDamage
     }, {
         label: '急速',
-        value: realtimeEnhancements?.haste
+        value: enhancements?.haste
     }]
 
     const elements = [{
         label: '火',
-        value: realtimeEnhancements?.mastery?.fire
+        value: enhancements?.mastery?.fire
     }, {
         label: '水',
-        value: realtimeEnhancements?.mastery?.water
+        value: enhancements?.mastery?.water
     }]
 
     return <div className={`character-wrapper ${className}`}>
@@ -170,7 +179,7 @@ const CharacterPanel = (props: {
             <ProgressBar className="character-casting" percentage={castingPercentage} color="#eee">{castingTimeRemain.toFixed(1)}s</ProgressBar>
         </div>
         <div className="character-resources-wrapper">
-            {resources.filter(r => r.cap > 0).map(resource => {
+            {resourceLines.filter(r => r.cap > 0).map(resource => {
                 const { label, value, cap, color } = resource;
                 const percentage = getPercentage(value, cap);
                 return <div className="character-resource" key={label}>
@@ -180,7 +189,7 @@ const CharacterPanel = (props: {
             })}
         </div>
         <div className="character-attributes-wrapper">
-            {attributes.map(attribute => {
+            {attributeLines.map(attribute => {
                 const { label, value } = attribute;
                 return <div className="character-attribute" key={label}>
                     <div className="character-attribute-label">{label}</div>
@@ -189,7 +198,7 @@ const CharacterPanel = (props: {
             })}
         </div>
         <div className="character-attributes-wrapper">
-            {enhancements.map(enhance => {
+            {enhancementLines.map(enhance => {
                 const { label, value } = enhance;
                 return <div className="character-attribute" key={label}>
                     <div className="character-attribute-label">{label}</div>

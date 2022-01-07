@@ -97,7 +97,7 @@ const Slots = (props: {
 
         // 检查代价是否足够
         const costEnough = skill.cost.every(cost => {
-            const remains = character?.realtimeResources?.[cost.type];
+            const remains = character?.resources?.[cost.type];
             return !!remains && remains > cost.value;
         });
         if (!costEnough) {
@@ -111,7 +111,7 @@ const Slots = (props: {
         dispatch(triggerSkillCooldown({ skillId: skill.id, time }));
         dispatch(triggerSharedCooldown(time));
 
-    }, [castingSkill, character?.realtimeResources, characterSkillMap, dispatch, shareCooldownRemain, time]);
+    }, [castingSkill, character?.resources, characterSkillMap, dispatch, shareCooldownRemain, time]);
 
     const onSlotClick = useCallback((slot: Slot) => {
         console.info(slot);

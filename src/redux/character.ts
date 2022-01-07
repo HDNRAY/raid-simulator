@@ -1,11 +1,17 @@
 
 
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
-import { Character, RealtimeCharacter, CharacterResource, RealtimeEnemy } from "types/types";
+import { Character, RealtimeCharacter, CharacterResource, TargetType } from "types/types";
 
 interface CharacterState {
     mainCharacter?: RealtimeCharacter,
-    target?: RealtimeCharacter | RealtimeEnemy | Array<RealtimeCharacter | RealtimeEnemy>
+    target?: {
+        type: TargetType,
+        id: string
+    } | Array<{
+        type: TargetType,
+        id: string
+    }>
 }
 
 const initialState: CharacterState = {
@@ -21,14 +27,14 @@ const characterSlice = createSlice({
             const { health, mana, energy } = staticResource;
             state.mainCharacter = {
                 ...payload,
-                realtimeResources: {
+                resources: {
                     health,
                     mana,
                     energy,
                     fury: 0
                 },
-                realtimeAttributes: staticAttributes,
-                realtimeEnhancements: staticEnhancements,
+                attributes: staticAttributes,
+                enhancements: staticEnhancements,
                 continuesEffect: []
             };
         },
@@ -71,7 +77,7 @@ const characterSlice = createSlice({
             const { type, value } = payload;
             const character = state.mainCharacter;
             if (character) {
-                character.realtimeResources[type] -= value;
+                character.resources[type] -= value;
             }
         },
         updateCost: (state, { payload }: PayloadAction<{
@@ -81,7 +87,7 @@ const characterSlice = createSlice({
             const { type, value } = payload;
             const character = state.mainCharacter;
             if (character) {
-                character.realtimeResources[type] = value;
+                character.resources[type] = value;
             }
         }
     }

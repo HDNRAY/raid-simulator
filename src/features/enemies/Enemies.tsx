@@ -18,11 +18,11 @@ const Enemies = (props: {
 
     return <div className={`enemies-wrapper ${className}`}>
         {selectedEnemies.map(enemy => {
-            const { id, realtimeResources, name, staticResources } = enemy;
-            const percentage = Math.round(100 * (realtimeResources?.health || 0) / staticResources.health);
+            const { id, resources, name, staticResources } = enemy;
+            const percentage = Math.round(100 * (resources?.health || 0) / staticResources.health);
             return <div className="enemy-wrapper" key={id}>
                 <ProgressBar className="health" percentage={percentage} color="orangered" textColor="white">
-                    <span className="current">{realtimeResources?.health}</span>/<span className="cap">{staticResources.health}</span>
+                    <span className="current">{resources?.health}</span>/<span className="cap">{staticResources.health}</span>
                 </ProgressBar>
                 <div className="name">{name}</div>
                 <div className="corner left-top-corner"></div>

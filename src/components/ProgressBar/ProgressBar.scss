@@ -9,6 +9,7 @@
     .text-outer {
         position: absolute;
         left: $unit * 5;
+        height: 100%;
         top: 50%;
         transform: translateY(-50%);
         z-index: 1;
@@ -20,8 +21,8 @@
         height: calc(100% + #{$unit} * 2);
         border-width: $unit;
         position: absolute;
-        left: -$unit;
-        top: -$unit;
+        left: 0;
+        top: 0;
         overflow: hidden;
 
         .text-inner {

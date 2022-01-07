@@ -9,9 +9,10 @@ export const skills: Array<Skill> = [{
         type: 'mana',
         value: 250
     }],
-    target: 'all',
+    target: 'enemy',
     effects: [{
         type: 'damage',
+        target: 'enemy',
         value: 300
     }]
 }, {
@@ -19,19 +20,20 @@ export const skills: Array<Skill> = [{
     name: '豪火球',
     cooldown: 10000,
     castTime: 2500,
-    target: 'all',
+    target: 'enemy',
     cost: [{
         type: 'mana',
         value: 560
     }],
     effects: [{
         type: 'damage',
+        target: 'enemy',
         value: 1500
     }]
 }, {
     id: '13',
     name: '龙破斩',
-    target: 'all',
+    target: 'enemy',
     cooldown: 0,
     castTime: 2500,
     cost: [{
@@ -40,7 +42,8 @@ export const skills: Array<Skill> = [{
     }],
     effects: [{
         type: 'damage',
-        value: (props: EffectValueProps) => 21 * props.caster.realtimeAttributes.intelligence
+        target: 'enemy',
+        value: (props: EffectValueProps) => 21 * props.caster.attributes.intelligence
     }]
 }, {
     id: '00',

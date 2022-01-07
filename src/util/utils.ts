@@ -35,4 +35,6 @@ const checkTrigger = (threshold: number, options: {
 
 const numberToPercentage = (value?: number) => `${100 * (value ?? 0)}%`;
 
-export { timeShorter, getPercentage, checkTrigger, numberToPercentage }
+const unit = (value: number = 1) => `${value * 100 / 1920}vw`;
+
+export { timeShorter, getPercentage, checkTrigger, numberToPercentage, unit }
