@@ -4,7 +4,8 @@
     border-width: $unit;
     position: relative;
     box-sizing: content-box;
-    min-height: $unit * 22;
+    height: $unit * 22;
+    line-height: $unit * 22;
 
     .text-outer {
         position: absolute;

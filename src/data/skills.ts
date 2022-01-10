@@ -5,7 +5,7 @@ export const skills: Array<Skill> = [{
     id: '11',
     name: '火球术',
     cooldown: 0,
-    castTime: 2000,
+    castTime: 1000,
     cost: [{
         type: 'mana',
         value: 400
@@ -41,15 +41,15 @@ export const skills: Array<Skill> = [{
     castTime: 0,
     cost: [{
         type: 'fury',
-        value: 10
+        value: 1
     }],
     effects: [{
         id: uuid(),
         type: 'dot',
         target: 'enemy',
         value: (props: EffectValueProps) => 0.5 * props.caster.attributes.strength,
-        repeat: 7,
-        duration: 2000
+        interval: 3000,
+        duration: 21000
     }]
 }, {
     id: '00',

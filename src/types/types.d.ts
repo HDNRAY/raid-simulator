@@ -52,8 +52,9 @@ export interface RealtimeCharacterObject extends CharacterObject {
     overTimeEffects: Array<{
         effectId: string,
         skillId: string,
-        repeat: number,
-        startTime: number
+        lastTriggerTime: number,
+        startTime: number,
+        caster: RealtimeCharacterObject
     }>
 }
 
@@ -112,7 +113,7 @@ export interface Effect<T = EffectType> {
 export interface OverTimeEffect extends Effect {
     type: OverTimeEffectType,
     name?: string,
-    repeat: number,
+    interval: number,
     duration: number
 }
 

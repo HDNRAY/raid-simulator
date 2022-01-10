@@ -80,6 +80,41 @@ const raidSlice = createSlice({
                 }
             }
         },
+        addEnemyOverTimeEffect: (state, { payload }) => {
+            const { targetId, effectId, skillId, startTime, caster } = payload;
+            const target = state.enemies.find(e => e.id === targetId);
+            if (target) {
+                const existIndex = target.overTimeEffects.findIndex(i => i.effectId === effectId);
+                if (existIndex > -1) {
+                    target.overTimeEffects.splice(existIndex, 1);
+                }
+                target.overTimeEffects.push({
+                    effectId,
+                    skillId,
+                    lastTriggerTime: startTime,
+                    startTime,
+                    caster
+                })
+            }
+        },
+        updateEnemyOverTimeEffect: (state, { payload }) => {
+            const { targetId, effectId, skillId, time } = payload;
+            const target = state.enemies.find(e => e.id === targetId);
+            if (target) {
+                const effect = target.overTimeEffects.find(i => i.skillId === skillId && i.effectId === effectId);
+                if (effect) {
+                    effect.lastTriggerTime = time;
+                }
+            }
+        },
+        removeEnemyOverTimeEffect: (state, { payload }) => {
+            const { targetId, effectId } = payload;
+            const target = state.enemies.find(e => e.id === targetId);
+            if (target) {
+                const index = target.overTimeEffects.findIndex(i => i.effectId === effectId);
+                target.overTimeEffects.splice(index, 1);
+            }
+        },
         effectOnEnemy: (state, { payload }: PayloadAction<{
             effected: CharacterResource,
             critical: boolean,
@@ -114,5 +149,9 @@ const raidSlice = createSlice({
     }
 })
 
-export const { addEnemies, initEnemies, startRaid, stopRaid, effectOnEnemy, updateEffectHistory } = raidSlice.actions
+export const { addEnemies, initEnemies,
+    startRaid, stopRaid,
+    effectOnEnemy, updateEffectHistory,
+    addEnemyOverTimeEffect, updateEnemyOverTimeEffect, removeEnemyOverTimeEffect
+} = raidSlice.actions
 export default raidSlice.reducer

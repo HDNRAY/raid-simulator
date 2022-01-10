@@ -4,9 +4,9 @@ import Statistics from 'features/statistics/Statistics';
 import { CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
 import { costOnCharacter, recoverCost, doneCasting } from 'redux/character';
 import { addLog } from 'redux/log';
-import { DamageLog, effectOnEnemy, updateEffectHistory } from 'redux/raid';
+import { addEnemyOverTimeEffect, DamageLog, effectOnEnemy, removeEnemyOverTimeEffect, updateEffectHistory, updateEnemyOverTimeEffect } from 'redux/raid';
 import { useAppDispatch, useAppSelector } from 'redux/store';
-import { RealtimeCharacter, Skill, Effect, RealtimeCharacterObject, OverTimeEffectType, OverTimeEffect } from 'types/types';
+import { RealtimeCharacter, Skill, Effect, RealtimeCharacterObject, OverTimeEffect, TargetType } from 'types/types';
 import { computeCritical } from 'util/utils';
 import './Battle.scss';
 
@@ -89,7 +89,7 @@ const BattleScene = (props: {
     }, [character, dispatch]);
 
     // 造成直接效果
-    const doDirectEffect = useCallback((effect, skill: Skill, target: RealtimeCharacterObject, caster: RealtimeCharacterObject) => {
+    const doDirectEffect = useCallback((effect, skill: Skill, targetType: TargetType, target: RealtimeCharacterObject, caster: RealtimeCharacterObject) => {
         // 计算效果数字
         // 增加减少
         const positiveTypes = ['heal', 'buff'];
@@ -110,18 +110,24 @@ const BattleScene = (props: {
         }))
 
         // 产生效果
-        dispatch(effectOnEnemy({ pon, effected, targetId: target.id, value, critical, skillId: skill.id, time, caster }))
+        if (targetType === 'enemy') {
+            dispatch(effectOnEnemy({ pon, effected, targetId: target.id, value, critical, skillId: skill.id, time, caster }))
+        }
     }, [dispatch, time]);
 
     // 造成持续效果
-    const doOverTimeEffect = useCallback((effect: OverTimeEffect, skill, target: RealtimeCharacterObject, caster: RealtimeCharacterObject) => {
-        target.overTimeEffects.push({
-            effectId: effect.id,
-            skillId: skill.id,
-            repeat: effect.repeat ?? 0,
-            startTime: time
-        })
-    }, [time]);
+    const doOverTimeEffect = useCallback((effect: OverTimeEffect, skill, targetType: TargetType, target: RealtimeCharacterObject, caster: RealtimeCharacterObject) => {
+        if (targetType === 'enemy') {
+            dispatch(addEnemyOverTimeEffect({
+                targetId: target.id,
+                effectId: effect.id,
+                skillId: skill.id,
+                interval: effect.interval,
+                startTime: time,
+                caster
+            }))
+        }
+    }, [dispatch, time]);
 
     // 产生效果
     const doEffect = useCallback((effect: Effect, skill: Skill, caster: RealtimeCharacterObject) => {
@@ -155,9 +161,9 @@ const BattleScene = (props: {
 
         // 效果类型
         if (['damage', 'heal'].includes(effect.type)) {
-            doDirectEffect(effect, skill, target, caster);
+            doDirectEffect(effect, skill, effect.target, target, caster);
         } else if (['dot', 'hot', 'buff', 'debuff'].includes(effect.type)) {
-            doOverTimeEffect(effect as OverTimeEffect, skill, target, caster)
+            doOverTimeEffect(effect as OverTimeEffect, skill, effect.target, target, caster)
         }
 
     }, [dispatch, doDirectEffect, doOverTimeEffect, enemies, selectedTarget, time]);
@@ -191,17 +197,42 @@ const BattleScene = (props: {
     useEffect(() => {
         enemies.forEach(enemy => {
             enemy.overTimeEffects.forEach(item => {
-                const { skillId, effectId, startTime, repeat } = item;
-                const effect: OverTimeEffect = skillMap[skillId].effects.find(i => i.id === effectId);
-                if (time > item.startTime + effect.duration) {
+                const { skillId, effectId, startTime, lastTriggerTime, caster } = item;
+                const skill = skillMap[skillId];
+                const effect: OverTimeEffect = skill.effects.find(i => i.id === effectId);
 
-                    if (!!repeat) {
+                if (['dot', 'hot'].includes(effect.type)) {
+                    if (time > lastTriggerTime + effect.interval) {
+                        doDirectEffect(effect, skill, 'enemy', enemy, caster)
 
+                        if (time < startTime + effect.duration) {
+                            // 继续
+                            dispatch(updateEnemyOverTimeEffect({
+                                skillId: skill.id,
+                                targetId: enemy.id,
+                                effectId: effect.id,
+                                time
+                            }));
+                        } else {
+                            // 结束
+                            dispatch(removeEnemyOverTimeEffect({
+                                targetId: enemy.id,
+                                effectId: effect.id
+                            }));
+                        }
+                    }
+                } else if (['buff', 'debuff'].includes(effect.type)) {
+                    if (time >= startTime + effect.duration) {
+                        // 结束
+                        dispatch(removeEnemyOverTimeEffect({
+                            targetId: enemy.id,
+                            effectId: effect.id
+                        }));
                     }
                 }
             })
         })
-    })
+    }, [dispatch, doDirectEffect, enemies, time])
 
     return <div className={`battle-scene-wrapper ${className}`}>
         <Enemies className="battle-enemies"></Enemies>

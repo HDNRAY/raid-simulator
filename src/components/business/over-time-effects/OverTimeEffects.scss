@@ -1,0 +1,20 @@
+@import 'src/styles/shared.scss';
+
+.overtime-effects-wrapper {
+    .overtime-effect {
+        display: flex;
+        align-items: center;
+
+        .overtime-effect-label {
+            width: $unit * 60;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        .overtime-effect-progress {
+            width: 0;
+            flex: 1;
+        }
+    }
+}
