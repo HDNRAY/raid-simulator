@@ -49,8 +49,10 @@ export interface RealtimeCharacterObject extends CharacterObject {
     resources: CharacterResources,
     attributes: CharacterAttributes,
     enhancements: CharacterEnhancements,
-    continuesEffect: Array<{
+    overTimeEffects: Array<{
         effectId: string,
+        skillId: string,
+        repeat: number,
         startTime: number
     }>
 }
@@ -94,18 +96,22 @@ export interface EffectValueProps {
     skill: Skill,
     target?: RealtimeCharacterObject
 }
-export type EffectType = 'damage' | 'heal' | ContinuesEffectType;
-export interface Effect {
-    type: EffectType,
+
+export type DirectEffectType = 'damage' | 'heal';
+export type OverTimeEffectType = 'dot' | 'buff' | 'hot' | 'debuff';
+export type EffectType = DirectEffectType | OverTimeEffectType;
+
+export interface Effect<T = EffectType> {
+    id: string,
+    type: T,
     target: TargetType,
     on?: CharacterResource,
     value: number | ((props: EffectValueProps) => number)
 }
 
-export type ContinuesEffectType = 'dot' | 'buff' | 'hot' | 'debuff';
-export interface ContinuesEffect extends Effect {
-    type: ContinuesEffectType,
-    name: string,
+export interface OverTimeEffect extends Effect {
+    type: OverTimeEffectType,
+    name?: string,
     repeat: number,
     duration: number
 }

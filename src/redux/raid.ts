@@ -52,6 +52,7 @@ const raidSlice = createSlice({
                     },
                     attributes: staticAttributes,
                     enhancements: staticEnhancements,
+                    overTimeEffects: []
                 }
             });
         },

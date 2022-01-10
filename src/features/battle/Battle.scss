@@ -5,7 +5,7 @@
 
     .battle-enemies {
         position: absolute;
-        top: $unit * 420;
+        top: $unit * 500;
         left: 50%;
         transform: translate(-50%, -50%);
         width: $unit * 1000;
@@ -14,7 +14,7 @@
 
     .battle-statistics {
         position: absolute;
-        top: $unit * 460;
+        top: $unit * 800;
         left: $unit * 60;
         width: $unit * 300;
         height: 26vh;

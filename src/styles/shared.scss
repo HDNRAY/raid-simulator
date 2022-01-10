@@ -1,6 +1,6 @@
 @use "sass:math";
 
-$unit: math.div(100vw, 1920);
+$unit: math.div(100vmax, 1920);
 $default-panel-bg:#333;
 
 $secondary-text-color:#ccc;

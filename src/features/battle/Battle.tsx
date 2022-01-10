@@ -3,9 +3,10 @@ import Enemies from 'features/enemies/Enemies';
 import Statistics from 'features/statistics/Statistics';
 import { CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
 import { costOnCharacter, recoverCost, doneCasting } from 'redux/character';
+import { addLog } from 'redux/log';
 import { DamageLog, effectOnEnemy, updateEffectHistory } from 'redux/raid';
 import { useAppDispatch, useAppSelector } from 'redux/store';
-import { RealtimeCharacter, Skill, Effect } from 'types/types';
+import { RealtimeCharacter, Skill, Effect, RealtimeCharacterObject, OverTimeEffectType, OverTimeEffect } from 'types/types';
 import { computeCritical } from 'util/utils';
 import './Battle.scss';
 
@@ -87,55 +88,94 @@ const BattleScene = (props: {
         })
     }, [character, dispatch]);
 
+    // 造成直接效果
+    const doDirectEffect = useCallback((effect, skill: Skill, target: RealtimeCharacterObject, caster: RealtimeCharacterObject) => {
+        // 计算效果数字
+        // 增加减少
+        const positiveTypes = ['heal', 'buff'];
+        const pon = positiveTypes.includes(effect.type) ? 1 : -1;
+        // 计算技能原始数值
+        const valueFromSkill = typeof effect.value === 'number' ? effect.value : effect.value({ skill, target, caster });
+        // 检查暴击
+        const { criticalChance, criticalDamage } = caster.enhancements;
+        const [value, critical] = computeCritical(valueFromSkill, criticalChance, criticalDamage);
+
+        // 效果形式属性
+        const effected = effect.on || 'health';
+
+        // 增加储能
+        dispatch(recoverCost({
+            type: 'fury',
+            value: value * 0.01
+        }))
+
+        // 产生效果
+        dispatch(effectOnEnemy({ pon, effected, targetId: target.id, value, critical, skillId: skill.id, time, caster }))
+    }, [dispatch, time]);
+
+    // 造成持续效果
+    const doOverTimeEffect = useCallback((effect: OverTimeEffect, skill, target: RealtimeCharacterObject, caster: RealtimeCharacterObject) => {
+        target.overTimeEffects.push({
+            effectId: effect.id,
+            skillId: skill.id,
+            repeat: effect.repeat ?? 0,
+            startTime: time
+        })
+    }, [time]);
+
     // 产生效果
-    const doEffect = useCallback((effect: Effect, skill: Skill) => {
-        console.log(effect, skill);
-        if (effect.target === 'self') {
-
-        } else if (effect.target === 'enemy') {
-            if (selectedTarget && !Array.isArray(selectedTarget) && selectedTarget.type === 'enemy') {
-                // 计算效果数字
-                const target = enemies.find(e => e.id === selectedTarget.id);
-                // 增加减少
-                const positiveTypes = ['heal', 'buff'];
-                const pon = positiveTypes.includes(effect.type) ? 1 : -1;
-                // 计算技能原始数值
-                const valueFromSkill = typeof effect.value === 'number' ? effect.value : effect.value({ skill, target, caster: character! });
-                // 检查暴击
-                const { criticalChance, criticalDamage } = character!.enhancements;
-                const [value, critical] = computeCritical(valueFromSkill, criticalChance, criticalDamage);
-
-                // 效果形式属性
-                const effected = effect.on || 'health';
-
-                // 增加储能
-                dispatch(recoverCost({
-                    type: 'fury',
-                    value: value * 0.01
+    const doEffect = useCallback((effect: Effect, skill: Skill, caster: RealtimeCharacterObject) => {
+        // 目标
+        if (!selectedTarget) {
+            // 默认自动自我施法，若目标非自己，则无效
+            if (effect.target !== 'self') {
+                dispatch(addLog({
+                    type: 'warning',
+                    content: '请选择目标',
+                    time
                 }))
-
-                // 产生效果
-                dispatch(effectOnEnemy({ pon, effected, targetId: selectedTarget.id, value, critical, skillId: skill.id, time, caster: character! }))
-            } else {
-
+                return;
             }
         }
 
-    }, [character, dispatch, enemies, selectedTarget, time]);
+        let target: any;
+        if (effect.target === 'self') {
+            target = caster;
+        } else if (effect.target === 'enemy') {
+            if (selectedTarget && !Array.isArray(selectedTarget) && selectedTarget.type === 'enemy') {
+                target = enemies.find(e => e.id === selectedTarget.id);
+            } else {
+                dispatch(addLog({
+                    type: 'warning',
+                    content: '无效的目标',
+                    time
+                }))
+            }
+        }
+
+        // 效果类型
+        if (['damage', 'heal'].includes(effect.type)) {
+            doDirectEffect(effect, skill, target, caster);
+        } else if (['dot', 'hot', 'buff', 'debuff'].includes(effect.type)) {
+            doOverTimeEffect(effect as OverTimeEffect, skill, target, caster)
+        }
+
+    }, [dispatch, doDirectEffect, doOverTimeEffect, enemies, selectedTarget, time]);
 
     useEffect(() => {
+        // 有施法技能
         if (castingSkill) {
             // 无需读条 或 读条完成
             if (castingSkill.castTime === 0 || castingTimePast >= castingSkill.castTime) {
                 // 代价
                 doCost(castingSkill);
                 // 效果
-                castingSkill.effects.forEach((effect: Effect) => doEffect(effect, castingSkill));
+                castingSkill.effects.forEach((effect: Effect) => doEffect(effect, castingSkill, character!));
                 // 完成
                 dispatch(doneCasting());
             }
         }
-    }, [castingSkill, castingTimePast, dispatch, doCost, doEffect]);
+    }, [castingSkill, castingTimePast, character, dispatch, doCost, doEffect]);
 
     /**
      * 敌人释放技能
@@ -148,6 +188,20 @@ const BattleScene = (props: {
     /**
      * 敌人持续效果update
      */
+    useEffect(() => {
+        enemies.forEach(enemy => {
+            enemy.overTimeEffects.forEach(item => {
+                const { skillId, effectId, startTime, repeat } = item;
+                const effect: OverTimeEffect = skillMap[skillId].effects.find(i => i.id === effectId);
+                if (time > item.startTime + effect.duration) {
+
+                    if (!!repeat) {
+
+                    }
+                }
+            })
+        })
+    })
 
     return <div className={`battle-scene-wrapper ${className}`}>
         <Enemies className="battle-enemies"></Enemies>

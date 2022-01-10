@@ -1,4 +1,4 @@
-import ProgressBar from "components/ProgressBar/ProgressBar";
+import ProgressBar from "components/basic/progress-bar/ProgressBar";
 import { enemies } from "data/enemies";
 import { useEffect } from "react";
 import { initEnemies } from "redux/raid";

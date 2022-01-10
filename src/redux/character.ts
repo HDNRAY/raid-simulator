@@ -35,7 +35,7 @@ const characterSlice = createSlice({
                 },
                 attributes: staticAttributes,
                 enhancements: staticEnhancements,
-                continuesEffect: []
+                overTimeEffects: []
             };
         },
         setTarget: (state, { payload }) => {

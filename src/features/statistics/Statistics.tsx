@@ -1,4 +1,4 @@
-import ProgressBar from "components/ProgressBar/ProgressBar";
+import ProgressBar from "components/basic/progress-bar/ProgressBar";
 import { skillMap } from "data/skills";
 import { useMemo } from "react";
 import { DamageLog } from "redux/raid";

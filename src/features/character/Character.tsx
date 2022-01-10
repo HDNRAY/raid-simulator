@@ -1,7 +1,7 @@
-import ProgressBar from "components/ProgressBar/ProgressBar";
+import ProgressBar from "components/basic/progress-bar/ProgressBar";
 import { you } from "data/character";
-import { skillMap } from "data/skills";
-import { useEffect, useMemo, useRef } from "react";
+import CastingBar from "features/casting-bar/CastingBar";
+import { useEffect, useRef } from "react";
 import { recoverCost, setMainCharacter, setTarget } from "redux/character";
 import { setupSlots } from "redux/slots";
 import { useAppDispatch, useAppSelector } from "redux/store";
@@ -19,7 +19,7 @@ const CharacterPanel = (props: {
 
     const enemies = useAppSelector(state => state.raid.enemies);
 
-    const { staticResources, resources, attributes, enhancements, name, castingSkillId, castingTime } = character || {} as RealtimeCharacter;
+    const { staticResources, resources, attributes, enhancements, name } = character || {} as RealtimeCharacter;
 
     const time = useAppSelector(state => state.universal.time);
 
@@ -36,16 +36,7 @@ const CharacterPanel = (props: {
         dispatch(setupSlots(you.slots));
     }, [dispatch]);
 
-    // 正在释放技能
-    const castingSkill: any = useMemo(() => castingSkillId && skillMap[castingSkillId], [castingSkillId]);
-    // 读条时间
-    const castingTimePast = castingTime ? time - castingTime : 0;
-    // 读条百分比
-    const castingPercentage = getPercentage(castingTimePast, castingSkill?.castTime);
-    // 读条剩余时间
-    const castingTimeRemain = castingSkill ? Math.max(castingSkill.castTime - castingTimePast, 0) / 1000 : 0
-
-    // 体力回复
+    // 体力回复 每0.1秒1点体力
     const lastTimeRegenerateEnergy = useRef<number>(0);
     useEffect(() => {
         if (resources && resources?.energy < staticResources.energy && time > lastTimeRegenerateEnergy.current + 100) {
@@ -57,7 +48,7 @@ const CharacterPanel = (props: {
         }
     }, [dispatch, resources, staticResources, time])
 
-    // 念力回复
+    // 念力回复 每0.1秒 0.1 * 精神
     const lastTimeRegenerateMana = useRef<number>(0);
     useEffect(() => {
         if (resources && resources?.mana < staticResources.mana && time > lastTimeRegenerateMana.current + 100) {
@@ -173,7 +164,7 @@ const CharacterPanel = (props: {
     return <div className={`character-wrapper ${className}`}>
         <div className="character-casting-wrapper">
             <div className="character-casting-name">{name}</div>
-            <ProgressBar className="character-casting" percentage={castingPercentage} color="#eee">{castingTimeRemain.toFixed(1)}s</ProgressBar>
+            <CastingBar></CastingBar>
         </div>
         {characterInfo()}
     </div>

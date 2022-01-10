@@ -1,11 +1,13 @@
 
 
-import { createSlice } from "@reduxjs/toolkit";
+import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 import { v4 as uuid } from 'uuid';
+
+export type LogType = 'battle' | 'warning';
 
 export interface Log {
     id: string,
-    type: 'battle' | 'warning',
+    type: LogType,
     content?: string,
     time: number
 }
@@ -22,10 +24,14 @@ const logSlice = createSlice({
     name: 'log',
     initialState,
     reducers: {
-        addLog: (state, { payload }) => {
+        addLog: (state, { payload }: PayloadAction<{
+            type: LogType,
+            content: string,
+            time: number
+        }>) => {
             state.logs.push({
                 id: uuid(),
-                ...payload
+                ...payload,
             });
         }
     }

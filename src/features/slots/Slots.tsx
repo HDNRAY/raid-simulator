@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { addLog } from "redux/log";
 import eventBus from "util/eventBus";
-import Cooldown from "../../components/Cooldown/Cooldown";
+import Cooldown from "../../components/basic/cooldown/Cooldown";
 import { triggerSharedCooldown } from "../../redux/slots";
 import { useAppDispatch, useAppSelector } from "../../redux/store";
 import './Slots.scss';
@@ -79,19 +79,19 @@ const Slots = (props: {
         const characterSkill = characterSkillMap[skill.id];
         // 检查GCD
         if (shareCooldownRemain > 0) {
-            dispatch(addLog({ type: 'warning', content: 'In GCD' }));
+            dispatch(addLog({ type: 'warning', content: 'In GCD', time }));
             return;
         }
 
         // 检查技能CD
         if (characterSkill.lastTriggerTime && time - characterSkill.lastTriggerTime <= skill.cooldown) {
-            dispatch(addLog({ type: 'warning', content: '我还不能使用这个技能' }));
+            dispatch(addLog({ type: 'warning', content: '我还不能使用这个技能', time }));
             return
         }
 
         // 是否正在施法
         if (castingSkill) {
-            dispatch(addLog({ type: 'warning', content: '我正在施法' }));
+            dispatch(addLog({ type: 'warning', content: '我正在施法', time }));
             return
         }
 
@@ -101,7 +101,7 @@ const Slots = (props: {
             return !!remains && remains > cost.value;
         });
         if (!costEnough) {
-            dispatch(addLog({ type: 'warning', content: '代价不够' }));
+            dispatch(addLog({ type: 'warning', content: '代价不够', time }));
             return
         }
 

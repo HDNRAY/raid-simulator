@@ -1,4 +1,5 @@
 import { EffectValueProps, Skill } from "types/types";
+import { v4 as uuid } from 'uuid';
 
 export const skills: Array<Skill> = [{
     id: '11',
@@ -11,6 +12,7 @@ export const skills: Array<Skill> = [{
     }],
     target: 'enemy',
     effects: [{
+        id: uuid(),
         type: 'damage',
         target: 'enemy',
         value: 100
@@ -26,6 +28,7 @@ export const skills: Array<Skill> = [{
         value: 2000
     }],
     effects: [{
+        id: uuid(),
         type: 'damage',
         target: 'enemy',
         value: (props: EffectValueProps) => 8 * props.caster.attributes.intelligence
@@ -41,6 +44,7 @@ export const skills: Array<Skill> = [{
         value: 10
     }],
     effects: [{
+        id: uuid(),
         type: 'dot',
         target: 'enemy',
         value: (props: EffectValueProps) => 0.5 * props.caster.attributes.strength,

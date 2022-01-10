@@ -1,4 +1,4 @@
-import Button from "components/Button/Button";
+import Button from "components/basic/button/Button";
 import { useCallback } from "react";
 import { startRaid, initEnemies, stopRaid } from "redux/raid";
 import { useAppDispatch, useAppSelector } from "redux/store";
