@@ -17,17 +17,9 @@ const Slots = (props: {
     const dispatch = useAppDispatch();
 
     // 角色
-    const character = useAppSelector(state => state.character.mainCharacter);
+    const resources = useAppSelector(state => state.character.mainCharacter?.resources);
 
     const slots = useAppSelector(state => state.slots.slots);
-    // const skills = useAppSelector(state => state.skill.skills);
-    // const skillMap: { [key: string]: Skill } = useMemo(() => {
-    //     const data = skills.reduce((result: any, skill: Skill) => {
-    //         result[skill.id] = skill;
-    //         return result;
-    //     }, {})
-    //     return data;
-    // }, [skills]);
 
     const slotsWithSkills: Array<Slot> = useMemo(() => {
         return slots.map(slot => {
@@ -97,7 +89,7 @@ const Slots = (props: {
 
         // 检查代价是否足够
         const costEnough = skill.cost.every(cost => {
-            const remains = character?.resources?.[cost.type];
+            const remains = resources?.[cost.type];
             return !!remains && remains > cost.value;
         });
         if (!costEnough) {
@@ -106,12 +98,11 @@ const Slots = (props: {
         }
 
         // 检查目标是否合法
-
         dispatch(startCasting({ skillId: skill.id, time }))
         dispatch(triggerSkillCooldown({ skillId: skill.id, time }));
         dispatch(triggerSharedCooldown(time));
 
-    }, [castingSkill, character?.resources, characterSkillMap, dispatch, shareCooldownRemain, time]);
+    }, [castingSkill, resources, characterSkillMap, dispatch, shareCooldownRemain, time]);
 
     const onSlotClick = useCallback((slot: Slot) => {
         console.info(slot);
@@ -147,9 +138,9 @@ const Slots = (props: {
         {slotsWithSkills.map((slot, index) => {
             const { key, link } = slot;
 
-            let cd, total;
+            let cd = shareCooldownRemain, total = sharedCooldown;
             let skillElement = null;
-            if (link) {
+            if (link && link.type === 'skill') {
                 const skill = skillMap[link.id];
                 const characterSkill = characterSkillMap[link.id];
 
@@ -164,10 +155,6 @@ const Slots = (props: {
                 }
             }
 
-            if (!cd) {
-                cd = shareCooldownRemain;
-                total = sharedCooldown;
-            }
             return <div className="slot" key={index} onClick={() => onSlotClick(slot)}>
                 <Cooldown value={cd} total={total} ></Cooldown>
                 <div className="slot-key">

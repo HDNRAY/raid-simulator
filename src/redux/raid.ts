@@ -41,14 +41,14 @@ const raidSlice = createSlice({
         initEnemies: (state, { payload }) => {
             state.enemies = payload.map((item: Enemy) => {
                 const { staticAttributes, staticResources, staticEnhancements } = item;
-                const { health, mana, energy } = staticResources;
                 return {
                     ...item,
                     resources: {
-                        health,
-                        mana,
-                        energy,
+                        ...staticResources,
                         fury: 0
+                    },
+                    availableResources: {
+                        ...staticResources
                     },
                     attributes: staticAttributes,
                     enhancements: staticEnhancements,

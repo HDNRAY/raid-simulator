@@ -24,14 +24,14 @@ const characterSlice = createSlice({
     reducers: {
         setMainCharacter: (state, { payload }: PayloadAction<Character>) => {
             const { staticAttributes, staticResources: staticResource, staticEnhancements } = payload
-            const { health, mana, energy } = staticResource;
             state.mainCharacter = {
                 ...payload,
                 resources: {
-                    health,
-                    mana,
-                    energy,
+                    ...staticResource,
                     fury: 0
+                },
+                availableResources: {
+                    ...staticResource
                 },
                 attributes: staticAttributes,
                 enhancements: staticEnhancements,
@@ -98,7 +98,7 @@ const characterSlice = createSlice({
             const character = state.mainCharacter;
             if (character) {
                 const newValue = character.resources[type] + value;
-                character.resources[type] = Math.min(character.staticResources[type], Math.round(newValue));
+                character.resources[type] = Math.min(character.availableResources[type], Math.round(newValue));
             }
         },
         addCharacterOverTimeEffect: (state, { payload }) => {

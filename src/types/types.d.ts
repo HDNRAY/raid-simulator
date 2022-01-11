@@ -47,6 +47,7 @@ export interface RealtimeCharacterObject extends CharacterObject {
     castingSkillId?: string,
     castingTime?: number,
     resources: CharacterResources,
+    availableResources: CharacterResources,
     attributes: CharacterAttributes,
     enhancements: CharacterEnhancements,
     overTimeEffects: Array<{
@@ -126,6 +127,9 @@ export interface Cost {
     value: number | ((props: costValueProps) => number)
 }
 
+/**
+ * 主动技能，包括dot，debuff
+ */
 export interface Skill {
     id: string,
     name: string,
@@ -135,5 +139,16 @@ export interface Skill {
     cost: Array<Cost>,
     effects: Array<Effect | ContinuesEffect>,
     target: TargetType
+}
+
+/**
+ * 被动技能，特殊效果，如占用蓝上限，提供急速
+ */
+export interface Talent {
+    id: string,
+    name: string,
+    icon?: string,
+    costs: any,
+    effects: any
 }
 // 模型 结束

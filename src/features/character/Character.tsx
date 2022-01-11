@@ -19,7 +19,7 @@ const CharacterPanel = (props: {
 
     const enemies = useAppSelector(state => state.raid.enemies);
 
-    const { staticResources, resources, attributes, enhancements, name } = character || {} as RealtimeCharacter;
+    const { availableResources, resources, attributes, enhancements, name } = character || {} as RealtimeCharacter;
 
     const time = useAppSelector(state => state.universal.time);
 
@@ -39,26 +39,26 @@ const CharacterPanel = (props: {
     // 体力回复 每0.1秒1点体力
     const lastTimeRegenerateEnergy = useRef<number>(0);
     useEffect(() => {
-        if (resources && resources?.energy < staticResources.energy && time > lastTimeRegenerateEnergy.current + 100) {
+        if (resources && resources?.energy < availableResources.energy && time > lastTimeRegenerateEnergy.current + 100) {
             lastTimeRegenerateEnergy.current = time;
             dispatch(recoverCost({
                 type: 'energy',
                 value: 1
             }))
         }
-    }, [dispatch, resources, staticResources, time])
+    }, [dispatch, resources, availableResources, time])
 
     // 念力回复 每0.1秒 0.1 * 精神
     const lastTimeRegenerateMana = useRef<number>(0);
     useEffect(() => {
-        if (resources && resources?.mana < staticResources.mana && time > lastTimeRegenerateMana.current + 100) {
+        if (resources && resources?.mana < availableResources.mana && time > lastTimeRegenerateMana.current + 100) {
             lastTimeRegenerateMana.current = time;
             dispatch(recoverCost({
                 type: 'mana',
                 value: attributes!.spirit * 0.1
             }))
         }
-    }, [dispatch, attributes, resources, staticResources, time])
+    }, [dispatch, attributes, resources, availableResources, time])
 
     const characterInfo = () => {
         if (!character) {
@@ -68,22 +68,22 @@ const CharacterPanel = (props: {
         const resourceLines = [{
             label: '生命',
             value: resources.health,
-            cap: staticResources.health ?? 100,
+            cap: availableResources.health ?? 100,
             color: 'orangered'
         }, {
             label: '魔力',
             value: resources.mana,
-            cap: staticResources.mana ?? 100,
+            cap: availableResources.mana ?? 100,
             color: 'cyan'
         }, {
             label: '体力',
             value: resources.energy,
-            cap: staticResources.energy ?? 100,
+            cap: availableResources.energy ?? 100,
             color: 'lightgoldenrodyellow'
         }, {
             label: '储能',
             value: resources.fury,
-            cap: staticResources.fury ?? 100,
+            cap: availableResources.fury ?? 100,
             color: 'lightgreen'
         }];
 

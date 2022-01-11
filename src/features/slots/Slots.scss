@@ -2,16 +2,19 @@
 
 .slots-wrapper {
     display: flex;
+    flex-wrap: wrap;
     padding: $unit * 10;
 
     .slot {
         $slotWidth: $unit * 54;
 
+        flex-shrink: 0;
         position: relative;
         width: $slotWidth;
         height: $slotWidth;
         background-color: $default-panel-bg;
         margin-right: $unit * 10;
+        margin-top: $unit * 10;
 
         .slot-key {
             position: absolute;

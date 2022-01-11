@@ -23,8 +23,8 @@ const Enemies = (props: {
 
     return <div className={`enemies-wrapper ${className}`}>
         {selectedEnemies.map(enemy => {
-            const { id, resources, name, staticResources, overTimeEffects } = enemy;
-            const percentage = Math.round(100 * (resources?.health || 0) / staticResources.health);
+            const { id, resources, name, availableResources, overTimeEffects } = enemy;
+            const percentage = Math.round(100 * (resources?.health || 0) / availableResources.health);
             const effects = overTimeEffects.map(item => {
                 const { skillId, effectId } = item;
                 const skill = skillMap[skillId];
@@ -39,7 +39,7 @@ const Enemies = (props: {
 
             return <div className="enemy-wrapper" key={id}>
                 <ProgressBar className="health" percentage={percentage} color="orangered" textColor="white">
-                    <span className="current">{resources?.health}</span>/<span className="cap">{staticResources.health}</span>
+                    <span className="current">{resources?.health}</span>/<span className="cap">{availableResources.health}</span>
                 </ProgressBar>
                 <OverTimeEffects className="enemy-effects" time={time} effects={effects}></OverTimeEffects>
                 <div className="name">{name}</div>

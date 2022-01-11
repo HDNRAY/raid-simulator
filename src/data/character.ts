@@ -40,18 +40,28 @@ export const you: Character = {
             id: '12'
         }
     }, {
-        key: 'R',
-        link: {
-            type: 'skill',
-            id: '00'
-        }
-    }, {
         key: '3',
         link: {
             type: 'skill',
             id: '21'
         }
     }, {
-        key: 'Q'
+        key: 'C'
+    }, {
+        key: 'Q',
+        link: {
+            type: 'skill',
+            id: '00'
+        }
+    }, {
+        key: 'E'
+    }, {
+        key: 'R',
+    }, {
+        key: 'T'
+    }, {
+        key: 'F'
+    }, {
+        key: 'G'
     }]
 }
