@@ -29,6 +29,7 @@ const ProgressBar = (props: {
         borderTopStyle: border ? 'solid' : undefined,
         borderBottomStyle: border ? 'solid' : undefined,
         width: percentage === 100 ? `calc(${percentage}% + ${unit(2)})` : `${percentage}%`,
+        height: `calc(100%${border ? ` + ${unit(2)}` : ''})`,
         ...positionOffset
     }
     const textInnerStyle = {

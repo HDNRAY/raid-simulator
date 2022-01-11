@@ -5,7 +5,7 @@
     position: relative;
     box-sizing: content-box;
     height: $unit * 22;
-    line-height: $unit * 22;
+    line-height: $unit * 21;
 
     .text-outer {
         position: absolute;
@@ -19,12 +19,12 @@
 
     .progress-bar-inner {
         z-index: 2;
-        height: calc(100% + #{$unit} * 2);
         border-width: $unit;
         position: absolute;
         left: 0;
         top: 0;
         overflow: hidden;
+        line-height: $unit * 21;
 
         .text-inner {
             position: absolute;

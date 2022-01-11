@@ -101,6 +101,41 @@ const characterSlice = createSlice({
                 character.resources[type] = Math.min(character.staticResources[type], Math.round(newValue));
             }
         },
+        addCharacterOverTimeEffect: (state, { payload }) => {
+            const { effectId, skillId, startTime, caster } = payload;
+            const target = state.mainCharacter;
+            if (target) {
+                const existIndex = target.overTimeEffects.findIndex(i => i.effectId === effectId);
+                if (existIndex > -1) {
+                    target.overTimeEffects.splice(existIndex, 1);
+                }
+                target.overTimeEffects.push({
+                    effectId,
+                    skillId,
+                    lastTriggerTime: startTime,
+                    startTime,
+                    caster
+                })
+            }
+        },
+        updateCharacterOverTimeEffect: (state, { payload }) => {
+            const { effectId, skillId, time } = payload;
+            const target = state.mainCharacter;
+            if (target) {
+                const effect = target.overTimeEffects.find(i => i.skillId === skillId && i.effectId === effectId);
+                if (effect) {
+                    effect.lastTriggerTime = time;
+                }
+            }
+        },
+        removeCharacterOverTimeEffect: (state, { payload }) => {
+            const { effectId } = payload;
+            const target = state.mainCharacter;
+            if (target) {
+                const index = target.overTimeEffects.findIndex(i => i.effectId === effectId);
+                target.overTimeEffects.splice(index, 1);
+            }
+        },
     }
 })
 

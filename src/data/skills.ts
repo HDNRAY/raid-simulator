@@ -41,7 +41,7 @@ export const skills: Array<Skill> = [{
     castTime: 0,
     cost: [{
         type: 'fury',
-        value: 1
+        value: 50
     }],
     effects: [{
         id: uuid(),
@@ -49,6 +49,23 @@ export const skills: Array<Skill> = [{
         target: 'enemy',
         value: (props: EffectValueProps) => 0.5 * props.caster.attributes.strength,
         interval: 3000,
+        duration: 21000
+    }]
+}, {
+    id: '22',
+    name: '风行术',
+    target: 'self',
+    cooldown: 0,
+    castTime: 0,
+    cost: [{
+        type: 'mana',
+        value: 50
+    }],
+    effects: [{
+        id: uuid(),
+        type: 'buff',
+        target: 'self',
+        value: 0.2,
         duration: 21000
     }]
 }, {
