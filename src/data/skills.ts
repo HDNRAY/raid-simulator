@@ -52,7 +52,7 @@ export const skills: Array<Skill> = [{
         duration: 21000
     }]
 }, {
-    id: '22',
+    id: '32',
     name: '风行术',
     target: 'self',
     cooldown: 0,

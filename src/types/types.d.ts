@@ -137,7 +137,7 @@ export interface Skill {
     castTime: number,
     cooldown: number,
     cost: Array<Cost>,
-    effects: Array<Effect | ContinuesEffect>,
+    effects: Array<Effect | OverTimeEffect>,
     target: TargetType
 }
 

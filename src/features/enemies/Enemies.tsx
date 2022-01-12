@@ -28,7 +28,7 @@ const Enemies = (props: {
             const effects = overTimeEffects.map(item => {
                 const { skillId, effectId } = item;
                 const skill = skillMap[skillId];
-                const effect: OverTimeEffect = skill.effects.find(i => i.id === effectId);
+                const effect: OverTimeEffect = skill.effects.find(i => i.id === effectId) as OverTimeEffect;
                 return {
                     id: effect.id,
                     name: effect.name || skill.name,

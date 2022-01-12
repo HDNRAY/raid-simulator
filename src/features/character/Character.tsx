@@ -1,7 +1,7 @@
 import ProgressBar from "components/basic/progress-bar/ProgressBar";
 import { you } from "data/character";
 import CastingBar from "features/casting-bar/CastingBar";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { recoverCost, setMainCharacter, setTarget } from "redux/character";
 import { setupSlots } from "redux/slots";
 import { useAppDispatch, useAppSelector } from "redux/store";
@@ -60,7 +60,7 @@ const CharacterPanel = (props: {
         }
     }, [dispatch, attributes, resources, availableResources, time])
 
-    const characterInfo = () => {
+    const characterInfo = useMemo(() => {
         if (!character) {
             return null
         }
@@ -159,14 +159,14 @@ const CharacterPanel = (props: {
                 </div>
             </div>
         </>
-    }
+    }, [attributes, availableResources, character, enhancements, resources])
 
     return <div className={`character-wrapper ${className}`}>
         <div className="character-casting-wrapper">
             <div className="character-casting-name">{name}</div>
             <CastingBar></CastingBar>
         </div>
-        {characterInfo()}
+        {characterInfo}
     </div>
 }
 

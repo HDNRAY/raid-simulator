@@ -199,7 +199,7 @@ const BattleScene = (props: {
             enemy.overTimeEffects.forEach(item => {
                 const { skillId, effectId, startTime, lastTriggerTime, caster } = item;
                 const skill = skillMap[skillId];
-                const effect: OverTimeEffect = skill.effects.find(i => i.id === effectId);
+                const effect: OverTimeEffect = skill.effects.find(i => i.id === effectId) as OverTimeEffect;
 
                 if (['dot', 'hot'].includes(effect.type)) {
                     if (time > lastTriggerTime + effect.interval) {
