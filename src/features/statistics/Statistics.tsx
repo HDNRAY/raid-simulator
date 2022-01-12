@@ -14,7 +14,12 @@ const Statistics = (props: {
 
     const { list, total } = useMemo(() => {
         let total = 0;
-        const logMap = effectHistory.filter(i => i.caster.id === character?.id).reduce((result: any, item: DamageLog) => {
+        const logMap: {
+            [key: string]: {
+                name: string,
+                value: number
+            }
+        } = effectHistory.filter(i => i.caster.id === character?.id).reduce((result: any, item: DamageLog) => {
             const { skillId, value } = item;
             if (!result[skillId]) {
                 result[skillId] = {
@@ -27,7 +32,7 @@ const Statistics = (props: {
             return result;
         }, {});
 
-        const result = Object.values(logMap).filter(i => !!i).sort().reverse();
+        const result = Object.values(logMap).sort((a, b) => a.value - b.value).reverse();
 
         result.unshift({
             name: '总计',

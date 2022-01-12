@@ -26,7 +26,7 @@ export const you: Character = {
             water: 0
         }
     },
-    skills: [{ skillId: '11' }, { skillId: '12' }, { skillId: '21' }, { skillId: '00' }],
+    skills: [{ skillId: '11' }, { skillId: '12' }, { skillId: '21' }, { skillId: '00' }, { skillId: '32' }],
     slots: [{
         key: '1',
         link: {
@@ -54,7 +54,11 @@ export const you: Character = {
             id: '00'
         }
     }, {
-        key: 'E'
+        key: 'E',
+        link: {
+            type: 'skill',
+            id: '32'
+        }
     }, {
         key: 'R',
     }, {

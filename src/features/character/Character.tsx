@@ -1,5 +1,6 @@
 import ProgressBar from "components/basic/progress-bar/ProgressBar";
 import { you } from "data/character";
+import { skillMap } from "data/skills";
 import CastingBar from "features/casting-bar/CastingBar";
 import { useEffect, useMemo, useRef } from "react";
 import { recoverCost, setMainCharacter, setTarget } from "redux/character";
@@ -19,7 +20,21 @@ const CharacterPanel = (props: {
 
     const enemies = useAppSelector(state => state.raid.enemies);
 
-    const { availableResources, resources, attributes, enhancements, name } = character || {} as RealtimeCharacter;
+    const { availableResources, resources, attributes, enhancements, name, overTimeEffects = [] } = character || {} as RealtimeCharacter;
+
+    const buffs = useMemo(() => {
+        const result = overTimeEffects.map(overTimeEffect => {
+            const skill = skillMap[overTimeEffect.skillId];
+            const effect = skill.effects.find(i => i.id === overTimeEffect.effectId);
+            return {
+                ...overTimeEffect,
+                skill,
+                effect
+            }
+        }).filter(i => i.effect?.type === 'buff');
+        console.log(result);
+        return result;
+    }, [overTimeEffects])
 
     const time = useAppSelector(state => state.universal.time);
 
@@ -60,7 +75,7 @@ const CharacterPanel = (props: {
         }
     }, [dispatch, attributes, resources, availableResources, time])
 
-    const characterInfo = useMemo(() => {
+    const characterResources = useMemo(() => {
         if (!character) {
             return null
         }
@@ -87,6 +102,22 @@ const CharacterPanel = (props: {
             color: 'lightgreen'
         }];
 
+        return <div className="character-resources-wrapper">
+            {resourceLines.filter(r => r.cap > 0).map(resource => {
+                const { label, value, cap, color } = resource;
+                const percentage = getPercentage(value, cap);
+                return <div className="character-resource" key={label}>
+                    <div className="character-resource-label">{label}</div>
+                    <ProgressBar className="character-resource-value" percentage={percentage} border={false} color={color}>{value}</ProgressBar>
+                </div>
+            })}
+        </div>
+    }, [availableResources, character, resources])
+
+    const characterAttributes = useMemo(() => {
+        if (!character) {
+            return null
+        }
         const attributeLines = [{
             label: '力量',
             value: attributes.strength
@@ -101,6 +132,21 @@ const CharacterPanel = (props: {
             value: attributes.spirit
         }]
 
+        return <div className="character-attributes-wrapper">
+            {attributeLines.map(attribute => {
+                const { label, value } = attribute;
+                return <div className="character-attribute" key={label}>
+                    <div className="character-attribute-label">{label}</div>
+                    <div className="character-attribute-value">{value}</div>
+                </div>
+            })}
+        </div>
+    }, [attributes, character])
+
+    const characterEnhancements = useMemo(() => {
+        if (!character) {
+            return null
+        }
         const enhancementLines = [{
             label: '暴击',
             value: enhancements.criticalChance
@@ -120,53 +166,34 @@ const CharacterPanel = (props: {
             value: enhancements.mastery.water
         }]
 
-        return <>
-            <div className="character-resources-wrapper">
-                {resourceLines.filter(r => r.cap > 0).map(resource => {
-                    const { label, value, cap, color } = resource;
-                    const percentage = getPercentage(value, cap);
-                    return <div className="character-resource" key={label}>
-                        <div className="character-resource-label">{label}</div>
-                        <ProgressBar className="character-resource-value" percentage={percentage} border={false} color={color}>{value}</ProgressBar>
-                    </div>
-                })}
-            </div>
-            <div className="character-attributes-wrapper">
-                {attributeLines.map(attribute => {
-                    const { label, value } = attribute;
-                    return <div className="character-attribute" key={label}>
-                        <div className="character-attribute-label">{label}</div>
-                        <div className="character-attribute-value">{value}</div>
-                    </div>
-                })}
-            </div>
-            <div className="character-attributes-wrapper">
-                {enhancementLines.map(enhance => {
-                    const { label, value } = enhance;
-                    return <div className="character-attribute" key={label}>
-                        <div className="character-attribute-label">{label}</div>
-                        <div className="character-attribute-value">{numberToPercentage(value)}</div>
-                    </div>
-                })}
-                <div className="character-elements-wrapper">
-                    {elements.map(element => {
-                        const { label, value } = element;
-                        return <div className="character-element" key={label}>
-                            <div className="character-element-label">{label}</div>
-                            <div className="character-element-value">{numberToPercentage(value)}</div>
-                        </div>
-                    })}
+        return <div className="character-attributes-wrapper">
+            {enhancementLines.map(enhance => {
+                const { label, value } = enhance;
+                return <div className="character-attribute" key={label}>
+                    <div className="character-attribute-label">{label}</div>
+                    <div className="character-attribute-value">{numberToPercentage(value)}</div>
                 </div>
+            })}
+            <div className="character-elements-wrapper">
+                {elements.map(element => {
+                    const { label, value } = element;
+                    return <div className="character-element" key={label}>
+                        <div className="character-element-label">{label}</div>
+                        <div className="character-element-value">{numberToPercentage(value)}</div>
+                    </div>
+                })}
             </div>
-        </>
-    }, [attributes, availableResources, character, enhancements, resources])
+        </div>
+    }, [character, enhancements])
 
     return <div className={`character-wrapper ${className}`}>
         <div className="character-casting-wrapper">
             <div className="character-casting-name">{name}</div>
             <CastingBar></CastingBar>
         </div>
-        {characterInfo}
+        {characterResources}
+        {characterAttributes}
+        {characterEnhancements}
     </div>
 }
 

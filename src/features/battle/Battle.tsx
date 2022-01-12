@@ -2,7 +2,7 @@ import { skillMap } from 'data/skills';
 import Enemies from 'features/enemies/Enemies';
 import Statistics from 'features/statistics/Statistics';
 import { CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
-import { costOnCharacter, recoverCost, doneCasting } from 'redux/character';
+import { costOnCharacter, recoverCost, doneCasting, addCharacterOverTimeEffect, updateCharacterOverTimeEffect, removeCharacterOverTimeEffect } from 'redux/character';
 import { addLog } from 'redux/log';
 import { addEnemyOverTimeEffect, DamageLog, effectOnEnemy, removeEnemyOverTimeEffect, updateEffectHistory, updateEnemyOverTimeEffect } from 'redux/raid';
 import { useAppDispatch, useAppSelector } from 'redux/store';
@@ -126,6 +126,13 @@ const BattleScene = (props: {
                 startTime: time,
                 caster
             }))
+        } else if (targetType === 'self') {
+            dispatch(addCharacterOverTimeEffect({
+                effectId: effect.id,
+                skillId: skill.id,
+                startTime: time,
+                caster
+            }))
         }
     }, [dispatch, time]);
 
@@ -190,6 +197,41 @@ const BattleScene = (props: {
     /**
      * 角色持续效果update
      */
+    useEffect(() => {
+
+        character?.overTimeEffects.forEach(item => {
+            const { skillId, effectId, startTime, lastTriggerTime, caster } = item;
+            const skill = skillMap[skillId];
+            const effect: OverTimeEffect = skill.effects.find(i => i.id === effectId) as OverTimeEffect;
+
+            if (['dot', 'hot'].includes(effect.type)) {
+                if (time > lastTriggerTime + effect.interval) {
+                    doDirectEffect(effect, skill, 'self', character, caster)
+
+                    if (time < startTime + effect.duration) {
+                        // 继续
+                        dispatch(updateCharacterOverTimeEffect({
+                            skillId: skill.id,
+                            effectId: effect.id,
+                            time
+                        }));
+                    } else {
+                        // 结束
+                        dispatch(removeCharacterOverTimeEffect({
+                            effectId: effect.id
+                        }));
+                    }
+                }
+            } else if (['buff', 'debuff'].includes(effect.type)) {
+                if (time >= startTime + effect.duration) {
+                    // 结束
+                    dispatch(removeCharacterOverTimeEffect({
+                        effectId: effect.id
+                    }));
+                }
+            }
+        })
+    }, [character, dispatch, doDirectEffect, time])
 
     /**
      * 敌人持续效果update

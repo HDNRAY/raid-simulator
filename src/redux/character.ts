@@ -139,5 +139,9 @@ const characterSlice = createSlice({
     }
 })
 
-export const { setMainCharacter, setTarget, triggerSkillCooldown, startCasting, doneCasting, cancelCasting, costOnCharacter, updateCost, recoverCost } = characterSlice.actions
+export const { setMainCharacter, setTarget,
+    triggerSkillCooldown, startCasting, doneCasting, cancelCasting,
+    costOnCharacter, updateCost, recoverCost,
+    addCharacterOverTimeEffect, updateCharacterOverTimeEffect, removeCharacterOverTimeEffect
+} = characterSlice.actions
 export default characterSlice.reducer

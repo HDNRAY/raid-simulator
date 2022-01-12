@@ -59,7 +59,7 @@ export const skills: Array<Skill> = [{
     castTime: 0,
     cost: [{
         type: 'mana',
-        value: 50
+        value: 500
     }],
     effects: [{
         id: uuid(),
