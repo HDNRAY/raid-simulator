@@ -20,21 +20,41 @@ const CharacterPanel = (props: {
 
     const enemies = useAppSelector(state => state.raid.enemies);
 
-    const { availableResources, resources, attributes, enhancements, name, overTimeEffects = [] } = character || {} as RealtimeCharacter;
+    const { availableResources, resources, attributes, staticEnhancements, enhancements, name } = character || {} as RealtimeCharacter;
 
-    const buffs = useMemo(() => {
-        const result = overTimeEffects.map(overTimeEffect => {
-            const skill = skillMap[overTimeEffect.skillId];
-            const effect = skill.effects.find(i => i.id === overTimeEffect.effectId);
-            return {
-                ...overTimeEffect,
-                skill,
-                effect
-            }
-        }).filter(i => i.effect?.type === 'buff');
-        console.log(result);
-        return result;
-    }, [overTimeEffects])
+    // const buffs = useMemo(() => {
+    //     const result = overTimeEffects.map(overTimeEffect => {
+    //         const skill = skillMap[overTimeEffect.skillId];
+    //         const effect = skill.effects.find(i => i.id === overTimeEffect.effectId);
+    //         return {
+    //             ...overTimeEffect,
+    //             skill,
+    //             effect
+    //         }
+    //     }).filter(i => i.effect?.type === 'buff');
+    //     console.log(result);
+    //     return result;
+    // }, [overTimeEffects])
+
+    const buffs = useAppSelector(state => {
+        const c = state.character.mainCharacter;
+        if (!c) {
+            return []
+        } else {
+            const result = c.overTimeEffects.map(overTimeEffect => {
+                const skill = skillMap[overTimeEffect.skillId];
+                const effect = skill.effects.find(i => i.id === overTimeEffect.effectId);
+                return {
+                    ...overTimeEffect,
+                    skill,
+                    effect
+                }
+            }).filter(i => i.effect?.type === 'buff');
+            return result;
+        }
+    }, (previous, current) => {
+        return previous.length === current.length && previous.every((p, i) => p.effectId === current[i].effectId)
+    });
 
     const time = useAppSelector(state => state.universal.time);
 
@@ -50,6 +70,13 @@ const CharacterPanel = (props: {
         dispatch(setMainCharacter(you));
         dispatch(setupSlots(you.slots));
     }, [dispatch]);
+
+    // buff属性
+    useEffect(() => {
+        buffs.forEach(buff => {
+            console.log(buff, buff.effect?.on);
+        })
+    }, [buffs])
 
     // 体力回复 每0.1秒1点体力
     const lastTimeRegenerateEnergy = useRef<number>(0);
@@ -75,30 +102,27 @@ const CharacterPanel = (props: {
         }
     }, [dispatch, attributes, resources, availableResources, time])
 
+    // 纯显示
     const characterResources = useMemo(() => {
-        if (!character) {
-            return null
-        }
-
         const resourceLines = [{
             label: '生命',
-            value: resources.health,
+            value: resources?.health,
             cap: availableResources.health ?? 100,
             color: 'orangered'
         }, {
             label: '魔力',
-            value: resources.mana,
-            cap: availableResources.mana ?? 100,
+            value: resources?.mana,
+            cap: availableResources?.mana ?? 100,
             color: 'cyan'
         }, {
             label: '体力',
-            value: resources.energy,
-            cap: availableResources.energy ?? 100,
+            value: resources?.energy,
+            cap: availableResources?.energy ?? 100,
             color: 'lightgoldenrodyellow'
         }, {
             label: '储能',
-            value: resources.fury,
-            cap: availableResources.fury ?? 100,
+            value: resources?.fury,
+            cap: availableResources?.fury ?? 100,
             color: 'lightgreen'
         }];
 
@@ -112,24 +136,21 @@ const CharacterPanel = (props: {
                 </div>
             })}
         </div>
-    }, [availableResources, character, resources])
+    }, [availableResources, resources])
 
     const characterAttributes = useMemo(() => {
-        if (!character) {
-            return null
-        }
         const attributeLines = [{
             label: '力量',
-            value: attributes.strength
+            value: attributes?.strength
         }, {
             label: '敏捷',
-            value: attributes.agility
+            value: attributes?.agility
         }, {
             label: '智力',
-            value: attributes.intelligence
+            value: attributes?.intelligence
         }, {
             label: '精神',
-            value: attributes.spirit
+            value: attributes?.spirit
         }]
 
         return <div className="character-attributes-wrapper">
@@ -141,29 +162,26 @@ const CharacterPanel = (props: {
                 </div>
             })}
         </div>
-    }, [attributes, character])
+    }, [attributes])
 
     const characterEnhancements = useMemo(() => {
-        if (!character) {
-            return null
-        }
         const enhancementLines = [{
             label: '暴击',
-            value: enhancements.criticalChance
+            value: enhancements?.criticalChance
         }, {
             label: '暴伤',
-            value: enhancements.criticalDamage
+            value: enhancements?.criticalDamage
         }, {
             label: '急速',
-            value: enhancements.haste
+            value: enhancements?.haste
         }]
 
         const elements = [{
             label: '火',
-            value: enhancements.mastery.fire
+            value: enhancements?.mastery.fire
         }, {
             label: '水',
-            value: enhancements.mastery.water
+            value: enhancements?.mastery.water
         }]
 
         return <div className="character-attributes-wrapper">
@@ -184,7 +202,7 @@ const CharacterPanel = (props: {
                 })}
             </div>
         </div>
-    }, [character, enhancements])
+    }, [enhancements])
 
     return <div className={`character-wrapper ${className}`}>
         <div className="character-casting-wrapper">

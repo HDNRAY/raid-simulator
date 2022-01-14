@@ -65,6 +65,7 @@ export const skills: Array<Skill> = [{
         id: uuid(),
         type: 'buff',
         target: 'self',
+        on: 'haste',
         value: 0.2,
         duration: 21000
     }]

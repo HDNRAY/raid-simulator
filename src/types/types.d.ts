@@ -22,6 +22,8 @@ export interface CharacterAttributes {
     spirit: number,
 }
 
+
+export type CharacterEnhancement = keyof CharacterEnhancements
 export interface CharacterEnhancements {
     // 暴击率
     criticalChance: number,
@@ -107,7 +109,7 @@ export interface Effect<T = EffectType> {
     id: string,
     type: T,
     target: TargetType,
-    on?: CharacterResource,
+    on?: CharacterResource | CharacterAttribute | CharacterEnhancement,
     value: number | ((props: EffectValueProps) => number)
 }
 
