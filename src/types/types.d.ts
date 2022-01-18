@@ -46,16 +46,26 @@ export interface CharacterObject {
 }
 
 export interface RealtimeCharacterObject extends CharacterObject {
+    // 释放的技能
     castingSkillId?: string,
+    // 释放的时间
     castingTime?: number,
+    // 释放时，需要的读条时间，受急速等影响
+    castTime?: number,
+    // 实时资源
     resources: CharacterResources,
+    // 可用资源上限
     availableResources: CharacterResources,
+    // 实时属性
     attributes: CharacterAttributes,
+    // 实时次级属性
     enhancements: CharacterEnhancements,
+    // buff & debuff
     overTimeEffects: Array<{
         effectId: string,
         skillId: string,
         lastTriggerTime: number,
+        interval: number,
         startTime: number,
         caster: RealtimeCharacterObject
     }>
@@ -95,9 +105,11 @@ export interface Slot {
  * 模型 开始
  * 即属性里有可能有function类型，只作为静态数据的数据结构，其他模块引用
  */
+export type EffectValueFunction = (props: EffectValueProps) => number
 export interface EffectValueProps {
     caster: RealtimeCharacterObject,
-    skill: Skill,
+    skill?: Skill,
+    effect: Effect,
     target?: RealtimeCharacterObject
 }
 
@@ -110,7 +122,7 @@ export interface Effect<T = EffectType> {
     type: T,
     target: TargetType,
     on?: CharacterResource | CharacterAttribute | CharacterEnhancement,
-    value: number | ((props: EffectValueProps) => number)
+    value: number | EffectValueFunction
 }
 
 export interface OverTimeEffect extends Effect {

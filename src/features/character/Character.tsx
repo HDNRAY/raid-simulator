@@ -1,6 +1,5 @@
 import ProgressBar from "components/basic/progress-bar/ProgressBar";
 import { you } from "data/character";
-import { skillMap } from "data/skills";
 import CastingBar from "features/casting-bar/CastingBar";
 import { useEffect, useMemo, useRef } from "react";
 import { recoverCost, setMainCharacter, setTarget } from "redux/character";
@@ -20,41 +19,7 @@ const CharacterPanel = (props: {
 
     const enemies = useAppSelector(state => state.raid.enemies);
 
-    const { availableResources, resources, attributes, staticEnhancements, enhancements, name } = character || {} as RealtimeCharacter;
-
-    // const buffs = useMemo(() => {
-    //     const result = overTimeEffects.map(overTimeEffect => {
-    //         const skill = skillMap[overTimeEffect.skillId];
-    //         const effect = skill.effects.find(i => i.id === overTimeEffect.effectId);
-    //         return {
-    //             ...overTimeEffect,
-    //             skill,
-    //             effect
-    //         }
-    //     }).filter(i => i.effect?.type === 'buff');
-    //     console.log(result);
-    //     return result;
-    // }, [overTimeEffects])
-
-    const buffs = useAppSelector(state => {
-        const c = state.character.mainCharacter;
-        if (!c) {
-            return []
-        } else {
-            const result = c.overTimeEffects.map(overTimeEffect => {
-                const skill = skillMap[overTimeEffect.skillId];
-                const effect = skill.effects.find(i => i.id === overTimeEffect.effectId);
-                return {
-                    ...overTimeEffect,
-                    skill,
-                    effect
-                }
-            }).filter(i => i.effect?.type === 'buff');
-            return result;
-        }
-    }, (previous, current) => {
-        return previous.length === current.length && previous.every((p, i) => p.effectId === current[i].effectId)
-    });
+    const { availableResources, resources, attributes, enhancements, name } = character || {} as RealtimeCharacter;
 
     const time = useAppSelector(state => state.universal.time);
 
@@ -71,24 +36,18 @@ const CharacterPanel = (props: {
         dispatch(setupSlots(you.slots));
     }, [dispatch]);
 
-    // buff属性
-    useEffect(() => {
-        buffs.forEach(buff => {
-            console.log(buff, buff.effect?.on);
-        })
-    }, [buffs])
-
     // 体力回复 每0.1秒1点体力
     const lastTimeRegenerateEnergy = useRef<number>(0);
     useEffect(() => {
-        if (resources && resources?.energy < availableResources.energy && time > lastTimeRegenerateEnergy.current + 100) {
+        const regenerateSpeed = 100 * (1 - (enhancements?.haste || 0))
+        if (resources && resources?.energy < availableResources.energy && time > lastTimeRegenerateEnergy.current + regenerateSpeed) {
             lastTimeRegenerateEnergy.current = time;
             dispatch(recoverCost({
                 type: 'energy',
                 value: 1
             }))
         }
-    }, [dispatch, resources, availableResources, time])
+    }, [dispatch, resources, availableResources, time, enhancements])
 
     // 念力回复 每0.1秒 0.1 * 精神
     const lastTimeRegenerateMana = useRef<number>(0);
@@ -107,7 +66,7 @@ const CharacterPanel = (props: {
         const resourceLines = [{
             label: '生命',
             value: resources?.health,
-            cap: availableResources.health ?? 100,
+            cap: availableResources?.health ?? 100,
             color: 'orangered'
         }, {
             label: '魔力',

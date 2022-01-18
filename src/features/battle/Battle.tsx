@@ -117,17 +117,19 @@ const BattleScene = (props: {
 
     // 造成持续效果
     const doOverTimeEffect = useCallback((effect: OverTimeEffect, skill, targetType: TargetType, target: RealtimeCharacterObject, caster: RealtimeCharacterObject) => {
+        const haste = caster.enhancements?.haste || 0;
         if (targetType === 'enemy') {
             dispatch(addEnemyOverTimeEffect({
                 targetId: target.id,
                 effectId: effect.id,
                 skillId: skill.id,
-                interval: effect.interval,
+                interval: effect.interval * (1 - haste),
                 startTime: time,
                 caster
             }))
         } else if (targetType === 'self') {
             dispatch(addCharacterOverTimeEffect({
+                interval: effect.interval * (1 - haste),
                 effectId: effect.id,
                 skillId: skill.id,
                 startTime: time,
@@ -179,7 +181,7 @@ const BattleScene = (props: {
         // 有施法技能
         if (castingSkill) {
             // 无需读条 或 读条完成
-            if (castingSkill.castTime === 0 || castingTimePast >= castingSkill.castTime) {
+            if (castingSkill.castTime === 0 || !character?.castTime || castingTimePast >= character?.castTime) {
                 // 代价
                 doCost(castingSkill);
                 // 效果
@@ -198,14 +200,13 @@ const BattleScene = (props: {
      * 角色持续效果update
      */
     useEffect(() => {
-
         character?.overTimeEffects.forEach(item => {
-            const { skillId, effectId, startTime, lastTriggerTime, caster } = item;
+            const { skillId, effectId, startTime, lastTriggerTime, caster, interval } = item;
             const skill = skillMap[skillId];
             const effect: OverTimeEffect = skill.effects.find(i => i.id === effectId) as OverTimeEffect;
 
             if (['dot', 'hot'].includes(effect.type)) {
-                if (time > lastTriggerTime + effect.interval) {
+                if (time > lastTriggerTime + interval) {
                     doDirectEffect(effect, skill, 'self', character, caster)
 
                     if (time < startTime + effect.duration) {
@@ -239,12 +240,12 @@ const BattleScene = (props: {
     useEffect(() => {
         enemies.forEach(enemy => {
             enemy.overTimeEffects.forEach(item => {
-                const { skillId, effectId, startTime, lastTriggerTime, caster } = item;
+                const { skillId, effectId, startTime, lastTriggerTime, caster, interval } = item;
                 const skill = skillMap[skillId];
                 const effect: OverTimeEffect = skill.effects.find(i => i.id === effectId) as OverTimeEffect;
 
                 if (['dot', 'hot'].includes(effect.type)) {
-                    if (time > lastTriggerTime + effect.interval) {
+                    if (time > lastTriggerTime + interval) {
                         doDirectEffect(effect, skill, 'enemy', enemy, caster)
 
                         if (time < startTime + effect.duration) {

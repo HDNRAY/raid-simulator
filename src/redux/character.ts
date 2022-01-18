@@ -1,7 +1,8 @@
 
 
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
-import { Character, RealtimeCharacter, CharacterResource, TargetType } from "types/types";
+import { skillMap } from "data/skills";
+import { Character, RealtimeCharacter, CharacterResource, TargetType, OverTimeEffect } from "types/types";
 
 interface CharacterState {
     mainCharacter?: RealtimeCharacter,
@@ -49,25 +50,28 @@ const characterSlice = createSlice({
             }
         },
         startCasting: (state, { payload }) => {
-            const { skillId, time } = payload;
+            const { skillId, time, castTime } = payload;
             const character = state.mainCharacter;
             if (character) {
                 character.castingSkillId = skillId;
                 character.castingTime = time;
+                character.castTime = castTime
             }
         },
         doneCasting: (state) => {
             const character = state.mainCharacter;
             if (character) {
                 character.castingSkillId = undefined;
-                character.castingTime = undefined
+                character.castingTime = undefined;
+                character.castTime = 0;
             }
         },
-        cancelCasting: (state, { payload }) => {
+        cancelCasting: (state) => {
             const character = state.mainCharacter;
             if (character) {
                 character.castingSkillId = undefined;
-                character.castingTime = undefined
+                character.castingTime = undefined;
+                character.castTime = 0;
             }
         },
         costOnCharacter: (state, { payload }: PayloadAction<{
@@ -102,7 +106,7 @@ const characterSlice = createSlice({
             }
         },
         addCharacterOverTimeEffect: (state, { payload }) => {
-            const { effectId, skillId, startTime, caster } = payload;
+            const { effectId, skillId, startTime, caster, interval } = payload;
             const target = state.mainCharacter;
             if (target) {
                 const existIndex = target.overTimeEffects.findIndex(i => i.effectId === effectId);
@@ -110,6 +114,7 @@ const characterSlice = createSlice({
                     target.overTimeEffects.splice(existIndex, 1);
                 }
                 target.overTimeEffects.push({
+                    interval,
                     effectId,
                     skillId,
                     lastTriggerTime: startTime,
@@ -136,12 +141,33 @@ const characterSlice = createSlice({
                 target.overTimeEffects.splice(index, 1);
             }
         },
+        computeBuffs: (state, { payload }: PayloadAction<Array<any>>) => {
+            const character = state.mainCharacter;
+            if (!character) {
+                return;
+            }
+
+            payload.forEach(overTimeEffect => {
+                const { skillId, effectId, caster } = overTimeEffect;
+                const skill = skillMap[skillId];
+                const effect = skill.effects.find(i => i.id === effectId) as OverTimeEffect;
+                const { on, value } = effect;
+                const effectValue = typeof value === 'number' ? value : value({
+                    effect,
+                    skill,
+                    caster
+                });
+                if (on === 'haste') {
+                    character.enhancements.haste = Math.min(0.5, character.enhancements.haste + effectValue);
+                }
+            })
+        }
     }
 })
 
 export const { setMainCharacter, setTarget,
     triggerSkillCooldown, startCasting, doneCasting, cancelCasting,
     costOnCharacter, updateCost, recoverCost,
-    addCharacterOverTimeEffect, updateCharacterOverTimeEffect, removeCharacterOverTimeEffect
+    addCharacterOverTimeEffect, updateCharacterOverTimeEffect, removeCharacterOverTimeEffect, computeBuffs
 } = characterSlice.actions
 export default characterSlice.reducer

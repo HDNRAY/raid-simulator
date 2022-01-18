@@ -81,7 +81,7 @@ const raidSlice = createSlice({
             }
         },
         addEnemyOverTimeEffect: (state, { payload }) => {
-            const { targetId, effectId, skillId, startTime, caster } = payload;
+            const { targetId, effectId, skillId, startTime, caster, interval } = payload;
             const target = state.enemies.find(e => e.id === targetId);
             if (target) {
                 const existIndex = target.overTimeEffects.findIndex(i => i.effectId === effectId);
@@ -89,6 +89,7 @@ const raidSlice = createSlice({
                     target.overTimeEffects.splice(existIndex, 1);
                 }
                 target.overTimeEffects.push({
+                    interval,
                     effectId,
                     skillId,
                     lastTriggerTime: startTime,

@@ -47,7 +47,7 @@
         z-index: 20;
         width: $unit * 400;
         position: absolute;
-        top: 40%;
+        bottom: $paddingToScreen;
         right: $paddingToScreen;
     }
 

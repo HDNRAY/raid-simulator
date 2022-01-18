@@ -5,7 +5,7 @@ export const skills: Array<Skill> = [{
     id: '11',
     name: '火球术',
     cooldown: 0,
-    castTime: 1000,
+    castTime: 2000,
     cost: [{
         type: 'mana',
         value: 400
@@ -67,7 +67,7 @@ export const skills: Array<Skill> = [{
         target: 'self',
         on: 'haste',
         value: 0.2,
-        duration: 21000
+        duration: 1000 * 60
     }]
 }, {
     id: '00',

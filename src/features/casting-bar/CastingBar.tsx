@@ -17,9 +17,9 @@ const CastingBar = () => {
     // 读条时间
     const castingTimePast = castingTime ? time - castingTime : 0;
     // 读条百分比
-    const castingPercentage = getPercentage(castingTimePast, castingSkill?.castTime);
+    const castingPercentage = getPercentage(castingTimePast, character?.castTime);
     // 读条剩余时间
-    const castingTimeRemain = castingSkill ? Math.max(castingSkill.castTime - castingTimePast, 0) / 1000 : 0
+    const castingTimeRemain = castingSkill ? Math.max((character?.castTime || 0) - castingTimePast, 0) / 1000 : 0
 
     return <ProgressBar className="character-casting" percentage={castingPercentage} color="#eee">{castingTimeRemain.toFixed(1)}s</ProgressBar>
 }

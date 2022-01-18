@@ -18,6 +18,7 @@ const Slots = (props: {
 
     // 角色
     const resources = useAppSelector(state => state.character.mainCharacter?.resources);
+    const enhancements = useAppSelector(state => state.character.mainCharacter?.enhancements);
 
     const slots = useAppSelector(state => state.slots.slots);
 
@@ -98,11 +99,15 @@ const Slots = (props: {
         }
 
         // 检查目标是否合法
-        dispatch(startCasting({ skillId: skill.id, time }))
+        dispatch(startCasting({
+            skillId: skill.id,
+            time,
+            castTime: skill.castTime * (1 - (enhancements?.haste || 0)) || 0
+        }))
         dispatch(triggerSkillCooldown({ skillId: skill.id, time }));
         dispatch(triggerSharedCooldown(time));
 
-    }, [castingSkill, resources, characterSkillMap, dispatch, shareCooldownRemain, time]);
+    }, [characterSkillMap, shareCooldownRemain, time, castingSkill, dispatch, enhancements, resources]);
 
     const onSlotClick = useCallback((slot: Slot) => {
         console.info(slot);
