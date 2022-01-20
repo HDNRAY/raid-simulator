@@ -6,7 +6,7 @@ import { costOnCharacter, recoverCost, doneCasting, addCharacterOverTimeEffect, 
 import { addLog } from 'redux/log';
 import { addEnemyOverTimeEffect, DamageLog, effectOnEnemy, removeEnemyOverTimeEffect, updateEffectHistory, updateEnemyOverTimeEffect } from 'redux/raid';
 import { useAppDispatch, useAppSelector } from 'redux/store';
-import { RealtimeCharacter, Skill, Effect, RealtimeCharacterObject, OverTimeEffect, TargetType } from 'types/types';
+import { RealtimeCharacterInterface, Skill, Effect, RealtimeCharacterObject, OverTimeEffect, TargetType } from 'types/types';
 import { computeCritical } from 'util/utils';
 import './Battle.scss';
 
@@ -63,7 +63,7 @@ const BattleScene = (props: {
     const enemies = useAppSelector(state => state.raid.enemies);
 
     // 角色
-    const character: RealtimeCharacter | undefined = useAppSelector(state => state.character.mainCharacter);
+    const character: RealtimeCharacterInterface | undefined = useAppSelector(state => state.character.mainCharacter);
 
     /**
      * 公共方法

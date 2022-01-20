@@ -1,8 +1,8 @@
 
-import { Character } from 'types/types';
+import { CharacterInterface } from 'types/types';
 import { v4 as uuid } from 'uuid';
 
-export const you: Character = {
+export const you: CharacterInterface = {
     id: uuid(),
     name: "张语寒",
     staticResources: {

@@ -1,9 +1,8 @@
-import { Enemy } from "types/types";
-import { v4 as uuid } from 'uuid';
+import { EnemyInterface } from "types/types";
 
-export const enemies: Array<Enemy> = [{
-    id: uuid(),
-    name: '一号BOSS',
+export const enemyData: Array<EnemyInterface> = [{
+    id: '0001',
+    name: 'フォ死と',
     staticResources: {
         health: 100000,
         mana: 10000,

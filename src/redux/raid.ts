@@ -1,7 +1,7 @@
 
 
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
-import { CharacterObject, CharacterResource, Enemy, RealtimeEnemy } from "types/types";
+import { CharacterObject, CharacterResource, RealtimeEnemyInterface } from "types/types";
 import { v4 as uuid } from 'uuid';
 import { Log } from "./log";
 
@@ -24,7 +24,7 @@ export interface DamageLog extends Log {
 interface RaidState {
     raidStatus: 'stopped' | 'started',
     raidStartTime?: number,
-    enemies: Array<RealtimeEnemy>,
+    enemies: Array<RealtimeEnemyInterface>,
     effectHistory: Array<DamageLog>
 }
 
@@ -39,22 +39,7 @@ const raidSlice = createSlice({
     initialState,
     reducers: {
         initEnemies: (state, { payload }) => {
-            state.enemies = payload.map((item: Enemy) => {
-                const { staticAttributes, staticResources, staticEnhancements } = item;
-                return {
-                    ...item,
-                    resources: {
-                        ...staticResources,
-                        fury: 0
-                    },
-                    availableResources: {
-                        ...staticResources
-                    },
-                    attributes: staticAttributes,
-                    enhancements: staticEnhancements,
-                    overTimeEffects: []
-                }
-            });
+            state.enemies = payload;
         },
         addEnemies: (state, { payload }) => {
             state.enemies.push({
@@ -89,12 +74,8 @@ const raidSlice = createSlice({
                     target.overTimeEffects.splice(existIndex, 1);
                 }
                 target.overTimeEffects.push({
-                    interval,
-                    effectId,
-                    skillId,
-                    lastTriggerTime: startTime,
-                    startTime,
-                    caster
+                    interval, effectId, skillId, startTime, caster,
+                    lastTriggerTime: startTime
                 })
             }
         },
@@ -135,11 +116,7 @@ const raidSlice = createSlice({
                 }
 
                 state.effectHistory.push({
-                    id: uuid(), time, type: 'battle', shown: false, critical,
-                    value,
-                    target,
-                    caster,
-                    skillId
+                    id: uuid(), time, type: 'battle', shown: false, critical, value, target, caster, skillId
                 })
             }
             if (state.raidStatus === 'stopped') {

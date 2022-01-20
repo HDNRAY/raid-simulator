@@ -1,8 +1,7 @@
 import Button from "components/basic/button/Button";
 import { useCallback } from "react";
-import { startRaid, initEnemies, stopRaid } from "redux/raid";
+import { startRaid, stopRaid } from "redux/raid";
 import { useAppDispatch, useAppSelector } from "redux/store";
-import { enemies } from "data/enemies";
 import { timeShorter } from "util/utils";
 import { setMainCharacter } from "redux/character";
 import { you } from "data/character";
@@ -18,7 +17,6 @@ const Info = (props: {
     const raidStatus = 'started'// useAppSelector(state => state.raid.raidStatus);
 
     const initRaid = useCallback(() => {
-        dispatch(initEnemies(enemies));
         dispatch(setMainCharacter(you));
     }, [dispatch]);
 

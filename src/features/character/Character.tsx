@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { recoverCost, setMainCharacter, setTarget } from "redux/character";
 import { setupSlots } from "redux/slots";
 import { useAppDispatch, useAppSelector } from "redux/store";
-import { RealtimeCharacter } from "types/types";
+import { RealtimeCharacterInterface } from "types/types";
 import { getPercentage, numberToPercentage } from "util/utils";
 import './Character.scss';
 
@@ -15,11 +15,11 @@ const CharacterPanel = (props: {
     const { className } = props;
 
     const dispatch = useAppDispatch();
-    const character: RealtimeCharacter | undefined = useAppSelector(state => state.character.mainCharacter);
+    const character: RealtimeCharacterInterface | undefined = useAppSelector(state => state.character.mainCharacter);
 
     const enemies = useAppSelector(state => state.raid.enemies);
 
-    const { availableResources, resources, attributes, enhancements, name } = character || {} as RealtimeCharacter;
+    const { availableResources, resources, attributes, enhancements, name } = character || {} as RealtimeCharacterInterface;
 
     const time = useAppSelector(state => state.universal.time);
 

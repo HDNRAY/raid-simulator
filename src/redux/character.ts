@@ -2,10 +2,10 @@
 
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 import { skillMap } from "data/skills";
-import { Character, RealtimeCharacter, CharacterResource, TargetType, OverTimeEffect } from "types/types";
+import { CharacterInterface, RealtimeCharacterInterface, CharacterResource, TargetType, OverTimeEffect } from "types/types";
 
 interface CharacterState {
-    mainCharacter?: RealtimeCharacter,
+    mainCharacter?: RealtimeCharacterInterface,
     target?: {
         type: TargetType,
         id: string
@@ -23,7 +23,7 @@ const characterSlice = createSlice({
     name: 'character',
     initialState,
     reducers: {
-        setMainCharacter: (state, { payload }: PayloadAction<Character>) => {
+        setMainCharacter: (state, { payload }: PayloadAction<CharacterInterface>) => {
             const { staticAttributes, staticResources: staticResource, staticEnhancements } = payload
             state.mainCharacter = {
                 ...payload,

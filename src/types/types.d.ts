@@ -37,6 +37,7 @@ export interface CharacterEnhancements {
     },
 }
 
+// 角色对象静态数据
 export interface CharacterObject {
     id: string,
     name: string,
@@ -45,6 +46,7 @@ export interface CharacterObject {
     staticEnhancements: CharacterEnhancements
 }
 
+// 角色对象静态+实时数据
 export interface RealtimeCharacterObject extends CharacterObject {
     // 释放的技能
     castingSkillId?: string,
@@ -71,28 +73,31 @@ export interface RealtimeCharacterObject extends CharacterObject {
     }>
 }
 
+// 角色技能实时数据
 export interface CharacterSkill {
     skillId: string,
     lastTriggerTime?: number
 }
 
-export interface Character extends CharacterObject {
+// 包含技能键位等设置的角色静态数据
+export interface CharacterInterface extends CharacterObject {
     skills: Array<CharacterSkill>,
     slots: Array<Slot>
 }
 
-export interface RealtimeCharacter extends RealtimeCharacterObject {
+// 包含技能键位等设置的角色实时数据
+export interface RealtimeCharacterInterface extends RealtimeCharacterObject {
     skills: Array<CharacterSkill>,
     slots: Array<Slot>
 }
 
-export interface RealtimeEnemy extends RealtimeCharacterObject {
+export interface RealtimeEnemyInterface extends RealtimeCharacterObject {
 }
-export interface Enemy extends CharacterObject {
+export interface EnemyInterface extends CharacterObject {
 }
 
+// 键位
 export interface Slot {
-    // id: number
     key?: string,
     link?: {
         type: 'skill',
@@ -105,6 +110,7 @@ export interface Slot {
  * 模型 开始
  * 即属性里有可能有function类型，只作为静态数据的数据结构，其他模块引用
  */
+// 效果value计算
 export type EffectValueFunction = (props: EffectValueProps) => number
 export interface EffectValueProps {
     caster: RealtimeCharacterObject,
@@ -117,6 +123,7 @@ export type DirectEffectType = 'damage' | 'heal';
 export type OverTimeEffectType = 'dot' | 'buff' | 'hot' | 'debuff';
 export type EffectType = DirectEffectType | OverTimeEffectType;
 
+// 效果
 export interface Effect<T = EffectType> {
     id: string,
     type: T,
@@ -125,6 +132,7 @@ export interface Effect<T = EffectType> {
     value: number | EffectValueFunction
 }
 
+// 持续效果
 export interface OverTimeEffect extends Effect {
     type: OverTimeEffectType,
     name?: string,
@@ -132,13 +140,14 @@ export interface OverTimeEffect extends Effect {
     duration: number
 }
 
-export interface costValueProps {
-    caster: Character,
-    skill: Skill
-}
+// 代价
 export interface Cost {
     type: CharacterResource,
     value: number | ((props: costValueProps) => number)
+}
+export interface costValueProps {
+    caster: CharacterInterface,
+    skill: Skill
 }
 
 /**

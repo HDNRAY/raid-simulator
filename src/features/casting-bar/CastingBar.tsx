@@ -2,15 +2,15 @@ import ProgressBar from "components/basic/progress-bar/ProgressBar";
 import { skillMap } from "data/skills";
 import { useMemo } from "react";
 import { useAppSelector } from "redux/store";
-import { RealtimeCharacter } from "types/types";
+import { RealtimeCharacterInterface } from "types/types";
 import { getPercentage } from "util/utils";
 
 const CastingBar = () => {
 
     const time = useAppSelector(state => state.universal.time);
 
-    const character: RealtimeCharacter | undefined = useAppSelector(state => state.character.mainCharacter);
-    const { castingSkillId, castingTime } = character || {} as RealtimeCharacter;
+    const character: RealtimeCharacterInterface | undefined = useAppSelector(state => state.character.mainCharacter);
+    const { castingSkillId, castingTime } = character || {} as RealtimeCharacterInterface;
 
     // 正在释放技能
     const castingSkill: any = useMemo(() => castingSkillId && skillMap[castingSkillId], [castingSkillId]);

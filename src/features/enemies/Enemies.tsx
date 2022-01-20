@@ -1,12 +1,14 @@
 import ProgressBar from "components/basic/progress-bar/ProgressBar";
 import OverTimeEffects from "components/business/over-time-effects/OverTimeEffects";
-import { enemies } from "data/enemies";
+import { EnemyObjectInterface, getEnemy } from "core/Enemy";
 import { skillMap } from "data/skills";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { initEnemies } from "redux/raid";
 import { useAppDispatch, useAppSelector } from "redux/store";
 import { OverTimeEffect } from "types/types";
 import './Enemies.scss';
+
+export const enemies: Array<string> = ['0001']
 
 const Enemies = (props: {
     className?: string
@@ -17,8 +19,15 @@ const Enemies = (props: {
 
     const time = useAppSelector(state => state.universal.time);
 
+    const enemyRefs = useRef<Array<EnemyObjectInterface>>([]);
+
     useEffect(() => {
-        dispatch(initEnemies(enemies));
+        const enemiesStatus = enemies.map(id => {
+            const enmey = getEnemy(id);
+            enemyRefs.current.push(enmey)
+            return enmey.onInitialize()
+        });
+        dispatch(initEnemies(enemiesStatus));
     }, [dispatch]);
 
     return <div className={`enemies-wrapper ${className}`}>
