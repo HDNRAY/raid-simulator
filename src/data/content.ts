@@ -14,6 +14,7 @@ import type { BuffDef, SkillDef } from '../core/types';
 /** GCD：施放占 GCD 的技能后挂上；`gcd:false` 的技能不检查它。 */
 export const GCD_BUFF: BuffDef = {
   id: 'gcd',
+  color: 0x8a8ca0,
   nameKey: 'hud.casting',
   icon: 'gcd',
   polarity: 'neutral',
@@ -26,6 +27,7 @@ export const GCD_BUFF: BuffDef = {
 /** 闪避的无敌窗口：300ms。判定层只看这个 flag。 */
 export const DODGE_IFRAME: BuffDef = {
   id: 'dodge-iframe',
+  color: 0x60c8f0,
   nameKey: 'hud.dodged',
   icon: 'buff_dodge',
   polarity: 'buff',
@@ -39,6 +41,7 @@ export const DODGE_IFRAME: BuffDef = {
 /** 格挡：1.5 秒减伤 60%。精防就是"在 hit frame 前 0.2 秒内按下"额外叠一层。 */
 export const GUARD_REDUCE: BuffDef = {
   id: 'guard',
+  color: 0x9aa8d8,
   nameKey: 'hud.immune',
   icon: 'buff_guard',
   polarity: 'buff',
@@ -52,6 +55,7 @@ export const GUARD_REDUCE: BuffDef = {
 /** 完美格挡：更短、更硬。由 guard 技能的附加 trigger 施加。 */
 export const GUARD_PERFECT: BuffDef = {
   id: 'guard-perfect',
+  color: 0xffe070,
   nameKey: 'hud.immune',
   icon: 'buff_guard',
   polarity: 'buff',
@@ -92,18 +96,20 @@ export const SLASH_FURY: BuffDef = {
 /** 派生窗口：施放斩击后开启，让 arc 可用。 */
 export const COMBO_WINDOW: BuffDef = {
   id: 'combo-window',
+  color: 0x5acad8,
   nameKey: 'hud.combo',
   icon: 'buff_combo',
   polarity: 'buff',
   duration: 1500,
   maxStacks: 1,
   stacking: { mode: 'refresh' },
-  flags: { comboWindow: ['arc'] },
+  flags: { comboWindow: ['riposte'] },
 };
 
 /** 风行术：+20% 急速。 */
 export const HASTE_BUFF: BuffDef = {
   id: 'haste-buff',
+  color: 0x80e8c0,
   nameKey: 'stat.haste',
   icon: 'buff_haste',
   polarity: 'buff',
@@ -125,6 +131,7 @@ export const HASTE_BUFF: BuffDef = {
 /** 割裂的流血 DoT：每 3 秒跳一次，持续 21 秒。 */
 export const BLEED_DEBUFF: BuffDef = {
   id: 'bleed',
+  color: 0xd05050,
   nameKey: 'event.crit',
   icon: 'debuff_bleed',
   polarity: 'debuff',
@@ -151,6 +158,7 @@ export const BLEED_DEBUFF: BuffDef = {
 /** 前摇标记：让 UI 知道 Boss 正在读条（也用于"打断"这类机制）。 */
 export const BOSS_TELEGRAPH: BuffDef = {
   id: 'boss-telegraph',
+  color: 0xff7040,
   nameKey: 'hud.phase',
   icon: 'telegraph',
   polarity: 'neutral',
@@ -163,6 +171,7 @@ export const BOSS_TELEGRAPH: BuffDef = {
 /** 狂暴：伤害 +100%。 */
 export const BOSS_ENRAGE: BuffDef = {
   id: 'boss-enrage',
+  color: 0xff3030,
   nameKey: 'event.enrage',
   icon: 'buff_enrage',
   polarity: 'debuff',
@@ -174,20 +183,37 @@ export const BOSS_ENRAGE: BuffDef = {
 
 /* ================================================================== *
  * 玩家技能
- * ================================================================== */
-
-/**
- * 斩击：**循环的基石**。瞬发、CD 0、耗精力 8、产生 20 斗炁。
+ * ================================================================== *
  *
- * 数值设计：GCD 是 300ms（18 tick），所以循环里任意两个技能之间
- * 至少隔 18 tick —— 这是"循环节奏"的硬约束。
+ * ------------------------------------------------------------------
+ * 这套技能是为「精力 + 斗炁」资源模型**专门设计**的
+ * ------------------------------------------------------------------
+ *
+ * 两条资源各有一个明确的决策问题，技能组必须让这两个问题都出现：
+ *
+ *   精力（回复快，约 20/秒）
+ *     → 防御技能的代价。问题是「我现在躲，还是留着精力等下一发？」
+ *       所以两个防御技都消耗精力，且**都不占公共冷却** ——
+ *       这样"该躲的时候能不能躲"完全由精力决定。
+ *
+ *   斗炁（不自动回复，只靠基础技积攒，上限 100）
+ *     → 强击与终结技的代价。问题是「斗炁一够就花掉，还是攒满打爆发？」
+ *       强击（30）可以持续消耗，终结技（100）要求攒满 ——
+ *       于是"攒满"这个选择有真实的机会成本。
+ *
+ * 循环节奏：
+ *   基础技每 1.5 秒一次（GCD 0.3s，但受精力回复限制更接近这个节奏），
+ *   每 4 次攒满斗炁；中间穿插强击，满了打终结技。
+ *   防御技随时可插，但会挤占后面的基础技。
  */
-const SLASH: SkillDef = {
-  id: 'slash',
+
+/** 基础技：回能 + 积攒斗炁。循环的基石。 */
+const STRIKE: SkillDef = {
+  id: 'strike',
   kind: 'activeSkill',
-  nameKey: 'skill.slash.name',
-  descKey: 'skill.slash.desc',
-  icon: 'skill_slash',
+  nameKey: 'skill.strike.name',
+  descKey: 'skill.strike.desc',
+  icon: 'skill_strike',
   abilities: [
     {
       kind: 'trigger',
@@ -196,11 +222,9 @@ const SLASH: SkillDef = {
         then: [
           { kind: 'grant', target: { mode: 'self' }, buff: GCD_BUFF },
           { kind: 'grant', target: { mode: 'self' }, buff: COMBO_WINDOW },
-          // 一次性产生斗炁（不是"每秒回复"—— 后者语义不同）
-          { kind: 'resource', target: { mode: 'self' }, resource: 'douqi', delta: 20 },
-          // 少量回能：让斩击可以接近 GCD 节奏持续输出，
-          // 而不是被能量卡死（那样循环会变得毫无选择余地）
-          { kind: 'resource', target: { mode: 'self' }, resource: 'energy', delta: 6 },
+          // 积攒斗炁（一次性），并小幅回能，让循环能持续
+          { kind: 'resource', target: { mode: 'self' }, resource: 'douqi', delta: 18 },
+          { kind: 'resource', target: { mode: 'self' }, resource: 'energy', delta: 8 },
         ],
       },
     },
@@ -208,7 +232,7 @@ const SLASH: SkillDef = {
   castTime: 0,
   cooldown: 0,
   gcd: true,
-  cost: [{ resource: 'energy', value: 8 }],
+  cost: [],
   targeting: { mode: 'primaryEnemy' },
   hits: [
     {
@@ -217,9 +241,8 @@ const SLASH: SkillDef = {
         {
           kind: 'damage',
           damage: {
-            // 目标：一发斩击约 600（暴击后更高），配合 GCD 形成 ~500 DPS 的基础节奏
-            base: 240,
-            scaling: [{ stat: 'strength', ratio: 3 }],
+            base: 100,
+            scaling: [{ stat: 'strength', ratio: 1.2 }],
             school: 'physical',
             canCrit: true,
             countsAsHit: true,
@@ -233,11 +256,12 @@ const SLASH: SkillDef = {
   interruptible: false,
 };
 
-const HEAVY: SkillDef = {
-  id: 'heavy',
+/** 强击：消耗斗炁的中等爆发。 */
+const HEAVY_STRIKE: SkillDef = {
+  id: 'heavyStrike',
   kind: 'activeSkill',
-  nameKey: 'skill.heavy.name',
-  descKey: 'skill.heavy.desc',
+  nameKey: 'skill.heavyStrike.name',
+  descKey: 'skill.heavyStrike.desc',
   icon: 'skill_heavy',
   abilities: [
     {
@@ -248,23 +272,21 @@ const HEAVY: SkillDef = {
       },
     },
   ],
-  // 2 秒读条：可被打断，这是"要不要现在放大招"的取舍来源
-  castTime: 2000,
-  cooldown: 8000,
+  castTime: 0,
+  cooldown: 6000,
   gcd: true,
-  cost: [{ resource: 'energy', value: 55 }],
+  cost: [{ resource: 'douqi', value: 30 }],
   targeting: { mode: 'primaryEnemy' },
   hits: [
     {
-      at: 2000,
+      at: 0,
       effects: [
         {
           kind: 'damage',
           damage: {
-            // 8 秒 CD 的大招，约 2500
-            base: 400,
-            scaling: [{ stat: 'intelligence', ratio: 19 }],
-            school: 'arcane',
+            base: 260,
+            scaling: [{ stat: 'strength', ratio: 3.4 }],
+            school: 'physical',
             canCrit: true,
             countsAsHit: true,
           },
@@ -272,11 +294,69 @@ const HEAVY: SkillDef = {
       ],
     },
   ],
-  tags: ['spell'],
-  school: 'arcane',
-  interruptible: true,
+  tags: ['melee'],
+  school: 'physical',
+  interruptible: false,
 };
 
+/**
+ * 派生技：只能在基础技之后的派生窗口内使用。
+ *
+ * 它的价值不在伤害（与强击接近），而在**把派生窗口变成收益** ——
+ * 否则"派生窗口"这个机制就只是个摆设。
+ */
+const RIPOSTE: SkillDef = {
+  id: 'riposte',
+  kind: 'activeSkill',
+  nameKey: 'skill.riposte.name',
+  descKey: 'skill.riposte.desc',
+  icon: 'skill_riposte',
+  abilities: [
+    {
+      kind: 'trigger',
+      trigger: {
+        on: 'onCastFinish',
+        then: [
+          { kind: 'grant', target: { mode: 'self' }, buff: GCD_BUFF },
+          // 派生成功额外回一点斗炁：奖励"接上连段"
+          { kind: 'resource', target: { mode: 'self' }, resource: 'douqi', delta: 10 },
+        ],
+      },
+    },
+  ],
+  castTime: 0,
+  cooldown: 0,
+  gcd: true,
+  cost: [],
+  targeting: { mode: 'primaryEnemy' },
+  hits: [
+    {
+      at: 0,
+      effects: [
+        {
+          kind: 'damage',
+          damage: {
+            base: 220,
+            scaling: [{ stat: 'strength', ratio: 2.6 }],
+            school: 'physical',
+            canCrit: true,
+            countsAsHit: true,
+          },
+        },
+        // **消耗掉派生窗口**：一次基础技只能换来一次派生。
+        // 没有这一步，窗口期内可以反复接派生，基础技就没人按了。
+        { kind: 'removeBuff', target: { mode: 'self' }, buffId: 'combo-window' },
+      ],
+    },
+  ],
+  tags: ['melee'],
+  school: 'physical',
+  interruptible: false,
+  // **派生**：需要基础技刚打出的窗口
+  requires: [{ kind: 'hasBuff', buffId: 'combo-window' }],
+};
+
+/** 割裂：代价是斗炁，收益是持续伤害 + 易伤。 */
 const REND: SkillDef = {
   id: 'rend',
   kind: 'activeSkill',
@@ -293,52 +373,7 @@ const REND: SkillDef = {
     },
   ],
   castTime: 0,
-  cooldown: 0,
-  gcd: true,
-  cost: [{ resource: 'douqi', value: 35 }],
-  targeting: { mode: 'primaryEnemy' },
-  hits: [
-    {
-      at: 0,
-      effects: [
-        {
-          kind: 'damage',
-          damage: {
-            // 割裂本体伤害低，价值在易伤层数
-            base: 60,
-            scaling: [{ stat: 'strength', ratio: 1.2 }],
-            school: 'physical',
-            canCrit: true,
-            countsAsHit: true,
-          },
-        },
-        // 挂流血：每层提高目标承受的物理伤害
-        { kind: 'grantBuff', target: { mode: 'primaryEnemy' }, buff: BLEED_DEBUFF },
-      ],
-    },
-  ],
-  tags: ['melee'],
-  school: 'physical',
-  interruptible: false,
-};
-
-const ARC: SkillDef = {
-  id: 'arc',
-  kind: 'activeSkill',
-  nameKey: 'skill.arc.name',
-  descKey: 'skill.arc.desc',
-  icon: 'skill_arc',
-  abilities: [
-    {
-      kind: 'trigger',
-      trigger: {
-        on: 'onCastFinish',
-        then: [{ kind: 'grant', target: { mode: 'self' }, buff: GCD_BUFF }],
-      },
-    },
-  ],
-  castTime: 0,
-  cooldown: 0,
+  cooldown: 10_000,
   gcd: true,
   cost: [{ resource: 'douqi', value: 25 }],
   targeting: { mode: 'primaryEnemy' },
@@ -349,10 +384,97 @@ const ARC: SkillDef = {
         {
           kind: 'damage',
           damage: {
-            // 派生技：比斩击强，但需要先斩击开启窗口
-            base: 380,
-            scaling: [{ stat: 'strength', ratio: 5 }],
+            base: 70,
+            scaling: [{ stat: 'strength', ratio: 1.0 }],
             school: 'physical',
+            canCrit: true,
+            countsAsHit: true,
+          },
+        },
+        { kind: 'grantBuff', target: { mode: 'primaryEnemy' }, buff: BLEED_DEBUFF },
+      ],
+    },
+  ],
+  tags: ['melee'],
+  school: 'physical',
+  interruptible: false,
+};
+
+/**
+ * 终结技：**要求斗炁已满**，打空斗炁换取巨额伤害。
+ *
+ * 门槛用 `douqi-full` 标记 buff 表达（引擎在斗炁加到上限时自动挂上），
+ * 所以这里不需要引擎提供"资源是否满"的新条件类型。
+ *
+ * 2.2 秒读条且可被打断 —— 这是"攒满就放"的机会成本：
+ * 放的时机不对会被 Boss 打断，斗炁白攒。
+ */
+const FINISHER: SkillDef = {
+  id: 'finisher',
+  kind: 'activeSkill',
+  nameKey: 'skill.finisher.name',
+  descKey: 'skill.finisher.desc',
+  icon: 'skill_finisher',
+  abilities: [
+    // 打空斗炁（代价在施法时已扣，这里只是确保不会残留标记）
+    { kind: 'resource', target: { mode: 'self' }, resource: 'douqi', delta: -100 },
+    {
+      kind: 'trigger',
+      trigger: {
+        on: 'onCastFinish',
+        then: [
+          { kind: 'grant', target: { mode: 'self' }, buff: GCD_BUFF },
+          // 打完给一个短暂的增伤窗口：奖励"打空斗炁"这个决定
+          {
+            kind: 'grant',
+            target: { mode: 'self' },
+            buff: {
+              id: 'aftermath',
+              nameKey: 'skill.finisher.name',
+              icon: 'buff_aftermath',
+              polarity: 'buff',
+              color: 0xffb040,
+              duration: 8000,
+              maxStacks: 1,
+              stacking: { mode: 'refresh' },
+              modifiers: [
+                {
+                  stat: 'damageBoost',
+                  op: 'addPercent',
+                  value: 25,
+                  sourceKey: 'skill.finisher.name',
+                  namespace: 'aftermath',
+                  tier: 'buff',
+                },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  ],
+  castTime: 2200,
+  /**
+   * 20 秒冷却。
+   *
+   * 为什么必须有：它不消耗精力、只要斗炁满就能放，而斗炁积攒很快。
+   * 早期版本给它 0 冷却，实测 60 秒内能放 184 次 —— 循环完全退化成
+   * "无脑按终结技"。冷却把"什么时候放"变成真正的取舍。
+   */
+  cooldown: 20_000,
+  gcd: true,
+  cost: [{ resource: 'douqi', value: 100 }],
+  targeting: { mode: 'primaryEnemy' },
+  hits: [
+    {
+      at: 2200,
+      effects: [
+        {
+          kind: 'damage',
+          damage: {
+            base: 500,
+            scaling: [{ stat: 'strength', ratio: 4, }, { stat: 'intelligence', ratio: 12 }],
+            school: 'arcane',
             canCrit: true,
             countsAsHit: true,
           },
@@ -360,13 +482,13 @@ const ARC: SkillDef = {
       ],
     },
   ],
-  tags: ['melee'],
-  school: 'physical',
-  interruptible: false,
-  // 派生：只有在 combo-window 内可用。**这是"技能派生"的全部实现**
-  requires: [{ kind: 'hasBuff', buffId: 'combo-window' }],
+  tags: ['spell'],
+  school: 'arcane',
+  interruptible: true,
+  requires: [{ kind: 'hasBuff', buffId: 'douqi-full' }],
 };
 
+/** 闪避：耗精力换一个极短的无敌窗口。**不占公共冷却**。 */
 const DODGE: SkillDef = {
   id: 'dodge',
   kind: 'activeSkill',
@@ -375,17 +497,18 @@ const DODGE: SkillDef = {
   icon: 'skill_dodge',
   abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: DODGE_IFRAME }],
   castTime: 0,
-  cooldown: 0,
-  // **不占 GCD**：所以闪避随时可用。这就是"能不能躲掉"的全部机制。
+  cooldown: 1500,
+  // **不占 GCD**：所以闪避随时可用，"能不能躲掉"完全由精力决定
   gcd: false,
-  cost: [{ resource: 'energy', value: 25 }],
+  cost: [{ resource: 'energy', value: 30 }],
   targeting: { mode: 'self' },
   hits: [],
-  tags: ['defensive', 'movement'],
+  tags: ['defensive'],
   school: 'physical',
   interruptible: false,
 };
 
+/** 格挡：耗精力换一段减伤。窗口比闪避长、但减伤不到底。 */
 const GUARD: SkillDef = {
   id: 'guard',
   kind: 'activeSkill',
@@ -394,37 +517,13 @@ const GUARD: SkillDef = {
   icon: 'skill_guard',
   abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: GUARD_REDUCE }],
   castTime: 0,
-  cooldown: 0,
+  cooldown: 3000,
   gcd: false,
-  cost: [{ resource: 'energy', value: 15 }],
+  cost: [{ resource: 'energy', value: 20 }],
   targeting: { mode: 'self' },
   hits: [],
   tags: ['defensive'],
   school: 'physical',
-  interruptible: false,
-};
-
-const HASTE_SKILL: SkillDef = {
-  id: 'haste',
-  kind: 'activeSkill',
-  nameKey: 'skill.haste.name',
-  descKey: 'skill.haste.desc',
-  icon: 'skill_haste',
-  abilities: [
-    {
-      kind: 'grant',
-      target: { mode: 'self' },
-      buff: HASTE_BUFF,
-    },
-  ],
-  castTime: 0,
-  cooldown: 20_000,
-  gcd: true,
-  cost: [{ resource: 'energy', value: 30 }],
-  targeting: { mode: 'self' },
-  hits: [],
-  tags: ['spell'],
-  school: 'arcane',
   interruptible: false,
 };
 
@@ -602,13 +701,13 @@ const EMPOWER: SkillDef = {
  * ================================================================== */
 
 export const PLAYER_SKILLS: readonly SkillDef[] = [
-  SLASH,
-  HEAVY,
+  STRIKE,
+  HEAVY_STRIKE,
+  RIPOSTE,
   REND,
-  ARC,
+  FINISHER,
   DODGE,
   GUARD,
-  HASTE_SKILL,
 ];
 
 export const BOSS_SKILLS: readonly SkillDef[] = [CRIMSON_ARC, TRIPLE_SLAM, CORRUPTION, EMPOWER];

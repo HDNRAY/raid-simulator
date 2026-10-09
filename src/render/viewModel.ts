@@ -24,6 +24,21 @@ export interface BuffView {
   readonly nameKey: string;
   readonly icon: string;
   readonly polarity: 'buff' | 'debuff' | 'neutral';
+  /**
+   * 色块图标用的颜色。
+   *
+   * 目前美术素材是**单色方块占位** —— 由内容里的 `color` 决定；
+   * 没给则由 polarity 推导。接入正式图标后这一项会被贴图替换。
+   */
+  readonly color: number;
+  /**
+   * 极简标签的**语言 key**（最多 2 字）。
+   *
+   * 为什么不显示全名：buff 条是横排的，全名会把整条撑爆。
+   * 完整说明留给悬停/详情面板（M7）。
+   * 给 key 而不是文案 —— 渲染层不持有可显示文字（i18n 规范 I1）。
+   */
+  readonly shortLabelKey: string;
   readonly stacks: number;
   /** 剩余时间（ms）；永久为 Infinity */
   readonly remainingMs: number;

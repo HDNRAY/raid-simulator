@@ -64,6 +64,26 @@ export const zhCN = {
     douqiRegen: '斗炁回复',
   },
 
+  /**
+   * buff / debuff 图标上的**极简标签**（最多 2 字）。
+   *
+   * 单独一组而不是复用 `nameKey`：完整名称在横排图标条上会把版面撑爆。
+   * 也不用"截取全名前两字" —— "势能涌动"截成"势能"读不出含义。
+   */
+  buffShort: {
+    dodgeIframe: '无敌',
+    guard: '减伤',
+    guardPerfect: '完美',
+    comboWindow: '派生',
+    haste: '急速',
+    bleed: '流血',
+    enrage: '狂暴',
+    empowered: '强化',
+    telegraph: '前摇',
+    gcd: '冷却',
+    douqiFull: '满斗炁',
+  },
+
   /** 预警提示：告诉玩家"现在该做什么" */
   hint: {
     dodgeOrGuard: '闪避或格挡',
@@ -143,15 +163,23 @@ export const zhCN = {
     entropySurge: { name: '势能涌动' },
   },
 
-  /** 玩家技能 */
+  /**
+   * 玩家技能。
+   *
+   * 命名对应资源模型：`strike` 积攒斗炁、`heavyStrike`/`rend` 消耗斗炁、
+   * `finisher` 要求斗炁满；`dodge`/`guard` 消耗精力。
+   */
   skill: {
-    slash: { name: '斩击', desc: '快速近战攻击，少量积攒斗炁。可开启派生窗口。' },
-    heavy: { name: '龙破斩', desc: '2 秒读条，高额法术伤害。读条期间可被打断。' },
-    rend: { name: '割裂', desc: '造成流血，每层提高目标承受的物理伤害。' },
-    arc: { name: '弧光斩', desc: '派生技。只能在斩击后的派生窗口内使用。' },
-    dodge: { name: '闪避', desc: '300 毫秒无敌。不占公共冷却。' },
-    guard: { name: '格挡', desc: '1.5 秒内减伤 60%。不占公共冷却。' },
-    haste: { name: '风行术', desc: '15 秒内急速提高 20%。' },
+    strike: { name: '贯击', desc: '基础攻击。积攒斗炁，并小幅回复精力。' },
+    heavyStrike: { name: '崩拳', desc: '消耗 30 斗炁，造成一次高额物理伤害。' },
+    riposte: { name: '无双击', desc: '派生技，只能在贯击后的瞬间接上。额外积攒斗炁。' },
+    rend: { name: '裂伤', desc: '消耗 25 斗炁，造成流血并提高目标承受的物理伤害。' },
+    finisher: {
+      name: '斗炁爆发',
+      desc: '需要斗炁全满。2.2 秒读条，打空全部斗炁换取巨额伤害，之后获得增伤。',
+    },
+    dodge: { name: '闪避', desc: '消耗精力，获得极短的完全无敌。不占公共冷却。' },
+    guard: { name: '格挡', desc: '消耗精力，一段时间内大幅减伤。不占公共冷却。' },
   },
 
   /** Boss 技能与本体 */

@@ -42,7 +42,7 @@ const registry = createRegistry(
 function makeEncounter(): BattleEngine {
   const player: Combatant = {
     id: 'player',
-    nameKey: 'hud.level',
+    nameKey: 'hud.you',
     side: 'ally',
     caps: { hp: 12_000, energy: 120, douqi: 100 },
     resources: { hp: 12_000, energy: 120, douqi: 0 },
@@ -97,17 +97,15 @@ function makeEncounter(): BattleEngine {
 /**
  * 一个"合格玩家"的循环。
  *
- * 约束：GCD 是 300ms（18 tick），所以任意两次施放之间必须 >= 18 tick；
- * 斗炁由斩击产生（每次 20），弧光/割裂各消耗 25/35。
- *
- * 节奏：斩击(0) → 斩击(20) → 弧光(40) → 斩击(52)
+ * 约束：GCD 是 300ms（18 tick），所以同一 tick 只能放一个技能。
+ * 节奏：贯击(0) → 无双击(20) → 贯击(40) → 无双击(60) ...
+ * 也就是"基础技 → 派生"一对一接续（派生会消耗掉窗口）。
+ * 崩拳/裂伤/终结技在有空档时插入。
  */
 function playerPlan(tick: number): string | undefined {
-  const cycle = tick % 60;
-  if (cycle === 0) return 'slash';
-  if (cycle === 20) return 'slash';
-  if (cycle === 40) return 'arc';
-  if (cycle === 52) return 'slash';
+  const cycle = tick % 40;
+  if (cycle === 0) return 'strike';
+  if (cycle === 20) return 'riposte';
   return undefined;
 }
 
@@ -208,7 +206,7 @@ describe('真实内容集成：Verrot 一场战斗', () => {
 
 describe('内容注册表：扩展内容不需要改引擎', () => {
   it('注册表能按 id 解析技能与 buff', () => {
-    expect(registry.skill('slash').id).toBe('slash');
+    expect(registry.skill('strike').id).toBe('strike');
     expect(registry.buff('dodge-iframe')?.flags?.invulnerable).toBe(true);
   });
 
@@ -244,7 +242,7 @@ describe('内容注册表：扩展内容不需要改引擎', () => {
     const newSkill: SkillDef = {
       id: 'data-only-skill',
       kind: 'activeSkill',
-      nameKey: 'skill.slash.name',
+      nameKey: 'skill.strike.name',
       icon: 'x',
       abilities: [],
       castTime: 0,
@@ -279,7 +277,7 @@ describe('内容注册表：扩展内容不需要改引擎', () => {
 
     const player: Combatant = {
       id: 'player',
-      nameKey: 'hud.level',
+      nameKey: 'hud.you',
       side: 'ally',
       caps: { hp: 1000, energy: 0, douqi: 0 },
       resources: { hp: 1000, energy: 0, douqi: 0 },

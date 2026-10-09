@@ -34,15 +34,25 @@ export interface KeyBinding {
   readonly skillId: string;
 }
 
-/** 键位表：默认一套 12 键布局。 */
+/**
+ * 默认键位。
+ *
+ * 布局按**循环里的角色**排，不按技能强弱：
+ *   1 = 基础技（最常按，放在最顺手的食指位）
+ *   2 = 强击 / 3 = 派生 / 4 = 持续伤害   （输出技能的优先级顺序）
+ *   5 = 终结技（要求斗炁满，按下去就该有"憋了很久"的手感）
+ *   Q / E = 防御（左手小指与无名指位，能在输出节奏里随时插进去）
+ *
+ * 本作没有位移，所以 WASD 整块空出来给技能。
+ */
 export const DEFAULT_BINDINGS: readonly KeyBinding[] = [
-  { key: '1', skillId: 'slash' },
-  { key: '2', skillId: 'heavy' },
-  { key: '3', skillId: 'rend' },
-  { key: '4', skillId: 'arc' },
+  { key: '1', skillId: 'strike' },
+  { key: '2', skillId: 'heavyStrike' },
+  { key: '3', skillId: 'riposte' },
+  { key: '4', skillId: 'rend' },
+  { key: '5', skillId: 'finisher' },
   { key: 'q', skillId: 'dodge' },
   { key: 'e', skillId: 'guard' },
-  { key: 'r', skillId: 'haste' },
 ];
 
 /** 需要拦掉默认行为的键（浏览器会用它们做别的）。 */

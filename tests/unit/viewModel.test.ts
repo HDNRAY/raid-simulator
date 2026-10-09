@@ -99,6 +99,8 @@ describe('isTightWindow', () => {
     nameKey: 'hud.dodged',
     icon: 'i',
     polarity: 'buff',
+    color: 0xff7a55,
+    shortLabelKey: 'buffShort.dodgeIframe',
     stacks: 1,
     remainingMs: 300,
     durationMs: 300,

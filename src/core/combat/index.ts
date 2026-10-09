@@ -26,6 +26,7 @@
 import { kahanSum, roundDamage, roundStat, safeDiv } from '../numeric';
 import type {
   BuffDef,
+  BuffInstance,
   Combatant,
   DamageSpec,
   EventDef,
@@ -139,6 +140,65 @@ export interface GateResult {
  *   - `gcd` 比 `cooldown` 优先：GCD 是全局的，更容易被玩家忽略
  *   - `cost` 比 `condition` 优先：资源不足比"条件不满足"更可操作
  */
+/**
+ * 按"资源是否已达上限"同步一个标记 buff。
+ *
+ * 用途：终结技的门槛常常是"资源攒满"。`Condition` 里只有
+ * `resourceAbove`（数值阈值）而没有"是否满"的语义 —— 数值阈值在
+ * 上限变化时就会失效（装备提升上限后，写死的阈值不再等于"满"）。
+ *
+ * 所以引擎负责在资源变动后把这条标记 buff 挂上/摘掉，
+ * 内容层就能用 `requires: [{ kind:'hasBuff', buffId }]` 表达门槛，
+ * **不需要给 Condition 加新类型**（这是可扩展性的一个验证点）。
+ *
+ * @returns 需要写入的 buffs 与事件；无变化时返回 undefined
+ */
+export function syncResourceGateBuff(
+  combatant: Combatant,
+  resource: string,
+  buffId: string,
+  buffDef: BuffDef,
+  tick = 0,
+): { readonly buffs: readonly BuffInstance[]; readonly events: readonly EventDef[] } | undefined {
+  const cap = (combatant.caps as Record<string, number>)[resource] ?? 0;
+  const current = (combatant.resources as Record<string, number>)[resource] ?? 0;
+  const atFull = cap > 0 && current >= cap;
+  const has = combatant.buffs.some((b) => b.defId === buffId);
+
+  if (atFull === has) return undefined;
+
+  if (atFull) {
+    const applied = applyBuff(combatant, buffDef, combatant.id, tick);
+    return {
+      buffs: applied.buffs,
+      events: [
+        {
+          kind: 'buffApplied',
+          tick,
+          targetId: combatant.id,
+          buffId,
+          stacks: applied.stacks,
+          sourceId: combatant.id,
+        },
+      ],
+    };
+  }
+
+  return {
+    buffs: combatant.buffs.filter((b) => b.defId !== buffId),
+    events: [
+      {
+        kind: 'buffExpired',
+        tick,
+        targetId: combatant.id,
+        buffId,
+        stacks: 0,
+        sourceId: combatant.id,
+      },
+    ],
+  };
+}
+
 export function checkGate(
   combatant: Combatant,
   skill: SkillDef,

@@ -27,12 +27,21 @@ const SCALING_MODE: ScalingMode = 'fit';
 /** 每场战斗的时限。超时判负。与 Boss 的 enrage 阈值一致。 */
 const TIME_LIMIT_MS = 180_000;
 
-/** 玩家基础属性。 */
+/**
+ * 玩家基础属性。
+ *
+ * `energyRegen` 是这套技能组的**节奏来源**：防御技（闪避 30 / 格挡 20）
+ * 只消耗精力，所以"我现在躲得起吗"完全由它决定。
+ * 22/秒 大致支持"每 1.4 秒一次防御"或"连续两次闪避"。
+ */
 const PLAYER_BASE: Partial<Record<StatKey, number>> = {
   strength: 120,
   agility: 100,
   intelligence: 110,
   spirit: 100,
+  energyRegen: 22,
+  critChance: 0.2,
+  critDamage: 0.5,
 };
 
 /** 玩家资源上限。 */
@@ -41,10 +50,11 @@ const PLAYER_CAPS = { hp: 12_000, energy: 120, douqi: 100 };
 /**
  * Boss 资源上限。
  *
- * 15 万血配玩家约 1000 DPS → 一场约 2.5 分钟的战斗，
- * 正好压在 3 分钟时限内、且在狂暴之前。
+ * 17 万血配实测约 1300 DPS → 一场约 2.2 分钟的战斗。
+ * 刻意留出余量：**玩得差的循环（不接派生、不放终结技）会打不完**，
+ * 于是"把循环打对"变成通关的必要条件，而不是可选的优化。
  */
-const BOSS_CAPS = { hp: 150_000, energy: 0, douqi: 0 };
+const BOSS_CAPS = { hp: 170_000, energy: 0, douqi: 0 };
 
 function makePlayer(): Combatant {
   return {

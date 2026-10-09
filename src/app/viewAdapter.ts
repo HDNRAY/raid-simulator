@@ -55,6 +55,52 @@ function isInternalBuff(buffId: string): boolean {
 }
 
 /** 拒绝原因 → 本地化 key 后缀。 */
+/**
+ * 按极性推导兜底色。
+ *
+ * 内容作者应尽量显式指定 `color` —— 同一极性下的不同 buff
+ * （无敌 vs 急速）需要区分。这只是没指定时的保底。
+ */
+function defaultBuffColor(polarity: string, buffId: string): number {
+  if (isDefensiveBuff(buffId)) return POLARITY_COLORS.iframe;
+  if (polarity === 'debuff') return POLARITY_COLORS.debuff;
+  if (polarity === 'neutral') return POLARITY_COLORS.neutral;
+  return POLARITY_COLORS.buff;
+}
+
+const POLARITY_COLORS = {
+  buff: 0x6cc46c,
+  debuff: 0xcc5555,
+  neutral: 0x8a8ca0,
+  iframe: 0xff7a55,
+} as const;
+
+/**
+ * buff id → 极简标签的**语言 key**。
+ *
+ * 这张表的必要性：机制 id 与文案 key 不是同一套命名
+ * （例如 `dodge-iframe` 的显示名是 `buffShort.dodgeIframe`）。
+ * 没登记时回退到中性占位，不影响玩法。
+ */
+const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
+  'dodge-iframe': 'buffShort.dodgeIframe',
+  guard: 'buffShort.guard',
+  'guard-perfect': 'buffShort.guardPerfect',
+  'combo-window': 'buffShort.comboWindow',
+  'haste-buff': 'buffShort.haste',
+  bleed: 'buffShort.bleed',
+  'boss-enrage': 'buffShort.enrage',
+  'boss-enrage-active': 'buffShort.enrage',
+  'boss-empowered': 'buffShort.empowered',
+  'boss-telegraph': 'buffShort.telegraph',
+  gcd: 'buffShort.gcd',
+  'douqi-full': 'buffShort.douqiFull',
+};
+
+function shortLabelKeyOf(buffId: string): string {
+  return SHORT_LABEL_KEYS[buffId] ?? 'buffShort.telegraph';
+}
+
 function blockKeyOf(reason: string): string {
   switch (reason) {
     case 'gcd':
@@ -350,11 +396,15 @@ function toCombatantView(engine: BattleEngine, id: string, tick: number): Combat
     const remainingMs = Number.isFinite(buff.expiresAtTick)
       ? Math.max(0, (buff.expiresAtTick - tick) * (1000 / 60))
       : Number.POSITIVE_INFINITY;
+    const polarity = def?.polarity ?? 'neutral';
     return {
       id: buff.defId,
       nameKey: def?.nameKey ?? 'hud.casting',
       icon: def?.icon ?? '',
-      polarity: def?.polarity ?? 'neutral',
+      polarity,
+      // 内容指定了颜色就用它，否则按极性给个兜底色
+      color: def?.color ?? defaultBuffColor(polarity, buff.defId),
+      shortLabelKey: shortLabelKeyOf(buff.defId),
       stacks: buff.stacks,
       remainingMs,
       durationMs,
@@ -404,15 +454,20 @@ function emptyView(tick: number): BattleSnapshotView {
   };
 }
 
-/** 默认槽位：与 `DEFAULT_BINDINGS` 对应。 */
+/**
+ * 默认技能槽：与 `DEFAULT_BINDINGS` 一一对应。
+ *
+ * 顺序 = 技能栏从左到右的显示顺序 = 循环里的角色顺序
+ * （基础 → 强击 → 派生 → 持续 → 终结 → 防御）。
+ */
 export const DEFAULT_SLOTS: readonly SlotBinding[] = [
-  { index: 0, key: '1', skillId: 'slash' },
-  { index: 1, key: '2', skillId: 'heavy' },
-  { index: 2, key: '3', skillId: 'rend' },
-  { index: 3, key: '4', skillId: 'arc' },
-  { index: 4, key: 'q', skillId: 'dodge' },
-  { index: 5, key: 'e', skillId: 'guard' },
-  { index: 6, key: 'r', skillId: 'haste' },
+  { index: 0, key: '1', skillId: 'strike' },
+  { index: 1, key: '2', skillId: 'heavyStrike' },
+  { index: 2, key: '3', skillId: 'riposte' },
+  { index: 3, key: '4', skillId: 'rend' },
+  { index: 4, key: '5', skillId: 'finisher' },
+  { index: 5, key: 'q', skillId: 'dodge' },
+  { index: 6, key: 'e', skillId: 'guard' },
 ];
 
 /** GCD 时长再导出，避免渲染层直接 import core/combat。 */

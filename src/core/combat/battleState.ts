@@ -40,6 +40,7 @@ import {
   payCosts,
   regenerate,
   type CombatContext,
+  syncResourceGateBuff,
 } from './index';
 import { computeStats } from '../stats/pipeline';
 import { createAiState, decide, type AiState, type AiView } from '../ai';
@@ -420,10 +421,36 @@ export class BattleEngine {
    * 施法路径**（数据模型规范：两边只差输入来源）。
    * 不给则默认玩家。
    */
-  applyActions(actions: readonly Action[], actorId = 'player'): void {
-    for (const action of actions) {
-      if (action.type === 'useSkill') this.tryUseSkill(action.skillId, actorId);
+  applyActions(actions: readonly Action[], actorId?: string): void {
+    /**
+     * 在 tick 之外被调用时（测试、工具、将来的回放注入），
+     * 这里**临时开一个工作副本并在结束时提交**。
+     *
+     * 为什么必须有这个兜底：一次 tick 内的所有读写都走工作副本，
+     * 而 `tryUseSkill` 的 actor 也从工作副本读。如果调用方在 tick
+     * 之外调进来，工作副本不存在 —— 早期版本会**静默什么都不做**
+     * （没有事件、没有异常），排查成本极高。
+     *
+     * `actorId` 不给则按阵营推断（第一个存活的我方单位），
+     * 而不是写死 'player' —— 写死会让 id 也叫 'player' 的敌方单位
+     * 被误当成施法者。
+     */
+    const owned = this.work === undefined;
+    if (owned) this.beginWork();
+    try {
+      const resolvedActor = actorId ?? this.defaultActorId();
+      for (const action of actions) {
+        if (action.type === 'useSkill') this.tryUseSkill(action.skillId, resolvedActor);
+      }
+    } finally {
+      if (owned) this.commitWork();
     }
+  }
+
+  /** 默认施法者：第一个存活的我方单位（没有则取第一个单位）。 */
+  private defaultActorId(): string {
+    const ally = this.state.combatants.find((c: Combatant) => c.side === 'ally' && c.alive);
+    return (ally ?? this.state.combatants[0])?.id ?? 'player';
   }
 
   /**
@@ -477,7 +504,16 @@ export class BattleEngine {
    * ---------------------------------------------------------------- */
 
   private tryUseSkill(skillId: string, actorId: string): void {
-    const actor = this.state.combatants.find((c: Combatant) => c.id === actorId);
+    /**
+     * ⚠️ 必须从**工作副本**读 actor，不能读 `this.state`。
+     *
+     * 踩过的坑：同一 tick 内的第二个技能会读到"还没挂上 GCD"的旧状态，
+     * 于是 `strike` 和 `riposte` 能在**同一个 tick 里都施放成功** ——
+     * 门禁形同虚设，实测 DPS 因此虚高 3 倍以上。
+     *
+     * 教训与工作副本那条一致：一次 tick 内的所有读写都必须走同一个副本。
+     */
+    const actor = this.work?.get(actorId);
     if (!actor) return;
 
     const skill = this.options.skills.get(skillId);
@@ -694,6 +730,54 @@ export class BattleEngine {
       this.pushBuffApplied(target.id, buff.id, applied.stacks);
     };
 
+    /**
+     * 把一个 buff 加到**施法者以外的目标**上（会被打上施法者来源）。
+     *
+     * 用于"大招打中后给 Boss 挂易伤"这类内容 —— 与 grantTo 的区别是
+     * `sourceId` 记成施法者而不是目标自己。
+     */
+    const applyBuffTo = (buff: BuffDef, targetId: string): void => {
+      const target = targetId === working.id ? working : this.current(targetId);
+      const applied = applyBuff(target, buff, working.id, this.state.tick);
+      commit({ ...target, buffs: applied.buffs });
+      this.events.push({
+        kind: 'buffApplied',
+        tick: this.state.tick,
+        targetId: target.id,
+        buffId: buff.id,
+        stacks: applied.stacks,
+        sourceId: working.id,
+      });
+    };
+
+    /** 加入一个 buff 实例（用对象字面量直接写内容，不必先定义 BuffDef）。 */
+    const addBuff = (buff: BuffDef, targetId: string): void => applyBuffTo(buff, targetId);
+
+    /**
+     * 斗炁满时自动挂上的标记 buff。
+     *
+     * 为什么需要它：终结技的门槛是"斗炁已满"，而 `requires` 只能检查
+     * buff / 资源阈值。用一条"满斗炁"标记 buff 表达它，内容层就能写
+     * `requires: [{ kind:'hasBuff', buffId:'douqi-full' }]` ——
+     * **不用给引擎加新条件类型**（这正是可扩展性的验证方式）。
+     */
+    const syncDouqiFull = (): void => {
+      const result = syncResourceGateBuff(working, 'douqi', 'douqi-full', {
+        id: 'douqi-full',
+        nameKey: 'resource.douqi',
+        icon: 'buff_douqi',
+        polarity: 'buff',
+        color: 0xffd050,
+        duration: Number.POSITIVE_INFINITY,
+        maxStacks: 1,
+        stacking: { mode: 'refresh' },
+      });
+      if (result) {
+        commit({ ...working, buffs: result.buffs });
+        for (const e of result.events) this.events.push(e);
+      }
+    };
+
     const grantResource = (resource: string, delta: number, targetId: string): void => {
       if (delta === 0) return;
       const target = targetId === working.id ? working : this.current(targetId);
@@ -709,10 +793,11 @@ export class BattleEngine {
       }
 
       if (ability.kind === 'resource') {
-        // 一次性资源变动（"斩击产生 20 点斗炁"）。
+        // 一次性资源变动（"基础技产生 18 点斗炁"）。
         // 与 `douqiRegen` 修正的区别：那是持续速率，这是一次性。
         const delta = typeof ability.delta === 'number' ? ability.delta : 0;
         grantResource(ability.resource, delta, targetIdOf(ability.target.mode));
+        syncDouqiFull();
         continue;
       }
 
@@ -723,10 +808,14 @@ export class BattleEngine {
           if (then.kind === 'resource') {
             const delta = typeof then.delta === 'number' ? then.delta : 0;
             grantResource(then.resource, delta, targetIdOf(then.target.mode));
+            syncDouqiFull();
           }
         }
       }
     }
+
+    // 本次结算结束后复查一次：内容可能直接写了 addBuff 形式的标记
+    void addBuff;
   }
 
   private pushBuffApplied(targetId: string, buffId: string, stacks: number): void {
@@ -805,6 +894,37 @@ export class BattleEngine {
         stacks: applied.stacks,
         sourceId: actor.id,
       });
+      return;
+    }
+
+    if (effect.kind === 'removeBuff') {
+      /**
+       * 移除 buff。
+       *
+       * 用途：**派生技消耗掉它自己的开启条件**。
+       * 没有这一步时，`combo-window` 在窗口期内可被反复利用，
+       * 派生技会完全取代基础技（实测 152 次派生 vs 38 次基础）。
+       * 移除之后，一次基础技只能换来一次派生。
+       */
+      const buffId = effect.buff?.id ?? effect.buffId;
+      if (buffId) {
+        const who = effect.target?.mode === 'self' ? actor : target;
+        const current = this.current(who.id);
+        if (current.buffs.some((b) => b.defId === buffId)) {
+          this.replaceCombatant({
+            ...current,
+            buffs: current.buffs.filter((b) => b.defId !== buffId),
+          });
+          this.events.push({
+            kind: 'buffExpired',
+            tick: this.state.tick,
+            targetId: who.id,
+            buffId,
+            stacks: 0,
+            sourceId: actor.id,
+          });
+        }
+      }
       return;
     }
 

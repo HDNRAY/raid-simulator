@@ -18,7 +18,7 @@
 
 import type { Application, Container, Graphics } from 'pixi.js';
 import { PALETTE } from './theme';
-import { FONT, LAYOUT, LOGICAL, iconRect, skillSlotRect } from '../ui/layout';
+import { FONT, LAYOUT, LOGICAL, skillSlotRect } from '../ui/layout';
 import { Bar, Label, Panel, drawCorners, type PixiCtor } from '../ui/primitives';
 import { BossSprite } from './actors/BossSprite';
 import {
@@ -118,12 +118,10 @@ function drawBackground(g: Graphics): void {
 
 class IconStrip {
   readonly root: Container;
-  private readonly icons: Array<{
-    bg: Graphics;
-    text: Label;
-    time: Label;
-    x: number;
-    y: number;
+  private readonly items: Array<{
+    square: Graphics;
+    label: Label;
+    timer: Label;
   }> = [];
   private readonly pixi: PixiCtor;
 
@@ -135,6 +133,7 @@ class IconStrip {
       readonly size: number;
       readonly gap: number;
       readonly max: number;
+      readonly labelGap?: number;
     },
     private readonly translate: TranslateFn,
   ) {
@@ -144,28 +143,27 @@ class IconStrip {
 
   private ensure(count: number): void {
     const target = Math.min(count, this.strip.max);
-    while (this.icons.length < target) {
-      const rect = iconRect(this.strip, this.icons.length);
-      const bg = new this.pixi.Graphics();
-      // 图标暂用「名字前两字」当地占位符号 —— 接入正式素材后换成贴图
-      const text = new Label(this.pixi, {
-        x: rect.x + rect.w / 2,
-        y: rect.y + 4,
+    while (this.items.length < target) {
+      const square = new this.pixi.Graphics();
+      // 极简标签：最多 2 字，字号 small（中文下限 13）
+      const label = new Label(this.pixi, {
+        x: 0,
+        y: this.strip.y + 3,
         size: FONT.small,
         color: 0xffffff,
-        anchorX: 0.5,
       });
-      const time = new Label(this.pixi, {
-        x: rect.x + rect.w / 2,
-        y: rect.y + rect.h - 12,
+      // 剩余时间叠在方块**右下角**，不额外占横向空间
+      const timer = new Label(this.pixi, {
+        x: 0,
+        y: this.strip.y + this.strip.size - FONT.tiny - 1,
         size: FONT.tiny,
-        color: 0xd8d8e4,
-        anchorX: 0.5,
+        color: 0xffffff,
+        anchorX: 1,
         stroke: 0x000000,
         strokeWidth: 2,
       });
-      this.root.addChild(bg, text.root, time.root);
-      this.icons.push({ bg, text, time, x: rect.x, y: rect.y });
+      this.root.addChild(square, label.root, timer.root);
+      this.items.push({ square, label, timer });
     }
   }
 
@@ -174,54 +172,54 @@ class IconStrip {
     const sorted = [...buffs].sort((a, b) => Number(b.isDefensive) - Number(a.isDefensive));
     this.ensure(sorted.length);
 
-    const { size } = this.strip;
-    for (let i = 0; i < this.icons.length; i += 1) {
-      const icon = this.icons[i];
+    const { x, y, size, gap } = this.strip;
+    const labelGap = this.strip.labelGap ?? 4;
+    let cursor = x;
+
+    for (let i = 0; i < this.items.length; i += 1) {
+      const item = this.items[i];
       const view = sorted[i];
-      if (!icon) continue;
+      if (!item) continue;
 
       if (!view) {
-        icon.bg.clear();
-        icon.text.set('');
-        icon.time.set('');
+        item.square.clear();
+        item.label.set('');
+        item.timer.set('');
+        item.square.visible = false;
         continue;
       }
 
       const tight = isTightWindow(view);
-      const edge = view.isDefensive
-        ? tight
-          ? PALETTE.iframe.bright
-          : PALETTE.iframe.base
-        : view.polarity === 'debuff'
-          ? PALETTE.debuff.base
-          : view.polarity === 'neutral'
-            ? PALETTE.neutral.base
-            : PALETTE.buff.base;
+      const edge = view.color;
 
-      const g = icon.bg;
+      const g = item.square;
+      g.visible = true;
       g.clear();
-      // 26px 太小，画渐层看不清 —— 只用底色 + 描边 + 顶边色带
-      g.rect(icon.x, icon.y, size, size).fill({ color: 0x0b0b12, alpha: 0.92 });
-      g.rect(icon.x, icon.y, size, size).stroke({ color: edge, width: tight ? 2 : 1 });
-      g.rect(icon.x + 1, icon.y + 1, size - 2, 2).fill(edge);
+      // **单色方块占位**：一块纯色 + 深色描边。
+      // 接入正式图标后这一块会被贴图替换，布局不需要改。
+      g.rect(cursor, y, size, size).fill({ color: edge, alpha: tight ? 1 : 0.9 });
+      g.rect(cursor, y, size, size).stroke({ color: 0x05050a, width: 1 });
+      // 判定窗口且时间很紧：加一圈亮边提醒"就是现在"
+      if (tight) g.rect(cursor - 1, y - 1, size + 2, size + 2).stroke({ color: 0xffffff, width: 1 });
 
-      const dur = Number.isFinite(view.durationMs) && view.durationMs > 0 ? view.durationMs : 1;
-      const frac = Number.isFinite(view.remainingMs)
-        ? Math.min(1, Math.max(0, view.remainingMs / dur))
-        : 1;
-      if (frac < 1) {
-        g.rect(icon.x + 1, icon.y + size - 3, Math.round((size - 2) * frac), 2).fill(edge);
-      }
-
-      icon.text.set(this.translate(view.nameKey).slice(0, 2));
-      icon.text.setColor(edge);
-      icon.time.set(
+      // 剩余时间：叠在方块内右下角（白字 + 黑描边，压在纯色上也读得清）
+      const seconds =
         view.stacks > 1
           ? `${view.stacks}`
-          : Number.isFinite(view.remainingMs) && view.remainingMs < 10_000
+          : Number.isFinite(view.remainingMs) && view.remainingMs < 100_000
             ? `${Math.ceil(view.remainingMs / 1000)}`
-            : '',
-      );
+            : '';
+      item.timer.set(seconds);
+      item.timer.setColor(edge > 0x808080 ? 0x101014 : 0xffffff);
+      item.timer.root.x = cursor + size - 2;
+
+      // 标签在方块右侧，流式排布
+      item.label.set(this.translate(view.shortLabelKey));
+      item.label.setColor(0xd0d0dc);
+      item.label.root.x = cursor + size + labelGap;
+
+      const labelW = Math.max(item.label.root.width, 16);
+      cursor += size + labelGap + labelW + gap;
     }
   }
 }

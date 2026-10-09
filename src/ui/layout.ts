@@ -61,8 +61,13 @@ export const LAYOUT = {
   bossBar: { x: 8, y: 4, w: 944, h: 18 },
   /** Boss 血条 */
   bossHp: { x: 8, y: 24, w: 944, h: 12 },
-  /** Boss 的 buff / debuff 图标（血条下方左侧） */
-  bossBuffs: { x: 8, y: 40, size: 26, gap: 3, max: 12 },
+  /**
+   * Boss 的 buff / debuff 条（血条下方左侧）。
+   *
+   * 每一项 = **单色方块（占位图标）+ 极简标签**。
+   * `size` 是方块边长，标签宽度由文字实际宽度决定（流式排布）。
+   */
+  bossBuffs: { x: 8, y: 40, size: 20, gap: 6, max: 10, labelGap: 4 },
 
   /**
    * 预警条 —— **全屏最重要的元素**。
@@ -77,8 +82,8 @@ export const LAYOUT = {
 
   /** 玩家面板（左下）：血 / 精力 / 斗炁 */
   player: { x: 8, y: 452, w: 264, h: 80 },
-  /** 玩家 buff 图标（玩家面板右侧，横向展开） */
-  playerBuffs: { x: 280, y: 452, size: 26, gap: 3, max: 12 },
+  /** 玩家的 buff / debuff 条（玩家面板右侧，横向展开） */
+  playerBuffs: { x: 280, y: 452, size: 20, gap: 6, max: 10, labelGap: 4 },
 
   /** 技能栏（右下，**右对齐**到安全区 —— 右手操作区） */
   skillBar: { slot: 48, gap: 5, max: 12, y: 474, right: 8 },
@@ -110,15 +115,7 @@ export function skillSlotRect(
   return { x: startX + index * (slot + gap), y, w: slot, h: slot };
 }
 
-/** 图标条某一位的坐标（左起横向展开）。 */
-export function iconRect(
-  strip: { readonly x: number; readonly y: number; readonly size: number; readonly gap: number },
-  index: number,
-): { x: number; y: number; w: number; h: number } {
-  return {
-    x: strip.x + index * (strip.size + strip.gap),
-    y: strip.y,
-    w: strip.size,
-    h: strip.size,
-  };
-}
+/**
+ * 图标条的排布是**流式**的（方块 + 变宽的文字标签），
+ * 所以不在这里算坐标 —— 由 `IconStrip` 每帧按实际文字宽度顺序摆放。
+ */

@@ -292,6 +292,14 @@ export interface BuffDef {
   readonly nameKey: LocaleKey;
   readonly icon: string;
   readonly polarity: Polarity;
+  /**
+   * 图标占位颜色（0xRRGGBB）。
+   *
+   * 当前美术素材是**单色方块占位**，所以这个值就是玩家看到的东西。
+   * 不做成"按 polarity 自动推导"是因为内容作者需要区分同极性的
+   * 不同 buff（例如"无敌"要橙、"急速"要青）。
+   */
+  readonly color?: number;
   /** ms。`Number.POSITIVE_INFINITY` 表示永久。 */
   readonly duration: number;
   readonly maxStacks: number;
