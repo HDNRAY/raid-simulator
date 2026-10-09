@@ -36,12 +36,18 @@ export interface LogPanelOptions {
   readonly translate: (key: string, params?: Readonly<Record<string, string | number>>) => string;
 }
 
-/** 每行的高度（逻辑像素）。 */
-const LINE_H = 16;
+/**
+ * 每行的高度（逻辑像素）。
+ *
+ * 需求："行间距小一点"。16 → **13**，行间空隙 2 → **1**。
+ * 每行占高从 18 降到 14，10 行省下 40px —— 面板也跟着变矮。
+ * 13px 的行高配 `FONT.tiny`(11) 仍然放得下，不会挤。
+ */
+const LINE_H = 13;
 /** 最多显示几行 —— 再多战斗中就来不及读了（见文件头说明）。 */
 const VISIBLE_LINES = 10;
 /** 行与行之间的间距 */
-const LINE_GAP = 2;
+const LINE_GAP = 1;
 
 /**
  * 类别 → 颜色。

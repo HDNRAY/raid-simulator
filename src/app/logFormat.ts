@@ -152,9 +152,19 @@ export class LogFormatter {
           params: {},
         };
       }
-      case 'castStarted': {
-        return { tick, category: 'cast', key: 'log.castStarted', params: {} };
-      }
+      /**
+       * ⚠️ `castStarted` **不记**（需求："log里不要开始读条"）。
+       *
+       * 它是最频繁的事件之一（Boss 与玩家每放一招都发），而信息量极低：
+       * "开始读条"本身不说明任何结果 —— 结果要么是命中（记了伤害）、
+       * 要么是被打断（记了打断）。读条**过程**已经由画面上的预警条
+       * 实时表达，日志里再记一条只是噪声。
+       *
+       * 去掉它之后日志剩下的都是**有结果的事**：伤害、闪躲、打断、
+       * 霸体、结束。这才是"战斗日志"该有的密度。
+       */
+      case 'castStarted':
+        return undefined;
       case 'castInterrupted': {
         return {
           tick,

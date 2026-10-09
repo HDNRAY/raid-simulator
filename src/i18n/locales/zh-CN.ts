@@ -332,7 +332,6 @@ export const zhCN = {
     takeDamage: '受到 {amount} 伤害',
     avoided: '闪躲',
     missed: '未命中',
-    castStarted: '开始读条',
     castInterrupted: '读条被打断（{reason}）',
     interruptSuccess: '打断成功',
     interruptImmune: '目标霸体，打断无效',

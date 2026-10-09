@@ -105,11 +105,22 @@ describe('LogFormatter：事件 → 条目', () => {
     expect(f.all()).toEqual([]);
   });
 
-  it('读条只记"开始"，不记"完成"（成对事件只留一条）', () => {
+  it('读条的两个时刻**都不记**（需求："log里不要开始读条"）', () => {
+    /**
+     * `castStarted` 与 `castFinished` 都不进日志。
+     *
+     * 信息量太低：「开始读条」不说明任何结果 —— 结果要么是命中
+     * （记了伤害）、要么是被打断（记了打断）。读条**过程**已经由
+     * 画面上的预警条实时表达。
+     *
+     * 去掉之后日志剩下的都是**有结果的事**：伤害、闪躲、打断、霸体、结束。
+     */
     const f = new LogFormatter();
-    f.consume([{ kind: 'castStarted', tick: 1, sourceId: 'player', skillId: 'attack' }]);
-    expect(f.all()).toHaveLength(1);
-    expect(f.all()[0]!.key).toBe('log.castStarted');
+    f.consume([
+      { kind: 'castStarted', tick: 1, sourceId: 'player', skillId: 'attack' },
+      { kind: 'castFinished', tick: 4, sourceId: 'player', skillId: 'attack' },
+    ]);
+    expect(f.all()).toEqual([]);
   });
 
   it('打断相关事件都记下（这是战斗里最需要复盘的信息之一）', () => {
