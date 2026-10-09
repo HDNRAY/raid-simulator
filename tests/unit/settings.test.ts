@@ -508,3 +508,40 @@ describe('关闭按钮与 Boss 面板边距', () => {
     expect(LAYOUT.player.y - castBottom).toBeLessThanOrEqual(10);
   });
 });
+
+describe('标签只出现在详情区，不占技能格', () => {
+  /**
+   * 需求："按键设置里，grid 的 cell 里就不要显示 tag 了"。
+   *
+   * 为什么去掉：格子是 188×56 的小面积，塞第三行字之后
+   * "技能名 + 按键 + 标签"互相挤，扫一眼分不清主次。而玩家在这一页
+   * 真正要确认的是"**哪个技能绑了哪个键**"——标签属于"这个技能是什么"，
+   * 那是底部详情区的事。
+   */
+  it('【关键】技能格里不再有标签 Label', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/ui/settings/SettingsPanel.ts', import.meta.url), 'utf8');
+    // RowSlot 不再带 tags 字段
+    expect(src).not.toMatch(/private readonly rowLabels: Array<\{\s*\n\s*\/\*\*[^]*?tags: Label;/);
+    // 绘制分支里不再给格子设标签
+    expect(src).not.toMatch(/slot\.tags\.set/);
+    // 建格子时也不再 new 标签 Label
+    expect(src).not.toMatch(/const tags = new Label\(pixi/);
+  });
+
+  it('标签仍然出现在**详情区**（没有整体删掉）', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/ui/settings/SettingsPanel.ts', import.meta.url), 'utf8');
+    // 详情区的 tags Label 还在，并且仍被赋值
+    expect(src).toMatch(/tags: detailLine\(/);
+    expect(src).toMatch(/this\.detail\.tags\.set\(tags\)/);
+    // 文案 key 仍然来自 settings.hintTags.<id>
+    expect(src).toMatch(/settings\.hintTags\.\$\{tag\}/);
+  });
+
+  it('tagColor 已随格子标签一起删除（不留死代码）', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/ui/settings/SettingsPanel.ts', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/function tagColor\(/);
+  });
+});

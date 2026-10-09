@@ -141,8 +141,6 @@ export class SettingsPanel {
   private readonly body: Container;
   private readonly rowGfx: Graphics;
   private readonly rowLabels: Array<{
-    /** 玩法提示标签（如「打断」），没有则为空串 */
-    readonly tags: Label;
     name: Label;
     key: Label;
     rect: { x: number; y: number; w: number; h: number };
@@ -259,20 +257,19 @@ export class SettingsPanel {
         anchorX: 1,
       });
       /**
-       * 玩法提示标签（需求："玩家技能的 tags 显示在设置里"）。
+       * ⚠️ 格子里**不画提示标签**（需求："按键设置里，grid 的 cell 里
+       * 就不要显示 tag 了"）。
        *
-       * 画在技能字**下方**一行，字号用 `tiny` —— 它是补充说明，
-       * 不能和"技能名 + 按键"抢视觉。没有标签的技能这一行留空
-       * （格子高度是统一的，不为了空行去压缩别的格）。
+       * 原先在技能字下方画一行 `tiny` 的标签（如「打断」）。去掉了：
+       *   - 格子是 188×56 的小面积，塞第三行字之后"技能名 + 按键 +
+       *     标签"三者互相挤，扫一眼分不清主次
+       *   - 玩家在这一页真正要确认的是"**哪个技能绑了哪个键**"，
+       *     标签属于"这个技能是什么"，那是详情区的事
+       *
+       * 标签现在只在底部**详情区**显示（跟说明、代价、冷却放一起）。
        */
-      const tags = new Label(pixi, {
-        x: rect.x + 12,
-        y: rect.y + rect.h - 12,
-        size: FONT.tiny,
-        color: PALETTE.textDim,
-      });
-      this.body.addChild(glyph.root, key.root, tags.root);
-      this.rowLabels.push({ name: glyph, key, tags, rect });
+      this.body.addChild(glyph.root, key.root);
+      this.rowLabels.push({ name: glyph, key, rect });
     }
 
     this.hintLabel = new Label(pixi, {
@@ -828,7 +825,6 @@ export class SettingsPanel {
     for (const row of this.rowLabels) {
       row.name.set('');
       row.key.set('');
-      row.tags.set('');
     }
     /**
      * **离开通用页时藏起滑块。**
@@ -884,24 +880,6 @@ export class SettingsPanel {
       slot.key.set(capturing ? '…' : formatKey(row.key, this.options.translate('settings.keyUnbound')));
       slot.key.setColor(capturing || focused ? PALETTE.douqi.bright : PALETTE.text);
       /**
-       * 标签文案：`settings.hintTags.<id>`。
-       *
-       * 用"·"分隔多个标签，而不是竖线或逗号 —— 小字下它最轻。
-       * 一个标签都没有时留空（不是"无"：那是噪声）。
-       */
-      const tagText = (row.hintTags ?? [])
-        .map((tag) => this.options.translate(`settings.hintTags.${tag}`))
-        .join(' · ');
-      slot.tags.set(tagText);
-      /**
-       * 标签颜色按含义分：
-       *   霸体（打不断）→ 金，和"这是个屏障"的直觉一致
-       *   高伤（很痛）  → 红，和伤害同色
-       *   打断（进攻性）→ 青绿，和可打断提示同色
-       */
-      slot.tags.setColor(tagColor(row.hintTags ?? []));
-
-      /**
        * 详情只为**当前焦点**那一项显示。
        *
        * 焦点可能在 tabs / slider / reset 上，那时 `focus.zone !== 'grid'`，
@@ -950,13 +928,6 @@ export class SettingsPanel {
  * 取**优先级最高的那一个**标签的颜色 —— 一行小字里混两种颜色会更乱，
  * 而标签本来就是"最该注意的那条"提示。
  */
-function tagColor(tags: readonly string[]): number {
-  if (tags.includes('highDamage')) return 0xff8a70; // 红：很痛
-  if (tags.includes('interruptImmune')) return 0xe4a840; // 金：打不断
-  if (tags.includes('interrupt')) return 0x7cd480; // 绿：进攻性
-  return 0x8c8c9e;
-}
-
 /** 详情里说明的最大字符数（超出截断加省略号）。 */
 const DETAIL_DESC_MAX_CHARS = 46;
 
