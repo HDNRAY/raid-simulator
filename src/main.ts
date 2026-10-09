@@ -94,7 +94,7 @@ function makePlayer(): Combatant {
 
 function makeBoss(): Combatant {
   return {
-    id: 'verrot',
+    id: 'meiichiro',
     nameKey: 'boss.name',
     side: 'enemy',
     caps: { ...BOSS_CAPS },
@@ -166,13 +166,13 @@ async function bootstrap(): Promise<void> {
         combatants: [makePlayer(), makeBoss()],
         // 用真实时钟做种子：每次开局不同，但仍可复现（记录 seed 即可）
         seed: Date.now() >>> 0,
-        bossId: 'verrot',
+        bossId: 'meiichiro',
         timeLimitMs: TIME_LIMIT_MS,
         buffs: registry.buffs,
         skills: registry.skills,
         baseStats: new Map<string, Partial<Record<StatKey, number>>>([
           ['player', PLAYER_BASE],
-          ['verrot', {}],
+          ['meiichiro', {}],
         ]),
         passiveModifiers: new Map(),
       },

@@ -373,7 +373,7 @@ const loadout: Loadout = {
 };
 
 const encounter: EncounterDef = {
-  id: 'verrot',
+  id: 'meiichiro',
   nameKey: 'event.enrage',
   player: loadout,
   boss: {

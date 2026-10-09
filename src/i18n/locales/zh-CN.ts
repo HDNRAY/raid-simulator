@@ -222,9 +222,9 @@ export const zhCN = {
 
   /** Boss 技能与本体 */
   boss: {
-    name: '堕落者·维罗特',
-    cleave: { name: '重斩', desc: '短前摇，造成 8 点物理伤害。可打断、可闪避、可格挡。' },
-    sweep: { name: '横扫', desc: '长前摇，造成 14 点火焰伤害。可打断、可闪避、可格挡。' },
+    name: '伪·明显一郎',
+    cleave: { name: '重斩', desc: '短前摇，造成 14 点物理伤害。可打断、可闪避、可格挡。' },
+    sweep: { name: '横扫', desc: '长前摇，造成 20 点火焰伤害。可打断、可闪避、可格挡。' },
     empower: { name: '蓄能', desc: '前摇后自身增伤，持续 16 秒。打断它可以免掉一轮爆发。' },
     /**
      * 霸体：Boss 的"不能被干扰"窗口。
@@ -302,7 +302,7 @@ export const zhCN = {
     defeatedByTimeout: '时间耗尽',
     defeatedByDeath: '你倒下了',
     defeatedByEnrage: '被狂暴的 Boss 击溃',
-    wonByKill: '击败了堕落者·维罗特',
+    wonByKill: '击败了伪·明显一郎',
     /** 结算面板上的统计标签 */
     statTime: '用时',
     statRemainingHp: '剩余生命',

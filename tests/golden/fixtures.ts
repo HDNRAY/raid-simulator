@@ -73,7 +73,7 @@ export function makePlayer(): Combatant {
 
 export function makeBoss(): Combatant {
   return {
-    id: 'verrot',
+    id: 'meiichiro',
     nameKey: 'boss.name',
     side: 'enemy',
     caps: { ...BOSS_CAPS },
@@ -97,13 +97,13 @@ export function makeGoldenEngineOptions(
   return {
     combatants: [makePlayer(), makeBoss()],
     seed,
-    bossId: 'verrot',
+    bossId: 'meiichiro',
     timeLimitMs: 180_000,
     buffs: registry.buffs,
     skills: registry.skills,
     baseStats: new Map<string, Partial<Record<StatKey, number>>>([
       ['player', PLAYER_BASE],
-      ['verrot', {}],
+      ['meiichiro', {}],
     ]),
     passiveModifiers: new Map(),
     ...overrides,
@@ -157,7 +157,7 @@ export const GOLDEN_OUTCOME = {
   finalRngSeed: 20261009,
   combatants: {
     player: { alive: true, hp: 9, energy: 0, douqi: 35, damageDealt: 0, damageTaken: 0 },
-    verrot: { alive: false, hp: 0, energy: 0, douqi: 0, damageDealt: 0, damageTaken: 0 },
+    meiichiro: { alive: false, hp: 0, energy: 0, douqi: 0, damageDealt: 0, damageTaken: 0 },
   },
 } satisfies Omit<RunOutcome, 'ticks'> & { readonly ticks: number };
 

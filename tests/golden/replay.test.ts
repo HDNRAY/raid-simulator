@@ -101,8 +101,8 @@ describe('随机源只有种子', () => {
   });
 
   it('概率判定（暴击）写进了状态，因此可复现', () => {
-    expect(runGolden(7).combatants['verrot']?.hp).toBe(
-      runGolden(7).combatants['verrot']?.hp,
+    expect(runGolden(7).combatants['meiichiro']?.hp).toBe(
+      runGolden(7).combatants['meiichiro']?.hp,
     );
   });
 });
@@ -175,8 +175,8 @@ describe('对内容改动的敏感度（回归保护）', () => {
     const auto = runGolden();
     const attackOnly = runWithPriority(['attack']);
     // 少了 60 伤害的轰，Boss 剩余血量应该更多（或者玩家更早死）
-    expect(attackOnly.combatants['verrot']!.hp).toBeGreaterThanOrEqual(
-      auto.combatants['verrot']!.hp,
+    expect(attackOnly.combatants['meiichiro']!.hp).toBeGreaterThanOrEqual(
+      auto.combatants['meiichiro']!.hp,
     );
   });
 });

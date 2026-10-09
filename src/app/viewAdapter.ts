@@ -550,7 +550,7 @@ function emptyView(tick: number): BattleSnapshotView {
     status: 'idle',
     enraged: false,
     player: emptyCombatant('player'),
-    boss: { ...emptyCombatant('verrot'), side: 'enemy' },
+    boss: { ...emptyCombatant('meiichiro'), side: 'enemy' },
     skills: [],
     floatingText: [],
     telegraphing: false,

@@ -76,7 +76,7 @@ describe('真实内容：Boss 的机制都接线了', () => {
     const engine = makeEngine();
     const used = new Set<string>();
     for (const e of run(engine, 60 * 30)) {
-      if (e.kind === 'skillUsed' && e.sourceId === 'verrot') used.add(e.skillId);
+      if (e.kind === 'skillUsed' && e.sourceId === 'meiichiro') used.add(e.skillId);
     }
     expect(used.size).toBeGreaterThan(0);
     // 开场动作是重斩（延迟 1.5 秒）
@@ -86,7 +86,7 @@ describe('真实内容：Boss 的机制都接线了', () => {
   it('Boss 的读条产生了前摇（castStarted）', () => {
     const engine = makeEngine();
     const castStarts = run(engine, 60 * 20).filter(
-      (e) => e.kind === 'castStarted' && e.sourceId === 'verrot',
+      (e) => e.kind === 'castStarted' && e.sourceId === 'meiichiro',
     );
     expect(castStarts.length).toBeGreaterThan(0);
   });
@@ -195,7 +195,7 @@ describe('真实内容：Boss 的机制都接线了', () => {
     for (let t = 0; t < 60 * 20; t += 1) {
       engine.tick();
       for (const e of engine.drainEvents()) {
-        if (e.kind === 'skillUsed' && e.sourceId === 'verrot') used.add(e.skillId);
+        if (e.kind === 'skillUsed' && e.sourceId === 'meiichiro') used.add(e.skillId);
         // 绝不该出现任何"阶段"类事件
         expect(e.kind).not.toBe('phaseChanged' as never);
       }
@@ -597,7 +597,7 @@ describe('Boss 霸体：唯一挡得住打断的东西', () => {
     e.drainEvents();
 
     // Boss 放霸体招式，然后空转等它读完（读条 0.4 秒）
-    e.tick([{ type: 'useSkill', skillId: 'boss-armor', atTick: e.snapshot.tick }], 'verrot');
+    e.tick([{ type: 'useSkill', skillId: 'boss-armor', atTick: e.snapshot.tick }], 'meiichiro');
     e.drainEvents();
     for (let i = 0; i < 30; i += 1) {
       e.tick();
@@ -610,7 +610,7 @@ describe('Boss 霸体：唯一挡得住打断的东西', () => {
     ).toBe(true);
 
     // 让 Boss 起一个读条招式
-    e.tick([{ type: 'useSkill', skillId: 'boss-cleave', atTick: e.snapshot.tick }], 'verrot');
+    e.tick([{ type: 'useSkill', skillId: 'boss-cleave', atTick: e.snapshot.tick }], 'meiichiro');
     e.drainEvents();
     expect(e.snapshot.combatants.find((c) => c.side === 'enemy')!.casts.length).toBe(1);
 
@@ -626,9 +626,9 @@ describe('Boss 霸体：唯一挡得住打断的东西', () => {
 
   it('没有霸体时「破」能打断 Boss 的任意招式', () => {
     const e = new BattleEngine(makeGoldenEngineOptions());
-    e.tick([], 'verrot');
+    e.tick([], 'meiichiro');
     e.drainEvents();
-    e.tick([{ type: 'useSkill', skillId: 'boss-cleave', atTick: e.snapshot.tick }], 'verrot');
+    e.tick([{ type: 'useSkill', skillId: 'boss-cleave', atTick: e.snapshot.tick }], 'meiichiro');
     e.drainEvents();
     expect(e.snapshot.combatants.find((c) => c.side === 'enemy')!.casts.length).toBe(1);
 
