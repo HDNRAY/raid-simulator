@@ -195,7 +195,7 @@ export const zhCN = {
     },
     dodge: {
       name: '闪',
-      desc: '消耗 40 炁，获得 0.5 秒完全无敌。瞬发，随时可按。'
+      desc: '消耗 30 炁，获得 0.5 秒完全无敌。瞬发，随时可按。'
     },
     guard: {
       name: '防',

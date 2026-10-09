@@ -22,7 +22,7 @@
  * | 字 | 代价 | 效果 |
  * |----|------|------|
  * | 攻 | 10 炁 | 造成 10 点伤害（普攻） |
- * | 闪 | 40 炁 | 0.5 秒完全无敌 |
+ * | 闪 | 30 炁 | 0.5 秒完全无敌 |
  * | 防 | 按住，每 0.1 秒 2 炁 | 减伤 40%，松开即取消 |
  * | 破 | —（5 秒 CD） | 瞬发，打断任何技能 |
  * | 轰 | 50 缠 | 造成 30 点伤害 |
@@ -283,7 +283,7 @@ const ATTACK: SkillDef = {
   interruptible: true,
 };
 
-/** 闪：0.5 秒完全无敌。代价是 40 缠（满缠的 40%）。 */
+/** 闪：0.5 秒完全无敌。代价是 **30 炁**（满炁的 30%）。 */
 const DODGE: SkillDef = {
   id: 'dodge',
   kind: 'activeSkill',
@@ -301,7 +301,7 @@ const DODGE: SkillDef = {
    */
   cooldown: 0,
   /** 瞬发无冷却 —— 否则"该躲时躲不了"。 */
-  cost: [{ resource: 'energy', value: S(40) }],
+  cost: [{ resource: 'energy', value: S(30) }],
   targeting: { mode: 'self' },
   hits: [],
   tags: ['defensive'],
