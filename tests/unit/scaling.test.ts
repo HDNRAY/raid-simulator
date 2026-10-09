@@ -116,9 +116,10 @@ describe('技能格内三个标签都不越界、互不重叠', () => {
      */
     const layout: Record<string, { h: number; ax: number; ay: number }> = {
       glyph: { h: 21, ax: 0.5, ay: 0.5 },
-      cooldown: { h: 20, ax: 0, ay: 1 },
+      cooldown: { h: 20, ax: 0.5, ay: 0.5 },
+      skillCd: { h: 13, ax: 0, ay: 1 },
       key: { h: 13, ax: 0, ay: 0 },
-      cost: { h: 13, ax: 1, ay: 0 },
+      cost: { h: 13, ax: 1, ay: 1 },
     };
     for (let i = 0; i < total; i += 1) {
       const rect = skillSlotRect(i, total);
@@ -145,7 +146,7 @@ describe('技能格内三个标签都不越界、互不重叠', () => {
      *   冷却秒数 18px     → 17x23（含描边）
      *   按键提示 11px     → 7x13
      */
-    const sizes = { glyph: { w: 26, h: 21 }, cooldown: { w: 17, h: 20 }, key: { w: 7, h: 13 }, cost: { w: 15, h: 13 } };
+    const sizes = { glyph: { w: 26, h: 21 }, cooldown: { w: 17, h: 20 }, skillCd: { w: 20, h: 13 }, key: { w: 7, h: 13 }, cost: { w: 18, h: 13 } };
     const total = 6;
     for (let i = 0; i < total; i += 1) {
       const rect = skillSlotRect(i, total);
@@ -350,23 +351,24 @@ describe('技能格四角布局', () => {
    */
   const rect = () => skillSlotRect(2, 6);
 
-  it('按键在左上角，代价在右上角（同一行）', () => {
+  it('按键在左上角；固有 CD 在左下、代价在右下（共用底行）', () => {
     const r = rect();
     const pos = skillSlotLabels(r);
-    expect(pos.key.y).toBe(pos.cost.y);
+    // 上半行：按键贴左
     expect(pos.key.x).toBeLessThan(r.x + r.w / 2);
+    expect(pos.key.y).toBeLessThan(r.y + r.h / 2);
+    // 下半行：固有 CD 贴左、代价贴右，同一行
+    expect(pos.skillCd.y).toBe(pos.cost.y);
+    expect(pos.skillCd.x).toBeLessThan(r.x + r.w / 2);
     expect(pos.cost.x).toBeGreaterThan(r.x + r.w / 2);
-    // 代价是右对齐的（渲染层用 anchorX = 1）
-    expect(pos.cost.x).toBeGreaterThan(pos.key.x);
+    expect(pos.skillCd.x).toBeLessThan(pos.cost.x);
   });
 
-  it('冷却数字在左下角', () => {
+  it('**实时**冷却数字在格子正中（需求："保持在原来的中间"）', () => {
     const r = rect();
     const pos = skillSlotLabels(r);
-    expect(pos.cooldown.x).toBeLessThan(r.x + r.w / 2);
-    expect(pos.cooldown.y).toBeGreaterThan(r.y + r.h / 2);
-    // 左下角且是"底对齐"，所以它离格子底边很近
-    expect(r.y + r.h - pos.cooldown.y).toBeLessThanOrEqual(4);
+    expect(pos.cooldown.x).toBeCloseTo(r.x + r.w / 2, 5);
+    expect(pos.cooldown.y).toBeCloseTo(r.y + r.h / 2, 5);
   });
 
   it('图标在正中', () => {
@@ -376,16 +378,19 @@ describe('技能格四角布局', () => {
     expect(pos.glyph.y).toBeCloseTo(r.y + r.h / 2, 5);
   });
 
-  it('代价只给数字，不给单位 —— 40px 的角落放不下"30炁"', async () => {
+  it('代价只给数字 + 可选后缀，不拼资源名（角落放不下"30炁"）', async () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
-    // 代价那行必须是 String(Math.round(...))，不能拼上资源名或单位
-    expect(src).toMatch(/s\.cost\.set\(String\(Math\.round\(view\.cost\.value\)\)\)/);
+    // `10` / `2/s` —— 数字 + suffix，**不是**数字 + 资源名
+    expect(src).toMatch(/s\.cost\.set\(`\$\{Math\.round\(view\.cost\.value\)\}\$\{view\.cost\.suffix \?\? ''\}`\)/);
   });
 
-  it('冷却秒数不带单位 —— "4" 而不是 "4s"', async () => {
+  it('**实时**冷却只给数字；**固有**冷却带单位', async () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    // 实时："4"（不给单位，格子太小）
     expect(src).toMatch(/s\.cd\.set\(view\.cooldownRatio > 0\.001 \? Math\.ceil\(view\.cooldownSec\)\.toString\(\) : ''\)/);
+    // 固有："30s"（给单位，它是规格说明而不是剩余量）
+    expect(src).toMatch(/s\.skillCd\.set\(view\.skillCdSec > 0 \? `\$\{Math\.round\(view\.skillCdSec\)\}s` : ''\)/);
   });
 });

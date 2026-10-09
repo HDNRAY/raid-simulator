@@ -26,7 +26,7 @@ import { LOGICAL } from '../layout';
  * ------------------------------------------------------------------ */
 
 export const SETTINGS_PANEL = {
-  w: 560,
+  w: 640,
   /**
    * 高度按"能放下当前全部技能"定。
    *
@@ -34,8 +34,12 @@ export const SETTINGS_PANEL = {
    * 恢复默认按钮与边距，360 是刚好留一点余量的值。
    * 若以后技能变多，`KEY_ROW_MAX` 会自动减少（而不是重叠），
    * 那时再考虑给表格加滚动。
+   *
+   * 演进 400 → **440**：格子从 44 加到 56（为了在技能名下放一行
+   * 提示标签），400 高的面板只剩 3 行、容量掉到 9。440 能放 4 行、
+   * 容量回到 12，与 `KEY_GRID_CAPACITY` 的下限一致。
    */
-  h: 400,
+  h: 440,
   /** 居中 */
   get x(): number {
     return Math.round((LOGICAL.width - this.w) / 2);
@@ -79,8 +83,8 @@ export const TAB_BAR = { y: 40, w: 88, h: 30, gap: 8, x: 16 } as const;
 export const KEY_GRID = {
   top: 88,
   cols: 3,
-  cellW: 164,
-  cellH: 44,
+  cellW: 188,
+  cellH: 56,
   gapX: 10,
   gapY: 8,
   inset: 16,

@@ -190,7 +190,14 @@ describe('读条组件（CastBar）：两处读条共用同一个实现', () => 
     const m = /this\.root\.addChild\(([^)]*)\)/.exec(src);
     expect(m).not.toBeNull();
     const order = m![1]!.split(',').map((x) => x.trim());
-    expect(order).toEqual(['bg', 'this.fillGfx', 'this.border', 'this.nameText', 'this.timeText']);
+    expect(order).toEqual([
+      'bg',
+      'this.fillGfx',
+      'this.border',
+      'this.nameText',
+      'this.tagText',
+      'this.timeText',
+    ]);
   });
 
   it('填充四周内缩 INSET，且描边路径落在半像素上', async () => {
@@ -251,8 +258,15 @@ describe('技能格：冷却遮罩（白）与数字的层叠', () => {
     const m = /this\.root\.addChild\((gfx,[^)]*cd\.root[^)]*)\)/.exec(src);
     expect(m, '未找到技能格的 addChild').not.toBeNull();
     const order = m![1]!.split(',').map((x) => x.trim());
-    // 顺序：格子底 → 技能字 → 按键 → 代价 → **冷却数字（最后 = 最上层）**
-    expect(order).toEqual(['gfx', 'glyph.root', 'key.root', 'cost.root', 'cd.root']);
+    // 层叠：格子底 → 图标 → 按键 → 固有CD → 代价 → **实时CD（最上层）**
+    expect(order).toEqual([
+      'gfx',
+      'glyph.root',
+      'key.root',
+      'skillCd.root',
+      'cost.root',
+      'cd.root',
+    ]);
   });
 
   it('数字字号大于技能字 —— 冷却时它才是关键信息', () => {
@@ -283,5 +297,59 @@ describe('读条边框：恒色，不随进度变色', () => {
     // 只有构造时用 options.line；没有运行期改色方法
     expect(src).not.toContain('setBorderColor');
     expect(src).toMatch(/drawBorder\(this\.options\.line\)/);
+  });
+});
+
+describe('Boss 读条上的招式提示标签', () => {
+  /**
+   * 需求："boss 的招式的 tags 显示在它的读条中，比如'霸体'技能，
+   * 提示玩家无法被打断，'高伤'提示玩家闪避比防御更值得"
+   */
+  it('读条视图带 hintTags，且文案 key 走 settings.hintTags.*', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    expect(src).toMatch(/cast\.hintTags/);
+    expect(src).toMatch(/settings\.hintTags\.\$\{tag\}/);
+  });
+
+  it('【关键】「霸体」是**状态**，不只是技能静态属性', async () => {
+    /**
+     * Boss 开了霸体之后，读条上必须显示"打不断" —— 否则玩家会白按「破」。
+     * 而霸体是运行时 buff（`interruptImmune`），不是技能自带的标签，
+     * 所以视图层要把两者**合并**。
+     */
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/app/viewAdapter.ts', import.meta.url), 'utf8');
+    expect(src).toMatch(/if \(armored\) castTags\.add\('interruptImmune'\)/);
+  });
+
+  it('三个标签都有中文文案', () => {
+    for (const tag of ['interruptImmune', 'highDamage', 'interrupt']) {
+      expect(translator.t(`settings.hintTags.${tag}` as never)).not.toBe('');
+    }
+  });
+});
+
+describe('闪避位移（与防御区分）', () => {
+  it('闪避往右位移、然后复位；峰值是一个三角波', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    /**
+     * 需求："闪避的画面效果改成往右移动，然后复位，和防御区分开来"。
+     * 用三角波（0 → 峰值 → 0）而不是缓动状态机：无敌窗口本身就是
+     * 这条动画的时间轴，跟着它走不会出现"动画还在播但无敌已结束"。
+     */
+    expect(src).toMatch(/const wave = 1 - Math\.abs\(progress \* 2 - 1\)/);
+    expect(src).toMatch(/this\.playerRoot\.x = Math\.round\(DODGE_PEAK_X \* wave\)/);
+    // 没有闪避时必须复位（否则会停在偏移位置）
+    expect(src).toMatch(/this\.playerRoot\.x = 0;/);
+  });
+
+  it('防御**不**位移 —— 两者要在余光里也能区分', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    // 位移只在 dodge 分支里发生
+    expect(src).toMatch(/const dodge = view\.player\.buffs\.find/);
+    expect(src).not.toMatch(/guarding.*playerRoot\.x/);
   });
 });

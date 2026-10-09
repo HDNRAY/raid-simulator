@@ -26,6 +26,15 @@ import { DISPLAY_SCALE } from '../data/balance';
 const SLOT_COOLDOWN_BAR_H = LAYOUT.skillBar.cooldownBarHeight;
 
 /**
+ * 闪避位移的峰值（逻辑像素，向右）。
+ *
+ * 26 是"看得清但不出画"的值：玩家本体宽约 108（cx±54）、
+ * 身后距左边界还有 246px，所以这个距离安全。再大就会像"换了个位置"，
+ * 而不是"闪了一下"。
+ */
+const DODGE_PEAK_X = 26;
+
+/**
  * 技能格右上角"资源代价"的颜色。
  *
  * **与资源条用的是同一个 base 色** —— 玩家不用学第二套映射：
@@ -254,6 +263,7 @@ class SkillBarView {
     key: Label;
     cd: Label;
     cost: Label;
+    skillCd: Label;
     rect: { x: number; y: number; w: number; h: number };
   }> = [];
   private readonly pixi: PixiCtor;
@@ -322,28 +332,42 @@ class SkillBarView {
         color: 0x9090a0,
       });
       /**
-       * 冷却秒数：**左下角**（需求）。
+       * **实时**冷却秒数：格子正中（需求："实时 cd 还是保持在原来的中间"）。
        *
-       * - 单位**不显示**（"4" 而不是 "4s"）：格子只有 40px，
-       *   多一个字母会挤掉图标
-       * - 左对齐 + 底对齐（anchor 0,1），所以 `pos.cooldown` 是左下角
-       * - 描边保证在任何底色上都读得清（白色遮罩 / 深色格子都行）
+       * - 双向居中（anchor 0.5/0.5），所以 `pos.cooldown` 是中心点
+       * - 描边保证压在图标上也读得清
        */
       const cd = new Label(this.pixi, {
         x: pos.cooldown.x,
         y: pos.cooldown.y,
         size: FONT.cd,
         color: 0xffffff,
-        anchorY: 1,
+        anchorX: 0.5,
+        anchorY: 0.5,
         stroke: 0x000000,
         strokeWidth: 3,
         bold: true,
       });
       /**
-       * 资源代价：**右上角**（需求）。
+       * **固有**冷却：左下角（需求："左下 我说的是技能的固有 cd 时间"）。
        *
-       * 只显示**数字**，资源种类靠**颜色**区分（炁绿 / 缠金 / 血红）——
-       * 40px 的角落放不下"30炁"三个字。
+       * 静态数字，带 `s` 单位（"30s"）—— 它是"这个技能多长 CD"的
+       * 规格说明，不是"还剩多久"，有单位才不会被误读成实时值。
+       */
+      const skillCd = new Label(this.pixi, {
+        x: pos.skillCd.x,
+        // 与右侧的代价**同一行对齐**：两者锚点不同（这里底对齐、
+        // 代价也是底对齐），但小字形的下伸不同，实测差 2px，补上
+        y: pos.skillCd.y - 2,
+        size: FONT.tiny,
+        color: 0x8c8c9e,
+        anchorY: 1,
+      });
+      /**
+       * 资源代价：**右下角**。
+       *
+       * 只显示**数字**（+ 按住技的 `/s` 后缀），资源种类靠**颜色**区分
+       * （炁绿 / 缠金 / 血红）—— 角落放不下"30炁"三个字。
        */
       const cost = new Label(this.pixi, {
         x: pos.cost.x,
@@ -351,12 +375,13 @@ class SkillBarView {
         size: FONT.tiny,
         color: 0xffffff,
         anchorX: 1,
+        anchorY: 1,
         stroke: 0x000000,
         strokeWidth: 2,
       });
-      // 层叠：底 → 图标 → 按键 → 代价 → 冷却（冷却最上层）
-      this.root.addChild(gfx, glyph.root, key.root, cost.root, cd.root);
-      this.slots.push({ gfx, glyph, key, cd, cost, rect });
+      // 层叠：底 → 图标 → 按键 → 固有CD → 代价 → 实时CD（实时最上层）
+      this.root.addChild(gfx, glyph.root, key.root, skillCd.root, cost.root, cd.root);
+      this.slots.push({ gfx, glyph, key, cd, cost, skillCd, rect });
     }
 
     if (target !== this.slotCount) {
@@ -376,6 +401,8 @@ class SkillBarView {
         s.cd.root.y = pos.cooldown.y;
         s.cost.root.x = pos.cost.x;
         s.cost.root.y = pos.cost.y;
+        s.skillCd.root.x = pos.skillCd.x;
+        s.skillCd.root.y = pos.skillCd.y;
       }
     }
   }
@@ -394,6 +421,7 @@ class SkillBarView {
         s.key.set('');
         s.cd.set('');
         s.cost.set('');
+        s.skillCd.set('');
         continue;
       }
 
@@ -483,7 +511,10 @@ class SkillBarView {
        * 需求："按键的 cd，数字应该盖在按键 icon 上。"
        * 加描边是为了在任何底色上都读得清（白色遮罩 / 深色格子都行）。
        */
+      // 实时剩余：只给数字（格子太小，`4s` 会挤掉图标）
       s.cd.set(view.cooldownRatio > 0.001 ? Math.ceil(view.cooldownSec).toString() : '');
+      // 固有冷却：带单位，"这个技能多长 CD"的规格说明
+      s.skillCd.set(view.skillCdSec > 0 ? `${Math.round(view.skillCdSec)}s` : '');
       /**
        * 资源代价：数字 + **资源色**。
        *
@@ -492,7 +523,8 @@ class SkillBarView {
        * 左下面板的炁条是同一个绿 —— 玩家不需要学第二套映射。
        */
       if (view.cost) {
-        s.cost.set(String(Math.round(view.cost.value)));
+        // 按住技带 `/s` 后缀（"2/s" = 每秒 2 点，不是一共 2 点）
+        s.cost.set(`${Math.round(view.cost.value)}${view.cost.suffix ?? ''}`);
         s.cost.setColor(RESOURCE_COLORS[view.cost.resource]);
       } else {
         s.cost.set('');
@@ -554,6 +586,8 @@ export class BattleScene {
 
   private readonly boss: BossSprite;
   private readonly playerAnim: Graphics;
+  /** 玩家图形的外层容器（只用于闪避位移） */
+  private readonly playerRoot: Container;
   private readonly flashOverlay: Graphics;
 
   /* 顶栏 */
@@ -621,9 +655,18 @@ export class BattleScene {
     this.boss = new BossSprite(pixi, { x: 630, y: 378 });
     this.root.addChild(this.boss.root);
 
+    /**
+     * 玩家图形外面套一层容器，**只为了能整体位移**。
+     *
+     * 闪避动画要"往右闪一下再复位"，而 `drawPlayer` 是在固定
+     * `cx = 300` 处绘制路径的。比起每帧按偏移重绘整套多边形
+     * （60fps 下白算几十次 fill），移动容器的 `x` 几乎零成本。
+     */
+    this.playerRoot = new pixi.Container();
     this.playerAnim = new pixi.Graphics();
     this.drawPlayer(1);
-    this.root.addChild(this.playerAnim);
+    this.playerRoot.addChild(this.playerAnim);
+    this.root.addChild(this.playerRoot);
 
     /* ---------- 全屏闪光 ---------- */
     this.flashOverlay = new pixi.Graphics();
@@ -946,6 +989,31 @@ export class BattleScene {
     }
     this.playerAnim.tint = dodging ? 0x9ad8ff : guarding ? 0xc8d0e8 : 0xffffff;
 
+    /**
+     * 闪避位移：**往右闪一下，然后复位**（需求）。
+     *
+     * 形状是一条"上去再下来"的三角波：
+     *   - 位移在闪避窗口的**中点**达到峰值（`DODGE_PEAK_X`）
+     *   - 窗口结束正好回到 0，所以不需要额外的缓动状态机
+     *
+     * 为什么用 `remainingMs / durationMs` 而不是自己记时间：
+     * 无敌窗口本来就是"这段动画的时间轴"，跟着它走就不会出现
+     * "动画还在播但无敌已经结束"的错位。
+     *
+     * ⚠️ 位移与防御**明显区分**（需求）：防御只有下沉（pose）+ 冷色，
+     * 不位移；闪避才横移 —— 两者在余光里也不会混。
+     */
+    const dodge = view.player.buffs.find((b) => b.id.startsWith('dodge') && b.remainingMs > 0);
+    if (dodge) {
+      const total = Math.max(1, dodge.durationMs);
+      const progress = 1 - Math.min(1, dodge.remainingMs / total);
+      // 三角波：0 → 1 → 0
+      const wave = 1 - Math.abs(progress * 2 - 1);
+      this.playerRoot.x = Math.round(DODGE_PEAK_X * wave);
+    } else {
+      this.playerRoot.x = 0;
+    }
+
     /* ---------- 顶栏 ---------- */
     const bb = LAYOUT.bossBar;
     this.bossName.set(translate(view.boss.nameKey));
@@ -983,7 +1051,19 @@ export class BattleScene {
     const cast = view.boss.cast;
     this.castBar.visible = cast !== undefined;
     if (cast) {
-      this.castBar.setContent(translate(cast.nameKey), `${(cast.remainingMs / 1000).toFixed(1)}s`);
+      /**
+       * 招式的提示标签（需求："boss 的招式的 tags 显示在它的读条中"）。
+       *
+       * 「霸体」= 打不断，别浪费「破」；「高伤」= 闪避比防御更值。
+       */
+      const tagLabel = (cast.hintTags ?? [])
+        .map((tag) => translate(`settings.hintTags.${tag}`))
+        .join(' · ');
+      this.castBar.setContent(
+        translate(cast.nameKey),
+        `${(cast.remainingMs / 1000).toFixed(1)}s`,
+        tagLabel,
+      );
       /**
        * 文字颜色表达**能不能打断**：可打断 → 青绿；霸体 → 青蓝。
        * 需求去掉了"闪避或格挡"那行字（永远适用 = 噪声），

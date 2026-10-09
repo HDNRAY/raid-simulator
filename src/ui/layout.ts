@@ -281,8 +281,10 @@ export function skillSlotRect(
  * 不必靠截图肉眼判断。
  */
 export interface SlotLabelRects {
-  /** 资源代价（右上角，右对齐） */
+  /** 资源代价（右下角，右对齐） */
   readonly cost: { readonly x: number; readonly y: number };
+  /** 技能的固有冷却（左下角，左对齐） */
+  readonly skillCd: { readonly x: number; readonly y: number };
   readonly glyph: { readonly x: number; readonly y: number };
   readonly cooldown: { readonly x: number; readonly y: number };
   readonly key: { readonly x: number; readonly y: number };
@@ -304,20 +306,30 @@ export function skillSlotLabels(rect: {
      */
     glyph: { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 },
     /**
-     * 冷却秒数：**左下角**。
+     * **实时**冷却秒数：格子**正中**。
      *
-     * 需求："左下显示 cd 数字，单位秒，单位不显示"。
-     * 单位不显示是因为格子只有 40px —— "4" 够用，"4s" 会挤掉图标。
+     * 需求："实时 cd 还是保持在原来的中间"。
+     *
+     * 它盖在图标上（先例：26px 数字压 26px 图标，靠描边保证可读），
+     * 读条/冷却这类"正在发生"的信息最值得占中心位。
+     * 锚点 (0.5, 0.5)，所以这里给的是中心点。
      */
-    cooldown: { x: rect.x + 3, y: rect.y + rect.h - 3 },
-    /** 按键提示：**左上角**（锚点 0,0） */
+    cooldown: { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 },
+    /**
+     * **固有**冷却（技能本身多长的 CD）：左下角，右对齐到底边左角。
+     *
+     * 需求："左下 我说的是技能的固有 cd 时间" —— 与实时剩余是两回事。
+     * 它是个**静态**数字，所以放在角上不抢中心。
+     */
+    skillCd: { x: rect.x + 3, y: rect.y + rect.h - 3 },
+    /** 按键提示：左上角（锚点 0,0） */
     key: { x: rect.x + 3, y: rect.y + 2 },
     /**
-     * 资源代价：**右上角**（锚点 1,0）。
+     * 资源代价：**左下偏右**（与固有 CD 同一行，右对齐）。
      *
-     * 需求："右上显示资源代价，炁 / 缠 / 甚至血，
-     * 用相应的颜色代表那种资源"。
+     * 30px 的格子角落放不下"30 / 5s"两件事挤在一侧，
+     * 所以代价贴右边、固有 CD 贴左边，共用底部那一行（锚点 1,1）。
      */
-    cost: { x: rect.x + rect.w - 3, y: rect.y + 2 },
+    cost: { x: rect.x + rect.w - 3, y: rect.y + rect.h - 3 },
   };
 }

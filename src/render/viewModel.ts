@@ -65,6 +65,13 @@ export interface CombatantView {
     readonly interruptible: boolean;
     /** 还要多久命中（ms）—— 预警文案用 */
     readonly remainingMs: number;
+    /**
+     * 招式的**玩法提示标签**（需求："boss 的招式的 tags 显示在它的读条中"）。
+     *
+     * 例：`interruptImmune`（霸体，打不断）、`highDamage`（高伤，
+     * 闪避比防御更值）。文案在 i18n 里。
+     */
+    readonly hintTags?: readonly string[];
   };
 }
 
@@ -76,10 +83,19 @@ export interface CombatantView {
  */
 export type ResourceKeyName = 'hp' | 'energy' | 'douqi';
 
-/** 技能格的资源代价（右上角显示）。 */
+/** 技能格的资源代价（左下方显示）。 */
 export interface SlotCost {
   readonly resource: ResourceKeyName;
   readonly value: number;
+  /**
+   * 数值后缀（如 `/s`）。
+   *
+   * 按住技（「防」）的代价是**每秒**扣的，所以写 `2/s` 而不是 `2` ——
+   * 后者会被读成"一共 2 点"（需求："防 代价应该显示 2/s"）。
+   * 后缀本身是**渲染层加的字面量**，不走 i18n：`/s` 是通用符号，
+   * 任何语言下都一样。
+   */
+  readonly suffix?: string;
 }
 
 export interface SkillSlotView {
@@ -92,8 +108,17 @@ export interface SkillSlotView {
   readonly usable: boolean;
   /** 冷却剩余比例 0..1（0 = 已好） */
   readonly cooldownRatio: number;
-  /** 冷却剩余秒数（展示用） */
+  /** 冷却剩余秒数（展示用）—— **实时**剩余，显示在格子正中 */
   readonly cooldownSec: number;
+  /**
+   * 技能的**固有冷却**秒数（满冷却时长），显示在左下角。
+   *
+   * ⚠️ 与 `cooldownSec` 是两回事（需求专门澄清过）：
+   *   - `cooldownSec` = **实时**还剩多久 → 格子**正中**
+   *   - `skillCdSec`  = 这个技能**本来**的冷却多久 → 格子**左下**
+   * 0 表示没有冷却（不显示）。
+   */
+  readonly skillCdSec: number;
   /** 是否是派生技且当前窗口已开 */
   readonly comboReady: boolean;
   /**

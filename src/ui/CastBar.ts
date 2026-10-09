@@ -76,6 +76,13 @@ export class CastBar {
   private readonly border: Graphics;
   private readonly nameText: Text;
   private readonly timeText: Text;
+  /**
+   * 招式提示标签（「霸体」「高伤」…）。
+   *
+   * 与技能名分开一格，画在技能名**右边** —— 技能名已经左对齐，
+   * 标签紧跟其后读起来是"技能名（标签）"，比塞到右边和秒数挤更好。
+   */
+  private readonly tagText: Text;
   private lastProgress = -1;
 
   constructor(private readonly options: CastBarOptions) {
@@ -107,6 +114,18 @@ export class CastBar {
     this.nameText.y = midY;
     this.nameText.anchor.y = 0.5;
 
+    this.tagText = new Text({
+      text: '',
+      style: {
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT.small,
+        fill: css(0xe4a840),
+      },
+    });
+    // 紧跟技能名之后（x 由 setContent 里按技能名实际宽度推）
+    this.tagText.y = midY;
+    this.tagText.anchor.y = 0.5;
+
     this.timeText = new Text({
       text: '',
       style: {
@@ -128,14 +147,22 @@ export class CastBar {
      * 看起来像"上边框缺失"）。所以顺序写在这里、只写一次 ——
      * 这也是把两处读条合并成一个组件的主要收益。
      */
-    this.root.addChild(bg, this.fillGfx, this.border, this.nameText, this.timeText);
+    this.root.addChild(bg, this.fillGfx, this.border, this.nameText, this.tagText, this.timeText);
   }
 
-  /** 技能名与剩余秒数。 */
-  setContent(name: string, time: string): void {
+  /**
+   * 技能名、剩余秒数，以及可选的提示标签。
+   *
+   * 标签用" · "连接（例：`高伤`），并以**暗金**画在技能名右侧 ——
+   * 它的作用是"这一招该怎么应对"，与技能名同级但更弱。
+   */
+  setContent(name: string, time: string, tagLabel = ''): void {
     if (this.nameText.text !== name) this.nameText.text = name;
     const t = this.options.showTime === false ? '' : time;
     if (this.timeText.text !== t) this.timeText.text = t;
+    if (this.tagText.text !== tagLabel) this.tagText.text = tagLabel;
+    // 技能名宽度要到渲染后才准，所以这里按 Text 的实际宽度定位
+    this.tagText.x = this.options.rect.x + 12 + this.nameText.width + 8;
   }
 
   /** 技能名颜色（Boss 预警条用它表达"能不能打断"）。 */

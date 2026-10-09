@@ -382,6 +382,28 @@ export type Hook =
   | 'onPhaseChange';
 
 export type SkillTag = 'melee' | 'spell' | 'dot' | 'defensive' | 'movement' | 'interrupt';
+
+/**
+ * 招式的**玩法提示标签**。
+ *
+ * ⚠️ 与 `SkillTag` 是两回事，**故意分开**：
+ *   - `SkillTag`（melee / spell / …）是**机械分类**，给触发器的
+ *     `filter` / `HookFilter` 用 —— 引擎按它匹配规则
+ *   - `HintTag`（本类型）是**给玩家看的**：它不参与任何计算，
+ *     只是让 UI 能把"这一招你该怎么应对"写在读条上
+ *
+ * 需求："boss 的招式的 tags 显示在它的读条中，比如'霸体'技能，
+ * 提示玩家无法被打断，'高伤'提示玩家闪避比防御更值得"
+ *
+ * 命名用英文标识符，文案在 i18n 里（渲染层不持有可显示文字）。
+ */
+export type HintTag =
+  /** 「霸体」：无法被打断 —— 别浪费打断技 */
+  | 'interruptImmune'
+  /** 「高伤」：单次伤害很高 —— 闪避（全免）比防御（减伤）更值 */
+  | 'highDamage'
+  /** 「打断」：这一招会打断目标读条 */
+  | 'interrupt';
 export type School = 'physical' | 'fire' | 'water' | 'arcane';
 
 export type HookFilter =
@@ -629,6 +651,12 @@ export interface GameEntity {
   readonly rarity?: Rarity;
   readonly requires?: readonly Condition[];
   readonly tags?: readonly string[];
+  /**
+   * 玩法提示标签（显示在读条/技能格上）。
+   *
+   * 与 `tags`（机械分类，给触发器匹配用）**分开** —— 见 `HintTag` 的说明。
+   */
+  readonly hintTags?: readonly HintTag[];
 }
 
 export interface EquipmentEntity extends GameEntity {

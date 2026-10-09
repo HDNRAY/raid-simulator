@@ -334,11 +334,16 @@ async function bootstrap(): Promise<void> {
     pixi: { Container, Graphics, Sprite, Text },
     translate: (key) => translateSafe(key),
     getRows: () =>
-      bindings.map((b) => ({
-        skillId: b.skillId,
-        nameKey: registry.skill(b.skillId).nameKey,
-        key: b.key,
-      })),
+      bindings.map((b) => {
+        const skill = registry.skill(b.skillId);
+        const hintTags = skill.hintTags;
+        return {
+          skillId: b.skillId,
+          nameKey: skill.nameKey,
+          key: b.key,
+          ...(hintTags === undefined || hintTags.length === 0 ? {} : { hintTags }),
+        };
+      }),
     onRebind: (skillId, key) => {
       // 同一个键只能绑一个技能：先把旧占用者解绑，再绑新的
       bindings = bindings.map((b) =>

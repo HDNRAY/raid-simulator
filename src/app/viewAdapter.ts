@@ -464,7 +464,8 @@ export class ViewAdapter {
       firstCost !== undefined && typeof firstCost.value === 'number'
         ? toSlotCost(firstCost.resource, firstCost.value)
         : drain !== undefined
-          ? toSlotCost(drain.resource, drain.perLogicTick)
+          ? // 按住技：代价是"每逻辑步扣一次" → 换算成**每秒**并标上 /s
+            toSlotCost(drain.resource, drain.perLogicTick, '/s')
           : undefined;
 
     return {
@@ -477,6 +478,8 @@ export class ViewAdapter {
       cooldownRatio,
       ...(cost === undefined ? {} : { cost }),
       cooldownSec: (remainTicks * (1000 / 60)) / 1000,
+      // 固有冷却（满值）—— 左下角显示的那个
+      skillCdSec: skill.cooldown / 1000,
       comboReady: (skill.requires?.length ?? 0) > 0 && conditionOk,
       ...(blockedKey === undefined ? {} : { blockedKey }),
     };
@@ -509,12 +512,25 @@ function toCombatantView(engine: BattleEngine, id: string, tick: number): Combat
     const armored = raw.buffs.some(
       (b) => engine.buffDef(b.defId)?.flags?.interruptImmune === true,
     );
+    /**
+     * 读条上要显示的提示标签。
+     *
+     * 「霸体」是**状态**（引擎里由 `interruptImmune` 标记表达），
+     * 而不是技能静态属性 —— 所以这里要合并两者：
+     *   技能自己声明的 `hintTags` ∪ 当前状态推出的 `interruptImmune`
+     * 否则 Boss 开了霸体、读条上却不提示，玩家会白按「破」。
+     */
+    const castTags = new Set(skill?.hintTags ?? []);
+    if (armored) castTags.add('interruptImmune');
+    const hintTags = [...castTags];
+
     castView = {
       skillId: cast.skillId,
       nameKey: skill?.nameKey ?? 'hud.casting',
       progress,
       interruptible: cast.interruptible && !armored,
       remainingMs: Math.max(0, nextHit - elapsedMs),
+      ...(hintTags.length === 0 ? {} : { hintTags }),
     };
   }
 
@@ -607,9 +623,9 @@ export const DEFAULT_SLOTS: readonly SlotBinding[] = [
  * 用类型守卫而不是断言：未知资源名返回 `undefined`，
  * 渲染层就只是"这个格子没有代价可显示"，不会拿到一个它不认识的值。
  */
-function toSlotCost(resource: string, value: number): SlotCost | undefined {
+function toSlotCost(resource: string, value: number, suffix?: string): SlotCost | undefined {
   if (resource === 'hp' || resource === 'energy' || resource === 'douqi') {
-    return { resource, value };
+    return suffix === undefined ? { resource, value } : { resource, value, suffix };
   }
   return undefined;
 }

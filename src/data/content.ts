@@ -348,7 +348,13 @@ const BREAK: SkillDef = {
   abilities: [],
   castTime: 0,
   cooldown: logicMs(50),
-  cost: [],
+  /**
+   * 代价 **10 炁**（需求："破增加 代价 10点炁"）。
+   *
+   * 原先免费：打断本身已经用 5 秒冷却计价了。加 10 炁之后，
+   * "打断"也要和「攻」「闪」抢同一池炁，取舍更紧。
+   */
+  cost: [{ resource: 'energy', value: S(10) }],
   targeting: { mode: 'primaryEnemy' },
   hits: [
     {
@@ -360,6 +366,8 @@ const BREAK: SkillDef = {
     },
   ],
   tags: ['interrupt'],
+  /** 提示玩家"这一招会打断目标" */
+  hintTags: ['interrupt'],
   school: 'physical',
   interruptible: false,
 };
@@ -483,6 +491,11 @@ const BOSS_CLEAVE: SkillDef = {
   ],
   tags: ['melee'],
   school: 'physical',
+  /**
+   * 「高伤」—— 单次 28 点，而玩家的「攻」只有 10。
+   * 提示玩家：**闪避比防御更值**（闪避全免，防御只减 55%）。
+   */
+  hintTags: ['highDamage'],
   interruptible: true,
 };
 
@@ -525,6 +538,8 @@ const BOSS_SWEEP: SkillDef = {
   ],
   tags: ['spell'],
   school: 'fire',
+  /** 「高伤」—— 单次 36 点，全场最高的一击。 */
+  hintTags: ['highDamage'],
   interruptible: true,
 };
 
@@ -600,6 +615,13 @@ const BOSS_ARMOR_SKILL: SkillDef = {
   hits: [],
   tags: ['defensive'],
   school: 'arcane',
+  /**
+   * 「霸体」—— 提示玩家"无法被打断"，别浪费「破」。
+   *
+   * 这条与引擎里的 `interruptImmune` 是两个面：引擎负责"真的打不断"，
+   * 这个标签负责"提前告诉玩家"。
+   */
+  hintTags: ['interruptImmune'],
   interruptible: true,
 };
 

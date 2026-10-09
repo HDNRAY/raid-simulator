@@ -276,6 +276,19 @@ export const zhCN = {
     generalEmptyHint: '音量、画面与体验相关的选项之后加在这里',
 
     /** 按键设置 */
+    /**
+     * 招式提示标签的文案。
+     *
+     * 需求把它们的效果说得很清楚：
+     *   - 「霸体」→ 提示玩家**无法被打断**（别浪费「破」）
+     *   - 「高伤」→ 提示**闪避比防御更值得**（闪避全免，防御只减伤）
+     *   - 「打断」→ 这一招会打断目标读条
+     */
+    hintTags: {
+      interruptImmune: '霸体',
+      highDamage: '高伤',
+      interrupt: '打断',
+    },
     keysHint: '方向键选择，Enter 改键，Esc 返回',
     keysCapturingHint: '按下想用的键（Esc 取消）',
     keysCapturing: '请按键…',
