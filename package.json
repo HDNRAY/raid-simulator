@@ -6,7 +6,7 @@
   "description": "Single-boss realtime combat simulator. Canvas/PixiJS renderer over a zero-dependency deterministic core.",
   "packageManager": "pnpm@11.28.5",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13"
   },
   "scripts": {
     "dev": "vite",

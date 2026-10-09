@@ -26,7 +26,13 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [20.x]
+        # ⚠️ 必须是 22.13+：pnpm 11.28.5 用了 `node:sqlite`（22.5 才有，
+        # 且 22.13 起才被 pnpm 官方支持）。原先写 20.x，CI 直接崩在
+        # `pnpm install` 之前 —— pnpm 自己加载时就报
+        # `ERR_UNKNOWN_BUILTIN_MODULE: No such built-in module: node:sqlite`。
+        #
+        # 与 package.json 的 `engines.node` 保持一致。
+        node-version: [22.x]
 
     steps:
       - uses: actions/checkout@v4
