@@ -16,7 +16,7 @@
 import type { Container, Graphics } from 'pixi.js';
 import { PALETTE } from '../../render/theme';
 import { LOGICAL } from '../layout';
-import { Label, type PixiCtor } from '../primitives';
+import type { PixiCtor } from '../primitives';
 
 export interface SettingsButtonOptions {
   readonly pixi: PixiCtor;
@@ -32,7 +32,6 @@ export class SettingsButton {
   readonly root: Container;
 
   private readonly gfx: Graphics;
-  private readonly label: Label;
   private readonly rect: { x: number; y: number; w: number; h: number };
   private hovered = false;
   private lastDrawnHover = false;
@@ -49,26 +48,7 @@ export class SettingsButton {
 
     this.root = new pixi.Container();
     this.gfx = new pixi.Graphics();
-    // 齿轮用"设"字代替 —— 目前没有图标素材，而技能图标也是用字占位，
-    // 保持同一套视觉语言
-    this.label = new Label(pixi, {
-      x: this.rect.x + SIZE / 2,
-      y: this.rect.y + 3,
-      size: 15,
-      color: 0xb0b0be,
-      anchorX: 0.5,
-      kai: true,
-    });
-    this.root.addChild(this.gfx, this.label.root);
-    /**
-     * 标签文案**必须显式赋值**。
-     *
-     * 踩过的坑：`Label` 构造时传入空字符串（内容要等 i18n），
-     * 而我一直没调 `set()` —— 于是按钮渲染成一个**空方块**，
-     * 看起来像"图标没加载"，实际是文本为空。
-     * 探针读渲染层文本才定位到（截图上看不出是"空"还是"被遮住"）。
-     */
-    this.label.set(options.translate('settings.open'));
+    this.root.addChild(this.gfx);
     this.draw();
   }
 
@@ -98,7 +78,8 @@ export class SettingsButton {
     const g = this.gfx;
     const { x, y, w, h } = this.rect;
     g.clear();
-    // 很淡的底 + 细描边：与技能栏一样"不抢眼"
+
+    // 按钮底：很淡的底 + 细描边，与技能栏一样"不抢眼"
     g.roundRect(x, y, w, h, 3).fill({
       color: 0xffffff,
       alpha: this.hovered ? 0.12 : 0.06,
@@ -107,10 +88,59 @@ export class SettingsButton {
       color: this.hovered ? PALETTE.douqi.bright : 0x5a5c70,
       width: 1,
     });
+
+    drawGear(g, x + w / 2, y + h / 2, this.hovered ? PALETTE.douqi.bright : 0xb0b0be);
   }
 
   /** 无障碍/调试用：按钮的语义名称。 */
   get labelKey(): string {
     return 'settings.open';
   }
+}
+
+
+/**
+ * 画一个齿轮图标。
+ *
+ * ------------------------------------------------------------------
+ * 为什么是"画出来的"而不是一个字符
+ * ------------------------------------------------------------------
+ *
+ * 早期用「设」字当图标。问题有两个：
+ *   1. 字必须**显式 set()** —— 我漏了这一步，按钮渲染成空方块，
+ *      看起来像"图标没加载"（截图区分不了"空"和"被遮住"）。
+ *   2. 「设」是个抽象字，不像图标那样一眼认得出是"设置"。
+ *
+ * 齿轮用 8 齿 + 中心孔构造，是设置图标最通用的形态。
+ * 全部是几何计算，所以**不依赖字体**，也不会有字形缺失的风险。
+ *
+ * 接入正式美术素材时，只需要把这一次调用换成贴图。
+ */
+function drawGear(g: Graphics, cx: number, cy: number, color: number): void {
+  const teeth = 8;
+  const rOuter = 8;
+  const rInner = 5.5;
+  const halfTooth = Math.PI / teeth / 2.2;
+
+  g.moveTo(cx + rInner * Math.cos(-halfTooth), cy + rInner * Math.sin(-halfTooth));
+  for (let i = 0; i < teeth; i += 1) {
+    const mid = (i * 2 * Math.PI) / teeth;
+    const a0 = mid - halfTooth;
+    const a1 = mid + halfTooth;
+    const b0 = mid + (2 * Math.PI) / teeth / 2 - halfTooth;
+    const b1 = mid + (2 * Math.PI) / teeth / 2 + halfTooth;
+
+    g.lineTo(cx + rInner * Math.cos(a0), cy + rInner * Math.sin(a0));
+    g.lineTo(cx + rOuter * Math.cos(a0), cy + rOuter * Math.sin(a0));
+    g.lineTo(cx + rOuter * Math.cos(a1), cy + rOuter * Math.sin(a1));
+    g.lineTo(cx + rInner * Math.cos(a1), cy + rInner * Math.sin(a1));
+    // 回到内圈，走到下一个齿的起点
+    g.lineTo(cx + rInner * Math.cos(b0), cy + rInner * Math.sin(b0));
+    g.lineTo(cx + rInner * Math.cos(b1), cy + rInner * Math.sin(b1));
+  }
+  g.closePath();
+  // 齿轮本体：用描边而不是填充 —— 26px 的按钮里，实心齿轮会糊成一坨
+  g.stroke({ color, width: 1.4 });
+  // 中心孔
+  g.circle(cx, cy, 2.2).stroke({ color, width: 1.4 });
 }

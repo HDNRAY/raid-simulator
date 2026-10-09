@@ -26,7 +26,7 @@ import { FONT, LOGICAL } from '../layout';
  * ------------------------------------------------------------------ */
 
 export const SETTINGS_PANEL = {
-  w: 520,
+  w: 560,
   /**
    * 高度按"能放下当前全部技能"定。
    *
@@ -35,7 +35,7 @@ export const SETTINGS_PANEL = {
    * 若以后技能变多，`KEY_ROW_MAX` 会自动减少（而不是重叠），
    * 那时再考虑给表格加滚动。
    */
-  h: 360,
+  h: 400,
   /** 居中 */
   get x(): number {
     return Math.round((LOGICAL.width - this.w) / 2);
@@ -63,25 +63,77 @@ export const TAB_BAR = { y: 40, w: 88, h: 30, gap: 8, x: 16 } as const;
  * `h: 30` 而不是 26：技能名是**中文单字**，字形比拉丁字母高。
  * `textY: 6` 让文字在行内垂直居中（行高 30、字高约 16，余量上下各 7）。
  */
-export const KEY_ROW = { top: 84, h: 30, inset: 16, textY: 6 } as const;
-export const RESET_BUTTON = { w: 108, h: 24, bottom: 32, x: 16 } as const;
+/**
+ * 技能键位用 **grid** 排布。
+ *
+ * ------------------------------------------------------------------
+ * 为什么从"一列清单"改成 grid
+ * ------------------------------------------------------------------
+ *
+ * 早期是每行一个技能的单列清单。但技能会越来越多 ——
+ * 单列的话 15 个技能就需要 15×30 = 450px 高度，弹窗会高得离谱。
+ * grid 每行放 3 个，同样 15 个技能只要 5 行。
+ *
+ * 每个格子 = 技能字 + 它当前的按键，上下排布。
+ */
+export const KEY_GRID = {
+  top: 88,
+  cols: 3,
+  cellW: 164,
+  cellH: 44,
+  gapX: 10,
+  gapY: 8,
+  inset: 16,
+} as const;
 
 /**
- * 键位表能显示多少行 —— **由剩下的空间算出来，不是写死的**。
+ * 底部两个元素的位置：**提示文字在上、按钮在下**，都由这两个常量定义。
  *
- * 踩过的坑：早期写死 `max: 8`，后来为了让中文单字不被裁切把行高
- * 从 26 调到 30，8 行就压到"恢复默认"按钮上了 —— 而那个位置
- * 点下去会命中按钮，玩家以为在改第 8 行的键，实际按了恢复默认。
- *
- * 现在从下往上留出按钮与提示文字的空间，剩下的高度才给行用。
- * 这样调行高（或弹窗高度）时**不会静默产生重叠**。
+ * 踩过的坑：`RESET_BUTTON.bottom` 与 `KEY_GRID_CAPACITY` 里各写了一次
+ * 底部偏移，算重了 —— 结果"恢复默认"按钮**压在提示文字上**。
+ * 现在按钮的 top 只在这里定义一次，容量推导与绘制都读它。
  */
-export const KEY_ROW_MAX = Math.max(
-  1,
-  Math.floor(
-    (SETTINGS_PANEL.h - KEY_ROW.top - RESET_BUTTON.bottom - RESET_BUTTON.h - 22) / KEY_ROW.h,
-  ),
-);
+export const RESET_BUTTON = {
+  w: 108,
+  h: 24,
+  x: 16,
+  /** 距弹窗底部的距离 */
+  bottom: 22,
+} as const;
+
+/** 提示文字那一行的顶部（在按钮上方）。 */
+export const HINT_LINE = {
+  height: 20,
+  /** 与按钮之间的间隙 */
+  gap: 8,
+} as const;
+
+/** 提示文字行的 y（相对弹窗顶部）。 */
+export function hintLineY(): number {
+  return SETTINGS_PANEL.h - RESET_BUTTON.bottom - RESET_BUTTON.h - HINT_LINE.gap - HINT_LINE.height;
+}
+
+/** 底部区域上沿：格子不能越过这条线。 */
+export function bottomAreaTop(): number {
+  return hintLineY();
+}
+
+/**
+ * 一屏能显示多少个技能格 —— **由剩余空间推导，不是写死的**。
+ *
+ * 踩过的坑：早期写死行数，后来调整行高就直接压到了"恢复默认"
+ * 按钮上 —— 那个位置点下去会命中按钮，玩家以为在改某个技能的键，
+ * 实际按了恢复默认。现在从下往上留出按钮与提示文字的空间，
+ * 剩下的高度才给格子用，调尺寸不会静默产生重叠。
+ */
+export const KEY_GRID_CAPACITY = (() => {
+  const usable = bottomAreaTop() - KEY_GRID.top - 6;
+  const rows = Math.max(
+    1,
+    Math.floor((usable + KEY_GRID.gapY) / (KEY_GRID.cellH + KEY_GRID.gapY)),
+  );
+  return rows * KEY_GRID.cols;
+})();
 
 export interface Rect {
   readonly x: number;
@@ -99,19 +151,27 @@ export function tabRect(index: number): Rect {
   };
 }
 
-export function keyRowRect(index: number): Rect {
+/**
+ * 第 `index` 个技能格的矩形（按 grid 排布）。
+ *
+ * 先算"第几行第几列"，再换算坐标 —— 这样调用方只需要一个下标，
+ * 不必知道列数。
+ */
+export function keyCellRect(index: number): Rect {
+  const col = index % KEY_GRID.cols;
+  const row = Math.floor(index / KEY_GRID.cols);
   return {
-    x: SETTINGS_PANEL.x + KEY_ROW.inset,
-    y: SETTINGS_PANEL.y + KEY_ROW.top + index * KEY_ROW.h,
-    w: SETTINGS_PANEL.w - KEY_ROW.inset * 2,
-    h: KEY_ROW.h - 2,
+    x: SETTINGS_PANEL.x + KEY_GRID.inset + col * (KEY_GRID.cellW + KEY_GRID.gapX),
+    y: SETTINGS_PANEL.y + KEY_GRID.top + row * (KEY_GRID.cellH + KEY_GRID.gapY),
+    w: KEY_GRID.cellW,
+    h: KEY_GRID.cellH,
   };
 }
 
 export function resetButtonRect(): Rect {
   return {
     x: SETTINGS_PANEL.x + RESET_BUTTON.x,
-    y: SETTINGS_PANEL.y + SETTINGS_PANEL.h - RESET_BUTTON.bottom,
+    y: SETTINGS_PANEL.y + SETTINGS_PANEL.h - RESET_BUTTON.bottom - RESET_BUTTON.h,
     w: RESET_BUTTON.w,
     h: RESET_BUTTON.h,
   };
@@ -169,8 +229,8 @@ export function hitTest(
   if (options.tab === 'keys') {
     if (contains(resetButtonRect(), px, py)) return { kind: 'resetKeys' };
     for (const [i, skillId] of options.rowSkillIds.entries()) {
-      if (i >= KEY_ROW_MAX) break;
-      if (contains(keyRowRect(i), px, py)) return { kind: 'keyRow', skillId };
+      if (i >= KEY_GRID_CAPACITY) break;
+      if (contains(keyCellRect(i), px, py)) return { kind: 'keyRow', skillId };
     }
   }
 

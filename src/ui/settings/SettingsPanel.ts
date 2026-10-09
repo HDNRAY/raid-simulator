@@ -29,15 +29,15 @@ import { PALETTE } from '../../render/theme';
 import { FONT, LOGICAL } from '../layout';
 import { Label, Panel, type PixiCtor } from '../primitives';
 import {
-  KEY_ROW,
   SETTINGS_PANEL,
   hitTest as hitTestLogic,
   keyLabel as formatKey,
-  keyRowRect,
+  keyCellRect,
   resetButtonRect,
   resolveKeyAction,
   tabRect,
-  KEY_ROW_MAX,
+  KEY_GRID_CAPACITY,
+  hintLineY,
   type SettingsTab,
 } from './logic';
 
@@ -171,29 +171,35 @@ export class SettingsPanel {
     this.rowGfx = new pixi.Graphics();
     this.body.addChild(this.rowGfx);
 
-    for (let i = 0; i < KEY_ROW_MAX; i += 1) {
-      const rect = this.rowRect(i);
-      const name = new Label(pixi, {
-        x: rect.x + 10,
-        y: rect.y + KEY_ROW.textY,
-        size: FONT.body,
+    /**
+     * 技能格：每个格子显示"技能字 + 当前按键"。
+     *
+     * 用 grid 而不是单列清单：技能会越来越多，单列 15 个技能就要
+     * 450px 高度。grid 每行 3 个，同样数量只要 1/3 的高度。
+     */
+    for (let i = 0; i < KEY_GRID_CAPACITY; i += 1) {
+      const rect = keyCellRect(i);
+      const glyph = new Label(pixi, {
+        x: rect.x + 12,
+        y: rect.y + 12,
+        size: FONT.warn,
         color: PALETTE.text,
         kai: true,
       });
       const key = new Label(pixi, {
-        x: rect.x + rect.w - 10,
-        y: rect.y + KEY_ROW.textY,
+        x: rect.x + rect.w - 12,
+        y: rect.y + 14,
         size: FONT.body,
-        color: PALETTE.text,
+        color: PALETTE.textDim,
         anchorX: 1,
       });
-      this.body.addChild(name.root, key.root);
-      this.rowLabels.push({ name, key, rect });
+      this.body.addChild(glyph.root, key.root);
+      this.rowLabels.push({ name: glyph, key, rect });
     }
 
     this.hintLabel = new Label(pixi, {
       x: x + 16,
-      y: y + SETTINGS_PANEL.h - 54,
+      y: y + hintLineY(),
       size: FONT.small,
       color: PALETTE.textDim,
     });
@@ -216,10 +222,6 @@ export class SettingsPanel {
   }
 
   /** 某一行的矩形（相对弹窗内的固定偏移）。 */
-  private rowRect(index: number): { x: number; y: number; w: number; h: number } {
-    return keyRowRect(index);
-  }
-
   get isOpen(): boolean {
     return this.visible;
   }
@@ -412,7 +414,7 @@ export class SettingsPanel {
     this.hintLabel.setColor(this.notice !== '' ? 0xff9080 : PALETTE.textDim);
 
     for (const [i, row] of rows.entries()) {
-      if (i >= KEY_ROW_MAX) break;
+      if (i >= KEY_GRID_CAPACITY) break;
       const slot = this.rowLabels[i];
       if (!slot) continue;
 

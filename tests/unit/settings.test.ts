@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   EMPTY_KEY,
-  KEY_ROW_MAX,
+  KEY_GRID_CAPACITY,
+  hintLineY,
+  KEY_GRID,
   SETTINGS_PANEL,
   applyRebind,
   contains,
   hitTest,
   insidePanel,
   keyLabel,
-  keyRowRect,
+  keyCellRect,
   resetButtonRect,
   resolveKeyAction,
   tabRect,
@@ -36,25 +38,45 @@ describe('几何：点击命中不能错位', () => {
     expect(insidePanel(b.x + 1, b.y + 1)).toBe(true);
   });
 
-  it('键位行按顺序排布、互不重叠', () => {
-    for (let i = 1; i < KEY_ROW_MAX; i += 1) {
-      const prev = keyRowRect(i - 1);
-      const curr = keyRowRect(i);
-      expect(curr.y).toBeGreaterThan(prev.y);
-      expect(curr.y).toBeGreaterThanOrEqual(prev.y + prev.h);
+  it('技能格按 grid 排布，两两不重叠', () => {
+    const cells = Array.from({ length: KEY_GRID_CAPACITY }, (_, i) => keyCellRect(i));
+    for (let a = 0; a < cells.length; a += 1) {
+      for (let b = a + 1; b < cells.length; b += 1) {
+        const A = cells[a]!;
+        const B = cells[b]!;
+        const ox = Math.min(A.x + A.w, B.x + B.w) - Math.max(A.x, B.x);
+        const oy = Math.min(A.y + A.h, B.y + B.h) - Math.max(A.y, B.y);
+        expect(ox > 0 && oy > 0, `第 ${a} 格与第 ${b} 格重叠`).toBe(false);
+      }
     }
   });
 
-  it('【关键】恢复默认按钮不与最后一行键位重叠 —— 行数是从剩余空间推出来的', () => {
-    const lastRow = keyRowRect(KEY_ROW_MAX - 1);
+  it('grid 每行放 3 个：第二行的 x 回到第一列', () => {
+    const first = keyCellRect(0);
+    const fourth = keyCellRect(KEY_GRID.cols);
+    expect(fourth.x).toBe(first.x);
+    expect(fourth.y).toBeGreaterThan(first.y);
+  });
+
+  it('grid 比单列省高度：容量至少 12 个技能', () => {
+    /**
+     * 这是改成 grid 的**理由**，值得写成断言。
+     * 单列时 12 个技能要 12×30 = 360px，弹窗根本放不下。
+     */
+    expect(KEY_GRID.cols).toBeGreaterThanOrEqual(3);
+    expect(KEY_GRID_CAPACITY).toBeGreaterThanOrEqual(12);
+  });
+
+  it('【关键】恢复默认按钮不与最后一个技能格重叠 —— 容量是从剩余空间推出来的', () => {
+    const lastCell = keyCellRect(KEY_GRID_CAPACITY - 1);
     const reset = resetButtonRect();
-    expect(reset.y).toBeGreaterThanOrEqual(lastRow.y + lastRow.h);
+    expect(reset.y).toBeGreaterThanOrEqual(lastCell.y + lastCell.h);
     expect(reset.y + reset.h).toBeLessThanOrEqual(SETTINGS_PANEL.y + SETTINGS_PANEL.h);
   });
 
-  it('推导出的行数足够放下当前 6 个技能', () => {
+  it('推导出的容量足够放下当前 6 个技能', () => {
     // 如果这个不成立，说明弹窗高度或行高被改得太紧，技能表会显示不全
-    expect(KEY_ROW_MAX).toBeGreaterThanOrEqual(6);
+    expect(KEY_GRID_CAPACITY).toBeGreaterThanOrEqual(6);
   });
 
   it('contains 的边界是闭区间', () => {
@@ -93,7 +115,7 @@ describe('hitTest：点到哪里', () => {
 
   it('点键位行命中对应的技能', () => {
     for (const [i, skillId] of rows.entries()) {
-      const r = keyRowRect(i);
+      const r = keyCellRect(i);
       expect(hitTest(r.x + 4, r.y + 4, { tab: 'keys', rowSkillIds: rows })).toEqual({
         kind: 'keyRow',
         skillId,
@@ -107,7 +129,7 @@ describe('hitTest：点到哪里', () => {
   });
 
   it('【关键】通用 tab 下不会命中键位行 —— 那一块在通用 tab 里不存在', () => {
-    const r = keyRowRect(0);
+    const r = keyCellRect(0);
     expect(hitTest(r.x + 4, r.y + 4, { tab: 'general', rowSkillIds: rows }).kind).toBe('none');
   });
 
@@ -117,11 +139,11 @@ describe('hitTest：点到哪里', () => {
   });
 
   it('最后一行**可见**的键位仍然可点', () => {
-    const many = Array.from({ length: KEY_ROW_MAX + 4 }, (_, i) => `s${i}`);
-    const last = keyRowRect(KEY_ROW_MAX - 1);
+    const many = Array.from({ length: KEY_GRID_CAPACITY + 4 }, (_, i) => `s${i}`);
+    const last = keyCellRect(KEY_GRID_CAPACITY - 1);
     expect(hitTest(last.x + 4, last.y + 4, { tab: 'keys', rowSkillIds: many })).toEqual({
       kind: 'keyRow',
-      skillId: `s${KEY_ROW_MAX - 1}`,
+      skillId: `s${KEY_GRID_CAPACITY - 1}`,
     });
   });
 
@@ -131,8 +153,8 @@ describe('hitTest：点到哪里', () => {
      * "恢复默认"按钮上了。那个点必须归按钮，**不能**归一个看不见的行 ——
      * 否则玩家点"恢复默认"会改掉某个根本看不到的技能的键。
      */
-    const many = Array.from({ length: KEY_ROW_MAX + 4 }, (_, i) => `s${i}`);
-    const beyond = keyRowRect(KEY_ROW_MAX + 1);
+    const many = Array.from({ length: KEY_GRID_CAPACITY + 4 }, (_, i) => `s${i}`);
+    const beyond = keyCellRect(KEY_GRID_CAPACITY + 1);
     const target = hitTest(beyond.x + 4, beyond.y + 4, { tab: 'keys', rowSkillIds: many });
     expect(target.kind).not.toBe('keyRow');
   });
@@ -226,5 +248,30 @@ describe('键盘：弹窗打开时怎么处理', () => {
     expect(resolveKeyAction('shift+1', true)).toEqual({ kind: 'capture', key: 'shift+1' });
     // Tab 也是合法按键（它被输入层 preventDefault 掉了）
     expect(resolveKeyAction('tab', true)).toEqual({ kind: 'capture', key: 'tab' });
+  });
+});
+
+describe('底部区域不重叠（曾经把"恢复默认"压在提示文字上）', () => {
+  it('提示文字行在按钮上方，且两者不重叠', () => {
+    const hintRect = {
+      x: SETTINGS_PANEL.x + 16,
+      y: SETTINGS_PANEL.y + hintLineY(),
+      w: 300,
+      // 13px 字号的行高约 18
+      h: 18,
+    };
+    const reset = resetButtonRect();
+    expect(hintRect.y + hintRect.h).toBeLessThanOrEqual(reset.y);
+  });
+
+  it('提示文字行与按钮都在弹窗内', () => {
+    const reset = resetButtonRect();
+    expect(SETTINGS_PANEL.y + hintLineY()).toBeGreaterThanOrEqual(SETTINGS_PANEL.y);
+    expect(reset.y + reset.h).toBeLessThanOrEqual(SETTINGS_PANEL.y + SETTINGS_PANEL.h);
+  });
+
+  it('技能格的容量不会越过提示文字行', () => {
+    const lastCell = keyCellRect(KEY_GRID_CAPACITY - 1);
+    expect(lastCell.y + lastCell.h).toBeLessThanOrEqual(SETTINGS_PANEL.y + hintLineY());
   });
 });

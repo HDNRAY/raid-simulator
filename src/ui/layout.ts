@@ -93,7 +93,21 @@ export const LAYOUT = {
   playerBuffs: { x: 244, y: 424, size: 20, gap: 6, max: 10, labelGap: 4 },
 
   /** 技能栏（右下，**右对齐**到安全区 —— 右手操作区） */
-  skillBar: { slot: 44, gap: 6, max: 8, y: 486, right: 8 },
+  skillBar: {
+    slot: 44,
+    gap: 6,
+    max: 8,
+    y: 486,
+    right: 8,
+    /**
+     * 冷却遮罩**最大**高度（"变矮"）。
+     *
+     * 早期是覆盖整格的弧形：又红又高而且**抖动**（弧的起止角每帧
+     * 重算，抗锯齿边缘在 1px 之间跳）。现在是一块半透明黑条，
+     * 固定高度、只有高度随冷却比例变。
+     */
+    cooldownBarHeight: 18,
+  },
 
   /** 战斗计时（顶栏右侧） */
   timer: { x: 868, y: 3, w: 84, h: 20 },

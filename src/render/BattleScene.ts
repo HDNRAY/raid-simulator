@@ -20,6 +20,9 @@ import type { Application, Container, Graphics } from 'pixi.js';
 import { PALETTE } from './theme';
 import { FONT, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../ui/layout';
 import { DISPLAY_SCALE } from '../data/balance';
+
+/** 冷却矮条的最大高度（取自布局表，避免两处写魔数）。 */
+const SLOT_COOLDOWN_BAR_H = LAYOUT.skillBar.cooldownBarHeight;
 import { Bar, Label, Panel, type PixiCtor } from '../ui/primitives';
 import { BossSprite } from './actors/BossSprite';
 import {
@@ -356,7 +359,7 @@ class SkillBarView {
         continue;
       }
 
-      const { x, y, w, h } = s.rect;
+      const { x, y, w } = s.rect;
       const g = s.gfx;
       g.clear();
 
@@ -372,24 +375,22 @@ class SkillBarView {
        */
       if (view.cooldownRatio > 0.001) {
         /**
-         * 冷却：从 12 点方向顺时针扫过的一条**弧线**。
+         * 冷却遮罩：格子**顶部**一块**半透明黑色矮条**。
          *
-         * 三个刻意的选择（都是被实际观感逼出来的）：
+         * 换过三次，每次都是被具体问题逼的：
          *
-         * 1. **不画描边边框**（需求明确）。弧本身就是一根有宽度的线，
-         *    再叠一圈描边会在两个端点上形成突兀的直线接头。
-         * 2. **不填充**。早期版本填一个扇形/圆环，实测**把技能字盖住了**
-         *    —— 那正是玩家最需要看清的东西。只留弧线，字始终完整。
-         * 3. **半径留足余量**（`- 3`）。贴边会导致弧的两端在
-         *    视觉上被按钮方框"切掉"，看起来像渲染 bug。
+         *   1. **扇形/圆环填充** —— 把技能字盖住了。
+         *   2. **一条红色弧线** —— 虽然不挡字，但（a）红色在这套
+         *      青/金/绿的配色里非常跳；（b）**会抖动**：弧的起止角
+         *      每帧重算，抗锯齿边缘在 1px 之间来回跳。
+         *   3. 现在：**半透明黑 + 固定高度 + 只有高度变化**。
+         *      高度是整数像素，所以不会抖；黑色不参与配色。
+         *
+         * 高度只改（不变色、不换形状），读取起来也更直接：
+         * 黑条越长 = 冷却越久。
          */
-        const cx = x + w / 2;
-        const cy = y + h / 2;
-        const r = Math.min(w, h) / 2 - 3;
-        const start = -Math.PI / 2;
-        const end = start + Math.PI * 2 * view.cooldownRatio;
-        g.arc(cx, cy, r, start, end);
-        g.stroke({ color: PALETTE.iframe.base, width: 3, alpha: 0.95 });
+        const barH = Math.max(1, Math.round(SLOT_COOLDOWN_BAR_H * view.cooldownRatio));
+        g.rect(x, y, w, barH).fill({ color: 0x000000, alpha: 0.62 });
       }
       /**
        * 不可用（资源不足 / 条件不满足）**不画任何方框**。
