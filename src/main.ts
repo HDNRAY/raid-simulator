@@ -40,7 +40,7 @@ const TIME_LIMIT_MS = 180_000;
  * 内容里写死的固定值（攻 10 / 轰 30）。所以这里只留最小的基础值，
  * 属性系统本身仍然可用（装备/增益可以往里加）。
  *
- * 精力回复**不走属性**：它是固定"每 0.1 秒 1 点"，
+ * 缠回复**不走属性**：它是固定"每 0.1 秒 1 点"，
  * 由 `data/balance.ts` 的 `ENERGY_PER_LOGIC_TICK` 决定。
  */
 const PLAYER_BASE: Partial<Record<StatKey, number>> = {
@@ -53,7 +53,7 @@ const PLAYER_BASE: Partial<Record<StatKey, number>> = {
 /**
  * 资源上限。
  *
- * 需求：双方都是 100 血，精力与斗炁上限也是 100。
+ * 需求：双方都是 100 血，缠与炁上限也是 100。
  *
  * **直接用展示刻度**（不再乘 `DISPLAY_SCALE`）：内容的伤害值
  * （攻 10 / 轰 30）本身就是展示刻度，两边同刻度才能对上 ——

@@ -70,7 +70,12 @@ describe('I18N-T1 / T3：扁平化', () => {
 
 describe('I18N-T4：模板与占位符', () => {
   it('无占位符的 key 原样返回', () => {
-    expect(t.t('resource.hp')).toBe('生命');
+    /**
+     * 断言"返回的是语言包里的那个值"，而**不是**某一个具体文案。
+     * 早期这里写死了 '生命'，于是改个显示名（生命 → 血）就会假失败 ——
+     * 而译文本身并不是这条测试要验证的东西（它验证的是"无占位符时原样返回"）。
+     */
+    expect(t.t('resource.hp')).toBe(zhCN.resource.hp);
     expect(t.t('reject.gcd')).toBe('公共冷却中');
   });
 
@@ -150,8 +155,8 @@ describe('I18N-T5：数字格式化', () => {
 
 describe('复数形式', () => {
   it('中文没有单复数区分，one 与 other 都返回同一形式', () => {
-    expect(t.plural({ one: 'resource.hp', other: 'resource.hp' }, 1)).toBe('生命');
-    expect(t.plural({ one: 'resource.hp', other: 'resource.hp' }, 5)).toBe('生命');
+    expect(t.plural({ one: 'resource.hp', other: 'resource.hp' }, 1)).toBe(zhCN.resource.hp);
+    expect(t.plural({ one: 'resource.hp', other: 'resource.hp' }, 5)).toBe(zhCN.resource.hp);
   });
 });
 
@@ -187,7 +192,7 @@ describe('类型推导与规模', () => {
   it('key 类型是点分字面量联合', () => {
     // 真正的保障在 tsc：把下面那行放开注释会编译失败
     const key: MessageKey = 'resource.hp';
-    expect(t.t(key)).toBe('生命');
+    expect(t.t(key)).toBe(zhCN.resource.hp);
     // const bad: MessageKey = 'resource.hpX';
   });
 

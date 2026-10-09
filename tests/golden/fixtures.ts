@@ -200,7 +200,7 @@ export function planPriority(
            * **只在"这次攻击真的会打到我"时才闪。**
            *
            * 踩过的坑：早期版本只要 Boss 在读条就闪 —— 包括那些
-           * 前摇刚好被公共冷却挡住的时刻。结果是白白花掉 40 精力
+           * 前摇刚好被公共冷却挡住的时刻。结果是白白花掉 40 缠
            * （= 4 次「攻」的代价），实测"会闪"反而比"不闪"输得更惨。
            *
            * 所以这里要求：闪完之后还够打一次「攻」，
@@ -211,7 +211,7 @@ export function planPriority(
            *
            * 踩过的坑：`remainingMs <= leadMs` 这个条件在 150ms 的
            * 窗口里会命中约 9 个 tick，于是每个 tick 都闪一次 ——
-           * 一次读条烧掉 360 点精力，把输出的能量全抢走，
+           * 一次读条烧掉 360 点缠，把输出的能量全抢走，
            * 结果"会闪"反而输得比"不闪"更惨。
            */
           const alreadyImmune = (state.combatants.find((c) => c.side === 'ally')?.buffs ?? []).some(
@@ -249,7 +249,7 @@ export function planPriority(
 /**
  * 输出优先级（黄金重放用）。
  *
- * 顺序即"玩家会优先按哪个键"：凝（增伤）→ 轰（斗炁爆发）→ 攻（填充）。
+ * 顺序即"玩家会优先按哪个键"：凝（增伤）→ 轰（炁爆发）→ 攻（填充）。
  * 破与御不在优先级里 —— 它们要在看到 Boss 读条时才用（见 `planPriority`）。
  */
 export const OUTPUT_PRIORITY = ['focus', 'blast', 'attack'] as const;

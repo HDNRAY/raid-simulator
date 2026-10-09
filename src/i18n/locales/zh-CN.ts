@@ -22,21 +22,23 @@ export const zhCN = {
   /**
    * 资源名。
    *
-   * 只有两种：**精力**是短循环资源（常规技能消耗、回复快），
-   * **斗炁**是积攒型资源（高威力技能消耗、靠战斗动作积攒）。
+   * 三种：**血**（生命）是生死线，**炁**是积攒型资源
+   * （高威力技能消耗、靠战斗动作积攒），**缠**是短循环资源
+   * （常规技能消耗、回复快）。
    */
   resource: {
-    hp: '生命',
-    energy: '精力',
-    douqi: '斗炁',
+    hp: '血',
+    energy: '缠',
+    douqi: '炁',
     /**
      * 状态条上的**单字标签**（楷体显示）。
      *
-     * 单独一组而不是复用上面的全名：条宽只有 200px，
-     * 「生命 100/100」放不下，而「生 100/100」可以。
+     * 目前与全名相同 —— 这三个字本身就是单字。
+     * 之所以仍然单独一组：条宽只有 200px，将来若全名变长
+     * （例如"生命值"），标签需要独立于全名，不必再改布局。
      */
-    hpShort: '生',
-    energyShort: '精',
+    hpShort: '血',
+    energyShort: '缠',
     douqiShort: '炁',
   },
 
@@ -66,11 +68,11 @@ export const zhCN = {
     healingBoost: '治疗加成',
     shieldBoost: '护盾加成',
     maxHp: '生命上限',
-    maxEnergy: '精力上限',
-    maxDouqi: '斗炁上限',
+    maxEnergy: '缠上限',
+    maxDouqi: '炁上限',
     hpRegen: '生命回复',
-    energyRegen: '精力回复',
-    douqiRegen: '斗炁回复',
+    energyRegen: '缠回复',
+    douqiRegen: '炁回复',
   },
 
   /**
@@ -90,7 +92,7 @@ export const zhCN = {
     empowered: '强化',
     telegraph: '前摇',
     gcd: '冷却',
-    douqiFull: '满斗炁',
+    douqiFull: '炁满',
     sunder: '裂',
   },
 
@@ -110,7 +112,7 @@ export const zhCN = {
    */
   block: {
     comboWindow: '派生窗口未开启',
-    cost: '精力或斗炁不足',
+    cost: '缠或炁不足',
     gcd: '公共冷却中',
     cooldown: '冷却中',
     casting: '正在施法中',
@@ -181,15 +183,15 @@ export const zhCN = {
   skill: {
     attack: {
       name: '攻',
-      desc: '普攻。消耗 10 精力，造成 10 点伤害。',
+      desc: '普攻。消耗 10 缠，造成 10 点伤害。',
     },
     dodge: {
       name: '闪',
-      desc: '消耗 40 精力，获得 0.5 秒完全无敌。不占公共冷却。',
+      desc: '消耗 40 缠，获得 0.5 秒完全无敌。不占公共冷却。',
     },
     guard: {
       name: '御',
-      desc: '按住持续减伤 40%，每 0.1 秒消耗 2 精力。松开即取消。',
+      desc: '按住持续减伤 40%，每 0.1 秒消耗 2 缠。松开即取消。',
     },
     break: {
       name: '破',
@@ -197,11 +199,11 @@ export const zhCN = {
     },
     blast: {
       name: '轰',
-      desc: '消耗 50 斗炁，造成 30 点伤害并使目标易伤。',
+      desc: '消耗 50 炁，造成 30 点伤害并使目标易伤。',
     },
     focus: {
       name: '凝',
-      desc: '消耗 50 斗炁，自身增伤 20%，持续 30 秒。',
+      desc: '消耗 50 炁，自身增伤 20%，持续 30 秒。',
     },
   },
 

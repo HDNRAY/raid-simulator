@@ -617,9 +617,9 @@ export function payCosts(
  * 按**逻辑步**（0.1 秒）而不是按秒或按 tick
  * ------------------------------------------------------------------
  *
- * 需求是"每 0.1 秒恢复 1 点精力"。三种做法里只有一种是对的：
+ * 需求是"每 0.1 秒恢复 1 点缠"。三种做法里只有一种是对的：
  *
- *   按秒聚合（每秒 +10）：玩家看到精力一秒跳一次，
+ *   按秒聚合（每秒 +10）：玩家看到缠一秒跳一次，
  *     而「御」是按 0.1 秒扣的 —— 收支节奏对不上，手感会很怪。
  *   按 tick（每 1/60 秒 +1/6 点）：被整数化吃掉小数，实际不回复。
  *   按逻辑步：与内容里的时长单位一致，收支都在同一个时间网格上。
@@ -637,7 +637,7 @@ export function regenerate(
 
   if (tick % TICKS_PER_LOGIC_TICK !== 0) return { combatant: current, events };
 
-  // 精力：固定每逻辑步回复（不再受精神加成影响 —— 刻度太小，加法会失真）
+  // 缠：固定每逻辑步回复（不再受精神加成影响 —— 刻度太小，加法会失真）
   if (ENERGY_PER_LOGIC_TICK > 0) {
     const result = changeResource(current, 'energy', ENERGY_PER_LOGIC_TICK, tick);
     current = result.combatant;

@@ -175,12 +175,12 @@ describe('可扩展性：新增一个技能只需要写数据', () => {
     expect(damage).toHaveLength(2); // 两段命中
     expect(damage.reduce((sum, e) => sum + (e.kind === 'damage' ? e.amount : 0), 0)).toBe(120);
 
-    // 施法者拿到 buff + 斗炁
+    // 施法者拿到 buff + 炁
     const player = engine.snapshot.combatants.find((c) => c.id === 'player')!;
     expect(player.buffs.some((b) => b.defId === 'test-brand')).toBe(true);
     /**
-     * 斗炁 = 内容直接给的 25（`delta: 25`）
-     *      + 命中造成的伤害换算来的量（两段共 120 伤害 → 120 点斗炁）。
+     * 炁 = 内容直接给的 25（`delta: 25`）
+     *      + 命中造成的伤害换算来的量（两段共 120 伤害 → 120 点炁）。
      *
      * 会被上限截断到 `makeCombatant` 的 100 —— 这正好验证了钳制。
      */

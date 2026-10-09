@@ -583,7 +583,7 @@ export class BattleScene {
     this.castBar.root.visible = false;
     hud.addChild(this.castPanel.root, this.castBar.root, this.castName.root, this.castHint.root);
 
-    /* 玩家面板：生命 / 精力 / 斗炁 **垂直排列** */
+    /* 玩家面板：生命 / 缠 / 炁 **垂直排列** */
     const pf = LAYOUT.player;
     this.playerPanel = new Panel(pixi, {
       x: pf.x,

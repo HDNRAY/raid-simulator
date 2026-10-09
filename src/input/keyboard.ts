@@ -181,7 +181,7 @@ export function createKeyboardInput(
 
   const onBlur = (): void => {
     // 失焦时清空按住状态：否则切走再回来会误判"还在按住"，
-    // 而"还在按住"意味着引擎会继续扣资源 —— 那会白扣玩家的精力。
+    // 而"还在按住"意味着引擎会继续扣资源 —— 那会白扣玩家的缠。
     for (const [key, skillId] of heldSkills) {
       queue.push({ type: 'releaseSkill', skillId, atTick: options.currentTick() });
       heldSkills.delete(key);

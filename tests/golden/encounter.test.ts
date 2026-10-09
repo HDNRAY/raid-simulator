@@ -119,7 +119,7 @@ describe('真实内容：Boss 的机制都接线了', () => {
 });
 
 describe('真实内容：玩家招式都接线了', () => {
-  it('攻：消耗 10 精力、造成 10 点伤害', () => {
+  it('攻：消耗 10 缠、造成 10 点伤害', () => {
     const engine = makeEngine();
     engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
     const events = engine.drainEvents();
@@ -129,9 +129,9 @@ describe('真实内容：玩家招式都接线了', () => {
     expect(damage.amount).toBe(10); // 需求：攻造成 10 点伤害
   });
 
-  it('攻：代价确实是 10 点精力（与"不施放"对照，隔离自然回复的干扰）', () => {
+  it('攻：代价确实是 10 点缠（与"不施放"对照，隔离自然回复的干扰）', () => {
     /**
-     * 为什么要做对照：精力每个逻辑步都会自然回复，
+     * 为什么要做对照：缠每个逻辑步都会自然回复，
      * 直接断言"施放前的值 − 100"会被回复量污染（实测差 10 点）。
      * 用同一 tick 数的两次运行相减，才能把"代价"单独量出来。
      */
@@ -162,7 +162,7 @@ describe('真实内容：玩家招式都接线了', () => {
     expect(player.buffs.some((b) => b.defId === 'dodge-iframe')).toBe(true);
   });
 
-  it('轰：消耗 50 斗炁、造成 30 点伤害', () => {
+  it('轰：消耗 50 炁、造成 30 点伤害', () => {
     const options = makeGoldenEngineOptions();
     const player = options.combatants[0]!;
     const engine = new BattleEngine({
@@ -234,10 +234,10 @@ describe('真实内容：玩家招式都接线了', () => {
     expect(after.buffs.some((b) => b.defId === 'guard')).toBe(false);
   });
 
-  it('御：每 0.1 秒扣 2 点精力，精力耗尽自动松开', () => {
+  it('御：每 0.1 秒扣 2 点缠，缠耗尽自动松开', () => {
     const options = makeGoldenEngineOptions();
     const playable = options.combatants[0]!;
-    // 只给刚好够 3 步的精力（3 × 2 点 × 10 刻度）
+    // 只给刚好够 3 步的缠（3 × 2 点 × 10 刻度）
     const engine = new BattleEngine({
       ...options,
       combatants: [
@@ -259,13 +259,13 @@ describe('真实内容：玩家招式都接线了', () => {
       engine.drainEvents();
     }
     const after = engine.snapshot.combatants.find((c) => c.side === 'ally')!;
-    // 精力被扣光 → 自动松开
+    // 缠被扣光 → 自动松开
     expect(after.resources.energy).toBeLessThan(60);
   });
 });
 
-describe('斗炁按伤害换算', () => {
-  it('造成伤害会给自己攒斗炁', () => {
+describe('炁按伤害换算', () => {
+  it('造成伤害会给自己攒炁', () => {
     const engine = makeEngine();
     const before = engine.snapshot.combatants.find((c) => c.side === 'ally')!.resources.douqi;
     engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
@@ -274,7 +274,7 @@ describe('斗炁按伤害换算', () => {
     expect(after).toBeGreaterThan(before);
   });
 
-  it('受到伤害也会攒斗炁（挨打不是纯粹吃亏）', () => {
+  it('受到伤害也会攒炁（挨打不是纯粹吃亏）', () => {
     const options = makeGoldenEngineOptions();
     const engine = new BattleEngine(options);
     // 等到玩家挨第一下
@@ -296,7 +296,7 @@ describe('斗炁按伤害换算', () => {
     void douqiBefore;
   });
 
-  it('斗炁不会超过上限', () => {
+  it('炁不会超过上限', () => {
     const engine = makeEngine();
     run(engine, 60 * 120, { skillId: 'attack', everyTicks: 30 });
     const player = engine.snapshot.combatants.find((c) => c.side === 'ally')!;

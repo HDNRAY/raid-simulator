@@ -503,9 +503,9 @@ export class BattleEngine {
   }
 
   /**
-   * 按伤害量换算斗炁。
+   * 按伤害量换算炁。
    *
-   * 需求：「斗炁根据造成或受到的伤害数值」—— 造成 1 点伤害得 1 点，
+   * 需求：「炁根据造成或受到的伤害数值」—— 造成 1 点伤害得 1 点，
    * 受到 1 点伤害也得 1 点。
    *
    * 换算放在**引擎**而不是逐条写进内容，因为它必须对**每一次伤害**生效
@@ -516,9 +516,9 @@ export class BattleEngine {
     /**
      * `damage` 是**内部刻度**，而系数是展示刻度的 —— 必须用换算过的版本。
      *
-     * 踩过的坑：直接用展示刻度系数会让斗炁攒得快 `DISPLAY_SCALE` 倍，
+     * 踩过的坑：直接用展示刻度系数会让炁攒得快 `DISPLAY_SCALE` 倍，
      * 玩家一路「轰」秒杀 Boss（实测 7 秒通关一场本该 2 分钟的战斗）。
-     * 而且单点伤害小到 10 内部点时，`Math.round` 会把 1 点斗炁算成 1 ——
+     * 而且单点伤害小到 10 内部点时，`Math.round` 会把 1 点炁算成 1 ——
      * 所以系数的换算必须在这里做，不能靠调用方记得。
      */
     const gain = Math.round(damage * DOUQI_PER_INTERNAL_DAMAGE);
@@ -785,7 +785,7 @@ export class BattleEngine {
   private advanceCasts(): void {
     // ⚠️ 遍历 **id 列表**而不是 `this.state.combatants` 的元素快照。
     //
-    // 原因：`applyActions` 会用新对象替换 combatant（例如扣了斗炁）。
+    // 原因：`applyActions` 会用新对象替换 combatant（例如扣了炁）。
     // 如果这里持有循环开始时的旧引用，读到的是**过期状态**，
     // 随后的写回会把 applyActions 刚做的改动覆盖掉。
     // （症状：`resourceChanged` 事件发了，但资源回到原值。）
@@ -881,7 +881,7 @@ export class BattleEngine {
      * **每改一次 state，就立刻把 working 同步成最新版本。**
      *
      * 违反它会怎样：working 是方法开头捕获的旧对象，
-     * 方法末尾又用它写回 —— 中间所有改动（挂 buff、加斗炁）全被抹掉。
+     * 方法末尾又用它写回 —— 中间所有改动（挂 buff、加炁）全被抹掉。
      * 症状是"`resourceChanged` / `buffApplied` 事件都发了，但状态没变"，
      * 极难从事件流上看出来。
      */
@@ -933,10 +933,10 @@ export class BattleEngine {
     const addBuff = (buff: BuffDef, targetId: string): void => applyBuffTo(buff, targetId);
 
     /**
-     * 斗炁满时自动挂上的标记 buff。
+     * 炁满时自动挂上的标记 buff。
      *
-     * 为什么需要它：终结技的门槛是"斗炁已满"，而 `requires` 只能检查
-     * buff / 资源阈值。用一条"满斗炁"标记 buff 表达它，内容层就能写
+     * 为什么需要它：终结技的门槛是"炁已满"，而 `requires` 只能检查
+     * buff / 资源阈值。用一条"满炁"标记 buff 表达它，内容层就能写
      * `requires: [{ kind:'hasBuff', buffId:'douqi-full' }]` ——
      * **不用给引擎加新条件类型**（这正是可扩展性的验证方式）。
      */
@@ -972,7 +972,7 @@ export class BattleEngine {
       }
 
       if (ability.kind === 'resource') {
-        // 一次性资源变动（"基础技产生 18 点斗炁"）。
+        // 一次性资源变动（"基础技产生 18 点炁"）。
         // 与 `douqiRegen` 修正的区别：那是持续速率，这是一次性。
         const delta = typeof ability.delta === 'number' ? ability.delta : 0;
         grantResource(ability.resource, delta, targetIdOf(ability.target.mode));
@@ -1054,7 +1054,7 @@ export class BattleEngine {
           this.events.push(...applied.events);
 
           /**
-           * 斗炁按伤害换算：**造成伤害的人**与**受到伤害的人**各得一份。
+           * 炁按伤害换算：**造成伤害的人**与**受到伤害的人**各得一份。
            * 放在这里（而不是内容里）才能覆盖所有伤害来源。
            */
           if (result.amount > 0) {
