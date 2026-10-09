@@ -26,24 +26,28 @@
  * 见架构规范 §12。
  */
 
-import { applyBuff, expireBuffs,
-} from '../buffs';
+import { expireBuffs } from '../buffs';
 import {
   capOf,
-  changeResource,
-  checkGate,
-  hastedCastTime,
-  hastedCooldown,
-  payCosts,
   regenerate,
   type CombatContext,
-  syncResourceGateBuff,
 } from './index';
-import { DOUQI_PER_INTERNAL_DAMAGE } from '../../data/balance';
-import { TICKS_PER_LOGIC_TICK } from '../loopConstants';
-import { createAiState, decide, type AiState, type AiView } from '../ai';
+import { createAiState, type AiState } from '../ai';
 import type { StatBreakdown } from '../stats/pipeline';
-import { resolveHit, type HitResolutionContext } from './hitResolution';
+import type { HitResolutionContext } from './hitResolution';
+import { createWorkSet, toMutable, type MutableCombatant } from './battleStateTypes';
+import { endHold, gainDouqiFromDamage, startHold, tickHolds, type HoldsContext } from './holds';
+import {
+  runAbilities,
+  runAi,
+  type AbilitiesContext,
+  type AiContext,
+} from './runAi';
+import {
+  advanceCasts,
+  tryUseSkill,
+  type CastPipelineContext,
+} from './castPipeline';
 import {
   applyEnrage,
   statsBreakdownOf,
@@ -51,57 +55,19 @@ import {
   type StatsContext,
 } from './stats';
 import { nextRandom, type RngState } from '../rng';
-import type {  Ability,
-Action,
+import type {
+  Action,
   BattleState,
   BuffDef,
-  CastInstance,
   Combatant,
   EventDef,
-  HitDef,
   SkillDef,
   StatKey,
   StatModifier,
   DamageSpec,
 } from '../types';
 
-/**
- * tick 内的工作副本类型：把 `Combatant` 的 readonly 去掉。
- *
- * 只用于引擎内部；对外暴露的 `BattleState` 仍然是 readonly 的
- * （快照不可被渲染层改坏）。
- */
-interface MutableCombatant {
-  id: string;
-  nameKey: Combatant['nameKey'];
-  side: Combatant['side'];
-  caps: Record<string, number>;
-  resources: Record<string, number>;
-  counters: Combatant['counters'];
-  basePrimary: Combatant['basePrimary'];
-  buffs: Combatant['buffs'] extends readonly (infer T)[] ? T[] : never;
-  cooldowns: Record<string, number>;
-  casts: CastInstance[];
-  uses: Record<string, number>;
-  activeHold?: { readonly skillId: string } | undefined;
-  behaviors: Combatant['behaviors'];
-  alive: boolean;
-}
 
-/** 把只读快照转成工作副本（深拷贝需要改的容器）。 */
-function toMutable(combatant: Combatant): MutableCombatant {
-  return {
-    ...combatant,
-    caps: { ...combatant.caps },
-    resources: { ...combatant.resources },
-    counters: { ...combatant.counters },
-    basePrimary: { ...combatant.basePrimary },
-    buffs: [...combatant.buffs],
-    cooldowns: { ...combatant.cooldowns },
-    casts: [...combatant.casts],
-    uses: { ...combatant.uses },
-  };
-}
 
 /** 起始初始状态需要的输入。 */
 export interface CreateBattleOptions {
@@ -195,110 +161,7 @@ export class BattleEngine {
    * AI（M4）：行为数组 → Action
    * ---------------------------------------------------------------- */
 
-  /**
-   * 让 AI 决策并应用它的动作。
-   *
-   * 位置很关键：在"玩家动作生效"之后、"读条推进"之前 ——
-   * 于是 Boss 的动作也享受**同一套**门禁与消耗，
-   * 而不是绕过引擎直接改状态。
-   */
-  private runAi(): void {
-    const bossId = this.options.bossId;
-    if (!bossId) return;
-    const self = this.state.combatants.find((c: Combatant) => c.id === bossId);
-    if (!self || !self.alive) return;
-    const opponent = this.opponentOf(bossId);
-    if (!opponent) return;
 
-    const view: AiView = {
-      self,
-      opponent,
-      tick: this.state.tick,
-      elapsedMs: (this.state.tick - this.state.startedAtTick) * (1000 / 60),
-      skillOf: (id: string) => this.options.skills.get(id),
-      isReady: (id: string) => (self.cooldowns[id] ?? 0) <= this.state.tick,
-      canAct: self.casts.length === 0,
-    };
-
-    const decision = decide(view, self.behaviors, this.aiState);
-    this.aiState = decision.nextState;
-
-    /**
-     * AI 层事件 → 实际效果。
-     *
-     * 只有两种，都是"执行一串能力/挂一个 buff"，
-     * **没有"阶段"这类引擎概念**。
-     */
-    for (const event of decision.events) {
-      if (event.kind === 'thresholdReached') {
-        // 血量阈值被跨过：执行内容声明的能力（通常是授予阶段 buff）
-        this.runAbilities(bossId, event.abilities);
-        this.events.push({
-          kind: 'behaviorTriggered',
-          tick: this.state.tick,
-          bossId,
-          kindName: `onHpBelow#${event.index}`,
-        });
-      } else {
-        this.applyEnrage(self);
-      }
-    }
-
-    if (decision.actions.length > 0) this.applyActions(decision.actions, bossId);
-  }
-
-  /**
-   * 执行一串能力（`onHpBelow.then` 用）。
-   *
-   * 这是"内容组合能力"的入口：`grant` / `modifier` / `resource` 全部走
-   * 既有实现，所以**新增一种阶段效果不需要改引擎**。
-   */
-  private runAbilities(actorId: string, abilities: readonly Ability[]): void {
-    for (const ability of abilities) {
-      const actor = this.work?.get(actorId);
-      if (!actor) return;
-      const opponent = this.opponentOf(actorId);
-      const targetIdOf = (mode: string): string =>
-        mode === 'self' ? actorId : (opponent?.id ?? actorId);
-
-      if (ability.kind === 'grant') {
-        const targetId = targetIdOf(ability.target.mode);
-        const target = this.current(targetId);
-        const applied = applyBuff(target, ability.buff, actorId, this.state.tick);
-        this.replaceCombatant({ ...target, buffs: applied.buffs });
-        this.events.push({
-          kind: 'buffApplied',
-          tick: this.state.tick,
-          targetId,
-          buffId: ability.buff.id,
-          stacks: applied.stacks,
-          sourceId: actorId,
-        });
-        continue;
-      }
-
-      if (ability.kind === 'resource') {
-        const delta = typeof ability.delta === 'number' ? ability.delta : 0;
-        if (delta !== 0) {
-          const targetId = targetIdOf(ability.target.mode);
-          const result = changeResource(
-            this.current(targetId),
-            ability.resource,
-            delta,
-            this.state.tick,
-          );
-          this.replaceCombatant(result.combatant);
-          this.events.push(...result.events);
-        }
-        continue;
-      }
-
-      if (ability.kind === 'trigger') {
-        // onHpBelow 里嵌 trigger 没有明确语义，直接执行它的 then
-        for (const then of ability.trigger.then) this.runAbilities(actorId, [then]);
-      }
-    }
-  }
 
 
 
@@ -322,12 +185,88 @@ export class BattleEngine {
   }
 
   /**
-   * 命中结算 —— 实现搬到 `./hitResolution.ts`（约 190 行）。
+   * AI 轮转 + 能力执行器 —— 实现搬到 `./runAi.ts`（约 105 行）。
    *
-   * 这里只有薄委托：把引擎的能力打包成 `HitResolutionContext`。
+   * ⚠️ `aiState` **仍然留在引擎**：它必须随战斗一起持久、可重放
+   * （放外部的话回放时 AI 会做出不同决定）。这里只是把"怎么决策"
+   * 借出去，状态还是引擎的。
    */
-  private resolveHit(actor: Combatant, skill: SkillDef, hit: HitDef): void {
-    resolveHit(this.hitContext(), actor, skill, hit);
+  private aiContext(): AiContext {
+    return {
+      state: this.state,
+      events: this.events,
+      tick: this.state.tick,
+      combatants: this.state.combatants,
+      aiState: this.aiState,
+      buffs: this.options.buffs,
+      skills: this.options.skills,
+      options: {
+        ...(this.options.bossId === undefined ? {} : { bossId: this.options.bossId }),
+        skills: this.options.skills,
+      },
+      current: (id) => this.current(id),
+      replaceCombatant: (updated) => this.replaceCombatant(updated),
+      opponentOf: (id) => this.opponentOf(id),
+      applyEnrage: (boss) => this.applyEnrage(boss),
+      runAbilities: (actorId, abilities) => runAbilities(this.abilitiesContext(), actorId, abilities),
+      applyActions: (actions, actorId) => this.applyActions(actions, actorId),
+    };
+  }
+
+  /** 能力执行器需要的引擎能力。 */
+  private abilitiesContext(): AbilitiesContext {
+    return {
+      tick: this.state.tick,
+      combatants: this.state.combatants,
+      buffs: this.options.buffs,
+      skills: this.options.skills,
+      events: this.events,
+      current: (id) => this.current(id),
+      replaceCombatant: (updated) => this.replaceCombatant(updated),
+      opponentOf: (id) => this.opponentOf(id),
+    };
+  }
+
+  /**
+   * 按住型技能 + 炁换算 —— 实现搬到 `./holds.ts`（约 115 行）。
+   *
+   * ⚠️ 它们原先用 `this.work?.get(id)` 取工作副本，现在统一走
+   * `current()` —— 后者本来就是 work-aware 的（先查工作副本、
+   * 没有才回落到 state），所以是**语义等价**的简化。
+   */
+  private holds(): HoldsContext {
+    return {
+      tick: this.state.tick,
+      combatants: this.state.combatants,
+      skills: this.options.skills,
+      buffs: this.options.buffs,
+      events: this.events,
+      current: (id) => this.current(id),
+      replaceCombatant: (updated) => this.replaceCombatant(updated),
+      tryUseSkill: (skillId, actorId) => tryUseSkill(this.castPipeline(), skillId, actorId),
+    };
+  }
+
+  /**
+   * 施法流程 —— 实现搬到 `./castPipeline.ts`（约 465 行）。
+   *
+   * 引擎**不再持有这些方法的实现**，只在 tick 的合适位置调用它们
+   * （tick 顺序是引擎的职责，见 `tick()`）。
+   */
+  private castPipeline(): CastPipelineContext {
+    return {
+      tick: this.state.tick,
+      combatants: this.state.combatants,
+      events: this.events,
+      skills: this.options.skills,
+      buffs: this.options.buffs,
+      current: (id) => this.current(id),
+      replaceCombatant: (updated) => this.replaceCombatant(updated),
+      opponentOf: (id) => this.opponentOf(id),
+      statsOf: (id) => this.statsOf(id),
+      hit: () => this.hitContext(),
+      combatContext: this.ctx,
+    };
   }
 
   /** 命中结算阶段需要的引擎能力（每次现取，避免持有可变引用）。 */
@@ -340,8 +279,17 @@ export class BattleEngine {
       opponentOf: (id) => this.opponentOf(id),
       statsOf: (id) => this.statsOf(id),
       rollCrit: (stats, damage) => this.rollCrit(stats, damage),
-      gainDouqiFromDamage: (id, damage, tick) => this.gainDouqiFromDamage(id, damage, tick),
-      pushBuffApplied: (id, buffId, stacks) => this.pushBuffApplied(id, buffId, stacks),
+      gainDouqiFromDamage: (id, damage, tick) => gainDouqiFromDamage(this.holds(), id, damage, tick),
+      pushBuffApplied: (id, buffId, stacks) => {
+        this.events.push({
+          kind: 'buffApplied',
+          tick: this.state.tick,
+          targetId: id,
+          buffId,
+          stacks,
+          sourceId: id,
+        });
+      },
     };
   }
 
@@ -402,121 +350,9 @@ export class BattleEngine {
    * 按住型技能（「防」）
    * ---------------------------------------------------------------- */
 
-  /**
-   * 开始按住一个技能。
-   *
-   * 与 `useSkill` 的区别：按住型技能施放后**保持生效**，
-   * 由 `tickHolds` 每个逻辑步扣 `holdDrain`。资源耗尽或松手即结束。
-   */
-  private startHold(skillId: string, actorId: string): void {
-    const actor = this.work?.get(actorId);
-    if (!actor) return;
-    const skill = this.options.skills.get(skillId);
-    if (!skill?.holdDrain) {
-      // 不是按住型技能 → 退化成普通施放，这样输入层不必区分两种技能
-      this.tryUseSkill(skillId, actorId);
-      return;
-    }
-    if (actor.activeHold?.skillId === skillId) return;
 
-    this.tryUseSkill(skillId, actorId);
-    const after = this.work?.get(actorId);
-    if (!after) return;
-    // 只有施放真的成功（身上有它授予的 buff）才进入按住状态
-    const granted = skill.abilities.some(
-      (a) => a.kind === 'grant' && after.buffs.some((b) => b.defId === a.buff.id),
-    );
-    if (!granted) return;
-    this.replaceCombatant({ ...after, activeHold: { skillId } });
-  }
 
-  /** 结束按住：移除它授予的 buff。 */
-  private endHold(skillId: string, actorId: string): void {
-    const actor = this.work?.get(actorId);
-    if (!actor) return;
-    if (actor.activeHold?.skillId !== skillId) return;
 
-    const skill = this.options.skills.get(skillId);
-    const grantedIds = new Set(
-      (skill?.abilities ?? [])
-        .filter((a): a is Extract<typeof a, { kind: 'grant' }> => a.kind === 'grant')
-        .map((a) => a.buff.id),
-    );
-
-    this.replaceCombatant({
-      ...actor,
-      activeHold: undefined,
-      buffs: actor.buffs.filter((b) => !grantedIds.has(b.defId)),
-    });
-  }
-
-  /**
-   * 每个逻辑步处理按住状态：扣资源，资源不够就自动松开。
-   *
-   * 为什么按**逻辑步**而不是每 tick：需求定义"每 0.1 秒扣 2 点"，
-   * 按 tick（1/60 秒）扣会让玩家算不清代价，也会被整数化吃掉小数。
-   */
-  private tickHolds(): void {
-    if (this.state.tick % TICKS_PER_LOGIC_TICK !== 0) return;
-
-    for (const id of this.state.combatants.map((c: Combatant) => c.id)) {
-      const actor = this.work?.get(id);
-      const hold = actor?.activeHold;
-      if (!actor || !hold) continue;
-
-      const skill = this.options.skills.get(hold.skillId);
-      const drain = skill?.holdDrain;
-      if (!drain) {
-        this.endHold(hold.skillId, id);
-        continue;
-      }
-
-      const have = (actor.resources as Record<string, number>)[drain.resource] ?? 0;
-      if (have < drain.perLogicTick) {
-        // 资源耗尽 → 自动松开，并告诉玩家原因
-        this.endHold(hold.skillId, id);
-        this.events.push({
-          kind: 'skillRejected',
-          tick: this.state.tick,
-          sourceId: id,
-          skillId: hold.skillId,
-          reason: 'cost',
-        });
-        continue;
-      }
-      const result = changeResource(actor, drain.resource, -drain.perLogicTick, this.state.tick);
-      this.replaceCombatant(result.combatant);
-      this.events.push(...result.events);
-    }
-  }
-
-  /**
-   * 按伤害量换算炁。
-   *
-   * 需求：「炁根据造成或受到的伤害数值」—— 造成 1 点伤害得 1 点，
-   * 受到 1 点伤害也得 1 点。
-   *
-   * 换算放在**引擎**而不是逐条写进内容，因为它必须对**每一次伤害**生效
-   * （包括 DoT、反击、任何来源）—— 写进内容一定会漏。
-   */
-  private gainDouqiFromDamage(combatantId: string, damage: number, tick: number): void {
-    if (damage <= 0) return;
-    /**
-     * `damage` 是**内部刻度**，而系数是展示刻度的 —— 必须用换算过的版本。
-     *
-     * 踩过的坑：直接用展示刻度系数会让炁攒得快 `DISPLAY_SCALE` 倍，
-     * 玩家一路「轰」秒杀 Boss（实测 7 秒通关一场本该 2 分钟的战斗）。
-     * 而且单点伤害小到 10 内部点时，`Math.round` 会把 1 点炁算成 1 ——
-     * 所以系数的换算必须在这里做，不能靠调用方记得。
-     */
-    const gain = Math.round(damage * DOUQI_PER_INTERNAL_DAMAGE);
-    if (gain <= 0) return;
-    const target = this.work?.get(combatantId);
-    if (!target) return;
-    const result = changeResource(target, 'douqi', gain, tick);
-    this.replaceCombatant(result.combatant);
-    this.events.push(...result.events);
-  }
 
   /* ---------------------------------------------------------------- *
    * 工作副本：一次 tick 内只有一份可变状态
@@ -544,21 +380,7 @@ export class BattleEngine {
 
   /** 开始一个 tick 的工作副本（浅拷贝 + 需要改的容器深拷贝一层）。 */
   private beginWork(): void {
-    const work = new Map<string, MutableCombatant>();
-    for (const combatant of this.state.combatants) {
-      work.set(combatant.id, {
-        ...combatant,
-        caps: { ...combatant.caps },
-        resources: { ...combatant.resources },
-        counters: { ...combatant.counters },
-        basePrimary: { ...combatant.basePrimary },
-        buffs: [...combatant.buffs],
-        cooldowns: { ...combatant.cooldowns },
-        casts: [...combatant.casts],
-        uses: { ...combatant.uses },
-      });
-    }
-    this.work = work;
+    this.work = createWorkSet(this.state.combatants);
   }
 
   /** 把工作副本一次性提交回 state。**这是唯一的写回点。** */
@@ -602,9 +424,9 @@ export class BattleEngine {
     try {
       const resolvedActor = actorId ?? this.defaultActorId();
       for (const action of actions) {
-        if (action.type === 'useSkill') this.tryUseSkill(action.skillId, resolvedActor);
-        else if (action.type === 'hold') this.startHold(action.skillId, resolvedActor);
-        else if (action.type === 'releaseSkill') this.endHold(action.skillId, resolvedActor);
+        if (action.type === 'useSkill') tryUseSkill(this.castPipeline(), action.skillId, resolvedActor);
+        else if (action.type === 'hold') startHold(this.holds(), action.skillId, resolvedActor);
+        else if (action.type === 'releaseSkill') endHold(this.holds(), action.skillId, resolvedActor);
       }
     } finally {
       if (owned) this.commitWork();
@@ -647,10 +469,10 @@ export class BattleEngine {
 
     // 1. 动作生效
     this.applyActions(actions, actorId ?? 'player');
-    this.runAi();
+    runAi(this.aiContext());
 
     // 2. 读条推进
-    this.advanceCasts();
+    advanceCasts(this.castPipeline());
 
     // 3. 持续效果（DoT / HoT）到点触发
     this.tickOverTimeEffects();
@@ -661,7 +483,7 @@ export class BattleEngine {
     this.regenerateResources();
 
     // 5b. 按住型技能的持续消耗（按逻辑步）
-    this.tickHolds();
+    tickHolds(this.holds());
 
     // 6. 时间限制
     this.checkTimeLimit();
@@ -676,492 +498,15 @@ export class BattleEngine {
    * 技能施放
    * ---------------------------------------------------------------- */
 
-  private tryUseSkill(skillId: string, actorId: string): void {
-    /**
-     * ⚠️ 必须从**工作副本**读 actor，不能读 `this.state`。
-     *
-     * 踩过的坑：同一 tick 内的第二个技能会读到"还没扣掉代价"的旧状态，
-     * 于是 `strike` 和 `riposte` 能在**同一个 tick 里都施放成功** ——
-     * 门禁形同虚设，实测 DPS 因此虚高 3 倍以上。
-     *
-     * 教训与工作副本那条一致：一次 tick 内的所有读写都必须走同一个副本。
-     */
-    const actor = this.work?.get(actorId);
-    if (!actor) return;
-
-    const skill = this.options.skills.get(skillId);
-    if (!skill) return;
-
-    const stats = this.statsOf(actor.id);
-    const opponent = this.opponentOf(actor.id);
-
-    /**
-     * 谁能打断读条：**只有瞬发技能**。
-     *
-     * ------------------------------------------------------------------
-     * 规则（需求明确）
-     * ------------------------------------------------------------------
-     *
-     *   - **瞬发**（`castTime === 0`）：读条中放行 → 打断当前读条。
-     *     包括「闪」「破」「凝」，以及**「防」这种按住型**。
-     *   - **有读条的**（攻 / 轰）：读条中被 `casting` 拒绝，
-     *     所以**不会**打断自己，必须等当前读条结束。
-     *
-     * 这条规则很自然：读条技能之间互相打断会让"读条"失去意义
-     * （永远在被打断，永远读不完）；而瞬发技能本来就是"零耗时"的
-     * 应对手段（闪避、打断、增益），随时可用才合理。
-     *
-     * 踩过的坑：早期这里写的是 `!isHold`，方向正好取反 —— 变成
-     * "只有按住型被拒绝、其它全部放行"，与需求完全相反。
-     */
-    const isInstant = skill.castTime === 0;
-
-    /* ------------------------------------------------------------------ *
-     * 读条中施放**其它**技能 → 打断当前读条。
-     *
-     * 需求：「读条的时候如果使用其他技能，就打断当前的读条」。
-     *
-     * 这是删掉公共冷却之后的**主要限速机制**，也是"攻 / 轰 要挑空档"
-     * 这一博弈的来源。注意代价在开始读条时就已扣除、**中断不退** ——
-     * 所以"酝酿大招被打断"是有真实损失的。
-     * ------------------------------------------------------------------ */
-
-    // 先做门禁检查（含资源、冷却）
-    const gate = checkGate(actor, skill, this.ctx, {
-      hasTarget: opponent !== undefined,
-      allowedWhileCasting: isInstant,
-    });
-
-    /**
-     * ⚠️ 顺序很重要：**门禁通过之后才能打断**。
-     *
-     * 踩过的坑：早期把打断放在门禁之前，于是"资源不足被拒绝"也会
-     * 顺手把正在读的条打断 —— 玩家按下幻想的「轰」（缠不够），
-     * 结果连「攻」的读条也没了。用日志才看出来：同一 tick 里
-     * 先 `castInterrupted`、再 `skillRejected`。
-     */
-    /**
-     * **瞬发技能都会打断自己的读条** —— 包括「闪」（需求明确）。
-     *
-     * 我一度给「闪」开了豁免（"瞬发自保不该有双重代价"），
-     * 但需求要的是它**必须**打断：读条中按闪避 = 放弃这次输出
-     * 换取生存，这个取舍本身就是玩法。
-     *
-     * ⚠️ 代价确实很大（一次「攻」≈10 伤 + 30 炁），所以给「闪」
-     * 加了 **1 秒冷却** —— 既保留"要打断"的取舍，又避免连按浪费。
-     */
-    const isDefensiveReaction = false;
-    if (gate.ok && actor.casts.length > 0 && !isDefensiveReaction) {
-      for (const cast of actor.casts) {
-        this.events.push({
-          kind: 'castInterrupted',
-          tick: this.state.tick,
-          sourceId: actor.id,
-          skillId: cast.skillId,
-          reason: 'replaced',
-        });
-      }
-      actor.casts = [];
-    }
-
-    if (!gate.ok) {
-      this.events.push({
-        kind: 'skillRejected',
-        tick: this.state.tick,
-        sourceId: actor.id,
-        skillId,
-        reason: gate.reason ?? 'condition',
-      });
-      return;
-    }
-
-    // 扣代价
-    const paid = payCosts(actor, skill, this.state.tick);
-    this.events.push(...paid.events);
-    let next = paid.combatant;
-
-    // 技能冷却（受急速影响）
-    if (skill.cooldown > 0) {
-      const cooldownMs = hastedCooldown(skill.cooldown, stats);
-      const readyAt = this.state.tick + Math.round(cooldownMs / (1000 / 60));
-      next = { ...next, cooldowns: { ...next.cooldowns, [skillId]: readyAt } };
-    }
-
-    // 记使用次数
-    next = { ...next, uses: { ...next.uses, [skillId]: (next.uses[skillId] ?? 0) + 1 } };
-
-    // 读条 or 立刻结算。
-    //
-    // ⚠️ 状态写回只有两处，且**互斥**。这个方法是踩坑最密集的地方，
-    // 记录一下根因：早先的版本在方法末尾统一写回 `next`，而
-    // `resolveSkillHits` 也会通过 replaceCombatant 改 state，
-    // 于是最后那次写回把刚挂上的 buff / 刚扣的血全部覆盖掉
-    // ——表现为"事件发了但状态没变"。教训：**一个方法里只在一个地方
-    // 写回同一个对象**，或者干脆让下游函数自己写。
-    const castTimeMs = hastedCastTime(skill.castTime, stats);
-    if (castTimeMs > 0) {
-      // 读条：把 cast 写回 state 即可，hit 由 advanceCasts 逐段结算
-      this.replaceCombatant({
-        ...next,
-        casts: [
-          ...next.casts,
-          {
-            skillId,
-            startedAtTick: this.state.tick,
-            castTimeMs,
-            resolvedHits: 0,
-            interruptible: skill.interruptible,
-          },
-        ],
-      });
-      this.events.push({
-        kind: 'castStarted',
-        tick: this.state.tick,
-        sourceId: actor.id,
-        skillId,
-      });
-      /**
-       * **起手就生效**的能力（`on: 'castStart'`）。
-       *
-       * 需求："重斩加上霸体标签和霸体效果" —— 霸体的意义是"整个前摇
-       * 打不断"，所以它必须在起手时挂上。之前 skills 的 abilities 只在
-       * 读条**完成**时结算，于是前摇期间照样能被「破」打断，
-       * 霸体等于没有（实测确认过）。
-       *
-       * 时机放在 `castStarted` 事件之后：事件流上读起来是
-       * "开始了 → 因此获得霸体"，消费者按顺序理解不会歧义。
-       */
-      this.applyCastStartAbilities(skill, actor.id);
-    } else {
-      // 瞬发：先同步冷却，再结算 —— 之后**不再写回**
-      this.replaceCombatant(next);
-      this.resolveSkillHits(next, skill);
-    }
-
-    this.events.push({
-      kind: 'skillUsed',
-      tick: this.state.tick,
-      sourceId: actor.id,
-      skillId,
-    });
-  }
 
   /* ---------------------------------------------------------------- *
    * 读条推进
    * ---------------------------------------------------------------- */
 
-  private advanceCasts(): void {
-    // ⚠️ 遍历 **id 列表**而不是 `this.state.combatants` 的元素快照。
-    //
-    // 原因：`applyActions` 会用新对象替换 combatant（例如扣了炁）。
-    // 如果这里持有循环开始时的旧引用，读到的是**过期状态**，
-    // 随后的写回会把 applyActions 刚做的改动覆盖掉。
-    // （症状：`resourceChanged` 事件发了，但资源回到原值。）
-    for (const id of this.state.combatants.map((c: Combatant) => c.id)) {
-      const actor = this.current(id);
-      if (actor.casts.length === 0) continue;
 
-      const stillCasting: CastInstance[] = [];
 
-      // 同样遍历副本：循环体里 resolveHit 会改状态
-      for (const cast of [...actor.casts]) {
-        // 来源消失（技能被移除）→ 立即中断。见 i18n/数据模型规范 §7.2 规则 4
-        const skill = this.options.skills.get(cast.skillId);
-        if (!skill) {
-          this.events.push({
-            kind: 'castInterrupted',
-            tick: this.state.tick,
-            sourceId: actor.id,
-            skillId: cast.skillId,
-            reason: 'sourceLost',
-          });
-          continue;
-        }
 
-        /**
-         * **刚在本 tick 创建的读条不结算**（进度从下一帧开始算）。
-         *
-         * 踩过的坑：「攻」的 `hit.at` 是 0（伤害在读条结束时结算），
-         * 而读条创建后**同一个 tick** 就会被推进到这里 ——
-         * `elapsedMs = 0`、`0 <= 0` 成立，于是伤害**立刻**打出去，
-         * 读条形同虚设（实测按下「攻」当场掉 10 血）。
-         *
-         * 从"读条"的语义看这也更对：读条是跨时间的动作，
-         * 它不应该在开始的那一帧就完成。
-         */
-        if (cast.startedAtTick === this.state.tick) {
-          stillCasting.push(cast);
-          continue;
-        }
 
-        const elapsedMs = (this.state.tick - cast.startedAtTick) * (1000 / 60);
-
-        /**
-         * ⚠️ **读条没走完，任何 hit 都不许结算。**
-         *
-         * 这是需求"所有技能的效果，如果要读条，都应该在读条之后"的
-         * 技术落地，也是踩出来的 bug：
-         *
-         * 原先的条件只有 `hit.at <= elapsedMs`。而**玩家技能的 `at` 是 0**
-         * （「攻」「轰」都写 `at: 0`）—— 于是读条创建后的**下一 tick**
-         * 就满足 `0 <= 16.67`，伤害当场结算，读条形同虚设。
-         *
-         * 观感上就是"读条还在走、血已经掉了"（Boss 与玩家两边都有，
-         * 玩家的最明显：按下「攻」血就掉）。
-         *
-         * 现在多一个 `elapsedMs >= cast.castTimeMs` 的前提：
-         *   - 读条技能的 `at` 语义变成"读条走完之后的第几毫秒"
-         *     （Boss 技能本来就写 `at === castTime`，行为不变）
-         *   - 瞬发技能（`castTime === 0`）不走这里，仍由
-         *     `resolveSkillHits` 立即结算
-         *
-         * 注意 `castTimeMs` 是**已经算过急速**的值，所以这条判断
-         * 对急速同样成立。
-         */
-        const castDone = elapsedMs >= cast.castTimeMs;
-        const dueHits = skill.hits.filter(
-          (hit: HitDef, index: number) =>
-            index >= cast.resolvedHits && castDone && hit.at <= elapsedMs,
-        );
-
-        /**
-         * ⚠️ **顺序很重要：先发 `castFinished`，再结算伤害。**
-         *
-         * 需求："所有技能的效果，如果要读条，都应该在读条之后。"
-         *
-         * 事件顺序是这句话最直接的证据 —— 消费者（渲染层的飘字、
-         * 测试里的断言、未来的日志）都按事件顺序理解发生了什么。
-         * 原先伤害先发、`castFinished` 后发，于是时间线上看起来
-         * 仍然是"伤害在读条结束之前"。
-         */
-        const finished = elapsedMs >= cast.castTimeMs;
-        if (finished) {
-          this.events.push({
-            kind: 'castFinished',
-            tick: this.state.tick,
-            sourceId: actor.id,
-            skillId: cast.skillId,
-          });
-          this.fireCastFinishTriggers(actor, skill);
-        }
-
-        // CastInstance 是 readonly（状态设计如此），所以用新对象推进计数
-        let resolved = cast.resolvedHits;
-        for (const hit of dueHits) {
-          this.resolveHit(actor, skill, hit);
-          resolved += 1;
-        }
-
-        if (!finished) {
-          stillCasting.push({ ...cast, resolvedHits: resolved });
-        }
-      }
-
-      // ⚠️ 用**当前 state** 而不是循环开头缓存的 `next`：
-      // resolveHit 会在循环中间修改双方状态（扣血、挂 buff），
-      // 写回旧快照会把那些改动覆盖掉。
-      this.replaceCombatant({ ...this.current(actor.id), casts: stillCasting });
-    }
-  }
-
-  /**
-   * 结算 `on: 'castStart'` 的能力。
-   *
-   * 与 `fireCastFinishTriggers` 是**两套**：那个处理"完成时的结果"，
-   * 这个处理"施法期间的状态"。分成两个方法而不是加一个参数，
-   * 是因为它们的**写入对象不同** —— 完成时的结算必须操作累积对象
-   * （见那里的长注释），而起手时 `state` 已经是最新的。
-   */
-  private applyCastStartAbilities(skill: SkillDef, actorId: string): void {
-    for (const ability of skill.abilities) {
-      if (ability.kind !== 'grant' || ability.on !== 'castStart') continue;
-      const targetId = ability.target.mode === 'self' ? actorId : (this.opponentOf(actorId)?.id ?? actorId);
-      const target = this.current(targetId);
-      const applied = applyBuff(target, ability.buff, actorId, this.state.tick);
-      this.replaceCombatant({ ...target, buffs: applied.buffs });
-      this.events.push({
-        kind: 'buffApplied',
-        tick: this.state.tick,
-        targetId,
-        buffId: ability.buff.id,
-        stacks: applied.stacks,
-        sourceId: actorId,
-      });
-    }
-  }
-
-  /** 瞬发技能：立刻结算全部 hit 段。 */
-  private resolveSkillHits(actor: Combatant, skill: SkillDef): void {
-    for (const hit of skill.hits) {
-      this.resolveHit(actor, skill, hit);
-    }
-    this.fireCastFinishTriggers(actor, skill);
-  }
-
-  /**
-   * 技能完成时结算它自己的 abilities。
-   *
-   * 两种形态都要处理，**不能只处理 trigger**：
-   *
-   *   1. **直接 grant**：`{ kind:'grant', buff: dodgeBuff }`
-   *      —— 闪避 / 格挡这类"用了就给自己挂 buff"的技能走这条。
-   *      （踩过的坑：一开始只实现了 trigger 形态，于是 dodge 施放成功
-   *        但 buff 从未挂上，表现为"闪避没效果"。）
-   *   2. **trigger onCastFinish**：派生窗口走这条。
-   */
-  /**
-   * 结算技能自带的 abilities。
-   *
-   * ⚠️ 这里**必须操作传入的累积对象 `actor`，不能回读 `this.current()`**。
-   *
-   * 踩过的坑：回读会拿到 state 里的旧版本（此时冷却还没写回），
-   * 于是挂上 buff 后用旧的 buffs 数组整条覆盖回去 ——
-   * 表现为"dodge 施放成功、buffApplied 事件也发了，但 buff 立刻消失"。
-   *
-   * 所以：改动累积对象 → 同步到 state → 继续改。
-   */
-  private fireCastFinishTriggers(actor: Combatant, skill: SkillDef): void {
-    /**
-     * 本次结算的**唯一工作副本**。
-     *
-     * ⚠️ 这是踩坑最密集的地方，规则只有一条但必须严格遵守：
-     * **每改一次 state，就立刻把 working 同步成最新版本。**
-     *
-     * 违反它会怎样：working 是方法开头捕获的旧对象，
-     * 方法末尾又用它写回 —— 中间所有改动（挂 buff、加炁）全被抹掉。
-     * 症状是"`resourceChanged` / `buffApplied` 事件都发了，但状态没变"，
-     * 极难从事件流上看出来。
-     */
-    let working = this.current(actor.id);
-
-    /** 改 working 并同步到工作副本（单一入口，避免忘记同步）。 */
-    const commit = (next: Combatant): void => {
-      working = next as MutableCombatant;
-      this.replaceCombatant(next);
-    };
-
-    const targetIdOf = (mode: string): string =>
-      mode === 'self' ? working.id : (this.opponentOf(working.id)?.id ?? working.id);
-
-    const grantTo = (buff: BuffDef, targetId: string): void => {
-      if (targetId === working.id) {
-        const applied = applyBuff(working, buff, working.id, this.state.tick);
-        commit({ ...working, buffs: applied.buffs });
-        this.pushBuffApplied(working.id, buff.id, applied.stacks);
-        return;
-      }
-      const target = this.current(targetId);
-      const applied = applyBuff(target, buff, working.id, this.state.tick);
-      commit({ ...target, buffs: applied.buffs });
-      this.pushBuffApplied(target.id, buff.id, applied.stacks);
-    };
-
-    /**
-     * 把一个 buff 加到**施法者以外的目标**上（会被打上施法者来源）。
-     *
-     * 用于"大招打中后给 Boss 挂易伤"这类内容 —— 与 grantTo 的区别是
-     * `sourceId` 记成施法者而不是目标自己。
-     */
-    const applyBuffTo = (buff: BuffDef, targetId: string): void => {
-      const target = targetId === working.id ? working : this.current(targetId);
-      const applied = applyBuff(target, buff, working.id, this.state.tick);
-      commit({ ...target, buffs: applied.buffs });
-      this.events.push({
-        kind: 'buffApplied',
-        tick: this.state.tick,
-        targetId: target.id,
-        buffId: buff.id,
-        stacks: applied.stacks,
-        sourceId: working.id,
-      });
-    };
-
-    /** 加入一个 buff 实例（用对象字面量直接写内容，不必先定义 BuffDef）。 */
-    const addBuff = (buff: BuffDef, targetId: string): void => applyBuffTo(buff, targetId);
-
-    /**
-     * 炁满时自动挂上的标记 buff。
-     *
-     * 为什么需要它：终结技的门槛是"炁已满"，而 `requires` 只能检查
-     * buff / 资源阈值。用一条"满炁"标记 buff 表达它，内容层就能写
-     * `requires: [{ kind:'hasBuff', buffId:'douqi-full' }]` ——
-     * **不用给引擎加新条件类型**（这正是可扩展性的验证方式）。
-     */
-    const syncDouqiFull = (): void => {
-      const result = syncResourceGateBuff(working, 'douqi', 'douqi-full', {
-        id: 'douqi-full',
-        nameKey: 'resource.douqi',
-        icon: 'buff_douqi',
-        polarity: 'buff',
-        color: 0xffd050,
-        duration: Number.POSITIVE_INFINITY,
-        maxStacks: 1,
-        stacking: { mode: 'refresh' },
-      });
-      if (result) {
-        commit({ ...working, buffs: result.buffs });
-        for (const e of result.events) this.events.push(e);
-      }
-    };
-
-    const grantResource = (resource: string, delta: number, targetId: string): void => {
-      if (delta === 0) return;
-      const target = targetId === working.id ? working : this.current(targetId);
-      const result = changeResource(target, resource, delta, this.state.tick);
-      commit(result.combatant);
-      this.events.push(...result.events);
-    };
-
-    /**
-     * ⚠️ 这里只结算**读条完成**时刻的能力。
-     *
-     * `on: 'castStart'` 的那组在起手时就结算过了（见 `tryUseSkill`），
-     * 如果在完成时再算一次，霸体会被刷新成"从完成时刻起算"——
-     * 那正好把"整个前摇都免疫"这个语义破坏掉。
-     */
-    for (const ability of skill.abilities) {
-      if (ability.kind === 'grant' && ability.on === 'castStart') continue;
-      if (ability.kind === 'grant') {
-        grantTo(ability.buff, targetIdOf(ability.target.mode));
-        continue;
-      }
-
-      if (ability.kind === 'resource') {
-        // 一次性资源变动（"基础技产生 18 点炁"）。
-        // 与 `douqiRegen` 修正的区别：那是持续速率，这是一次性。
-        const delta = typeof ability.delta === 'number' ? ability.delta : 0;
-        grantResource(ability.resource, delta, targetIdOf(ability.target.mode));
-        syncDouqiFull();
-        continue;
-      }
-
-      if (ability.kind === 'trigger') {
-        if (ability.trigger.on !== 'onCastFinish') continue;
-        for (const then of ability.trigger.then) {
-          if (then.kind === 'grant') grantTo(then.buff, targetIdOf(then.target.mode));
-          if (then.kind === 'resource') {
-            const delta = typeof then.delta === 'number' ? then.delta : 0;
-            grantResource(then.resource, delta, targetIdOf(then.target.mode));
-            syncDouqiFull();
-          }
-        }
-      }
-    }
-
-    // 本次结算结束后复查一次：内容可能直接写了 addBuff 形式的标记
-    void addBuff;
-  }
-
-  private pushBuffApplied(targetId: string, buffId: string, stacks: number): void {
-    this.events.push({
-      kind: 'buffApplied',
-      tick: this.state.tick,
-      targetId,
-      buffId,
-      stacks,
-      sourceId: targetId,
-    });
-  }
 
   /* ---------------------------------------------------------------- *
    * 单个 hit 段的结算（判定层的核心）

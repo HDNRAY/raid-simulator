@@ -132,7 +132,6 @@ addEventListener: (type, listener) =>
 
 | 文件 | 天花板 |
 |---|---|
-| `src/core/combat/battleState.ts` | 1580 |
 | `src/core/types.ts` | 973 |
 
 ✅ 已拆到 700 以下、**从表里移除**的：
@@ -141,6 +140,7 @@ addEventListener: (type, listener) =>
 |---|---|---|---|
 | `src/render/BattleScene.ts` | 1421 | **668** | `skillBar` / `IconStrip` / `FloatingTextLayer` / `background` / `sceneTypes` / `hudUtils` / `actorLayout` + `parts/` 下 7 个帧部件 |
 | `src/ui/settings/SettingsPanel.ts` | 938 | **646** | `KeyGrid` / `SkillDetail` / `SettingsFrame` / `KeysFooter` / `ScaleSlider` / `rows` |
+| `src/core/combat/battleState.ts` | 1580 | **694** | `castPipeline` / `hitResolution` / `stats` / `holds` / `runAi` / `battleStateTypes` |
 
 ### ⚠️ `src/core/types.ts` 是特例：类型图是"中心辐射"的
 

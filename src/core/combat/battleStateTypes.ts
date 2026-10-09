@@ -1,0 +1,77 @@
+/**
+ * 引擎内部的**可变战斗者**类型 + 只读快照 → 工作副本的转换。
+ *
+ * ==================================================================
+ * 为什么单独一个文件
+ * ==================================================================
+ *
+ * `battleState.ts` 超过 700 行（AGENTS.md §3），拆出去的
+ * `hitResolution.ts` / `castPipeline.ts` 都要这个类型。
+ *
+ * ⚠️ 如果它们从 `battleState.ts` import，就形成"子模块反向依赖
+ * 主模块"的环 —— 所以必须待在两边都能向下依赖的地方。
+ */
+
+import type { CastInstance, Combatant } from '../types';
+
+/**
+ * tick 内的工作副本类型：把 `Combatant` 的 readonly 去掉。
+ *
+ * 只用于引擎内部；对外暴露的 `BattleState` 仍然是 readonly 的
+ * （快照不可被渲染层改坏）。
+ */
+export interface MutableCombatant {
+  id: string;
+  nameKey: Combatant['nameKey'];
+  side: Combatant['side'];
+  caps: Record<string, number>;
+  resources: Record<string, number>;
+  counters: Combatant['counters'];
+  basePrimary: Combatant['basePrimary'];
+  buffs: Combatant['buffs'] extends readonly (infer T)[] ? T[] : never;
+  cooldowns: Record<string, number>;
+  casts: CastInstance[];
+  uses: Record<string, number>;
+  activeHold?: { readonly skillId: string } | undefined;
+  behaviors: Combatant['behaviors'];
+  alive: boolean;
+}
+
+/** 把只读快照转成工作副本（深拷贝需要改的容器）。 */
+export function toMutable(combatant: Combatant): MutableCombatant {
+  return {
+    ...combatant,
+    caps: { ...combatant.caps },
+    resources: { ...combatant.resources },
+    counters: { ...combatant.counters },
+    basePrimary: { ...combatant.basePrimary },
+    buffs: [...combatant.buffs],
+    cooldowns: { ...combatant.cooldowns },
+    casts: [...combatant.casts],
+    uses: { ...combatant.uses },
+  };
+}
+
+/**
+ * 为一个 tick 建立**工作副本集**（浅拷贝 + 需要改的容器深拷贝一层）。
+ *
+ * 引擎的 `work` map 本身仍是它的私有字段（那是状态），
+ * 但"怎么造这份副本"是**纯函数**，没有理由留在 700+ 行的文件里。
+ */
+export function createWorkSet(combatants: readonly Combatant[]): Map<string, MutableCombatant> {
+  const work = new Map<string, MutableCombatant>();
+  for (const combatant of combatants) {
+    work.set(combatant.id, {
+      ...combatant,
+      caps: { ...combatant.caps },
+      resources: { ...combatant.resources },
+      counters: { ...combatant.counters },
+      basePrimary: { ...combatant.basePrimary },
+      buffs: [...combatant.buffs],
+      cooldowns: { ...combatant.cooldowns },
+      casts: [...combatant.casts],
+      uses: { ...combatant.uses },
+    });
+  }
+  return work;
+}

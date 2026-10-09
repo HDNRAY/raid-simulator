@@ -335,17 +335,22 @@ describe('能力结算时刻：castStart 与 castFinish', () => {
      * 而且会让「破」在一段时间内莫名其妙失效。
      */
     const { readFileSync } = await import('node:fs');
-    const src = readFileSync(new URL('../../src/core/combat/battleState.ts', import.meta.url), 'utf8');
+    // 施法流程已拆到 `castPipeline.ts`
+    const src = readFileSync(new URL('../../src/core/combat/castPipeline.ts', import.meta.url), 'utf8');
     expect(src).toMatch(/if \(ability\.kind === 'grant' && ability\.on === 'castStart'\) continue;/);
   });
 
   it('起手时确实有一条结算路径，且放在 castStarted 事件之后', async () => {
     const { readFileSync } = await import('node:fs');
-    const src = readFileSync(new URL('../../src/core/combat/battleState.ts', import.meta.url), 'utf8');
-    expect(src).toMatch(/private applyCastStartAbilities\(/);
+    const src = readFileSync(new URL('../../src/core/combat/castPipeline.ts', import.meta.url), 'utf8');
+    expect(src).toMatch(/export function applyCastStartAbilities\(/);
     // 顺序：先发 castStarted，再结算 —— 事件流读起来是"开始了 → 因此获得霸体"
+    /**
+     * ⚠️ `tryUseSkill` 也搬进 `castPipeline.ts` 了，所以**顺序与调用
+     * 现在都在同一个文件里** —— 读它一份即可。
+     */
     const idx = src.indexOf("kind: 'castStarted'");
-    const callIdx = src.indexOf('this.applyCastStartAbilities(');
+    const callIdx = src.indexOf('applyCastStartAbilities(ctx, skill, actor.id)');
     expect(idx).toBeGreaterThan(0);
     expect(callIdx).toBeGreaterThan(idx);
   });
