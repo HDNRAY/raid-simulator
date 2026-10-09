@@ -11,8 +11,6 @@
 
 import { assertValidContent, type ContentBundle } from './validate';
 import { buffAbilities } from '../expr/deps';
-import { flattenCatalog } from '../../i18n/translator';
-import { zhCN } from '../../i18n/locales/zh-CN';
 import type { BuffDef, SkillDef } from '../types';
 
 export interface ContentRegistry {
@@ -22,8 +20,8 @@ export interface ContentRegistry {
   /** 用技能 id 取定义；不存在则抛（内容校验保证不会发生） */
   skill(id: string): SkillDef;
   buff(id: string): BuffDef | undefined;
-  /** 某个技能的全部本地化 key（供译表裁剪等用途） */
-  readonly localeKeys: ReadonlySet<string>;
+  /** 本次校验用到的语言 key 集合（可能为空 = 未做 key 存在性校验） */
+  readonly localeKeys: ReadonlySet<string> | undefined;
 }
 
 /**
@@ -34,11 +32,16 @@ export interface ContentRegistry {
  */
 export function createRegistry(
   bundle: ContentBundle,
-  options: { readonly validate?: boolean } = {},
+  options: { readonly validate?: boolean; readonly localeKeys?: ReadonlySet<string> } = {},
 ): ContentRegistry {
-  const localeKeys = bundle.localeKeys ?? new Set(flattenCatalog(zhCN).keys());
-
-  const withLocale: ContentBundle = { ...bundle, localeKeys };
+  /**
+   * 语言包由调用方注入。
+   *
+   * `core/` **不许 import i18n**（架构规范 C1/I3：引擎只持 key、不碰文案）。
+   * 所以这里不自己去读语言包 —— 需要 key 存在性校验时由入口传进来。
+   */
+  const localeKeys = options.localeKeys ?? bundle.localeKeys;
+  const withLocale: ContentBundle = localeKeys ? { ...bundle, localeKeys } : bundle;
 
   if (options.validate !== false) {
     assertValidContent(withLocale);

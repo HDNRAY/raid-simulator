@@ -16,6 +16,11 @@ import type {
   StatKey,
   StatModifier,
 } from '../../src/core/types';
+import { flattenCatalog } from '../../src/i18n/translator';
+import { zhCN } from '../../src/i18n/locales/zh-CN';
+
+/** 语言 key 集合由测试注入 —— core 自己不读语言包（C1/I3）。 */
+const localeKeys = new Set(flattenCatalog(zhCN).keys());
 
 /**
  * 真实内容的集成测试（M4/M6 的验收）。
@@ -25,11 +30,14 @@ import type {
  *   registry → engine → AI(behavior 数组) → Action → 门禁 → 读条 → 判定
  */
 
-const registry = createRegistry({
-  entities: [ENTROPY_CLOCK],
-  skills: [...ALL_SKILLS],
-  buffs: [...ALL_BUFFS],
-});
+const registry = createRegistry(
+  {
+    entities: [ENTROPY_CLOCK],
+    skills: [...ALL_SKILLS],
+    buffs: [...ALL_BUFFS],
+  },
+  { localeKeys },
+);
 
 function makeEncounter(): BattleEngine {
   const player: Combatant = {
@@ -221,11 +229,14 @@ describe('内容注册表：扩展内容不需要改引擎', () => {
       nameKey: 'skill.doesNotExist.name' as SkillDef['nameKey'],
     };
     expect(() =>
-      createRegistry({
-        entities: [],
-        skills: [broken],
-        buffs: [] as readonly BuffDef[],
-      }),
+      createRegistry(
+        {
+          entities: [],
+          skills: [broken],
+          buffs: [] as readonly BuffDef[],
+        },
+        { localeKeys },
+      ),
     ).toThrow(/invalid content/);
   });
 
@@ -257,11 +268,14 @@ describe('内容注册表：扩展内容不需要改引擎', () => {
       interruptible: false,
     };
 
-    const extended = createRegistry({
-      entities: [],
-      skills: [...ALL_SKILLS, newSkill],
-      buffs: [...ALL_BUFFS],
-    });
+    const extended = createRegistry(
+      {
+        entities: [],
+        skills: [...ALL_SKILLS, newSkill],
+        buffs: [...ALL_BUFFS],
+      },
+      { localeKeys },
+    );
 
     const player: Combatant = {
       id: 'player',

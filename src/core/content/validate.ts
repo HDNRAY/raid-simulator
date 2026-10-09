@@ -49,7 +49,12 @@ export interface ContentBundle {
   readonly entities: readonly GameEntity[];
   readonly skills: readonly SkillDef[];
   readonly buffs: readonly BuffDef[];
-  /** 全部合法文案 key（由 i18n 层提供） */
+  /**
+   * 全部合法文案 key。
+   *
+   * 由**调用方**提供（core 不许 import i18n）。不给则跳过 key 存在性校验
+   * —— 浏览器的入口会传真实语言包，纯逻辑测试可以不传。
+   */
   readonly localeKeys?: ReadonlySet<string>;
   readonly encounters?: readonly EncounterDef[];
 }
