@@ -16,10 +16,13 @@ import {
   resolveActivate,
   resolveKeyAction,
   tabRect,
+  closeButtonRect,
   cycleZone,
   moveFocus,
   type SettingsFocus,
 } from '../../src/ui/settings/logic';
+import { UiLayout } from '../../src/ui/uiLayout';
+import { LAYOUT } from '../../src/ui/layout';
 
 /**
  * 设置界面的判定逻辑。
@@ -349,21 +352,25 @@ describe('弹窗内的键盘导航：没有只能用鼠标的死角', () => {
     expect(moveFocus({ zone: 'reset' }, 'left', cells)).toEqual({ zone: 'grid', index: cells - 1 });
   });
 
-  it('Tab 循环三个区域，Shift+Tab 反向', () => {
+  it('Tab 循环所有可用区域（含关闭按钮），Shift+Tab 反向', () => {
     const a = cycleZone({ zone: 'tabs', index: 0 }, cells);
     expect(a.zone).toBe('grid');
     const b = cycleZone(a, cells);
     expect(b.zone).toBe('reset');
+    // reset → close → tabs（关闭按钮也在循环里，否则它只能用鼠标）
     const c = cycleZone(b, cells);
-    expect(c.zone).toBe('tabs');
-    // 反向
-    expect(cycleZone({ zone: 'tabs', index: 0 }, cells, true).zone).toBe('reset');
+    expect(c.zone).toBe('close');
+    expect(cycleZone(c, cells).zone).toBe('tabs');
+    // 反向：tabs ← close（顺序是 tabs → grid → reset → close → tabs）
+    expect(cycleZone({ zone: 'tabs', index: 0 }, cells, true).zone).toBe('close');
   });
 
   it('没有技能格时 Tab 只在 tab 行与按钮之间走（不产生空焦点）', () => {
     const a = cycleZone({ zone: 'tabs', index: 0 }, 0);
     expect(a.zone).toBe('reset');
-    expect(cycleZone(a, 0).zone).toBe('tabs');
+    const a2 = cycleZone(a, 0);
+    expect(a2.zone).toBe('close');
+    expect(cycleZone(a2, 0).zone).toBe('tabs');
   });
 
   it('Enter 激活：tab 行切换 tab、格子上开始改键、按钮上恢复默认', () => {
@@ -432,5 +439,72 @@ describe('保留键在弹窗内的处理路径', () => {
     // 只说"不能用"会让玩家反复试同一个键，所以占位符是必需的
     const template = '{key} 是系统保留键，不能绑定';
     expect(template.replace('{key}', reservedKeyLabel('f3'))).toBe('F1–F12 是系统保留键，不能绑定');
+  });
+});
+
+describe('关闭按钮与 Boss 面板边距', () => {
+  /**
+   * 需求："设置弹窗里的『关闭』点了没反应。"
+   *
+   * 根因：它只是个 `Label`，**没有命中测试** —— 点它落到
+   * `hitTestLogic` 的 `none` 分支（"点在弹窗内空白处，消费掉"）。
+   * 点面板外的空白也能关，但那不是玩家会去点的地方。
+   */
+  it('【关键】点「关闭」命中 close，且关掉弹窗', () => {
+    const r = closeButtonRect();
+    const hit = hitTest(r.x + r.w / 2, r.y + r.h / 2, { tab: 'general', rowSkillIds: [] });
+    expect(hit.kind).toBe('close');
+    // 两个 tab 上都该能点（它是弹窗级的，不属于某一页）
+    expect(hitTest(r.x + 2, r.y + 2, { tab: 'keys', rowSkillIds: ['attack'] }).kind).toBe('close');
+  });
+
+  it('关闭按钮在弹窗内、右上角，且不与 tab 行重叠', () => {
+    const r = closeButtonRect();
+    expect(r.x).toBeGreaterThan(SETTINGS_PANEL.x + SETTINGS_PANEL.w / 2);
+    expect(r.y).toBeLessThan(SETTINGS_PANEL.y + 40);
+    // 竖向上不该压到 tab 行（tab 在 top 40..70）
+    expect(r.y + r.h).toBeLessThanOrEqual(SETTINGS_PANEL.y + 40);
+  });
+
+  it('键盘也能到「关闭」（Enter 可触发）', () => {
+    expect(resolveActivate({ zone: 'close' }, []).kind).toBe('close');
+    // 循环里必须包含它，否则它只能用鼠标
+    const fromReset = cycleZone({ zone: 'reset' }, 0);
+    expect(fromReset.zone).toBe('close');
+  });
+
+  /**
+   * 需求："boss 面板……无论 ui 如何缩放，应该保持和屏幕左右两边的
+   * 边距不变，只是缩放高度和内容尺寸。"
+   */
+  it('Boss 面板缩放时左右边距恒定、只缩高度', () => {
+    for (const k of [0.5, 1, 1.5, 2]) {
+      const ui = new UiLayout(k);
+      expect(ui.bossBar.x).toBe(LAYOUT.bossBar.x);
+      expect(ui.bossBar.w).toBe(LAYOUT.bossBar.w);
+      expect(ui.bossHp.x).toBe(LAYOUT.bossHp.x);
+      expect(ui.bossHp.w).toBe(LAYOUT.bossHp.w);
+    }
+    // 高度确实跟着缩放
+    expect(new UiLayout(2).bossBar.h).toBeGreaterThan(new UiLayout(1).bossBar.h);
+  });
+
+  /**
+   * 需求："玩家面板目前距离屏幕底部太远了，应该和按钮区域到底部距离一致。"
+   */
+  it('玩家面板底边与技能栏底边对齐（距屏幕底同一边距）', () => {
+    const skillBottom = LAYOUT.skillBar.y + LAYOUT.skillBar.slot;
+    const panelBottom = LAYOUT.player.y + LAYOUT.player.h;
+    expect(panelBottom).toBe(skillBottom);
+    // 缩放后依然对齐（两者都是底锚点）
+    const ui = new UiLayout(1.5);
+    expect(ui.playerPanel.y + ui.playerPanel.h).toBe(skillBottom);
+  });
+
+  it('玩家读条跟着面板下移，且不压到面板', () => {
+    const castBottom = LAYOUT.playerCastBar.y + LAYOUT.playerCastBar.h;
+    expect(castBottom).toBeLessThanOrEqual(LAYOUT.player.y);
+    // 间距不宜过大（否则中间空一块）
+    expect(LAYOUT.player.y - castBottom).toBeLessThanOrEqual(10);
   });
 });

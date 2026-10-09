@@ -271,8 +271,11 @@ describe('UI 缩放（设置 · 通用页的 slider）', () => {
     expect(focus.zone).toBe('slider');
     focus = cycleZone(focus, 0, false, true);
     expect(focus.zone).toBe('reset');
+    // reset → close（右上角的关闭）
+    const close = cycleZone(focus, 0, false, true);
+    expect(close.zone).toBe('close');
     // 再 Tab 回到 tabs
-    expect(cycleZone(focus, 0, false, true).zone).toBe('tabs');
+    expect(cycleZone(close, 0, false, true).zone).toBe('tabs');
     // 按键页没有 slider，Tab 顺序里不应出现它
     let keysFocus = cycleZone({ zone: 'tabs', index: 0 }, 6, false, false);
     expect(keysFocus.zone).toBe('grid');
@@ -459,9 +462,18 @@ describe('UI 缩放：覆盖面与鼠标支持', () => {
   it('Boss 面板 / 读条 / 日志面板都在缩放范围内', () => {
     const a = new UiLayout(1);
     const b = new UiLayout(1.5);
-    // Boss 顶栏与血条：贴顶居中，放大后仍然贴顶
+    /**
+     * Boss 顶栏：**左右边距不变**（需求："无论 ui 如何缩放，应该保持和
+     * 屏幕左右两边的边距不变，只是缩放高度和内容尺寸"）。
+     * 所以宽度不缩放，只有高度与字号跟着变。
+     */
     expect(b.bossBar.y).toBe(a.bossBar.y);
-    expect(b.bossBar.w).toBeGreaterThan(a.bossBar.w);
+    expect(b.bossBar.x).toBe(a.bossBar.x);
+    expect(b.bossBar.w).toBe(a.bossBar.w);
+    expect(b.bossBar.h).toBeGreaterThan(a.bossBar.h);
+    // 血条同理：贴左、宽度不变、只有高度变
+    expect(b.bossHp.x).toBe(a.bossHp.x);
+    expect(b.bossHp.w).toBe(a.bossHp.w);
     expect(b.bossHp.h).toBeGreaterThan(a.bossHp.h);
     // 两处读条
     expect(b.castBar.h).toBeGreaterThan(a.castBar.h);

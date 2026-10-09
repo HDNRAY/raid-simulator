@@ -250,6 +250,8 @@ export type ClickTarget =
   | { readonly kind: 'keyRow'; readonly skillId: string }
   /** 通用页的 UI 缩放滑块（支持鼠标点击/拖动） */
   | { readonly kind: 'scaleSlider' }
+  /** 右上角的关闭 */
+  | { readonly kind: 'close' }
   | { readonly kind: 'none' };
 
 /**
@@ -268,6 +270,9 @@ export function hitTest(
   },
 ): ClickTarget {
   if (!insidePanel(px, py)) return { kind: 'outside' };
+
+  // 关闭按钮优先级最高（它在右上角，与别的区域不重叠，但语义上该先判）
+  if (contains(closeButtonRect(), px, py)) return { kind: 'close' };
 
   const tabs: readonly SettingsTab[] = ['general', 'keys'];
   for (const [i, tab] of tabs.entries()) {
@@ -374,7 +379,9 @@ export type SettingsFocus =
   | { readonly zone: 'tabs'; readonly index: number }
   | { readonly zone: 'grid'; readonly index: number }
   | { readonly zone: 'slider' }
-  | { readonly zone: 'reset' };
+  | { readonly zone: 'reset' }
+  /** 右上角的「关闭」 */
+  | { readonly zone: 'close' };
 
 /** 初始焦点：按键 tab 的第一个技能格（最常改的东西）。 */
 export const INITIAL_FOCUS: SettingsFocus = { zone: 'grid', index: 0 };
@@ -438,6 +445,8 @@ export function moveFocus(
   }
 
   // 网格：左右在同一行内移动，上下按列移动；越界则换区
+  // ⚠️ 必须先收窄到 grid —— 焦点也可能停在 tabs / slider / reset / close 上
+  if (focus.zone !== 'grid') return focus;
   const index = focus.index;
   const col = index % KEY_GRID.cols;
   const row = Math.floor(index / KEY_GRID.cols);
@@ -476,7 +485,7 @@ export function cycleZone(
   const usable: SettingsFocus['zone'][] = ['tabs'];
   if (cellCount > 0) usable.push('grid');
   if (hasSlider) usable.push('slider');
-  usable.push('reset');
+  usable.push('reset', 'close');
   const current = usable.indexOf(focus.zone);
   const step = back ? -1 : 1;
   const next = usable[(current + step + usable.length) % usable.length]!;
@@ -486,6 +495,7 @@ export function cycleZone(
   }
   if (next === 'slider') return { zone: 'slider' };
   if (next === 'tabs') return { zone: 'tabs', index: 0 };
+  if (next === 'close') return { zone: 'close' };
   return { zone: 'reset' };
 }
 
@@ -543,6 +553,7 @@ export type ActivateAction =
   | { readonly kind: 'switchTab'; readonly tab: SettingsTab }
   | { readonly kind: 'startCapture'; readonly skillId: string }
   | { readonly kind: 'resetKeys' }
+  | { readonly kind: 'close' }
   | { readonly kind: 'none' };
 
 export function resolveActivate(
@@ -553,11 +564,32 @@ export function resolveActivate(
     return { kind: 'switchTab', tab: focus.index === 0 ? 'general' : 'keys' };
   }
   if (focus.zone === 'reset') return { kind: 'resetKeys' };
+  if (focus.zone === 'close') return { kind: 'close' };
   // slider 没有"激活"动作 —— 它的变化由左右方向键直接完成
   // （见 SettingsPanel 里 `move` 分支对 slider 的专门处理）
   if (focus.zone === 'slider') return { kind: 'none' };
   const skillId = rowSkillIds[focus.index];
   return skillId === undefined ? { kind: 'none' } : { kind: 'startCapture', skillId };
+}
+
+/**
+ * 右上角的**关闭按钮**。
+ *
+ * ⚠️ 原先「关闭」只是一个 `Label`，**完全没有命中测试** ——
+ * 点它什么也不会发生（需求："设置弹窗里的『关闭』点了没反应"）。
+ * 点面板外的空白能关，但那不是玩家会去点的地方。
+ *
+ * 给一个比文字略大的点击区（文字约 24×16），让它好点中。
+ */
+export const CLOSE_BUTTON = { right: 12, top: 7, w: 40, h: 22 } as const;
+
+export function closeButtonRect(): Rect {
+  return {
+    x: SETTINGS_PANEL.x + SETTINGS_PANEL.w - CLOSE_BUTTON.right - CLOSE_BUTTON.w,
+    y: SETTINGS_PANEL.y + CLOSE_BUTTON.top,
+    w: CLOSE_BUTTON.w,
+    h: CLOSE_BUTTON.h,
+  };
 }
 
 /**

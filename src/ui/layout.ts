@@ -120,7 +120,15 @@ export const LAYOUT = {
    * ⚠️ **读条在这块面板的上方，不与它重叠**（`playerCastBar` 的
    * y + h ≤ 这里的 y）。原因见 `playerCastBar` 的说明。
    */
-  player: { x: 8, y: 420, w: 228, h: 80 },
+  /**
+   * ⚠️ 位置下移过：420 → **452**（需求："玩家面板目前距离屏幕底部太远了，
+   * 应该和按钮区域到底部距离一致"）。
+   *
+   * 技能栏的底边是 `y(492) + slot(40) = 532`，距画布底 **8px**。
+   * 面板原先底边 500、距底 40px —— 比技能栏多出 32px，看起来"浮"在半空。
+   * 现在同样贴到 532，与右下角的技能栏、右边距 8 的构图规则一致。
+   */
+  player: { x: 8, y: 452, w: 228, h: 80 },
 
   /**
    * 玩家读条（面板顶部那一条）。
@@ -140,7 +148,12 @@ export const LAYOUT = {
    * 现在读条在 y 376..398、面板从 402 开始，两者不重叠。
    * 这条约束由布局测试守着（见 `tests/unit/scaling.test.ts`）。
    */
-  playerCastBar: { x: 8, y: 392, w: 228, h: 22 },
+  /**
+   * ⚠️ 跟着面板下移：392 → **424**（面板上方，间距 6px）。
+   * 面板与读条是**一组**，动了一个另一个必须跟着 —— 否则中间会出现
+   * 一段空白（或者读条压到面板上）。
+   */
+  playerCastBar: { x: 8, y: 424, w: 228, h: 22 },
 
   /**
    * 玩家三根资源条的排布。
@@ -414,7 +427,18 @@ export type UiAnchor =
   | 'bottom-right'
   | 'top'
   | 'top-left'
-  | 'right';
+  | 'right'
+  /**
+   * **贴顶、左右边距不变，只缩高度。**
+   *
+   * 需求："boss 面板，就是名字血量那些，无论 ui 如何缩放，应该保持和
+   * 屏幕左右两边的边距不变，只是缩放高度和内容尺寸。"
+   *
+   * 为什么不能用 `'top'`：那个锚点会按系数改宽度并保持水平居中 ——
+   * 宽度一变，左右边距就跟着变（缩放后血条会离屏幕边缘越来越远）。
+   * Boss 顶栏是**横贯整屏**的元素，它的左右边距是构图的一部分。
+   */
+  | 'top-fixed-width';
 
 /**
  * 按锚点缩放一个矩形。
@@ -440,6 +464,9 @@ export function scaleUiRect(
     case 'top':
       // 水平居中、贴顶
       return { x: Math.round(rect.x + (rect.w - w) / 2), y: rect.y, w, h };
+    case 'top-fixed-width':
+      // 贴顶、宽度不变（左右边距是构图的一部分）、只缩高度
+      return { x: rect.x, y: rect.y, w: rect.w, h };
     case 'right':
       // 贴右、垂直居中
       return { x: rect.x + rect.w - w, y: Math.round(rect.y + (rect.h - h) / 2), w, h };
@@ -457,6 +484,6 @@ export const UI_ANCHORS = {
   playerCastBar: 'bottom-left',
   playerBars: 'bottom-left',
   skillBar: 'bottom-right',
-  bossBar: 'top',
-  bossHp: 'top',
+  bossBar: 'top-fixed-width',
+  bossHp: 'top-fixed-width',
 } as const satisfies Readonly<Record<string, UiAnchor>>;

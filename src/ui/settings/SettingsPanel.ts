@@ -37,6 +37,7 @@ import {
   hitTest as hitTestLogic,
   keyLabel as formatKey,
   keyCellRect,
+  CLOSE_BUTTON,
   resetButtonRect,
   skillDetailRect,
   resolveKeyAction,
@@ -203,8 +204,8 @@ export class SettingsPanel {
       kai: true,
     });
     this.closeHint = new Label(pixi, {
-      x: x + SETTINGS_PANEL.w - 14,
-      y: y + 12,
+      x: x + SETTINGS_PANEL.w - CLOSE_BUTTON.right,
+      y: y + CLOSE_BUTTON.top + 3,
       size: FONT.small,
       color: PALETTE.textDim,
       anchorX: 1,
@@ -438,6 +439,15 @@ export class SettingsPanel {
         this.setFocusToSkill(target.skillId);
         return true;
       }
+      case 'close':
+        /**
+         * 需求："设置弹窗里的『关闭』点了没反应。"
+         *
+         * 根因：它只是个 Label，没有命中测试 —— 点它落到
+         * `hitTestLogic` 的 `none` 分支（"点在弹窗内空白处，消费掉"）。
+         */
+        this.options.onClose();
+        return true;
       case 'scaleSlider':
         /**
          * 鼠标点/拖滑块：由横坐标直接反算倍数（点到哪跳到哪）。
@@ -585,6 +595,9 @@ export class SettingsPanel {
         this.options.onResetKeys();
         this.setNotice(this.options.translate('settings.keysResetDone'));
         this.redraw();
+        return;
+      case 'close':
+        this.options.onClose();
         return;
       case 'none':
         return;
@@ -912,6 +925,8 @@ export class SettingsPanel {
 
     // 恢复默认按钮
     const rb = this.resetButton;
+    const closeFocused = this.focus.zone === 'close';
+    this.closeHint.setColor(closeFocused ? PALETTE.douqi.bright : PALETTE.textDim);
     const resetFocused = this.focus.zone === 'reset';
     rb.label.set(this.options.translate('settings.keysReset'));
     rb.label.setColor(resetFocused ? PALETTE.douqi.bright : PALETTE.text);
