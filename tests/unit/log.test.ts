@@ -326,3 +326,51 @@ describe('能力结算时刻：castStart 与 castFinish', () => {
     expect(callIdx).toBeGreaterThan(idx);
   });
 });
+
+describe('日志不该被按键频率放大', () => {
+  /**
+   * 需求："闪避现在还是会触发，闪避 cd 的 log，这是 bug"。
+   *
+   * 核实：闪避的 1 秒 CD **工作正常**。真问题是**记录了什么** ——
+   * 玩家在技能不可用时本能地连按/按住，而输入是 tick 级的，
+   * 实测连续按闪避 6 秒产生 **295 次 cooldown + 60 次 cost** 拒绝。
+   */
+  it('【关键】skillRejected 完全不进日志', async () => {
+    /**
+     * "技能被拒"是**输入反馈**，不是战斗事件。
+     *
+     * 画面上的技能格已经实时表达了同一件事（冷却遮罩 + 中心秒数 +
+     * 技能字变暗），战斗状态行也会给一条短提示。日志里再写一遍是
+     * 纯重复，而且必然被按键频率放大。
+     *
+     * 这条断言防止它被"顺手加回来"。
+     */
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/app/logFormat.ts', import.meta.url), 'utf8');
+    // `skillRejected` 分支必须直接返回 undefined
+    expect(src).toMatch(/case 'skillRejected':\s*\n\s*return undefined;/);
+  });
+
+  it('连续按不可用的技能不会刷屏（回归）', () => {
+    const f = new LogFormatter();
+    // 模拟 6 秒、每 tick 一次"被 CD 拒绝"
+    for (let i = 0; i < 360; i += 1) {
+      f.consume([
+        {
+          kind: 'skillRejected',
+          tick: i,
+          sourceId: 'player',
+          skillId: 'dodge',
+          reason: 'cooldown',
+        },
+      ]);
+    }
+    expect(f.all()).toEqual([]);
+  });
+
+  it('但真正的战斗事件照样逐条记（不被去重）', () => {
+    const f = new LogFormatter();
+    f.consume([damage({ tick: 1, amount: 10 }), damage({ tick: 2, amount: 10 })]);
+    expect(f.all()).toHaveLength(2);
+  });
+});

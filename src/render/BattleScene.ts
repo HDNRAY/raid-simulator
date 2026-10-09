@@ -29,11 +29,13 @@ const SLOT_COOLDOWN_BAR_H = LAYOUT.skillBar.cooldownBarHeight;
 /**
  * 闪避位移的峰值（逻辑像素，向右）。
  *
- * 26 是"看得清但不出画"的值：玩家本体宽约 108（cx±54）、
- * 身后距左边界还有 246px，所以这个距离安全。再大就会像"换了个位置"，
- * 而不是"闪了一下"。
+ * 演进 26 → **52**（需求："幅度按现在的翻倍"）。
+ *
+ * 玩家本体宽约 108（cx±54），中心在 x=300，所以右移 52 之后
+ * 最右缘到 406 —— 与 Boss（约 x 630，本体宽 100+）之间仍有 200px，
+ * 不会撞上。左缘到 194，距左边界也够。
  */
-const DODGE_PEAK_X = 26;
+const DODGE_PEAK_X = 52;
 
 /**
  * 技能格右上角"资源代价"的颜色。
@@ -1025,7 +1027,14 @@ export class BattleScene {
 
     const dodging = view.player.buffs.some((b) => b.id.startsWith('dodge') && b.remainingMs > 0);
     const guarding = view.player.buffs.some((b) => b.id.startsWith('guard') && b.remainingMs > 0);
-    const pose = dodging || guarding ? 0.85 : 1;
+    /**
+     * 姿态下沉**只给防御**（需求："闪避的动画不要变矮了"）。
+     *
+     * 原先闪避和防御共用 `pose = 0.85`。但区分两者的手段已经够了：
+     * 闪避是**横向位移**、防御是**下沉 + 冷色**。再让闪避也变矮，
+     * 两者就只剩颜色差异，在余光里反而不好分。
+     */
+    const pose = guarding ? 0.85 : 1;
     if (pose !== this.lastPlayerPose) {
       this.lastPlayerPose = pose;
       this.drawPlayer(pose);

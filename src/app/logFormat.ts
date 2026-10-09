@@ -169,14 +169,30 @@ export class LogFormatter {
       case 'interruptImmune': {
         return { tick, category: 'interrupt', key: 'log.interruptImmune', params: {} };
       }
-      case 'skillRejected': {
-        return {
-          tick,
-          category: 'interrupt',
-          key: 'log.skillRejected',
-          params: { reason: event.reason ?? 'condition' },
-        };
-      }
+      /**
+       * ⚠️ `skillRejected` **完全不进日志**。
+       *
+       * 需求："闪避现在还是会触发，闪避 cd 的 log，这是 bug"。
+       *
+       * 核实过程：
+       *   1. 先确认闪避的 1 秒 CD **工作正常**（实测接受于 tick 0/60/120/180）
+       *   2. 再量噪声有多大：连续按闪避 6 秒产生 **295 次 cooldown +
+       *      60 次 cost** 拒绝
+       *   3. 先试"只过滤 cooldown" —— 剩下的 cost 照样刷屏（按住键就是
+       *      每秒 10 次尝试）；再试"按技能去重" —— 被"成功时清标记"
+       *      破坏，效果不稳定
+       *
+       * 想清楚之后结论很简单：**"技能被拒"不是战斗事件，是输入反馈。**
+       * 它不属于战斗日志这条时间线，而是"我刚才那一下为什么没生效"。
+       * 而画面上的技能格已经实时表达了同一件事：
+       *   - 冷却中 → 白色遮罩 + 中心剩余秒数
+       *   - 资源不足 / 读条中 → 技能字变暗
+       * 战斗中的**状态行**也会给一条短提示。
+       *
+       * 所以日志里再写一遍是纯重复，而且必然被按键频率放大。
+       */
+      case 'skillRejected':
+        return undefined;
       case 'heal': {
         if (event.amount <= 0) return undefined;
         return { tick, category: 'resource', key: 'log.heal', params: { amount: event.amount } };

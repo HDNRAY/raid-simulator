@@ -352,4 +352,23 @@ describe('闪避位移（与防御区分）', () => {
     expect(src).toMatch(/const dodge = view\.player\.buffs\.find/);
     expect(src).not.toMatch(/guarding.*playerRoot\.x/);
   });
+
+  it('闪避**不**变矮 —— 姿态下沉只给防御', async () => {
+    /**
+     * 需求："闪避的动画不要变矮了"。
+     *
+     * 原先闪避和防御共用 `pose = 0.85`，于是两者的区别只剩颜色。
+     * 现在区分手段是：闪避 = 横向位移；防御 = 下沉 + 冷色。
+     */
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    expect(src).toMatch(/const pose = guarding \? 0\.85 : 1;/);
+    expect(src).not.toMatch(/dodging \|\| guarding \? 0\.85/);
+  });
+
+  it('位移峰值是 52（26 的翻倍）', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    expect(src).toMatch(/const DODGE_PEAK_X = 52;/);
+  });
 });
