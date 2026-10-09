@@ -3,26 +3,43 @@
  *
  * 这是整个模拟确定性的地基（architecture 规范 §2.3）：
  * **绝不把 requestAnimationFrame 的 delta 直接喂给逻辑。**
- * 逻辑永远按 DT = 16.6667ms 一步推进，渲染用插值对齐屏幕刷新率。
+ * 逻辑永远按固定 tick 推进，渲染用插值对齐屏幕刷新率。
  *
- * 累加器逻辑在 SimClock 里（worker 内部的模拟推进复用同一份实现）。
+ * 时钟与时间纪律在 simClock.ts / loopConstants.ts。
  * 本文件只负责"把时钟接上回调"。
  */
 
-import { DT } from './loopConstants';
+import { PS_PER_MS, PS_PER_TICK, exactTickMs, ticksAt } from './loopConstants';
 import { SimClock } from './simClock';
 
-export { DT, MAX_CATCHUP_MS, TIME_EPSILON } from './loopConstants';
+export {
+  DT,
+  MAX_CATCHUP_MS,
+  MAX_CATCHUP_TICKS,
+  MS_PER_TICK,
+  PS_PER_MS,
+  PS_PER_TICK,
+  TICKS_PER_SECOND,
+  exactTickMs,
+  msToPs,
+  psToMs,
+  tickToMs,
+  ticksAt,
+} from './loopConstants';
 
 /** 一帧内实际发生了什么。调用方用它驱动渲染插值。 */
 export interface FrameResult {
   /** 本帧推进的 tick 数 */
   steps: number;
+  /** 步进后的 tick 数（绝对） */
+  tick: number;
   /** 步进后的战斗内时间（ms） */
   time: number;
-  /** 插值系数 [0, 1)：renderedTime = (time - DT) + alpha * DT */
+  /** 插值系数 [0, 1) */
   alpha: number;
-  /** 因为 MAX_CATCHUP_MS 被丢弃的真实时间（ms） */
+  /** 因 MAX_CATCHUP_TICKS 被丢弃的 tick 数 */
+  droppedTicks: number;
+  /** 同上，毫秒表示 */
   droppedMs: number;
 }
 
@@ -54,9 +71,14 @@ export class FixedLoop {
     this.clock.reset();
   }
 
-  /** 把战斗内时间换算成 tick 序号（用于 Action 的帧量化）。 */
+  /**
+   * 把战斗内时间换算成 tick 序号（用于 Action 的帧量化）。
+   *
+   * 与时钟走**同一套换算**（ticksAt），否则会出现
+   * "时钟说 60 而这里说 59" 这种自相矛盾。
+   */
   tickAt(timeMs: number): number {
-    return Math.floor(timeMs / DT);
+    return ticksAt(timeMs);
   }
 
   /**
@@ -67,10 +89,10 @@ export class FixedLoop {
    */
   advance(realNowMs: number, onTick: (tick: number, time: number) => void): FrameResult {
     const a = this.clock.advance(realNowMs);
-    const firstTick = this.clock.tickCount - a.steps;
+    const firstTick = a.tick - a.steps;
     for (let i = 0; i < a.steps; i += 1) {
       const tick = firstTick + i + 1;
-      onTick(tick, tick * DT);
+      onTick(tick, (tick * PS_PER_TICK) / PS_PER_MS);
     }
     return a;
   }
@@ -83,10 +105,10 @@ export class FixedLoop {
  * 重放就不可靠了（architecture 规范 §2.2）。
  */
 export function quantizeToFrame(timeMs: number): number {
-  return Math.round(timeMs / DT) * DT;
+  return exactTickMs(ticksAt(timeMs));
 }
 
-/** 时间对应的 tick 序号。 */
+/** 时间对应的 tick 序号。与时钟同一套换算。 */
 export function frameOf(timeMs: number): number {
-  return Math.floor(timeMs / DT);
+  return ticksAt(timeMs);
 }

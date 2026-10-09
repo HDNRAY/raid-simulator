@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DT } from '../../src/core/loopConstants';
+import { exactTickMs } from '../../src/core/loopConstants';
 import { SimSession } from '../../src/core/worker';
 import { SNAPSHOT_INTERVAL_TICKS, type FromWorker } from '../../src/core/workerProtocol';
 
@@ -8,11 +8,17 @@ import { SNAPSHOT_INTERVAL_TICKS, type FromWorker } from '../../src/core/workerP
  * 不需要搭 worker 全局环境。
  */
 
-/** 把 N 帧的 frame() 结果收集起来（第一帧是校准帧）。 */
+/**
+ * 把 N 帧的 frame() 结果收集起来（第 0 帧是校准帧）。
+ *
+ * 用 exactTickMs 而不是 `i * DT`：后者是浮点乘法，
+ * `10 * DT` 会落在第 10 个 tick 边界**略下方**，导致只推进 9 tick。
+ * 需要精确边界时必须用 exactTickMs。
+ */
 function runFrames(session: SimSession, frames: number): FromWorker[] {
   const out: FromWorker[] = [];
   for (let i = 0; i <= frames; i += 1) {
-    out.push(session.frame(i * DT));
+    out.push(session.frame(exactTickMs(i)));
   }
   return out;
 }
@@ -81,7 +87,7 @@ describe('SimSession', () => {
     if (calibration.kind !== 'frame') throw new Error('unexpected');
     expect(calibration.events).toBeUndefined();
 
-    const stepped = session.frame(DT);
+    const stepped = session.frame(exactTickMs(1));
     if (stepped.kind !== 'frame') throw new Error('unexpected');
     expect(stepped.events).toEqual([{ kind: 'tick', tick: 1 }]);
   });
@@ -100,7 +106,7 @@ describe('SimSession', () => {
     const session = new SimSession(6);
     session.frame(0);
     // 逐帧推进 10 次（一次跳 10*DT 会触发 MAX_CATCHUP_MS 钳制，那是另一条路径）
-    for (let i = 1; i <= 10; i += 1) session.frame(i * DT);
+    for (let i = 1; i <= 10; i += 1) session.frame(exactTickMs(i));
     const before = session.requestSnapshot();
     const after = session.requestSnapshot();
     expect(before).toEqual(after);
@@ -111,10 +117,10 @@ describe('SimSession', () => {
   it('stop 之后不再推进', () => {
     const session = new SimSession(7);
     session.frame(0);
-    for (let i = 1; i <= 10; i += 1) session.frame(i * DT);
+    for (let i = 1; i <= 10; i += 1) session.frame(exactTickMs(i));
     const atStop = session.requestSnapshot();
     session.stop();
-    session.frame(20 * DT);
+    session.frame(exactTickMs(20));
     const afterStop = session.requestSnapshot();
     expect(afterStop).toEqual(atStop);
   });
