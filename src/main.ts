@@ -262,6 +262,11 @@ async function bootstrap(): Promise<void> {
       close: () => closeSettings(),
       openIn: (px: number, py: number) => settings.hitTest(px, py),
       isOpen: () => settingsOpen,
+      /** 正在等待按键改键的技能 id（没有则为 null）。 */
+      capturing: () => settings.capturingSkillId,
+      /** 当前键盘焦点（调试用）。 */
+      focus: () => settings.focusState,
+      trace: () => [...settings.settingsTrace],
     },
     probe: () => {
       const state = loop.engineState.snapshot;
@@ -288,6 +293,33 @@ async function bootstrap(): Promise<void> {
   };
 
   /* ---------- 设置界面 ---------- */
+  /**
+   * 是否正在"由主监听器处理一次按键"。
+   *
+   * ------------------------------------------------------------------
+   * 为什么必须有这个标记（一个真实的重入 bug）
+   * ------------------------------------------------------------------
+   *
+   * 一次 keydown 会经过**两个**监听器：本监听器（捕获阶段）和输入层
+   * （冒泡阶段）。而本监听器在改键时会调用 `SettingsPanel.handleKey`，
+   * 后者进入改键模式后**当场**把捕获回调注册给输入层 —— 于是输入层
+   * 在同一次事件里发现"已有捕获回调"，把**触发改键的那一次按键本身**
+   * 喂给了 `finishCapture`：一次 Enter 同时完成了"进入改键"和
+   * "把技能绑成 Enter"。堆栈证实过这条路径：
+   *
+   *   onKeyDown → handleKey → activateFocus → startCapture
+   *             → （回到 onKeyDown）→ 捕获回调 → finishCapture
+   *
+   * 修法是在**这一层**标记"这次按键已经被我处理"，让输入层跳过它。
+   * 放在这里而不是 `SettingsPanel` 里，是因为重入发生在这两个
+   * 监听器之间 —— 组件本身无从知道自己是被谁调用的。
+   *
+   * 早期我在组件里用时间戳（"同一瞬间的按键忽略"）绕过这个问题，
+   * 但那是**用阈值猜事件归属**：它同时会误判玩家的真实连按，
+   * 而且让"改键要按两次键"这种怪行为变得难以解释。
+   */
+  let handlingKeyDown = false;
+
   const settings = new SettingsPanel({
     pixi: { Container, Graphics, Sprite, Text },
     translate: (key) => translateSafe(key),
@@ -308,7 +340,19 @@ async function bootstrap(): Promise<void> {
       bindings = DEFAULT_BINDINGS;
       loop.setBindings(bindings);
     },
-    onCapture: (handler) => loop.inputSource?.capture(handler),
+    /**
+     * 把捕获回调包一层：**主监听器正在处理这次按键时直接跳过**。
+     *
+     * 否则那一次按键会被输入层重复投递，导致"一次按键进入改键并立刻
+     * 完成绑定"（详见上面 `handlingKeyDown` 的说明）。
+     */
+    onCapture: (handler) =>
+      loop.inputSource?.capture(
+        handler === undefined ? undefined : (key) => {
+          if (handlingKeyDown) return;
+          handler(key);
+        },
+      ),
     onClose: () => closeSettings(),
   });
   app.stage.addChild(settings.root);
@@ -321,6 +365,15 @@ async function bootstrap(): Promise<void> {
   app.stage.addChild(settingsButton.root);
 
   let settingsOpen = false;
+  /**
+   * 设置按钮是否被键盘选中。
+   *
+   * 需求是"几乎全键盘可操作"，所以设置**不能只能用鼠标点开**。
+   * 进入方式有两条：
+   *   - 按 `,`（单键直达）
+   *   - 按 `↑` 把焦点提到按钮上，再 Enter
+   */
+  let settingsFocused = false;
   const openSettings = (tab: 'general' | 'keys' = 'keys'): void => {
     settingsOpen = true;
     // 打开设置必须暂停战斗 —— 否则玩家改键时会被 Boss 打死
@@ -347,12 +400,61 @@ async function bootstrap(): Promise<void> {
     else if (settingsButton.hitTest(px, py)) openSettings();
   });
 
-  /* 设置打开时，键盘先给弹窗处理（改键捕获已经在输入层独占） */
+  /**
+   * 设置相关的键盘处理。
+   *
+   * 用**捕获阶段**（第三个参数 `true`）：必须在输入层之前拿到按键，
+   * 否则按 `,` 会被当成技能、按方向键会被战斗吃掉。
+   */
   window.addEventListener(
     'keydown',
     (event) => {
-      if (!settingsOpen) return;
-      settings.handleKey(event.key.toLowerCase());
+      const key = event.key.toLowerCase();
+
+      if (settingsOpen) {
+        handlingKeyDown = true;
+        try {
+          // 捕获模式下输入层会独占键盘（见 `InputSource.capture`），
+          // 所以这里只需要把按键交给弹窗
+          if (settings.handleKey(key)) event.preventDefault();
+        } finally {
+          handlingKeyDown = false;
+        }
+        return;
+      }
+
+      // 战斗中：`↑` 把焦点提到设置按钮，再 Enter 打开
+      if (key === 'arrowup') {
+        settingsFocused = true;
+        settingsButton.setFocused(true);
+        event.preventDefault();
+        return;
+      }
+      if (key === 'arrowdown' || key === 'escape') {
+        if (settingsFocused) {
+          settingsFocused = false;
+          settingsButton.setFocused(false);
+          event.preventDefault();
+        }
+        return;
+      }
+      if (key === 'enter' && settingsFocused) {
+        settingsFocused = false;
+        settingsButton.setFocused(false);
+        openSettings('keys');
+        event.preventDefault();
+        return;
+      }
+      /**
+       * `,` 单键直达。
+       *
+       * 用 `event.code` 而不是 `event.key` 判断 —— `,` 在中文输入法下
+       * 可能给出全角字符，而物理键位是稳定的。
+       */
+      if (event.code === 'Comma') {
+        openSettings('keys');
+        event.preventDefault();
+      }
     },
     true,
   );
@@ -373,7 +475,6 @@ async function bootstrap(): Promise<void> {
     loop.dispose();
   });
 
-  void settings;
 }
 
 void bootstrap();

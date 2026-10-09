@@ -255,6 +255,14 @@ export const zhCN = {
      * 完整名字留给弹窗标题。
      */
     open: '设',
+    /**
+     * 键盘打开的快捷键。
+     *
+     * 为什么不用 Esc：Esc 是"暂停 / 返回"（已有语义）。
+     * 用 `,` 是因为它紧挨着技能键区，单键、不冲突、且不占
+     * 任何数字/字母技能位。
+     */
+    openKey: '键盘按 , 或 ↑ 选中设置，Enter 打开',
     close: '关闭',
     tabGeneral: '通用',
     tabKeys: '按键',
@@ -263,9 +271,18 @@ export const zhCN = {
     generalEmptyHint: '音量、画面与体验相关的选项之后加在这里',
 
     /** 按键设置 */
-    keysHint: '点击某一项，然后按下你想用的键',
+    keysHint: '方向键选择，Enter 改键，Esc 返回',
+    keysCapturingHint: '按下想用的键（Esc 取消）',
     keysCapturing: '请按键…',
     keysConflict: '该键已被占用',
+    /**
+     * 系统保留键的提示。
+     *
+     * `{key}` 是被拒的那个键名（由 `reservedKeyLabel` 给出可读形式）。
+     * 明确写出"哪些不能绑"，玩家才不会一直试。
+     */
+    keysReserved: '{key} 是系统保留键，不能绑定',
+    keysReservedHint: 'Esc / Tab / Enter / F1–F12 / 单独的 Shift、Ctrl、Alt 不能绑定',
     keysReset: '恢复默认',
     keysResetDone: '已恢复默认键位',
     /** 键位表的两列标题 */

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { isReservedKey, reservedKeyLabel } from '../../src/input/keyboard';
 import {
   EMPTY_KEY,
   KEY_GRID_CAPACITY,
@@ -12,8 +13,12 @@ import {
   keyLabel,
   keyCellRect,
   resetButtonRect,
+  resolveActivate,
   resolveKeyAction,
   tabRect,
+  cycleZone,
+  moveFocus,
+  type SettingsFocus,
 } from '../../src/ui/settings/logic';
 
 /**
@@ -273,5 +278,159 @@ describe('底部区域不重叠（曾经把"恢复默认"压在提示文字上�
   it('技能格的容量不会越过提示文字行', () => {
     const lastCell = keyCellRect(KEY_GRID_CAPACITY - 1);
     expect(lastCell.y + lastCell.h).toBeLessThanOrEqual(SETTINGS_PANEL.y + hintLineY());
+  });
+});
+
+describe('系统保留键不能绑技能', () => {
+  it('Esc / Tab / Enter / F1–F12 / 单独修饰键都被拒', () => {
+    for (const key of [
+      'escape',
+      'tab',
+      'enter',
+      'f1',
+      'f5',
+      'f12',
+      'shift',
+      'control',
+      'alt',
+      'meta',
+    ]) {
+      expect(isReservedKey(key), key).toBe(true);
+    }
+  });
+
+  it('可打印字符与组合键可以绑', () => {
+    for (const key of ['1', 'q', 'z', ' ', 'shift+1', 'control+2', 'arrowup', 'arrowleft']) {
+      expect(isReservedKey(key), key).toBe(false);
+    }
+  });
+
+  it('保留键的可读名字 —— 提示里要写清是哪个键', () => {
+    expect(reservedKeyLabel('escape')).toBe('Esc');
+    expect(reservedKeyLabel('tab')).toBe('Tab');
+    expect(reservedKeyLabel('enter')).toBe('Enter');
+    // 功能键整排归成一个名字，玩家一看就知道"整个 F 区都不行"
+    expect(reservedKeyLabel('f1')).toBe('F1–F12');
+    expect(reservedKeyLabel('f12')).toBe('F1–F12');
+    expect(reservedKeyLabel('shift')).toBe('shift');
+  });
+});
+
+describe('弹窗内的键盘导航：没有只能用鼠标的死角', () => {
+  const cells = 6;
+
+  it('方向键在技能网格里移动，与 grid 的列数一致', () => {
+    const first: SettingsFocus = { zone: 'grid', index: 0 };
+    expect(moveFocus(first, 'right', cells)).toEqual({ zone: 'grid', index: 1 });
+    expect(moveFocus(first, 'down', cells)).toEqual({ zone: 'grid', index: KEY_GRID.cols });
+    // 第一列往左不动（不绕到上一行末尾，避免"斜着跳"）
+    expect(moveFocus(first, 'left', cells)).toEqual(first);
+  });
+
+  it('网格第一行往上 → 到 tab 行；最后一行往下 → 到"恢复默认"', () => {
+    expect(moveFocus({ zone: 'grid', index: 0 }, 'up', cells)).toEqual({ zone: 'tabs', index: 0 });
+    const lastRow: SettingsFocus = { zone: 'grid', index: KEY_GRID.cols * 2 };
+    expect(moveFocus(lastRow, 'down', cells)).toEqual({ zone: 'reset' });
+  });
+
+  it('焦点不会落到看不见的格子上', () => {
+    /**
+     * 容量是算出来的（`KEY_GRID_CAPACITY`），如果某一行只填了一半，
+     * 向下移动不能把焦点放到那个空位上 —— 否则玩家按 Enter
+     * 会"对空气改键"。
+     */
+    const odd = 4; // 4 个格子、3 列 → 第二行只有 1 个
+    const secondRowStart: SettingsFocus = { zone: 'grid', index: 2 };
+    expect(moveFocus(secondRowStart, 'down', odd)).toEqual({ zone: 'reset' });
+  });
+
+  it('"恢复默认"往上/往左回到网格', () => {
+    expect(moveFocus({ zone: 'reset' }, 'up', cells)).toEqual({ zone: 'grid', index: cells - 1 });
+    expect(moveFocus({ zone: 'reset' }, 'left', cells)).toEqual({ zone: 'grid', index: cells - 1 });
+  });
+
+  it('Tab 循环三个区域，Shift+Tab 反向', () => {
+    const a = cycleZone({ zone: 'tabs', index: 0 }, cells);
+    expect(a.zone).toBe('grid');
+    const b = cycleZone(a, cells);
+    expect(b.zone).toBe('reset');
+    const c = cycleZone(b, cells);
+    expect(c.zone).toBe('tabs');
+    // 反向
+    expect(cycleZone({ zone: 'tabs', index: 0 }, cells, true).zone).toBe('reset');
+  });
+
+  it('没有技能格时 Tab 只在 tab 行与按钮之间走（不产生空焦点）', () => {
+    const a = cycleZone({ zone: 'tabs', index: 0 }, 0);
+    expect(a.zone).toBe('reset');
+    expect(cycleZone(a, 0).zone).toBe('tabs');
+  });
+
+  it('Enter 激活：tab 行切换 tab、格子上开始改键、按钮上恢复默认', () => {
+    expect(resolveActivate({ zone: 'tabs', index: 0 }, [])).toEqual({
+      kind: 'switchTab',
+      tab: 'general',
+    });
+    expect(resolveActivate({ zone: 'tabs', index: 1 }, [])).toEqual({
+      kind: 'switchTab',
+      tab: 'keys',
+    });
+    expect(resolveActivate({ zone: 'reset' }, [])).toEqual({ kind: 'resetKeys' });
+    expect(resolveActivate({ zone: 'grid', index: 1 }, ['a', 'b'])).toEqual({
+      kind: 'startCapture',
+      skillId: 'b',
+    });
+  });
+
+  it('方向键与 Enter 在弹窗内被当作导航，不会穿透成技能', () => {
+    // 这是"几乎全键盘可操作"的前提：弹窗开着时方向键不该去打怪
+    expect(resolveKeyAction('arrowup', false)).toEqual({ kind: 'move', direction: 'up' });
+    expect(resolveKeyAction('arrowdown', false)).toEqual({ kind: 'move', direction: 'down' });
+    expect(resolveKeyAction('arrowleft', false)).toEqual({ kind: 'move', direction: 'left' });
+    expect(resolveKeyAction('arrowright', false)).toEqual({ kind: 'move', direction: 'right' });
+    expect(resolveKeyAction('enter', false)).toEqual({ kind: 'activate' });
+    expect(resolveKeyAction('tab', false)).toEqual({ kind: 'cycle', back: false });
+  });
+
+  it('捕获中优先一切 —— 连方向键都是"想绑这个键"', () => {
+    // 否则玩家想把技能绑成方向键就永远绑不上
+    expect(resolveKeyAction('arrowup', true)).toEqual({ kind: 'capture', key: 'arrowup' });
+    expect(resolveKeyAction('enter', true)).toEqual({ kind: 'capture', key: 'enter' });
+    // Esc 是唯一退路
+    expect(resolveKeyAction('escape', true)).toEqual({ kind: 'cancelCapture' });
+  });
+
+  it('无关按键不产生动作（但也不穿透）', () => {
+    expect(resolveKeyAction('x', false)).toEqual({ kind: 'ignore' });
+  });
+});
+
+describe('保留键在弹窗内的处理路径', () => {
+  /**
+   * 需求："一部分系统 reserved 的按键不支持绑技能，记得加提示"。
+   * 这里守住"键名 → 提示文案里的键名"这一步不会错位 ——
+   * 功能链路（真实按键 → 提示）由 CDP 端到端验证覆盖。
+   */
+  it('每个保留键都映射到可读名字，提示不会漏掉键名', () => {
+    const cases: ReadonlyArray<readonly [string, string]> = [
+      ['escape', 'Esc'],
+      ['tab', 'Tab'],
+      ['enter', 'Enter'],
+      ['f1', 'F1–F12'],
+      ['f12', 'F1–F12'],
+      ['shift', 'shift'],
+      ['control', 'control'],
+      ['alt', 'alt'],
+    ];
+    for (const [key, label] of cases) {
+      expect(isReservedKey(key), key).toBe(true);
+      expect(reservedKeyLabel(key), key).toBe(label);
+    }
+  });
+
+  it('模板里的 {key} 占位符能被替换（提示必须写出是哪个键）', () => {
+    // 只说"不能用"会让玩家反复试同一个键，所以占位符是必需的
+    const template = '{key} 是系统保留键，不能绑定';
+    expect(template.replace('{key}', reservedKeyLabel('f3'))).toBe('F1–F12 是系统保留键，不能绑定');
   });
 });

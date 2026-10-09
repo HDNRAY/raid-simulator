@@ -19,7 +19,7 @@
  * **逻辑在 node 里测，绘制在浏览器里看**。
  */
 
-import { FONT, LOGICAL } from '../layout';
+import { LOGICAL } from '../layout';
 
 /* ------------------------------------------------------------------ *
  * 几何
@@ -304,28 +304,164 @@ export function keyLabel(key: string, unboundText: string): string {
 }
 
 /* ------------------------------------------------------------------ *
- * 键盘
+ * 键盘导航
  * ------------------------------------------------------------------ */
+
+/**
+ * 键盘焦点位置。
+ *
+ * 用一个**线性游标**而不是"tab 索引 + 列 + 行"三件套：箭头键的处理
+ * 只需要"往哪个方向找下一个"，而线性游标把这个逻辑收敛成一次
+ * 索引运算，顺便让"Tab 也能切换"变得免费。
+ */
+export type SettingsFocus =
+  | { readonly zone: 'tabs'; readonly index: number }
+  | { readonly zone: 'grid'; readonly index: number }
+  | { readonly zone: 'reset' };
+
+/** 初始焦点：按键 tab 的第一个技能格（最常改的东西）。 */
+export const INITIAL_FOCUS: SettingsFocus = { zone: 'grid', index: 0 };
+
+export const TAB_COUNT = 2;
+
+/**
+ * 方向键移动后的新焦点。
+ *
+ * `cellCount` 是**当前可见**的技能格数量 —— 焦点不会跑到看不见的格子上。
+ */
+export function moveFocus(
+  focus: SettingsFocus,
+  direction: 'up' | 'down' | 'left' | 'right',
+  cellCount: number,
+): SettingsFocus {
+  if (focus.zone === 'tabs') {
+    // tab 行是横向的一排
+    if (direction === 'left') {
+      return { zone: 'tabs', index: (focus.index + TAB_COUNT - 1) % TAB_COUNT };
+    }
+    if (direction === 'right') {
+      return { zone: 'tabs', index: (focus.index + 1) % TAB_COUNT };
+    }
+    // 往下离开 tab 行 → 进网格
+    return cellCount > 0 ? { zone: 'grid', index: 0 } : { zone: 'reset' };
+  }
+
+  if (focus.zone === 'reset') {
+    if (direction === 'up' || direction === 'left') {
+      return cellCount > 0
+        ? { zone: 'grid', index: cellCount - 1 }
+        : { zone: 'tabs', index: 0 };
+    }
+    return focus;
+  }
+
+  // 网格：左右在同一行内移动，上下按列移动；越界则换区
+  const index = focus.index;
+  const col = index % KEY_GRID.cols;
+  const row = Math.floor(index / KEY_GRID.cols);
+  const rows = Math.max(1, Math.ceil(cellCount / KEY_GRID.cols));
+
+  const clampToCell = (i: number): SettingsFocus =>
+    i >= 0 && i < cellCount ? { zone: 'grid', index: i } : focus;
+
+  switch (direction) {
+    case 'left':
+      return col > 0 ? clampToCell(index - 1) : focus;
+    case 'right':
+      return col < KEY_GRID.cols - 1 ? clampToCell(index + 1) : focus;
+    case 'up':
+      if (row > 0) return clampToCell(index - KEY_GRID.cols);
+      return { zone: 'tabs', index: 0 };
+    case 'down': {
+      if (row < rows - 1) {
+        const next = index + KEY_GRID.cols;
+        // 最后一行的空位不落焦点
+        if (next < cellCount) return { zone: 'grid', index: next };
+      }
+      return { zone: 'reset' };
+    }
+  }
+}
+
+/** Tab / Shift+Tab 在较大区域之间切换（无障碍习惯用 Tab，所以也支持）。 */
+export function cycleZone(focus: SettingsFocus, cellCount: number, back = false): SettingsFocus {
+  const order: readonly SettingsFocus['zone'][] = ['tabs', 'grid', 'reset'];
+  const usable = cellCount > 0 ? order : (['tabs', 'reset'] as const);
+  const current = usable.indexOf(focus.zone);
+  const step = back ? -1 : 1;
+  const next = usable[(current + step + usable.length) % usable.length]!;
+  if (next === 'grid') {
+    const index = focus.zone === 'grid' ? focus.index : 0;
+    return { zone: 'grid', index: Math.min(index, Math.max(0, cellCount - 1)) };
+  }
+  if (next === 'tabs') return { zone: 'tabs', index: 0 };
+  return { zone: 'reset' };
+}
 
 /**
  * 弹窗打开时，某个按键该怎么处理。
  *
- * `capturing` 表示正在等待玩家按下新键 —— 此时除了 Esc（取消）
- * 之外的一切按键都交给捕获回调，**不能**当成"关闭弹窗"或"放技能"。
+ * ------------------------------------------------------------------
+ * 优先级
+ * ------------------------------------------------------------------
+ *
+ * 1. **捕获中**：除了 Esc（唯一退路）之外，一切按键都是"玩家想绑这个键"。
+ *    这一步必须在最前面 —— 否则玩家想把技能绑成 `arrowup` 就会被
+ *    当成导航。
+ * 2. **方向键 / Tab**：移动焦点。
+ * 3. **Enter / 空格**：激活当前焦点。
+ * 4. **Esc**：关闭弹窗。
+ *
+ * 需求是"几乎全键盘可操作，包括设置弹窗里的一切"，所以这里
+ * 不能有"只能用鼠标"的死角 —— 改键、切 tab、恢复默认全部可达。
  */
 export type KeyAction =
   | { readonly kind: 'cancelCapture' }
   | { readonly kind: 'closePanel' }
   | { readonly kind: 'capture'; readonly key: string }
+  | { readonly kind: 'move'; readonly direction: 'up' | 'down' | 'left' | 'right' }
+  | { readonly kind: 'cycle'; readonly back: boolean }
+  | { readonly kind: 'activate' }
   | { readonly kind: 'ignore' };
+
+/** 方向键键名 → 方向。 */
+const ARROWS: Readonly<Record<string, 'up' | 'down' | 'left' | 'right'>> = {
+  arrowup: 'up',
+  arrowdown: 'down',
+  arrowleft: 'left',
+  arrowright: 'right',
+};
 
 export function resolveKeyAction(key: string, capturing: boolean): KeyAction {
   if (capturing) {
-    // Esc 是唯一的退路，其它键都当作"玩家想绑这个键"
+    // Esc 是唯一的退路，其余按键都当作"玩家想绑这个键"
     return key === 'escape' ? { kind: 'cancelCapture' } : { kind: 'capture', key };
   }
-  return key === 'escape' ? { kind: 'closePanel' } : { kind: 'ignore' };
+
+  const arrow = ARROWS[key];
+  if (arrow) return { kind: 'move', direction: arrow };
+  if (key === 'tab') return { kind: 'cycle', back: false };
+  if (key === 'shift+tab') return { kind: 'cycle', back: true };
+  if (key === 'enter' || key === ' ') return { kind: 'activate' };
+  if (key === 'escape') return { kind: 'closePanel' };
+  return { kind: 'ignore' };
 }
 
-/** 键位行的字号（供面板绘制用，避免两处写魔数）。 */
-export const KEY_ROW_FONT = FONT.body;
+/** 激活当前焦点时的动作。 */
+export type ActivateAction =
+  | { readonly kind: 'switchTab'; readonly tab: SettingsTab }
+  | { readonly kind: 'startCapture'; readonly skillId: string }
+  | { readonly kind: 'resetKeys' }
+  | { readonly kind: 'none' };
+
+export function resolveActivate(
+  focus: SettingsFocus,
+  rowSkillIds: readonly string[],
+): ActivateAction {
+  if (focus.zone === 'tabs') {
+    return { kind: 'switchTab', tab: focus.index === 0 ? 'general' : 'keys' };
+  }
+  if (focus.zone === 'reset') return { kind: 'resetKeys' };
+  const skillId = rowSkillIds[focus.index];
+  return skillId === undefined ? { kind: 'none' } : { kind: 'startCapture', skillId };
+}

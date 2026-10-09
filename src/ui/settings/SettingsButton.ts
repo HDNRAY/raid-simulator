@@ -13,7 +13,7 @@
  * 所以这里就是一个 canvas 图形 + 自己算的命中测试。
  */
 
-import type { Container, Graphics } from 'pixi.js';
+import type { Container } from 'pixi.js';
 import { Icon } from '../../render/icons';
 import { PALETTE } from '../../render/theme';
 import { LOGICAL } from '../layout';
@@ -35,10 +35,10 @@ const ICON_COLOR = 0xb0b0be;
 export class SettingsButton {
   readonly root: Container;
 
-  private readonly gfx: Graphics;
   private readonly icon: Icon;
   private readonly rect: { x: number; y: number; w: number; h: number };
   private hovered = false;
+  private focused = false;
   private lastDrawnHover = false;
 
   constructor(private readonly options: SettingsButtonOptions) {
@@ -52,7 +52,6 @@ export class SettingsButton {
     };
 
     this.root = new pixi.Container();
-    this.gfx = new pixi.Graphics();
     /**
      * 图标用 SVG（`render/icons.ts`）。
      *
@@ -66,9 +65,8 @@ export class SettingsButton {
       size: ICON_SIZE,
       color: ICON_COLOR,
     });
-    this.root.addChild(this.gfx, this.icon.root);
+    this.root.addChild(this.icon.root);
     this.placeIcon();
-    this.draw();
   }
 
   /** 命中测试（坐标是逻辑像素）。 */
@@ -82,32 +80,34 @@ export class SettingsButton {
     return hit;
   }
 
-  /** 悬停反馈（目前只有主循环每帧调一次，用于重绘）。 */
+  /** 指针悬停。 */
   setHovered(hovered: boolean): void {
     this.hovered = hovered;
   }
 
-  update(): void {
-    if (this.hovered === this.lastDrawnHover) return;
-    this.lastDrawnHover = this.hovered;
-    this.draw();
+  /**
+   * 键盘是否选中了它。
+   *
+   * 与"悬停"分开：两者视觉一致（图标变亮），但来源不同 ——
+   * 混成一个字段会让"鼠标移开时把键盘选中也一起清掉"。
+   */
+  setFocused(focused: boolean): void {
+    this.focused = focused;
+    this.update();
   }
 
-  private draw(): void {
-    const g = this.gfx;
-    const { x, y, w, h } = this.rect;
-    g.clear();
-
-    // 按钮底：很淡的底 + 细描边，与技能栏一样"不抢眼"
-    g.roundRect(x, y, w, h, 3).fill({
-      color: 0xffffff,
-      alpha: this.hovered ? 0.12 : 0.06,
-    });
-    g.roundRect(x, y, w, h, 3).stroke({
-      color: this.hovered ? PALETTE.douqi.bright : 0x5a5c70,
-      width: 1,
-    });
-
+  /**
+   * 悬停 / 键盘选中状态。
+   *
+   * **没有边框、没有底色**（需求明确"不需要边框"）—— 状态只靠
+   * **图标颜色**表达，与技能栏"不要按钮方框"的处理一致：
+   * 画面上只有图形本身。
+   */
+  update(): void {
+    const lit = this.hovered || this.focused;
+    if (lit === this.lastDrawnHover) return;
+    this.lastDrawnHover = lit;
+    this.icon.setColor(lit ? PALETTE.douqi.bright : ICON_COLOR);
   }
 
   /**

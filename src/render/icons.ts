@@ -279,6 +279,24 @@ export class Icon {
     void this.apply(name);
   }
 
+  /**
+   * 换颜色（悬停 / 选中态用）。
+   *
+   * 颜色是**构建时注入 SVG** 的，所以换色等于换一张纹理 ——
+   * 这正是"不能运行时染色"的直接后果（见文件头说明）。
+   * 缓存按 `名字@颜色` 分键，所以来回切换不会反复解码。
+   */
+  setColor(color: number): void {
+    if (color === this.options.color) return;
+    void this.applyColor(color);
+  }
+
+  private async applyColor(color: number): Promise<void> {
+    const texture = await iconTexture(this.currentName, color);
+    if (this.disposed || !texture) return;
+    this.sprite.texture = texture;
+  }
+
   /** 当前图标名（调试与测试用）。 */
   get iconName(): IconName {
     return this.currentName;

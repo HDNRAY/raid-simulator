@@ -27,9 +27,12 @@
 import type { Container, Graphics } from 'pixi.js';
 import { PALETTE } from '../../render/theme';
 import { FONT, LOGICAL } from '../layout';
+import { isReservedKey, reservedKeyLabel } from '../../input/keyboard';
 import { Label, Panel, type PixiCtor } from '../primitives';
 import {
+  INITIAL_FOCUS,
   SETTINGS_PANEL,
+  cycleZone,
   hitTest as hitTestLogic,
   keyLabel as formatKey,
   keyCellRect,
@@ -38,6 +41,9 @@ import {
   tabRect,
   KEY_GRID_CAPACITY,
   hintLineY,
+  moveFocus,
+  resolveActivate,
+  type SettingsFocus,
   type SettingsTab,
 } from './logic';
 
@@ -99,6 +105,19 @@ export class SettingsPanel {
   private readonly resetButton: { gfx: Graphics; label: Label; rect: { x: number; y: number; w: number; h: number } };
 
   private tab: SettingsTab = 'keys';
+  /**
+   * 键盘焦点游标。
+   *
+   * 需求："几乎支持键盘操作，包括设置弹窗里的一切"。所以弹窗里
+   * **没有只能点鼠标的地方** —— tab、每个技能格、恢复默认按钮
+   * 都在这个线性游标上。
+   */
+  private focus: SettingsFocus = INITIAL_FOCUS;
+  /**
+   * 改键开始的时间戳（`performance.now()`）。
+   *
+   * 用来挡掉"触发改键的那一次按键本身" —— 见 `startCapture` 的说明。
+   */
   private visible = false;
   /** 正在等待按键的技能 id（undefined = 没在捕获） */
   private capturingSkill: string | undefined;
@@ -226,6 +245,35 @@ export class SettingsPanel {
     return this.visible;
   }
 
+  /**
+   * 是否作废下一次捕获回调（"触发改键的那一次按键"）。
+   *
+   * 每次 `startCapture` 置位、`finishCapture` 或 `stopCapture` 清零 ——
+   * 所以它不可能卡住。
+   */
+  private skipNextCapture = false;
+
+  /**
+   * 按键轨迹（环形缓冲，供调试探针读取）。
+   *
+   * 保留它是因为"按键没生效"这类问题**只能靠事件序列定位** ——
+   * 我这次排查"一次 Enter 同时进入改键并完成绑定"就是靠它，
+   * 日志一眼看出 `startCapture` 之后紧跟 `finishCapture(enter)`。
+   * 截图和单元测试都看不到这个层面的信息。
+   */
+  readonly settingsTrace: string[] = [];
+
+  /** 正在等待按键的技能 id（调试探针用）。 */
+  get capturingSkillId(): string | undefined {
+    return this.capturingSkill;
+  }
+
+  /** 当前键盘焦点（调试探针用）。 */
+  get focusState(): SettingsFocus {
+    return this.focus;
+  }
+
+
   open(tab: SettingsTab = 'keys'): void {
     this.visible = true;
     this.root.visible = true;
@@ -288,9 +336,19 @@ export class SettingsPanel {
    *
    * @returns 是否消费了这次按键
    */
+  /**
+   * 键盘输入（弹窗打开时由主循环转发）。
+   *
+   * @returns 是否消费了这次按键
+   */
   handleKey(key: string): boolean {
     if (!this.visible) return false;
+    const cellCount = this.options.getRows().length;
+
     const action = resolveKeyAction(key, this.capturingSkill !== undefined);
+    this.settingsTrace.push(`handleKey(${key}) cap=${this.capturingSkill ?? '-'} -> ${action.kind}`);
+    if (this.settingsTrace.length > 40) this.settingsTrace.shift();
+
     switch (action.kind) {
       case 'cancelCapture':
         this.stopCapture();
@@ -300,28 +358,133 @@ export class SettingsPanel {
         this.options.onClose();
         return true;
       case 'capture':
-        // 捕获模式下输入层会直接把键回调过来，这里不重复处理
+        // 捕获模式下输入层直接回调，这里不重复处理
+        return true;
+      case 'move':
+        this.focus = moveFocus(this.focus, action.direction, cellCount);
+        this.redraw();
+        return true;
+      case 'cycle':
+        this.focus = cycleZone(this.focus, cellCount, action.back);
+        this.redraw();
+        return true;
+      case 'activate':
+        this.activateFocus();
         return true;
       case 'ignore':
         return true;
     }
   }
 
+  /** 激活当前焦点（Enter / 空格）。 */
+  private activateFocus(): void {
+    const action = resolveActivate(this.focus, this.options.getRows().map((r) => r.skillId));
+    switch (action.kind) {
+      case 'switchTab':
+        this.setTab(action.tab);
+        return;
+      case 'startCapture':
+        this.startCapture(action.skillId);
+        return;
+      case 'resetKeys':
+        this.options.onResetKeys();
+        this.setNotice(this.options.translate('settings.keysResetDone'));
+        this.redraw();
+        return;
+      case 'none':
+        return;
+    }
+  }
+
   private startCapture(skillId: string): void {
+    this.settingsTrace.push(`startCapture(${skillId})`);
     this.capturingSkill = skillId;
+    /**
+     * 跳过**触发改键的那一次按键**。
+     *
+     * ------------------------------------------------------------------
+     * 为什么必须有这个标记
+     * ------------------------------------------------------------------
+     *
+     * 输入层的 keydown 监听器比主监听器**先注册**（它在 `startBattle()`
+     * 里、主监听器在 bootstrap 末尾），所以一次 keydown 的事件顺序是：
+     *
+     *   1. 输入层 `onKeyDown` 开始执行 —— 此时还没有捕获回调，它什么也没做
+     *   2. 主监听器调用 `SettingsPanel.handleKey` → 进入改键模式 →
+     *      **当场**把捕获回调注册给输入层
+     *   3. 输入层 `onKeyDown` 的执行**还没结束**，它继续走到
+     *      "有捕获回调吗" 那一步 —— 现在有了 —— 于是把
+     *      **同一个按键**喂给了 `finishCapture`
+     *
+     * 表现就是"按 Enter 进入改键，技能被静默绑成了 Enter"。
+     *
+     * 试过但**不管用**的两种修法：
+     *   - 在组件里比时间戳（"同一瞬间的按键忽略"）：用阈值猜事件归属，
+     *     会误吞玩家的真实连按。
+     *   - 在主监听器里标记"这次按键我处理了"：输入层先跑，
+     *     标记设置得太晚。
+     *
+     * 所以只能由**改键协议自己**表达："进入改键后的第一个回调作废"。
+     * 它与时序无关，并且每次进入/退出改键都会被重置。
+     */
+    this.skipNextCapture = true;
+    /**
+     * 时序守卫：记录改键开始的时刻，**同一瞬间到达的按键一律忽略**。
+     *
+     * 重入问题**不在这里解决** —— 它发生在输入层与主监听器之间，
+     * 由 `main.ts` 的 `dispatching` 标记挡掉（见那里的说明）。
+     * 组件这一层只关心"收到一个键，就处理一个键"。
+     */
     this.options.onCapture((key) => this.finishCapture(key));
     this.redraw();
   }
 
   private stopCapture(): void {
+    if (this.capturingSkill !== undefined) {
+      this.settingsTrace.push(`stopCapture(was ${this.capturingSkill})`);
+    }
     this.capturingSkill = undefined;
+    this.skipNextCapture = false;
     this.options.onCapture(undefined);
   }
 
   private finishCapture(key: string): void {
+    this.settingsTrace.push(`finishCapture(${key}) skip=${this.skipNextCapture}`);
     const skillId = this.capturingSkill;
-    this.stopCapture();
     if (skillId === undefined) return;
+
+    // 作废"触发改键的那一次按键" —— 见 `startCapture` 的说明
+    if (this.skipNextCapture) {
+      this.skipNextCapture = false;
+      return;
+    }
+
+    /**
+     * ⚠️ **先退出捕获，再做判定** —— 单一出口。
+     *
+     * 早期把 `stopCapture()` 分散在几个分支里（保留键的分支忘了调），
+     * 于是"按下保留键"之后捕获状态**卡住不退**：玩家的下一次按键
+     * 仍被当成改键输入，界面看起来像死了。
+     * 所有分支都必须走到这里。
+     */
+    this.stopCapture();
+
+    /**
+     * **系统保留键直接拒绝并提示**。
+     *
+     * 需求："一部分系统 reserved 的按键不支持绑技能，记得加提示"。
+     * 提示里必须写出**具体是哪个键**被拒 —— 只说"不能用"会让玩家
+     * 反复试同一个键。
+     */
+    if (isReservedKey(key)) {
+      this.setNotice(
+        this.options
+          .translate('settings.keysReserved')
+          .replace('{key}', reservedKeyLabel(key)),
+      );
+      this.redraw();
+      return;
+    }
 
     // 冲突策略（顶掉旧占用者）在 `applyRebind` 里，见它的说明
     const rows = this.options.getRows();
@@ -361,14 +524,15 @@ export class SettingsPanel {
     this.title.set(this.options.translate('settings.title'));
     this.closeHint.set(this.options.translate('settings.close'));
 
-    for (const button of this.tabButtons) {
+    for (const [i, button] of this.tabButtons.entries()) {
       const active = button.tab === this.tab;
+      const focused = this.focus.zone === 'tabs' && this.focus.index === i;
       const label =
         button.tab === 'general'
           ? this.options.translate('settings.tabGeneral')
           : this.options.translate('settings.tabKeys');
       button.label.set(label);
-      button.label.setColor(active ? 0xffffff : PALETTE.textDim);
+      button.label.setColor(active || focused ? 0xffffff : PALETTE.textDim);
       const g = button.gfx;
       g.clear();
       if (active) {
@@ -380,6 +544,20 @@ export class SettingsPanel {
         g.rect(button.rect.x, button.rect.y + button.rect.h - 2, button.rect.w, 2).fill(
           PALETTE.douqi.base,
         );
+      }
+      /**
+       * 键盘焦点：**一圈描边**。
+       *
+       * 与"选中"（下划线）刻意用不同的视觉手段 —— 它们语义不同：
+       * 选中 = 当前显示哪个 tab，焦点 = 回车会作用在谁身上。
+       * 两者可能同时存在（焦点在选中的 tab 上），也可能分开
+       * （焦点移走了但 tab 没切）。
+       */
+      if (focused) {
+        g.rect(button.rect.x, button.rect.y, button.rect.w, button.rect.h).stroke({
+          color: PALETTE.douqi.bright,
+          width: 1.5,
+        });
       }
     }
     void x;
@@ -408,7 +586,7 @@ export class SettingsPanel {
       this.notice !== ''
         ? this.notice
         : this.capturingSkill !== undefined
-          ? this.options.translate('settings.keysCapturing')
+          ? this.options.translate('settings.keysCapturingHint')
           : this.options.translate('settings.keysHint'),
     );
     this.hintLabel.setColor(this.notice !== '' ? 0xff9080 : PALETTE.textDim);
@@ -419,36 +597,39 @@ export class SettingsPanel {
       if (!slot) continue;
 
       const capturing = this.capturingSkill === row.skillId;
+      const focused = this.focus.zone === 'grid' && this.focus.index === i;
       slot.name.set(this.options.translate(row.nameKey));
       // 按键名统一大写显示，与技能栏上的提示一致
       slot.key.set(capturing ? '…' : formatKey(row.key, this.options.translate('settings.keyUnbound')));
-      slot.key.setColor(capturing ? PALETTE.douqi.bright : PALETTE.text);
+      slot.key.setColor(capturing || focused ? PALETTE.douqi.bright : PALETTE.text);
 
       const g = this.rowGfx;
-      // 交替底色 + 捕获时的高亮
+      // 交替底色 + 捕获/键盘焦点的高亮
       g.rect(slot.rect.x, slot.rect.y, slot.rect.w, slot.rect.h).fill({
-        color: capturing ? PALETTE.douqi.base : 0xffffff,
-        alpha: capturing ? 0.14 : i % 2 === 0 ? 0.03 : 0.06,
+        color: capturing || focused ? PALETTE.douqi.base : 0xffffff,
+        alpha: capturing ? 0.18 : focused ? 0.12 : i % 2 === 0 ? 0.03 : 0.06,
       });
-      if (capturing) {
+      if (capturing || focused) {
         g.rect(slot.rect.x, slot.rect.y, slot.rect.w, slot.rect.h).stroke({
           color: PALETTE.douqi.bright,
-          width: 1,
+          width: focused ? 1.5 : 1,
         });
       }
     }
 
     // 恢复默认按钮
     const rb = this.resetButton;
+    const resetFocused = this.focus.zone === 'reset';
     rb.label.set(this.options.translate('settings.keysReset'));
+    rb.label.setColor(resetFocused ? PALETTE.douqi.bright : PALETTE.text);
     const g = this.rowGfx;
     g.roundRect(rb.rect.x, rb.rect.y, rb.rect.w, rb.rect.h, 3).fill({
-      color: 0xffffff,
-      alpha: 0.08,
+      color: resetFocused ? PALETTE.douqi.base : 0xffffff,
+      alpha: resetFocused ? 0.16 : 0.08,
     });
     g.roundRect(rb.rect.x, rb.rect.y, rb.rect.w, rb.rect.h, 3).stroke({
-      color: 0x6a6c80,
-      width: 1,
+      color: resetFocused ? PALETTE.douqi.bright : 0x6a6c80,
+      width: resetFocused ? 1.5 : 1,
     });
   }
 

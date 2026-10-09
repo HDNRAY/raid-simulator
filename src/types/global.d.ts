@@ -19,6 +19,9 @@ declare global {
         /** 用逻辑坐标点一下（验证命中测试与布局一致） */
         openIn(px: number, py: number): void;
         isOpen(): boolean;
+        capturing(): string | undefined;
+        focus(): { readonly zone: string; readonly index?: number };
+        trace(): readonly string[];
       };
       probe(): {
         tick: number;

@@ -60,6 +60,69 @@ export const DEFAULT_BINDINGS: readonly KeyBinding[] = [
 const PREVENT_DEFAULT = new Set(['tab', ' ', 'f1', 'f2', 'f3', 'f4', 'f5']);
 
 /**
+ * **不允许绑定到技能上的键**。
+ *
+ * ------------------------------------------------------------------
+ * 为什么要有一份显式的名单
+ * ------------------------------------------------------------------
+ *
+ * 玩家在设置里按下什么键都能绑，但有些键**绑了会出事**：
+ *
+ *   - `escape`  关闭弹窗 / 暂停。绑成技能后按 Esc 会同时做两件事。
+ *   - `tab`     浏览器用来切换焦点。虽然我们 `preventDefault` 掉了，
+ *               但把 Tab 绑成技能会让"用键盘走遍界面"这件事变得别扭 ——
+ *               而"几乎全键盘可操作"是本项目的硬需求。
+ *   - `enter`   确认 / 重开一局。
+ *   - `f1`–`f12` 浏览器保留（F1 帮助、F5 刷新、F11 全屏、F12 开发者工具）。
+ *     我们只能拦下 F1–F5，F11/F12 根本拦不住 —— 所以整排都不许绑。
+ *   - 单独的修饰键（`shift` / `control` / `alt` / `meta`）：
+ *     它们应该作为**组合键的前缀**（`shift+1`），单独绑没有意义，
+ *     而且会让组合键的判定变得含糊。
+ *
+ * 名单做成函数导出而不是只写死在捕获流程里 —— 这样**界面能提前提示**
+ * 哪些键不能用，而不是等玩家按了才拒绝。
+ */
+const RESERVED_KEYS: ReadonlySet<string> = new Set([
+  'escape',
+  'tab',
+  'enter',
+  'shift',
+  'control',
+  'alt',
+  'meta',
+  ...Array.from({ length: 12 }, (_, i) => `f${i + 1}`),
+]);
+
+/** 这个键是否被系统保留（不能绑技能）。 */
+export function isReservedKey(key: string): boolean {
+  return RESERVED_KEYS.has(key);
+}
+
+/**
+ * 保留键的**可读名字**（提示文案里用）。
+ *
+ * 返回的是 i18n key 而不是中文：这一层不该出现文案。
+ */
+export function reservedKeyLabel(key: string): string {
+  if (/^f\d+$/.test(key)) return 'F1–F12';
+  switch (key) {
+    case 'escape':
+      return 'Esc';
+    case 'tab':
+      return 'Tab';
+    case 'enter':
+      return 'Enter';
+    case 'shift':
+    case 'control':
+    case 'alt':
+    case 'meta':
+      return key;
+    default:
+      return key;
+  }
+}
+
+/**
  * 把 `KeyboardEvent` 归一成一个键名。
  *
  * 归一化的必要性：`event.key` 的大小写随 Shift 变化
