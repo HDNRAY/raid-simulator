@@ -212,7 +212,7 @@ describe('真实内容：玩家招式都接线了', () => {
     expect(engine.snapshot.combatants.find((c) => c.side === 'enemy')!.casts).toHaveLength(0);
   });
 
-  it('御：按住期间减伤，松开即取消', () => {
+  it('防：按住期间减伤，松开即取消', () => {
     const engine = makeEngine();
     const player = engine.snapshot.combatants.find((c) => c.side === 'ally')!;
     void player;
@@ -234,7 +234,7 @@ describe('真实内容：玩家招式都接线了', () => {
     expect(after.buffs.some((b) => b.defId === 'guard')).toBe(false);
   });
 
-  it('御：每 0.1 秒扣 2 点缠，缠耗尽自动松开', () => {
+  it('防：每 0.1 秒扣 2 点缠，缠耗尽自动松开', () => {
     const options = makeGoldenEngineOptions();
     const playable = options.combatants[0]!;
     // 只给刚好够 3 步的缠（3 × 2 点 × 10 刻度）

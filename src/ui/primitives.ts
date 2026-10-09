@@ -135,7 +135,7 @@ export interface LabelProps {
   /**
    * 用**楷体族**而不是等宽族。
    *
-   * 技能图标上的字（攻/闪/御/破/轰/凝）走这条 ——
+   * 技能图标上的字（攻/闪/防/破/轰/凝）走这条 ——
    * 见 `theme.ts` 里关于楷体的说明。
    */
   readonly kai?: boolean;

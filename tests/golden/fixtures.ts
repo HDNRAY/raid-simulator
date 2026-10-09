@@ -250,6 +250,6 @@ export function planPriority(
  * 输出优先级（黄金重放用）。
  *
  * 顺序即"玩家会优先按哪个键"：凝（增伤）→ 轰（炁爆发）→ 攻（填充）。
- * 破与御不在优先级里 —— 它们要在看到 Boss 读条时才用（见 `planPriority`）。
+ * 破与防不在优先级里 —— 它们要在看到 Boss 读条时才用（见 `planPriority`）。
  */
 export const OUTPUT_PRIORITY = ['focus', 'blast', 'attack'] as const;
