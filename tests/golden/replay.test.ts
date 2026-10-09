@@ -6,12 +6,12 @@ import {
   type EngineOptions,
   type RecordedRun,
 } from '../../src/core/run';
-import { ENTROPY_CLOCK } from '../../src/data/entities/entropyClock';
 import type { StatKey, StatModifier } from '../../src/core/types';
 import {
   FIXED_SEED,
   GOLDEN_OUTCOME,
   OUTPUT_PRIORITY,
+  PLAYER_CAPS,
   makeGoldenEngineOptions,
   planPriority,
 } from './fixtures';
@@ -132,15 +132,22 @@ describe('对内容改动的敏感度（回归保护）', () => {
     expect(boosted.ticks).toBeLessThan(base.ticks);
   });
 
-  it('玩家完全不闪避会显著多挨伤害 —— 输入也是保护范围的一部分', () => {
-    const base = runGolden();
-    // 同一个引擎、同一颗种子、同一套输出循环，只把"会躲"换成"不躲"。
-    // 指标用**剩余血量**而不是用时：闪避不影响 DPS，只影响承受的伤害。
+  it('把"会闪"换成"不闪"会改变用时 —— 输入也是保护范围的一部分', () => {
+    const withDodge = runGolden();
     const noDodge = runWithPriority(OUTPUT_PRIORITY, {});
-    expect(noDodge.combatants['player']!.hp).toBeLessThan(base.combatants['player']!.hp);
-    // 而且差距要够大，否则说明闪避其实没什么用（判定层或时机有问题）
-    const saved = base.combatants['player']!.hp - noDodge.combatants['player']!.hp;
-    expect(saved).toBeGreaterThan(3_000);
+    /**
+     * 注意方向：当前平衡下**不闪反而更快赢**（用时更短）。
+     *
+     * 因为闪一次要 40 精力 = 4 次「攻」的代价，而 Boss 一次重击
+     * 只造成 18 伤害 —— "用闪换输出"在数值上不划算。
+     * 这是**内容数值**的结论，不是引擎 bug：引擎的闪避判定有独立测试
+     * （能量充足时能做到零承伤）。
+     *
+     * 写下来是为了让"以后这个关系反过来了"能被注意到 ——
+     * 那说明有人调过平衡，应该是有意为之。
+     */
+    expect(noDodge.ticks).not.toBe(withDodge.ticks);
+    expect(noDodge.ticks).toBeLessThan(withDodge.ticks);
   });
 
   it('精力回复砍半会改变"能躲几次"，但不会改击杀用时（这是个有价值的负面结论）', () => {
@@ -151,57 +158,87 @@ describe('对内容改动的敏感度（回归保护）', () => {
     expect(starved.ticks).toBe(base.ticks);
   });
 
-  it('Boss 行为数组改变会改变结果 —— AI 也在保护范围内', () => {
+  it('Boss 不还手时玩家必定获胜 —— AI 也在保护范围内', () => {
     const base = runGolden();
     const passive = makeGoldenEngineOptions();
     const silentBoss = runWith({
       ...passive,
       combatants: [passive.combatants[0]!, { ...passive.combatants[1]!, behaviors: [] }],
     });
-    // Boss 不还手 → 玩家一点伤害都不会挨
-    expect(silentBoss.combatants['player']!.hp).toBe(12_000);
-    expect(base.combatants['player']!.hp).toBeLessThan(12_000);
+    expect(silentBoss.status).toBe('victory');
+    expect(silentBoss.combatants['player']!.hp).toBe(PLAYER_CAPS.hp);
+    // 而正常一场是**险胜**：玩家只剩个位数百分比的血
+    expect(base.status).toBe('victory');
+    expect(base.combatants['player']!.hp).toBeLessThan(PLAYER_CAPS.hp * 0.3);
   });
 
-  it('去掉斗炁爆发会明显变慢 —— 终结技确实是主要伤害来源', () => {
-    const base = runGolden();
-    const noFinisher = runWithPriority(['rend', 'heavyStrike', 'riposte', 'strike']);
-    expect(noFinisher.ticks).toBeGreaterThan(base.ticks);
-  });
-});
-
-describe('熵之钟这件装备真的参与了战斗', () => {
-  it('带装备与不带装备的结果不同', () => {
-    const withClock = runGolden();
-    const without = runWith({ ...makeGoldenEngineOptions(), passiveModifiers: new Map() });
-    expect(without.ticks).not.toBe(withClock.ticks);
-  });
-
-  it('装备的四个能力在内容里齐全（modifier ×2 / derived / trigger）', () => {
-    expect(ENTROPY_CLOCK.abilities.map((a) => a.kind)).toEqual([
-      'modifier',
-      'modifier',
-      'derived',
-      'trigger',
-    ]);
+  it('只按「攻」不放「轰」会打得更慢 —— 斗炁爆发确实是主要伤害来源', () => {
+    const auto = runGolden();
+    const attackOnly = runWithPriority(['attack']);
+    // 少了 60 伤害的轰，Boss 剩余血量应该更多（或者玩家更早死）
+    expect(attackOnly.combatants['verrot']!.hp).toBeGreaterThanOrEqual(
+      auto.combatants['verrot']!.hp,
+    );
   });
 });
 
-describe('暴击判定（这是熵之钟触发效果的前提）', () => {
-  it('一场战斗会消耗随机数 —— 说明暴击判定真的在执行', () => {
+describe('玩家防御技能的选择会改变结果', () => {
+  it('完全不闪会改变结果 —— 输入也是保护范围的一部分', () => {
+    const withDodge = runGolden();
+    const noDodge = runWithPriority(OUTPUT_PRIORITY, {});
+    expect(noDodge.ticks).not.toBe(withDodge.ticks);
+  });
+
+  it('能量充足时闪避能完全免伤 —— 机制本身是对的（限制是能量）', () => {
+    const options = makeGoldenEngineOptions();
+    const p0 = options.combatants[0]!;
+    const rich = {
+      ...p0,
+      caps: { ...p0.caps, energy: 100_000 },
+      resources: { ...p0.resources, energy: 100_000 },
+    };
+    const rec = new RunRecorder({ ...options, combatants: [rich, options.combatants[1]!] });
+    rec.runUntilEnd(planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge' }), 60 * 250);
+    const o = rec.outcome();
+    expect(o.status).toBe('victory');
+    // 一次伤害都没挨到
+    expect(o.combatants['player']!.hp).toBe(PLAYER_CAPS.hp);
+  });
+});
+
+describe('随机源：新内容不含暴击，所以不消耗随机数', () => {
+  /**
+   * 这是个**有价值的负面结论**，值得写下来。
+   *
+   * 当前的 6 个招式都写了 `canCrit: false`，所以战斗里没有任何概率判定 ——
+   * 随机数一次都不被消耗，`finalRngSeed` 等于初始种子。
+   *
+   * 引擎的暴击机制本身是好的（有独立测试覆盖），只是内容还没用它。
+   * 这条断言让"以后加了暴击"能被立刻发现 —— 那时它会失败，
+   * 提醒我们更新黄金常量。
+   */
+  it('当前内容不消耗随机数', () => {
     const outcome = runGolden();
-    expect(outcome.finalRngSeed).not.toBe(FIXED_SEED);
+    expect(outcome.finalRngSeed).toBe(FIXED_SEED);
   });
 
-  it('暴击率设为 0 时随机数不被消耗 —— 消耗只由内容决定', () => {
-    const noCrit = runWith(withPlayerStats(makeGoldenEngineOptions(), { critChance: 0 }));
-    expect(noCrit.finalRngSeed).toBe(FIXED_SEED);
-  });
-
-  it('暴击率越高，击杀越快', () => {
-    const base = runGolden();
-    const alwaysCrit = runWith(withPlayerStats(makeGoldenEngineOptions(), { critChance: 1 }));
-    expect(alwaysCrit.ticks).toBeLessThan(base.ticks);
+  it('给一个可暴击的技能就会消耗随机数（机制是好的）', () => {
+    const options = makeGoldenEngineOptions();
+    const skills = new Map(options.skills);
+    const attack = skills.get('attack');
+    if (!attack) throw new Error('missing attack skill');
+    skills.set('attack', {
+      ...attack,
+      hits: attack.hits.map((h) => ({
+        ...h,
+        effects: h.effects.map((e) =>
+          e.damage ? { ...e, damage: { ...e.damage, canCrit: true } } : e,
+        ),
+      })),
+    });
+    const rec = new RunRecorder(withPlayerStats({ ...options, skills }, { critChance: 0.5 }));
+    rec.runUntilEnd(planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge' }), 60 * 250);
+    expect(rec.outcome().finalRngSeed).not.toBe(FIXED_SEED);
   });
 });
 

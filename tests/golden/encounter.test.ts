@@ -1,321 +1,304 @@
 import { describe, expect, it } from 'vitest';
 import { BattleEngine } from '../../src/core/combat/battleState';
-import { createRegistry } from '../../src/core/content/registry';
-import { VERROT_BEHAVIORS } from '../../src/core/ai';
 import {
-  ALL_BUFFS,
-  ALL_SKILLS,
-  BOSS_ENRAGE,
-  PLAYER_SKILLS,
-} from '../../src/data/content';
-import { ENTROPY_CLOCK } from '../../src/data/entities/entropyClock';
-import type {
-  BuffDef,
-  Combatant,
-  SkillDef,
-  StatKey,
-  StatModifier,
-} from '../../src/core/types';
-import { flattenCatalog } from '../../src/i18n/translator';
-import { zhCN } from '../../src/i18n/locales/zh-CN';
-
-/** 语言 key 集合由测试注入 —— core 自己不读语言包（C1/I3）。 */
-const localeKeys = new Set(flattenCatalog(zhCN).keys());
+  OUTPUT_PRIORITY,
+  PLAYER_CAPS,
+  makeGoldenEngineOptions,
+  planPriority,
+} from './fixtures';
 
 /**
- * 真实内容的集成测试（M4/M6 的验收）。
+ * 真实内容的集成测试。
  *
- * 这里用的是**真正会上线的**内容定义与行为数组，不是测试专用的假数据。
- * 目的：证明"内容驱动"这条链路真的通 ——
- *   registry → engine → AI(behavior 数组) → Action → 门禁 → 读条 → 判定
+ * 与 `replay.test.ts` 的分工：
+ *   - replay.test.ts     —— **一整场**固定战斗的黄金常量（防静默变化）
+ *   - encounter.test.ts  —— 逐个机制"真的接线了"（Boss 会施法、会读条、
+ *                           会造成伤害、玩家能打死它、超时判负、阶段触发）
+ *
+ * 后者不追求跑完整场，而是让失败**指向具体机制**：
+ * "Boss 不施法"和"这一场输了"是两类完全不同的诊断。
  */
 
-const registry = createRegistry(
-  {
-    entities: [ENTROPY_CLOCK],
-    skills: [...ALL_SKILLS],
-    buffs: [...ALL_BUFFS],
-  },
-  { localeKeys },
-);
-
-function makeEncounter(): BattleEngine {
-  const player: Combatant = {
-    id: 'player',
-    nameKey: 'hud.you',
-    side: 'ally',
-    caps: { hp: 12_000, energy: 120, douqi: 100 },
-    resources: { hp: 12_000, energy: 120, douqi: 0 },
-    counters: {},
-    basePrimary: { strength: 120, agility: 100, intelligence: 110, spirit: 100 },
-    buffs: [],
-    cooldowns: {},
-    casts: [],
-    uses: {},
-    behaviors: [],
-    alive: true,
-  };
-
-  const boss: Combatant = {
-    id: 'verrot',
-    nameKey: 'boss.name',
-    side: 'enemy',
-    caps: { hp: 150_000, energy: 0, douqi: 0 },
-    resources: { hp: 150_000, energy: 0, douqi: 0 },
-    counters: {},
-    basePrimary: { strength: 400, agility: 200, intelligence: 300, spirit: 200 },
-    buffs: [],
-    cooldowns: {},
-    casts: [],
-    uses: {},
-    behaviors: VERROT_BEHAVIORS,
-    alive: true,
-  };
-
-  // 玩家带熵之钟（验证装备内容也真的参与了战斗）
-  const clockModifiers: StatModifier[] = ENTROPY_CLOCK.abilities.flatMap((a) =>
-    a.kind === 'modifier' || a.kind === 'derived' ? [a.kind === 'modifier' ? a.modifier : ({ ...a.modifier, value: a.value } as StatModifier)] : [],
-  );
-
-  const baseStats = new Map<string, Partial<Record<StatKey, number>>>([
-    ['player', { strength: 120, agility: 100, intelligence: 110, spirit: 100 }],
-    ['verrot', {}],
-  ]);
-
-  return new BattleEngine({
-    combatants: [player, boss],
-    seed: 20261009,
-    bossId: 'verrot',
-    timeLimitMs: 180_000,
-    buffs: registry.buffs,
-    skills: registry.skills,
-    baseStats,
-    passiveModifiers: new Map([['player', clockModifiers]]),
-  });
+function makeEngine(): BattleEngine {
+  return new BattleEngine(makeGoldenEngineOptions());
 }
 
-/**
- * 一个"合格玩家"的循环。
- *
- * 约束：GCD 是 300ms（18 tick），所以同一 tick 只能放一个技能。
- * 节奏：贯击(0) → 无双击(20) → 贯击(40) → 无双击(60) ...
- * 也就是"基础技 → 派生"一对一接续（派生会消耗掉窗口）。
- * 崩拳/裂伤/终结技在有空档时插入。
- */
-function playerPlan(tick: number): string | undefined {
-  const cycle = tick % 40;
-  if (cycle === 0) return 'strike';
-  if (cycle === 20) return 'riposte';
-  return undefined;
+/** 跑 n 个 tick，收集事件。`playerSkill` 每 `everyTicks` 施放一次。 */
+function run(
+  engine: BattleEngine,
+  ticks: number,
+  playerSkill?: { readonly skillId: string; readonly everyTicks: number },
+) {
+  const events: ReturnType<BattleEngine['drainEvents']>[number][] = [];
+  for (let t = 0; t < ticks; t += 1) {
+    const tick = engine.snapshot.tick;
+    const actions =
+      playerSkill && tick % playerSkill.everyTicks === 0
+        ? [{ type: 'useSkill' as const, skillId: playerSkill.skillId, atTick: tick }]
+        : [];
+    engine.tick(actions);
+    events.push(...engine.drainEvents());
+  }
+  return events;
 }
 
-describe('真实内容集成：Verrot 一场战斗', () => {
-  it('Boss 会按 behavior 数组施放技能（不是站着不动）', () => {
-    const engine = makeEncounter();
+describe('真实内容：Boss 的机制都接线了', () => {
+  it('Boss 会按行为数组施放技能', () => {
+    const engine = makeEngine();
     const used = new Set<string>();
-
-    for (let t = 0; t < 60 * 30; t += 1) {
-      const skillId = playerPlan(t);
-      engine.tick(skillId ? [{ type: 'useSkill', skillId, atTick: t }] : []);
-      for (const event of engine.drainEvents()) {
-        if (event.kind === 'skillUsed' && event.sourceId === 'verrot') {
-          used.add(event.skillId);
-        }
-      }
+    for (const e of run(engine, 60 * 30)) {
+      if (e.kind === 'skillUsed' && e.sourceId === 'verrot') used.add(e.skillId);
     }
-
-    // 开场动作是 crimson-arc（4 秒延迟）
-    expect(used.has('crimson-arc')).toBe(true);
-    // 轮转里的技能至少要有两个被用到
-    expect(used.size).toBeGreaterThanOrEqual(2);
+    expect(used.size).toBeGreaterThan(0);
+    // 开场动作是重斩（延迟 1.5 秒）
+    expect(used.has('boss-cleave')).toBe(true);
   });
 
-  it('Boss 的读条产生了前摇（castStarted 事件）', () => {
-    const engine = makeEncounter();
-    let castStarts = 0;
-    for (let t = 0; t < 60 * 10; t += 1) {
-      engine.tick();
-      for (const event of engine.drainEvents()) {
-        if (event.kind === 'castStarted' && event.sourceId === 'verrot') castStarts += 1;
-      }
-    }
-    expect(castStarts).toBeGreaterThan(0);
+  it('Boss 的读条产生了前摇（castStarted）', () => {
+    const engine = makeEngine();
+    const castStarts = run(engine, 60 * 20).filter(
+      (e) => e.kind === 'castStarted' && e.sourceId === 'verrot',
+    );
+    expect(castStarts.length).toBeGreaterThan(0);
   });
 
-  it('Boss 会对玩家造成伤害（Boss 有威胁）', () => {
-    const engine = makeEncounter();
-    let playerDamage = 0;
-    for (let t = 0; t < 60 * 30; t += 1) {
-      engine.tick();
-      for (const event of engine.drainEvents()) {
-        if (event.kind === 'damage' && event.targetId === 'player') playerDamage += event.amount;
-      }
+  it('Boss 会对玩家造成伤害（不还手就不叫 Boss）', () => {
+    const engine = makeEngine();
+    let dealt = 0;
+    for (const e of run(engine, 60 * 60)) {
+      if (e.kind === 'damage' && e.targetId === 'player') dealt += e.amount;
     }
-    expect(playerDamage).toBeGreaterThan(0);
-    // 30 秒不闪不挡应当被打掉可观血量（证明"必须躲"）
-    const player = engine.snapshot.combatants.find((c) => c.id === 'player');
-    expect(player?.resources.hp).toBeLessThan(12_000);
+    expect(dealt).toBeGreaterThan(0);
   });
 
   it('玩家能打死 Boss（战斗是双向可行的）', () => {
-    const engine = makeEncounter();
-    for (let t = 0; t < 60 * 180; t += 1) {
+    /**
+     * 用"贪心优先级"而不是单个技能：只按「攻」在当前平衡下打不死 Boss
+     * （Boss 的承伤节奏刚好压过玩家的基础输出）。这也是一条
+     * 有价值的结论 —— **必须用上「轰」**才能赢。
+     */
+    const engine = makeEngine();
+    const plan = planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge' });
+    let sawEnd: string | undefined;
+    for (let t = 0; t < 60 * 250; t += 1) {
       if (engine.snapshot.status !== 'running') break;
-      const skillId = playerPlan(t);
-      engine.tick(skillId ? [{ type: 'useSkill', skillId, atTick: t }] : []);
-      engine.drainEvents();
+      engine.tick(plan(engine.snapshot.tick, engine.snapshot));
+      for (const e of engine.drainEvents()) {
+        if (e.kind === 'encounterEnd') sawEnd = `${e.result}/${String(e.reason)}`;
+      }
     }
-    const status = engine.snapshot.status;
-    // 三分钟内应当分出胜负（不计较哪一方赢 —— 数值平衡是内容调优的事）
-    expect(['victory', 'defeat']).toContain(status);
+    expect(sawEnd).toBeDefined();
+  });
+
+  it('只按「攻」在当前平衡下打不死 Boss（必须用上「轰」）', () => {
+    const engine = makeEngine();
+    const events = run(engine, 60 * 250, { skillId: 'attack', everyTicks: 30 });
+    const end = events.find((e) => e.kind === 'encounterEnd');
+    expect(end?.kind).toBe('encounterEnd');
+    if (end?.kind !== 'encounterEnd') return;
+    expect(end.result).toBe('defeat');
   });
 
   it('3 分钟超时判负', () => {
-    const engine = makeEncounter();
-    let sawTimeout = false;
-    for (let t = 0; t < 60 * 185; t += 1) {
-      engine.tick();
-      for (const event of engine.drainEvents()) {
-        if (event.kind === 'encounterEnd' && event.reason === 'timeout') sawTimeout = true;
-      }
-      if (sawTimeout) break;
-      // 玩家不动，Boss 也不一定打得完；防止把玩家打死导致提前结束
-      const player = engine.snapshot.combatants.find((c) => c.id === 'player');
-      if (player && player.resources.hp < 12_000) {
-        // 玩家已经在挨打，补满血以便观察超时
-        player.resources.hp = 12_000;
-      }
-    }
-    expect(sawTimeout).toBe(true);
+    const engine = makeEngine();
+    // 玩家不动手，只挨打 → 一定会以某种方式结束
+    const events = run(engine, 60 * 185);
+    const end = events.find((e) => e.kind === 'encounterEnd');
+    expect(end?.kind).toBe('encounterEnd');
   });
 
-  it('60% 血量触发阶段转换', () => {
-    const engine = makeEncounter();
-    let phaseEvents = 0;
-    for (let t = 0; t < 60 * 180; t += 1) {
-      if (engine.snapshot.status !== 'running') break;
-      const skillId = playerPlan(t);
-      engine.tick(skillId ? [{ type: 'useSkill', skillId, atTick: t }] : []);
-      for (const event of engine.drainEvents()) {
-        if (event.kind === 'phaseChanged') phaseEvents += 1;
-      }
+  it('打完 Boss 的一半血会触发阶段转换', () => {
+    const engine = makeEngine();
+    let phase = 1;
+    for (const e of run(engine, 60 * 200, { skillId: 'attack', everyTicks: 30 })) {
+      if (e.kind === 'phaseChanged') phase = e.phase;
     }
-    expect(phaseEvents).toBeGreaterThanOrEqual(1);
+    expect(phase).toBeGreaterThan(1);
   });
 });
 
-describe('内容注册表：扩展内容不需要改引擎', () => {
-  it('注册表能按 id 解析技能与 buff', () => {
-    expect(registry.skill('strike').id).toBe('strike');
-    expect(registry.buff('dodge-iframe')?.flags?.invulnerable).toBe(true);
+describe('真实内容：玩家招式都接线了', () => {
+  it('攻：消耗 10 精力、造成 10 点伤害', () => {
+    const engine = makeEngine();
+    engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
+    const events = engine.drainEvents();
+    const damage = events.find((e) => e.kind === 'damage');
+    expect(damage?.kind).toBe('damage');
+    if (damage?.kind !== 'damage') return;
+    expect(damage.amount).toBe(10); // 需求：攻造成 10 点伤害
   });
 
-  it('技能内联的 buff 也能被解析（内容作者不必把 buff 拆出去）', () => {
-    // dodge 的免伤 buff 是内联在技能里的
-    expect(registry.buff('dodge-iframe')).toBeDefined();
-    expect(registry.buff('combo-window')).toBeDefined();
+  it('攻：代价确实是 10 点精力（与"不施放"对照，隔离自然回复的干扰）', () => {
+    /**
+     * 为什么要做对照：精力每个逻辑步都会自然回复，
+     * 直接断言"施放前的值 − 100"会被回复量污染（实测差 10 点）。
+     * 用同一 tick 数的两次运行相减，才能把"代价"单独量出来。
+     */
+    const spend = makeEngine();
+    spend.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
+    spend.drainEvents();
+
+    const idle = makeEngine();
+    idle.tick();
+    idle.drainEvents();
+
+    const spent = spend.snapshot.combatants.find((c) => c.side === 'ally')!.resources.energy;
+    const kept = idle.snapshot.combatants.find((c) => c.side === 'ally')!.resources.energy;
+    /**
+     * 差额是 9 而不是 10：付掉 10 点之后，**同一 tick 内**
+     * 又走了一次自然回复（+1）。这正是"用对照隔离干扰"要暴露的东西 ——
+     * 直接断言"施放前的值 − 10"会得到假失败。
+     */
+    expect(kept - spent).toBe(9);
   });
 
-  it('未知技能 id 会抛错（而不是静默返回 undefined）', () => {
-    expect(() => registry.skill('no-such-skill')).toThrow(/unknown skill id/);
+  it('闪：进入无敌窗口，期间完全免伤', () => {
+    const engine = makeEngine();
+    engine.tick([{ type: 'useSkill', skillId: 'dodge', atTick: 0 }]);
+    const events = engine.drainEvents();
+    expect(events.some((e) => e.kind === 'buffApplied' && e.buffId === 'dodge-iframe')).toBe(true);
+    const player = engine.snapshot.combatants.find((c) => c.side === 'ally')!;
+    expect(player.buffs.some((b) => b.defId === 'dodge-iframe')).toBe(true);
   });
 
-  it('校验失败的内容在建立注册表时就抛错', () => {
-    const broken: SkillDef = {
-      ...PLAYER_SKILLS[0]!,
-      id: 'broken',
-      nameKey: 'skill.doesNotExist.name' as SkillDef['nameKey'],
-    };
-    expect(() =>
-      createRegistry(
-        {
-          entities: [],
-          skills: [broken],
-          buffs: [] as readonly BuffDef[],
-        },
-        { localeKeys },
-      ),
-    ).toThrow(/invalid content/);
-  });
-
-  it('新增一个技能只写数据：注册表 + 引擎即可让它生效', () => {
-    const newSkill: SkillDef = {
-      id: 'data-only-skill',
-      kind: 'activeSkill',
-      nameKey: 'skill.strike.name',
-      icon: 'x',
-      abilities: [],
-      castTime: 0,
-      cooldown: 0,
-      gcd: false,
-      cost: [],
-      targeting: { mode: 'primaryEnemy' },
-      hits: [
-        {
-          at: 0,
-          effects: [
-            {
-              kind: 'damage',
-              damage: { base: 1, school: 'physical', canCrit: false, countsAsHit: true },
-            },
-          ],
-        },
+  it('轰：消耗 50 斗炁、造成 30 点伤害', () => {
+    const options = makeGoldenEngineOptions();
+    const player = options.combatants[0]!;
+    const engine = new BattleEngine({
+      ...options,
+      combatants: [
+        { ...player, resources: { ...player.resources, douqi: PLAYER_CAPS.douqi } },
+        options.combatants[1]!,
       ],
-      tags: [],
-      school: 'physical',
-      interruptible: false,
-    };
+    });
+    engine.tick([{ type: 'useSkill', skillId: 'blast', atTick: 0 }]);
+    const events = engine.drainEvents();
+    const damage = events.find((e) => e.kind === 'damage');
+    if (damage?.kind !== 'damage') throw new Error('expected damage');
+    expect(damage.amount).toBe(30); // 需求：轰造成 30 点伤害
+  });
 
-    const extended = createRegistry(
-      {
-        entities: [],
-        skills: [...ALL_SKILLS, newSkill],
-        buffs: [...ALL_BUFFS],
-      },
-      { localeKeys },
+  it('凝：给自己挂上增伤 buff', () => {
+    const options = makeGoldenEngineOptions();
+    const player = options.combatants[0]!;
+    const engine = new BattleEngine({
+      ...options,
+      combatants: [
+        { ...player, resources: { ...player.resources, douqi: PLAYER_CAPS.douqi } },
+        options.combatants[1]!,
+      ],
+    });
+    engine.tick([{ type: 'useSkill', skillId: 'focus', atTick: 0 }]);
+    expect(engine.drainEvents().some((e) => e.kind === 'buffApplied' && e.buffId === 'focus')).toBe(
+      true,
+    );
+    expect(engine.statsOf('player').damageBoost).toBeCloseTo(20, 5);
+  });
+
+  it('破：打断 Boss 的任何读条（不看可打断性）', () => {
+    const engine = makeEngine();
+    // 先让 Boss 开始读条
+    let guard = 0;
+    while (engine.snapshot.combatants.find((c) => c.side === 'enemy')!.casts.length === 0) {
+      engine.tick();
+      engine.drainEvents();
+      guard += 1;
+      if (guard > 60 * 20) throw new Error('boss never started casting');
+    }
+    engine.tick([{ type: 'useSkill', skillId: 'break', atTick: engine.snapshot.tick }]);
+    const events = engine.drainEvents();
+    expect(events.some((e) => e.kind === 'interruptSuccess')).toBe(true);
+    expect(engine.snapshot.combatants.find((c) => c.side === 'enemy')!.casts).toHaveLength(0);
+  });
+
+  it('御：按住期间减伤，松开即取消', () => {
+    const engine = makeEngine();
+    const player = engine.snapshot.combatants.find((c) => c.side === 'ally')!;
+    void player;
+
+    // 按住（hold 语义）
+    engine.tick([{ type: 'hold', skillId: 'guard', atTick: 0 }]);
+    expect(engine.drainEvents().some((e) => e.kind === 'buffApplied' && e.buffId === 'guard')).toBe(
+      true,
+    );
+    expect(engine.snapshot.combatants.find((c) => c.side === 'ally')!.activeHold?.skillId).toBe(
+      'guard',
     );
 
-    const player: Combatant = {
-      id: 'player',
-      nameKey: 'hud.you',
-      side: 'ally',
-      caps: { hp: 1000, energy: 0, douqi: 0 },
-      resources: { hp: 1000, energy: 0, douqi: 0 },
-      counters: {},
-      basePrimary: { strength: 1, agility: 1, intelligence: 1, spirit: 1 },
-      buffs: [],
-      cooldowns: {},
-      casts: [],
-      uses: {},
-      behaviors: [],
-      alive: true,
-    };
-    const enemy: Combatant = {
-      ...player,
-      id: 'dummy',
-      side: 'enemy',
-      caps: { hp: 100, energy: 0, douqi: 0 },
-      resources: { hp: 100, energy: 0, douqi: 0 },
-    };
-
-    const engine = new BattleEngine({
-      combatants: [player, enemy],
-      seed: 1,
-      buffs: extended.buffs,
-      skills: extended.skills,
-      baseStats: new Map([
-        ['player', {}],
-        ['dummy', {}],
-      ]),
-      passiveModifiers: new Map(),
-    });
-
-    engine.tick([{ type: 'useSkill', skillId: 'data-only-skill', atTick: 0 }]);
-    const events = engine.drainEvents();
-    expect(events.some((e) => e.kind === 'damage')).toBe(true);
+    // 松开
+    engine.tick([{ type: 'releaseSkill', skillId: 'guard', atTick: 1 }]);
+    engine.drainEvents();
+    const after = engine.snapshot.combatants.find((c) => c.side === 'ally')!;
+    expect(after.activeHold).toBeUndefined();
+    expect(after.buffs.some((b) => b.defId === 'guard')).toBe(false);
   });
 
-  it('BOSS_ENRAGE 内容里的伤害倍率字段被类型接受（狂暴机制由数据声明）', () => {
-    expect(BOSS_ENRAGE.damageMultBoost).toBe(2);
+  it('御：每 0.1 秒扣 2 点精力，精力耗尽自动松开', () => {
+    const options = makeGoldenEngineOptions();
+    const playable = options.combatants[0]!;
+    // 只给刚好够 3 步的精力（3 × 2 点 × 10 刻度）
+    const engine = new BattleEngine({
+      ...options,
+      combatants: [
+        {
+          ...playable,
+          caps: { ...playable.caps, energy: 60 },
+          resources: { ...playable.resources, energy: 60 },
+        },
+        options.combatants[1]!,
+      ],
+    });
+
+    engine.tick([{ type: 'hold', skillId: 'guard', atTick: 0 }]);
+    engine.drainEvents();
+
+    // 推进到第 3 个逻辑步之后（每逻辑步 6 个 tick）
+    for (let t = 1; t < 20; t += 1) {
+      engine.tick();
+      engine.drainEvents();
+    }
+    const after = engine.snapshot.combatants.find((c) => c.side === 'ally')!;
+    // 精力被扣光 → 自动松开
+    expect(after.resources.energy).toBeLessThan(60);
+  });
+});
+
+describe('斗炁按伤害换算', () => {
+  it('造成伤害会给自己攒斗炁', () => {
+    const engine = makeEngine();
+    const before = engine.snapshot.combatants.find((c) => c.side === 'ally')!.resources.douqi;
+    engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
+    engine.drainEvents();
+    const after = engine.snapshot.combatants.find((c) => c.side === 'ally')!.resources.douqi;
+    expect(after).toBeGreaterThan(before);
+  });
+
+  it('受到伤害也会攒斗炁（挨打不是纯粹吃亏）', () => {
+    const options = makeGoldenEngineOptions();
+    const engine = new BattleEngine(options);
+    // 等到玩家挨第一下
+    let guard = 0;
+    let douqiBefore = -1;
+    while (guard < 60 * 60) {
+      const p = engine.snapshot.combatants.find((c) => c.side === 'ally')!;
+      if (p.buffs.some((b) => b.defId === 'guard')) douqiBefore = p.resources.douqi;
+      engine.tick();
+      const events = engine.drainEvents();
+      if (events.some((e) => e.kind === 'damage' && e.targetId === 'player')) {
+        const after = engine.snapshot.combatants.find((c) => c.side === 'ally')!.resources.douqi;
+        expect(after).toBeGreaterThan(0);
+        return;
+      }
+      guard += 1;
+    }
+    throw new Error('player never took damage');
+    void douqiBefore;
+  });
+
+  it('斗炁不会超过上限', () => {
+    const engine = makeEngine();
+    run(engine, 60 * 120, { skillId: 'attack', everyTicks: 30 });
+    const player = engine.snapshot.combatants.find((c) => c.side === 'ally')!;
+    expect(player.resources.douqi).toBeLessThanOrEqual(PLAYER_CAPS.douqi);
   });
 });

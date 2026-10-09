@@ -300,6 +300,14 @@ export interface BuffDef {
    * 不同 buff（例如"无敌"要橙、"急速"要青）。
    */
   readonly color?: number;
+  /**
+   * 隐藏：**不在 UI 的 buff 条上显示图标**。
+   *
+   * 用于引擎内部标记（公共冷却、Boss 前摇）—— 它们不是"玩家应该看到的
+   * 增益/减益"，而是引擎状态，UI 已经用别的方式表达
+   * （按钮变灰、预警条）。不隐藏就会在图标条上挂一串无意义的灰块。
+   */
+  readonly hidden?: boolean;
   /** ms。`Number.POSITIVE_INFINITY` 表示永久。 */
   readonly duration: number;
   readonly maxStacks: number;
@@ -454,6 +462,13 @@ export interface Effect {
   /** 不填则取所在 ability / hit 的目标 */
   readonly target?: TargetRule;
   readonly when?: Condition;
+  /**
+   * 仅 `interrupt` 用：**强制打断，不看 `interruptible`**。
+   *
+   * 「破」的语义是"打断任何技能"（需求明确），所以它是真打断而不是
+   * 只对可打断技能生效。默认 false，即尊重目标技能的可打断性。
+   */
+  readonly force?: boolean;
 }
 
 /** 目标的解析规则。 */
@@ -660,6 +675,18 @@ export interface SkillDef extends GameEntity {
   /** 默认 true；不占 GCD 的技能显式写 false */
   readonly gcd: boolean;
   readonly cost: readonly Cost[];
+  /**
+   * 「按住」技能：按住期间**每个逻辑步**扣一次资源。
+   *
+   * 用于「御」这类持续防御 —— 它的代价不是"施放一次"而是"一直按着"。
+   * 资源耗尽或松手都会让效果中止（引擎在 `holdTick` / `releaseKey` 处理）。
+   *
+   * 资源量用**内部刻度**（已乘 `DISPLAY_SCALE`）。
+   */
+  readonly holdDrain?: {
+    readonly resource: ResourceKey | string;
+    readonly perLogicTick: number;
+  };
   readonly targeting: TargetRule;
   readonly hits: readonly HitDef[];
   readonly tags: readonly SkillTag[];
@@ -782,6 +809,14 @@ export interface Combatant {
   readonly casts: readonly CastInstance[];
   /** 整场战斗的技能使用次数统计 */
   readonly uses: Record<SkillId, number>;
+  /**
+   * 当前按住不放的技能（「御」这类）。
+   *
+   * 为什么放进状态而不是只靠输入层记：**按住是一个持续的状态**，
+   * 它每个逻辑步都要扣资源，而且必须可重放（重放时按下/松开
+   * 是通过 Action 重现的，状态本身要能被检查）。
+   */
+  readonly activeHold?: { readonly skillId: SkillId } | undefined;
   readonly behaviors: readonly Behavior[];
   readonly alive: boolean;
 }
@@ -919,7 +954,15 @@ export type EventKind = EventDef['kind'];
 
 export type Action =
   | { readonly type: 'useSkill'; readonly skillId: SkillId; readonly atTick: number }
+  /**
+   * 按住不放：施放一个"按住型"技能，并保持它。
+   *
+   * 与 `useSkill` 的区别：按住型技能在松开前一直是生效状态，
+   * 引擎按逻辑步扣 `holdDrain`；`useSkill` 是"点一下"的语义。
+   */
+  | { readonly type: 'hold'; readonly skillId: SkillId; readonly atTick: number }
   | { readonly type: 'releaseKey'; readonly key: string; readonly atTick: number }
+  | { readonly type: 'releaseSkill'; readonly skillId: SkillId; readonly atTick: number }
   | { readonly type: 'setTarget'; readonly targetId: CombatantId; readonly atTick: number }
   | { readonly type: 'cancelCast'; readonly atTick: number }
   | { readonly type: 'pause'; readonly atTick: number }

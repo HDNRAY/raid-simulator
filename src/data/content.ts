@@ -1,268 +1,231 @@
 /**
- * MVP 内容：玩家技能表 + Boss「Verrot, the Fallen」。
+ * MVP 内容：玩家六招 + Boss「Verrot, the Fallen」。
  *
- * 这个文件是"横向扩展内容"的**示范**：全部是数据，
- * 引擎（core/）一行都不用改。加一个新技能 = 往 `SKILLS` 里加一项。
+ * ==================================================================
+ * 数值刻度（重要）
+ * ==================================================================
+ *
+ * 逻辑数值用**小整数**：生命上限 100、伤害 10 级别。
+ * 但内部实现按 **10 倍刻度**存储（HP 1000、10 伤害存成 100）。
+ *
+ * 为什么要这个转换：整数化是硬约束（架构规范 §12），
+ * 而"每 0.1 秒恢复 1 点精力"在 0.1 秒粒度上要除以 6 个物理 tick ——
+ * 直接用 1 点会导致每 tick 0.167 点，被整数化吃掉。
+ * 乘 10 之后每 tick 稳定得到整数，且**玩家看到的数字仍然是 100/10 这种小整数**。
+ *
+ * 换算规则：一切对外数值 × `DISPLAY_SCALE`。
+ *
+ * ==================================================================
+ * 技能设计（每个技能一个字，图标就用那个字）
+ * ==================================================================
+ *
+ * | 字 | 代价 | 效果 |
+ * |----|------|------|
+ * | 攻 | 10 精力 | 造成 10 点伤害（普攻） |
+ * | 闪 | 40 精力 | 0.5 秒完全无敌 |
+ * | 御 | 按住，每 0.1 秒 2 精力 | 减伤 40%，松开即取消 |
+ * | 破 | —（5 秒 CD） | 打断任何技能，不占公共冷却 |
+ * | 轰 | 50 斗炁 | 造成 30 点伤害 |
+ * | 凝 | 50 斗炁 | 增伤 20%，持续 30 秒 |
+ *
+ * 资源模型：
+ *   精力 —— 每 0.1 秒自动恢复 1 点（= 每秒 10 点）
+ *   斗炁 —— **按伤害换算**：造成 1 点伤害得 1 点，受到 1 点伤害也得 1 点
+ *
+ * 时间刻度：公共冷却 0.5 秒 = 5 个逻辑步（0.1 秒/步）。
  */
 
+import { logicTicks, logicMs } from '../core/loopConstants';
 import type { BuffDef, SkillDef } from '../core/types';
+
+/**
+ * 内容刻度 = **展示刻度**。
+ *
+ * 内容是"100 血 / 10 伤害 / 10 精力"这种可读的小整数，UI 直接显示它，
+ * 不需要任何换算。早期版本给血量乘了 10 而伤害没乘，
+ * 结果 10 点伤害只打掉 1 点血、一场战斗要按上百次 ——
+ * 统一成单一刻度之后这类错位不可能再发生。
+ */
+function S(value: number): number {
+  return value;
+}
+
+/** 生命上限（展示值）。 */
+export const HP_MAX = 100;
+/** 精力上限（展示值）。 */
+export const ENERGY_MAX = 100;
+/** 斗炁上限（展示值）。 */
+export const DOUQI_MAX = 100;
+
+/** 每 0.1 秒恢复的精力。 */
+export const ENERGY_PER_LOGIC_TICK = 1;
+
+/**
+ * 每点伤害换多少斗炁。
+ *
+ * 1 = "造成 1 点伤害得 1 点斗炁"，受到伤害同理。
+ * 于是打满 100 伤害或挨满 100 伤害各攒满一次斗炁。
+ */
+export const DOUQI_PER_DAMAGE = 1;
+
+/** 公共冷却：0.5 秒 = 5 个逻辑步。 */
+export const GCD_STEPS = 5;
+
+/* ================================================================== *
+ * 玩家图标配色（单色方块占位）
+ * ================================================================== */
+
+const C = {
+  attack: 0xd8d8e4,
+  dodge: 0x60c8f0,
+  guard: 0x9aa8d8,
+  break: 0xffd050,
+  blast: 0xff8040,
+  focus: 0xa070e0,
+  debuff: 0xd05050,
+  boss: 0xff7040,
+} as const;
 
 /* ================================================================== *
  * 共享 buff
  * ================================================================== */
 
-/** GCD：施放占 GCD 的技能后挂上；`gcd:false` 的技能不检查它。 */
+/** 公共冷却。`blocksGcd` 让"不占 GCD 的技能"能跳过它。 */
 export const GCD_BUFF: BuffDef = {
   id: 'gcd',
-  color: 0x8a8ca0,
-  nameKey: 'hud.casting',
+  nameKey: 'skill.attack.name',
   icon: 'gcd',
   polarity: 'neutral',
-  duration: 300,
+  color: 0x8a8ca0,
+  duration: logicMs(GCD_STEPS),
   maxStacks: 1,
   stacking: { mode: 'refresh' },
   flags: { blocksGcd: true },
+  /** 引擎内部标记，不在 UI 上显示图标（否则按钮旁边一直挂一个灰块）。 */
+  hidden: true,
 };
 
-/** 闪避的无敌窗口：300ms。判定层只看这个 flag。 */
+/** 闪：0.5 秒完全无敌。 */
 export const DODGE_IFRAME: BuffDef = {
   id: 'dodge-iframe',
-  color: 0x60c8f0,
-  nameKey: 'hud.dodged',
-  icon: 'buff_dodge',
+  nameKey: 'skill.dodge.name',
+  icon: 'char_dodge',
   polarity: 'buff',
-  duration: 300,
+  color: C.dodge,
+  duration: logicMs(5),
   maxStacks: 1,
   stacking: { mode: 'refresh' },
   flags: { invulnerable: true },
-  vfx: { onApply: 'flash_blue' },
-};
-
-/** 格挡：1.5 秒减伤 60%。精防就是"在 hit frame 前 0.2 秒内按下"额外叠一层。 */
-export const GUARD_REDUCE: BuffDef = {
-  id: 'guard',
-  color: 0x9aa8d8,
-  nameKey: 'hud.immune',
-  icon: 'buff_guard',
-  polarity: 'buff',
-  duration: 1500,
-  maxStacks: 1,
-  stacking: { mode: 'refresh' },
-  flags: { damageReduce: 0.6 },
-  vfx: { aura: 'shield' },
-};
-
-/** 完美格挡：更短、更硬。由 guard 技能的附加 trigger 施加。 */
-export const GUARD_PERFECT: BuffDef = {
-  id: 'guard-perfect',
-  color: 0xffe070,
-  nameKey: 'hud.immune',
-  icon: 'buff_guard',
-  polarity: 'buff',
-  duration: 400,
-  maxStacks: 1,
-  stacking: { mode: 'refresh' },
-  flags: { damageReduce: 0.95 },
-  vfx: { aura: 'shield_bright' },
 };
 
 /**
- * 斩击产生的斗炁。
+ * 御：减伤 40%。
  *
- * 这里刻意**用 `modifier` 而不是新增一个 ability 类型** ——
- * "技能给资源"这种需求可以完全由"给一条资源回复修正"表达，
- * 不需要动引擎（这正是可扩展性的验证方式）。
+ * 由"按住"维护、松开时移除 —— 所以 duration 只是兜底上限
+ * （防止按键状态丢失时永久挂着），真实生命周期由输入驱动。
  */
-export const SLASH_FURY: BuffDef = {
-  id: 'slash-douqi',
-  nameKey: 'resource.douqi',
-  icon: 'buff_douqi',
+export const GUARD_REDUCE: BuffDef = {
+  id: 'guard',
+  nameKey: 'skill.guard.name',
+  icon: 'char_guard',
   polarity: 'buff',
-  duration: 1000,
+  color: C.guard,
+  duration: logicMs(20),
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+  flags: { damageReduce: 0.4 },
+};
+
+/** 凝：增伤 20%，持续 30 秒。 */
+export const FOCUS_BUFF: BuffDef = {
+  id: 'focus',
+  nameKey: 'skill.focus.name',
+  icon: 'char_focus',
+  polarity: 'buff',
+  color: C.focus,
+  duration: logicMs(300),
   maxStacks: 1,
   stacking: { mode: 'refresh' },
   modifiers: [
     {
-      stat: 'douqiRegen',
-      op: 'add',
-      value: 12,
-      sourceKey: 'resource.douqi',
-      namespace: 'slash-douqi',
+      stat: 'damageBoost',
+      op: 'addPercent',
+      value: 20,
+      sourceKey: 'skill.focus.name',
+      namespace: 'focus',
       tier: 'buff',
-    },
-  ],
-};
-
-/** 派生窗口：施放斩击后开启，让 arc 可用。 */
-export const COMBO_WINDOW: BuffDef = {
-  id: 'combo-window',
-  color: 0x5acad8,
-  nameKey: 'hud.combo',
-  icon: 'buff_combo',
-  polarity: 'buff',
-  duration: 1500,
-  maxStacks: 1,
-  stacking: { mode: 'refresh' },
-  flags: { comboWindow: ['riposte'] },
-};
-
-/** 风行术：+20% 急速。 */
-export const HASTE_BUFF: BuffDef = {
-  id: 'haste-buff',
-  color: 0x80e8c0,
-  nameKey: 'stat.haste',
-  icon: 'buff_haste',
-  polarity: 'buff',
-  duration: 15_000,
-  maxStacks: 1,
-  stacking: { mode: 'refresh' },
-  modifiers: [
-    {
-      stat: 'haste',
-      op: 'add',
-      value: 0.2,
-      sourceKey: 'stat.haste',
-      namespace: 'haste-buff',
-      tier: 'buff',
-    },
-  ],
-};
-
-/** 割裂的流血 DoT：每 3 秒跳一次，持续 21 秒。 */
-export const BLEED_DEBUFF: BuffDef = {
-  id: 'bleed',
-  color: 0xd05050,
-  nameKey: 'event.crit',
-  icon: 'debuff_bleed',
-  polarity: 'debuff',
-  duration: 21_000,
-  maxStacks: 3,
-  stacking: { mode: 'stackRefresh', max: 3 },
-  modifiers: [
-    {
-      // 每层让目标受到的物理伤害提高 4%（易伤）
-      stat: 'vulnerability',
-      op: 'perStackAdd',
-      value: 0.04,
-      sourceKey: 'stat.vulnerability',
-      namespace: 'bleed',
-      tier: 'debuff',
     },
   ],
 };
 
 /* ================================================================== *
- * Boss 专用 buff（前摇标记 / 狂暴）
+ * Boss 专用
  * ================================================================== */
 
-/** 前摇标记：让 UI 知道 Boss 正在读条（也用于"打断"这类机制）。 */
+/** Boss 前摇标记（隐藏，只用于让 UI 知道它在读条）。 */
 export const BOSS_TELEGRAPH: BuffDef = {
   id: 'boss-telegraph',
-  color: 0xff7040,
-  nameKey: 'hud.phase',
+  nameKey: 'hud.casting',
   icon: 'telegraph',
   polarity: 'neutral',
-  duration: 2000,
+  color: C.boss,
+  duration: logicMs(30),
   maxStacks: 1,
   stacking: { mode: 'refresh' },
-  flags: { interruptImmune: true },
+  hidden: true,
 };
 
-/** 狂暴：伤害 +100%。 */
+/** Boss 狂暴：伤害翻倍。 */
 export const BOSS_ENRAGE: BuffDef = {
   id: 'boss-enrage',
-  color: 0xff3030,
-  nameKey: 'event.enrage',
-  icon: 'buff_enrage',
+  nameKey: 'screen.defeatedByEnrage',
+  icon: 'enrage',
   polarity: 'debuff',
+  color: 0xff3030,
   duration: Number.POSITIVE_INFINITY,
   maxStacks: 1,
   stacking: { mode: 'refresh' },
   damageMultBoost: 2,
 };
 
+/**
+ * 玩家给 Boss 挂的易伤。
+ *
+ * 为什么需要它：玩家只有 6 招，如果全是"直接伤害"，循环会没有层次。
+ * 用一个易伤 debuff 让"先叠层再爆发"成为一种选择。
+ */
+export const SUNDER_DEBUFF: BuffDef = {
+  id: 'sunder',
+  nameKey: 'debuff.sunder.name',
+  icon: 'debuff_sunder',
+  polarity: 'debuff',
+  color: C.debuff,
+  duration: logicMs(80),
+  maxStacks: 3,
+  stacking: { mode: 'stackRefresh', max: 3 },
+  modifiers: [
+    {
+      stat: 'vulnerability',
+      op: 'perStackAdd',
+      value: 0.1,
+      sourceKey: 'debuff.sunder.name',
+      namespace: 'sunder',
+      tier: 'debuff',
+    },
+  ],
+};
+
 /* ================================================================== *
- * 玩家技能
- * ================================================================== *
- *
- * ------------------------------------------------------------------
- * 这套技能是为「精力 + 斗炁」资源模型**专门设计**的
- * ------------------------------------------------------------------
- *
- * 两条资源各有一个明确的决策问题，技能组必须让这两个问题都出现：
- *
- *   精力（回复快，约 20/秒）
- *     → 防御技能的代价。问题是「我现在躲，还是留着精力等下一发？」
- *       所以两个防御技都消耗精力，且**都不占公共冷却** ——
- *       这样"该躲的时候能不能躲"完全由精力决定。
- *
- *   斗炁（不自动回复，只靠基础技积攒，上限 100）
- *     → 强击与终结技的代价。问题是「斗炁一够就花掉，还是攒满打爆发？」
- *       强击（30）可以持续消耗，终结技（100）要求攒满 ——
- *       于是"攒满"这个选择有真实的机会成本。
- *
- * 循环节奏：
- *   基础技每 1.5 秒一次（GCD 0.3s，但受精力回复限制更接近这个节奏），
- *   每 4 次攒满斗炁；中间穿插强击，满了打终结技。
- *   防御技随时可插，但会挤占后面的基础技。
- */
+ * 玩家技能：六招，每招一个字
+ * ================================================================== */
 
-/** 基础技：回能 + 积攒斗炁。循环的基石。 */
-const STRIKE: SkillDef = {
-  id: 'strike',
+/** 攻：普攻。代价低、伤害低，是循环的填充。 */
+const ATTACK: SkillDef = {
+  id: 'attack',
   kind: 'activeSkill',
-  nameKey: 'skill.strike.name',
-  descKey: 'skill.strike.desc',
-  icon: 'skill_strike',
-  abilities: [
-    {
-      kind: 'trigger',
-      trigger: {
-        on: 'onCastFinish',
-        then: [
-          { kind: 'grant', target: { mode: 'self' }, buff: GCD_BUFF },
-          { kind: 'grant', target: { mode: 'self' }, buff: COMBO_WINDOW },
-          // 积攒斗炁（一次性），并小幅回能，让循环能持续
-          { kind: 'resource', target: { mode: 'self' }, resource: 'douqi', delta: 18 },
-          { kind: 'resource', target: { mode: 'self' }, resource: 'energy', delta: 8 },
-        ],
-      },
-    },
-  ],
-  castTime: 0,
-  cooldown: 0,
-  gcd: true,
-  cost: [],
-  targeting: { mode: 'primaryEnemy' },
-  hits: [
-    {
-      at: 0,
-      effects: [
-        {
-          kind: 'damage',
-          damage: {
-            base: 100,
-            scaling: [{ stat: 'strength', ratio: 1.2 }],
-            school: 'physical',
-            canCrit: true,
-            countsAsHit: true,
-          },
-        },
-      ],
-    },
-  ],
-  tags: ['melee'],
-  school: 'physical',
-  interruptible: false,
-};
-
-/** 强击：消耗斗炁的中等爆发。 */
-const HEAVY_STRIKE: SkillDef = {
-  id: 'heavyStrike',
-  kind: 'activeSkill',
-  nameKey: 'skill.heavyStrike.name',
-  descKey: 'skill.heavyStrike.desc',
-  icon: 'skill_heavy',
+  nameKey: 'skill.attack.name',
+  descKey: 'skill.attack.desc',
+  icon: 'char_attack',
   abilities: [
     {
       kind: 'trigger',
@@ -273,61 +236,9 @@ const HEAVY_STRIKE: SkillDef = {
     },
   ],
   castTime: 0,
-  cooldown: 6000,
-  gcd: true,
-  cost: [{ resource: 'douqi', value: 30 }],
-  targeting: { mode: 'primaryEnemy' },
-  hits: [
-    {
-      at: 0,
-      effects: [
-        {
-          kind: 'damage',
-          damage: {
-            base: 260,
-            scaling: [{ stat: 'strength', ratio: 3.4 }],
-            school: 'physical',
-            canCrit: true,
-            countsAsHit: true,
-          },
-        },
-      ],
-    },
-  ],
-  tags: ['melee'],
-  school: 'physical',
-  interruptible: false,
-};
-
-/**
- * 派生技：只能在基础技之后的派生窗口内使用。
- *
- * 它的价值不在伤害（与强击接近），而在**把派生窗口变成收益** ——
- * 否则"派生窗口"这个机制就只是个摆设。
- */
-const RIPOSTE: SkillDef = {
-  id: 'riposte',
-  kind: 'activeSkill',
-  nameKey: 'skill.riposte.name',
-  descKey: 'skill.riposte.desc',
-  icon: 'skill_riposte',
-  abilities: [
-    {
-      kind: 'trigger',
-      trigger: {
-        on: 'onCastFinish',
-        then: [
-          { kind: 'grant', target: { mode: 'self' }, buff: GCD_BUFF },
-          // 派生成功额外回一点斗炁：奖励"接上连段"
-          { kind: 'resource', target: { mode: 'self' }, resource: 'douqi', delta: 10 },
-        ],
-      },
-    },
-  ],
-  castTime: 0,
   cooldown: 0,
   gcd: true,
-  cost: [],
+  cost: [{ resource: 'energy', value: S(10) }],
   targeting: { mode: 'primaryEnemy' },
   hits: [
     {
@@ -336,62 +247,12 @@ const RIPOSTE: SkillDef = {
         {
           kind: 'damage',
           damage: {
-            base: 220,
-            scaling: [{ stat: 'strength', ratio: 2.6 }],
+            base: S(10),
             school: 'physical',
-            canCrit: true,
+            canCrit: false,
             countsAsHit: true,
           },
         },
-        // **消耗掉派生窗口**：一次基础技只能换来一次派生。
-        // 没有这一步，窗口期内可以反复接派生，基础技就没人按了。
-        { kind: 'removeBuff', target: { mode: 'self' }, buffId: 'combo-window' },
-      ],
-    },
-  ],
-  tags: ['melee'],
-  school: 'physical',
-  interruptible: false,
-  // **派生**：需要基础技刚打出的窗口
-  requires: [{ kind: 'hasBuff', buffId: 'combo-window' }],
-};
-
-/** 割裂：代价是斗炁，收益是持续伤害 + 易伤。 */
-const REND: SkillDef = {
-  id: 'rend',
-  kind: 'activeSkill',
-  nameKey: 'skill.rend.name',
-  descKey: 'skill.rend.desc',
-  icon: 'skill_rend',
-  abilities: [
-    {
-      kind: 'trigger',
-      trigger: {
-        on: 'onCastFinish',
-        then: [{ kind: 'grant', target: { mode: 'self' }, buff: GCD_BUFF }],
-      },
-    },
-  ],
-  castTime: 0,
-  cooldown: 10_000,
-  gcd: true,
-  cost: [{ resource: 'douqi', value: 25 }],
-  targeting: { mode: 'primaryEnemy' },
-  hits: [
-    {
-      at: 0,
-      effects: [
-        {
-          kind: 'damage',
-          damage: {
-            base: 70,
-            scaling: [{ stat: 'strength', ratio: 1.0 }],
-            school: 'physical',
-            canCrit: true,
-            countsAsHit: true,
-          },
-        },
-        { kind: 'grantBuff', target: { mode: 'primaryEnemy' }, buff: BLEED_DEBUFF },
       ],
     },
   ],
@@ -400,107 +261,26 @@ const REND: SkillDef = {
   interruptible: false,
 };
 
-/**
- * 终结技：**要求斗炁已满**，打空斗炁换取巨额伤害。
- *
- * 门槛用 `douqi-full` 标记 buff 表达（引擎在斗炁加到上限时自动挂上），
- * 所以这里不需要引擎提供"资源是否满"的新条件类型。
- *
- * 2.2 秒读条且可被打断 —— 这是"攒满就放"的机会成本：
- * 放的时机不对会被 Boss 打断，斗炁白攒。
- */
-const FINISHER: SkillDef = {
-  id: 'finisher',
-  kind: 'activeSkill',
-  nameKey: 'skill.finisher.name',
-  descKey: 'skill.finisher.desc',
-  icon: 'skill_finisher',
-  abilities: [
-    // 打空斗炁（代价在施法时已扣，这里只是确保不会残留标记）
-    { kind: 'resource', target: { mode: 'self' }, resource: 'douqi', delta: -100 },
-    {
-      kind: 'trigger',
-      trigger: {
-        on: 'onCastFinish',
-        then: [
-          { kind: 'grant', target: { mode: 'self' }, buff: GCD_BUFF },
-          // 打完给一个短暂的增伤窗口：奖励"打空斗炁"这个决定
-          {
-            kind: 'grant',
-            target: { mode: 'self' },
-            buff: {
-              id: 'aftermath',
-              nameKey: 'skill.finisher.name',
-              icon: 'buff_aftermath',
-              polarity: 'buff',
-              color: 0xffb040,
-              duration: 8000,
-              maxStacks: 1,
-              stacking: { mode: 'refresh' },
-              modifiers: [
-                {
-                  stat: 'damageBoost',
-                  op: 'addPercent',
-                  value: 25,
-                  sourceKey: 'skill.finisher.name',
-                  namespace: 'aftermath',
-                  tier: 'buff',
-                },
-              ],
-            },
-          },
-        ],
-      },
-    },
-  ],
-  castTime: 2200,
-  /**
-   * 20 秒冷却。
-   *
-   * 为什么必须有：它不消耗精力、只要斗炁满就能放，而斗炁积攒很快。
-   * 早期版本给它 0 冷却，实测 60 秒内能放 184 次 —— 循环完全退化成
-   * "无脑按终结技"。冷却把"什么时候放"变成真正的取舍。
-   */
-  cooldown: 20_000,
-  gcd: true,
-  cost: [{ resource: 'douqi', value: 100 }],
-  targeting: { mode: 'primaryEnemy' },
-  hits: [
-    {
-      at: 2200,
-      effects: [
-        {
-          kind: 'damage',
-          damage: {
-            base: 500,
-            scaling: [{ stat: 'strength', ratio: 4, }, { stat: 'intelligence', ratio: 12 }],
-            school: 'arcane',
-            canCrit: true,
-            countsAsHit: true,
-          },
-        },
-      ],
-    },
-  ],
-  tags: ['spell'],
-  school: 'arcane',
-  interruptible: true,
-  requires: [{ kind: 'hasBuff', buffId: 'douqi-full' }],
-};
-
-/** 闪避：耗精力换一个极短的无敌窗口。**不占公共冷却**。 */
+/** 闪：0.5 秒完全无敌。代价是 40 精力（满精力的 40%）。 */
 const DODGE: SkillDef = {
   id: 'dodge',
   kind: 'activeSkill',
   nameKey: 'skill.dodge.name',
   descKey: 'skill.dodge.desc',
-  icon: 'skill_dodge',
+  icon: 'char_dodge',
   abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: DODGE_IFRAME }],
   castTime: 0,
-  cooldown: 1500,
-  // **不占 GCD**：所以闪避随时可用，"能不能躲掉"完全由精力决定
+  /**
+   * **没有冷却**。代价就是那 40 点精力，不需要再加冷却。
+   *
+   * 踩过的坑：早期给它加了 1.5 秒冷却，而 Boss 每 1.5–2.2 秒读一次条 ——
+   * 于是它总是差一点点就来不及，实测只减掉 6.5% 的伤害，
+   * 等于这个技能不存在。现在的约束是精力：满精力 100 只能连闪两次。
+   */
+  cooldown: 0,
+  /** 不占公共冷却 —— 否则"该躲时躲不了"。 */
   gcd: false,
-  cost: [{ resource: 'energy', value: 30 }],
+  cost: [{ resource: 'energy', value: S(40) }],
   targeting: { mode: 'self' },
   hits: [],
   tags: ['defensive'],
@@ -508,18 +288,25 @@ const DODGE: SkillDef = {
   interruptible: false,
 };
 
-/** 格挡：耗精力换一段减伤。窗口比闪避长、但减伤不到底。 */
+/**
+ * 御：按住持续减伤，松开取消。
+ *
+ * `holdDrain` 是引擎里"按住"机制的表达：每个逻辑步扣一次资源，
+ * 资源耗尽或松手就自动取消。这样"一直按着"会有明确代价。
+ */
 const GUARD: SkillDef = {
   id: 'guard',
   kind: 'activeSkill',
   nameKey: 'skill.guard.name',
   descKey: 'skill.guard.desc',
-  icon: 'skill_guard',
+  icon: 'char_guard',
   abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: GUARD_REDUCE }],
   castTime: 0,
-  cooldown: 3000,
+  cooldown: 0,
   gcd: false,
-  cost: [{ resource: 'energy', value: 20 }],
+  cost: [],
+  /** 按住期间每 0.1 秒扣 2 点精力。 */
+  holdDrain: { resource: 'energy', perLogicTick: 2 },
   targeting: { mode: 'self' },
   hits: [],
   tags: ['defensive'],
@@ -527,149 +314,186 @@ const GUARD: SkillDef = {
   interruptible: false,
 };
 
-/* ================================================================== *
- * Boss 技能
- * ================================================================== */
-
-/** 红弧：带前摇的扇形重击，**必须躲或挡**。 */
-const CRIMSON_ARC: SkillDef = {
-  id: 'crimson-arc',
+/** 破：打断任何技能。固定 5 秒 CD，不占公共冷却。 */
+const BREAK: SkillDef = {
+  id: 'break',
   kind: 'activeSkill',
-  nameKey: 'boss.crimsonArc.name',
-  descKey: 'boss.crimsonArc.desc',
-  icon: 'boss_arc',
-  abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: BOSS_TELEGRAPH }],
-  castTime: 1200,
-  cooldown: 9000,
+  nameKey: 'skill.break.name',
+  descKey: 'skill.break.desc',
+  icon: 'char_break',
+  abilities: [],
+  castTime: 0,
+  cooldown: logicMs(50),
   gcd: false,
   cost: [],
   targeting: { mode: 'primaryEnemy' },
   hits: [
     {
-      at: 1200,
-      avoidable: true,
+      at: 0,
+      effects: [
+        // 打断不区分可打断性：Boss 的所有招式都能被破
+        { kind: 'interrupt', target: { mode: 'primaryEnemy' }, force: true },
+      ],
+    },
+  ],
+  tags: ['interrupt'],
+  school: 'physical',
+  interruptible: false,
+};
+
+/** 轰：消耗 50 斗炁，造成 30 点伤害。 */
+const BLAST: SkillDef = {
+  id: 'blast',
+  kind: 'activeSkill',
+  nameKey: 'skill.blast.name',
+  descKey: 'skill.blast.desc',
+  icon: 'char_blast',
+  abilities: [
+    {
+      kind: 'trigger',
+      trigger: {
+        on: 'onCastFinish',
+        then: [{ kind: 'grant', target: { mode: 'self' }, buff: GCD_BUFF }],
+      },
+    },
+  ],
+  castTime: 0,
+  cooldown: 0,
+  gcd: true,
+  cost: [{ resource: 'douqi', value: S(50) }],
+  targeting: { mode: 'primaryEnemy' },
+  hits: [
+    {
+      at: 0,
       effects: [
         {
           kind: 'damage',
           damage: {
-            // 一次红弧 200。Boss 的总承伤被调到约 80 DPS ——
-            // 一场 2.5 分钟的战斗会打掉玩家约 12000（即全部血量），
-            // 所以**必须**用闪避/格挡削掉一部分才能活到最后。
-            base: 200,
-            school: 'fire',
+            base: S(30),
+            school: 'arcane',
             canCrit: false,
             countsAsHit: true,
-            avoidable: true,
           },
+        },
+        // 轰会打裂目标，叠易伤 —— 让"攒斗炁打轰"有额外收益
+        { kind: 'grantBuff', target: { mode: 'primaryEnemy' }, buff: SUNDER_DEBUFF },
+      ],
+    },
+  ],
+  tags: ['spell'],
+  school: 'arcane',
+  interruptible: false,
+};
+
+/** 凝：消耗 50 斗炁，增伤 20%，持续 30 秒。 */
+const FOCUS: SkillDef = {
+  id: 'focus',
+  kind: 'activeSkill',
+  nameKey: 'skill.focus.name',
+  descKey: 'skill.focus.desc',
+  icon: 'char_focus',
+  abilities: [
+    {
+      kind: 'grant',
+      target: { mode: 'self' },
+      buff: FOCUS_BUFF,
+    },
+  ],
+  castTime: 0,
+  cooldown: 0,
+  gcd: true,
+  cost: [{ resource: 'douqi', value: S(50) }],
+  targeting: { mode: 'self' },
+  hits: [],
+  tags: [],
+  school: 'arcane',
+  interruptible: false,
+};
+
+/* ================================================================== *
+ * Boss 技能
+ * ================================================================== *
+ *
+ * 设计约束（来自需求）：**Boss 的所有招式都默认可以被打断 / 闪避 / 格挡**。
+ * 所以每个招式都是 `interruptible: true`，且伤害都走正常判定路径。
+ */
+
+/** 重斩：有前摇，可被打断 / 闪避 / 格挡。 */
+const BOSS_CLEAVE: SkillDef = {
+  id: 'boss-cleave',
+  kind: 'activeSkill',
+  nameKey: 'boss.cleave.name',
+  descKey: 'boss.cleave.desc',
+  icon: 'boss_cleave',
+  abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: BOSS_TELEGRAPH }],
+  castTime: logicMs(8),
+  cooldown: logicMs(30),
+  gcd: false,
+  cost: [],
+  targeting: { mode: 'primaryEnemy' },
+  hits: [
+    {
+      at: logicMs(8),
+      effects: [
+        {
+          kind: 'damage',
+          damage: { base: S(18), school: 'physical', canCrit: false, countsAsHit: true },
+        },
+      ],
+    },
+  ],
+  tags: ['melee'],
+  school: 'physical',
+  interruptible: true,
+};
+
+/** 横扫：前摇更长、伤害更高，是"必须躲"的那一招。 */
+const BOSS_SWEEP: SkillDef = {
+  id: 'boss-sweep',
+  kind: 'activeSkill',
+  nameKey: 'boss.sweep.name',
+  descKey: 'boss.sweep.desc',
+  icon: 'boss_sweep',
+  abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: BOSS_TELEGRAPH }],
+  castTime: logicMs(12),
+  cooldown: logicMs(60),
+  gcd: false,
+  cost: [],
+  targeting: { mode: 'primaryEnemy' },
+  hits: [
+    {
+      at: logicMs(12),
+      effects: [
+        {
+          kind: 'damage',
+          damage: { base: S(30), school: 'fire', canCrit: false, countsAsHit: true },
         },
       ],
     },
   ],
   tags: ['spell'],
   school: 'fire',
-  interruptible: false,
-};
-
-/** 裂地三连：三段判定，每段都可以躲。 */
-const TRIPLE_SLAM: SkillDef = {
-  id: 'triple-slam',
-  kind: 'activeSkill',
-  nameKey: 'boss.tripleSlam.name',
-  descKey: 'boss.tripleSlam.desc',
-  icon: 'boss_slam',
-  abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: BOSS_TELEGRAPH }],
-  castTime: 900,
-  cooldown: 12_000,
-  gcd: false,
-  cost: [],
-  targeting: { mode: 'primaryEnemy' },
-  hits: [
-    {
-      at: 900,
-      avoidable: true,
-      effects: [
-        { kind: 'damage', damage: { base: 70, school: 'physical', canCrit: false, countsAsHit: true, avoidable: true } },
-      ],
-    },
-    {
-      at: 1150,
-      avoidable: true,
-      effects: [
-        { kind: 'damage', damage: { base: 70, school: 'physical', canCrit: false, countsAsHit: true, avoidable: true } },
-      ],
-    },
-    {
-      at: 1400,
-      avoidable: true,
-      effects: [
-        { kind: 'damage', damage: { base: 110, school: 'physical', canCrit: false, countsAsHit: true, avoidable: true } },
-      ],
-    },
-  ],
-  tags: ['melee'],
-  school: 'physical',
-  interruptible: false,
-};
-
-/**
- * 腐蚀咏唱：**可打断**的读条。
- *
- * 这条是给玩家出考题的：你得留一个打断技能（或者用高伤害压制）。
- * `interruptible: true` 是引擎唯一需要的声明。
- */
-const CORRUPTION: SkillDef = {
-  id: 'corruption',
-  kind: 'activeSkill',
-  nameKey: 'boss.corruption.name',
-  descKey: 'boss.corruption.desc',
-  icon: 'boss_cast',
-  abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: BOSS_TELEGRAPH }],
-  castTime: 3000,
-  cooldown: 18_000,
-  gcd: false,
-  cost: [],
-  targeting: { mode: 'primaryEnemy' },
-  hits: [
-    {
-      at: 3000,
-      avoidable: false,
-      effects: [
-        {
-          kind: 'damage',
-          damage: {
-            // 不可闪避、可打断。不打断就是 450 点（约占玩家 4% 血），
-            // 这是"留一手打断"的动机但不会一击致命。
-            base: 450,
-            school: 'arcane',
-            canCrit: false,
-            countsAsHit: true,
-            avoidable: false,
-          },
-        },
-      ],
-    },
-  ],
-  tags: ['spell'],
-  school: 'arcane',
   interruptible: true,
 };
 
-/** 蓄能：给自己加攻（Boss 的"呼吸"技能，给玩家喘息窗口）。 */
-const EMPOWER: SkillDef = {
-  id: 'empower',
+/** 蓄力：不造成伤害，给自己加攻。可以被打断（打断它就等于免掉一轮爆发）。 */
+const BOSS_EMPOWER: SkillDef = {
+  id: 'boss-empower',
   kind: 'activeSkill',
   nameKey: 'boss.empower.name',
-  icon: 'boss_buff',
+  descKey: 'boss.empower.desc',
+  icon: 'boss_empower',
   abilities: [
     {
       kind: 'grant',
       target: { mode: 'self' },
       buff: {
         id: 'boss-empowered',
-        nameKey: 'event.enrage',
-        icon: 'buff_enrage',
+        nameKey: 'boss.empower.name',
+        icon: 'boss_empower',
         polarity: 'debuff',
-        duration: 8000,
+        color: C.boss,
+        duration: logicMs(100),
         maxStacks: 1,
         stacking: { mode: 'refresh' },
         modifiers: [
@@ -677,7 +501,7 @@ const EMPOWER: SkillDef = {
             stat: 'damageBoost',
             op: 'addPercent',
             value: 30,
-            sourceKey: 'event.enrage',
+            sourceKey: 'boss.empower.name',
             namespace: 'boss-empowered',
             tier: 'buff',
           },
@@ -685,45 +509,35 @@ const EMPOWER: SkillDef = {
       },
     },
   ],
-  castTime: 800,
-  cooldown: 14_000,
+  castTime: logicMs(10),
+  cooldown: logicMs(120),
   gcd: false,
   cost: [],
   targeting: { mode: 'self' },
   hits: [],
   tags: [],
   school: 'physical',
-  interruptible: false,
+  interruptible: true,
 };
 
 /* ================================================================== *
  * 导出
  * ================================================================== */
 
-export const PLAYER_SKILLS: readonly SkillDef[] = [
-  STRIKE,
-  HEAVY_STRIKE,
-  RIPOSTE,
-  REND,
-  FINISHER,
-  DODGE,
-  GUARD,
-];
+export const PLAYER_SKILLS: readonly SkillDef[] = [ATTACK, DODGE, GUARD, BREAK, BLAST, FOCUS];
 
-export const BOSS_SKILLS: readonly SkillDef[] = [CRIMSON_ARC, TRIPLE_SLAM, CORRUPTION, EMPOWER];
+export const BOSS_SKILLS: readonly SkillDef[] = [BOSS_CLEAVE, BOSS_SWEEP, BOSS_EMPOWER];
 
 export const ALL_SKILLS: readonly SkillDef[] = [...PLAYER_SKILLS, ...BOSS_SKILLS];
 
-/** 全部会被 id 引用的 buff（含内联在技能里的那些）。 */
 export const ALL_BUFFS: readonly BuffDef[] = [
   GCD_BUFF,
-  SLASH_FURY,
   DODGE_IFRAME,
   GUARD_REDUCE,
-  GUARD_PERFECT,
-  COMBO_WINDOW,
-  HASTE_BUFF,
-  BLEED_DEBUFF,
+  FOCUS_BUFF,
+  SUNDER_DEBUFF,
   BOSS_TELEGRAPH,
   BOSS_ENRAGE,
 ];
+
+void logicTicks;

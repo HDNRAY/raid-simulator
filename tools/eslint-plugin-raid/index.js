@@ -323,9 +323,22 @@ const rules = {
         return text.slice(start, start + 12);
       }
 
+      /**
+       * 字体族里的中文名不算文案。
+       *
+       * `'KaiTi, STKaiti, 楷体, serif'` 是**字体族列表**，
+       * 不是给玩家看的文字 —— 把它搬进语言包毫无意义，
+       * 而列里保留中文名是必要的：某些系统只认"楷体"这个名字。
+       *
+       * 判据：字符串里出现 `serif` / `sans-serif` / `monospace` /
+       * `cursive` 这类 CSS 通用族关键字时，视为字体族。
+       */
+      const FONT_FAMILY_HINT = /\b(serif|sans-serif|monospace|cursive|fantasy|KaiTi|STKaiti)\b/;
+
       function check(node, text) {
         if (!CJK_RE.test(text)) return;
         if (isConsoleArg(node)) return;
+        if (FONT_FAMILY_HINT.test(text)) return;
         context.report({ node, messageId: 'cjk', data: { sample: sample(text) } });
       }
 

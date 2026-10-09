@@ -14,7 +14,7 @@
  */
 
 import type { Container, Graphics, Text } from 'pixi.js';
-import { TYPE, css } from '../render/theme';
+import { FONT_FAMILY, FONT_FAMILY_MONO, TYPE, css } from '../render/theme';
 
 export interface PixiCtor {
   readonly Container: typeof Container;
@@ -132,6 +132,13 @@ export interface LabelProps {
    */
   readonly stroke?: number;
   readonly strokeWidth?: number;
+  /**
+   * 用**楷体族**而不是等宽族。
+   *
+   * 技能图标上的字（攻/闪/御/破/轰/凝）走这条 ——
+   * 见 `theme.ts` 里关于楷体的说明。
+   */
+  readonly kai?: boolean;
 }
 
 export class Label {
@@ -142,7 +149,7 @@ export class Label {
     this.root = new pixi.Text({
       text: initial,
       style: {
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontFamily: props.kai ? FONT_FAMILY : FONT_FAMILY_MONO,
         fontSize: props.size ?? TYPE.sm,
         fill: css(props.color ?? 0xf0f0f6),
         fontWeight: props.bold ? '700' : '400',

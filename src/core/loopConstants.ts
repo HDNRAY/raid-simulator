@@ -122,3 +122,47 @@ export function exactTickMs(tick: number): number {
 export function tickToMs(tick: number): number {
   return exactTickMs(tick);
 }
+
+/* ------------------------------------------------------------------ *
+ * 逻辑步长（0.1 秒）
+ * ------------------------------------------------------------------ *
+ *
+ * 引擎内部仍然按 60Hz 推进（渲染需要 60fps），但**游戏逻辑**用
+ * 0.1 秒作为最小单位：
+ *
+ *   - 公共冷却 = 0.5 秒 = 5 个逻辑步
+ *   - 「闪」的无敌窗口 = 0.5 秒 = 5 个逻辑步
+ *   - 「御」每 0.1 秒扣 2 点精力
+ *
+ * 为什么不让引擎直接跑 10Hz：那样渲染插值粒度太粗，60fps 的画面
+ * 会明显卡顿。所以分成"物理 tick 60Hz / 逻辑步长 0.1s"两层，
+ * 由这个常量把两者连起来。
+ *
+ * 这样做的好处：**内容里不会出现脏数字**。
+ * 直接以 60Hz 写 0.5 秒会得到 30 tick，而写 0.15 秒会得到 9 tick
+ * （其实是 0.15 秒）；以 0.1s 为单位写就永远是 5、10、15 这种整数。
+ */
+export const LOGIC_TICK_MS = 100;
+
+/** 一个逻辑步等于多少个物理 tick。必须是整数（100ms / 16.67ms ≈ 6）。 */
+export const TICKS_PER_LOGIC_TICK = LOGIC_TICK_MS / MS_PER_TICK;
+
+/**
+ * 把逻辑步数换算成物理 tick 数。
+ *
+ * 只接受整数逻辑步 —— 传小数说明内容作者想表达比 0.1 秒更细的时长，
+ * 那超出了本作的逻辑精度（开发期直接抛错，比静默取整好）。
+ */
+export function logicTicks(steps: number): number {
+  if (!Number.isInteger(steps) || steps < 0) {
+    throw new Error(
+      `logicTicks expects a non-negative integer number of 0.1s steps, got ${steps}`,
+    );
+  }
+  return Math.round(steps * TICKS_PER_LOGIC_TICK);
+}
+
+/** 逻辑步数 → 毫秒。 */
+export function logicMs(steps: number): number {
+  return steps * LOGIC_TICK_MS;
+}

@@ -84,6 +84,7 @@ export class BattleLoop {
     this.input = createKeyboardInput(window, {
       bindings: this.options.bindings,
       currentTick: () => this.engine.snapshot.tick,
+      isHoldSkill: (skillId) => this.engine.skillOf(skillId)?.holdDrain !== undefined,
       onUiKey: (key) => {
         if (key === 'escape') this.paused = !this.paused;
       },
@@ -142,8 +143,12 @@ export class BattleLoop {
 
     const fromInput = this.input?.drain() ?? [];
     const held = this.input
-      ? repeatHeld(this.input, this.options.bindings, state.tick, (skillId) =>
-          this.isUsable(skillId),
+      ? repeatHeld(
+          this.input,
+          this.options.bindings,
+          state.tick,
+          (skillId) => this.isUsable(skillId),
+          (skillId) => this.engine.skillOf(skillId)?.holdDrain !== undefined,
         )
       : [];
 
@@ -157,6 +162,18 @@ export class BattleLoop {
    *
    * 用于"按住连发"：只在引擎确实能接受时才补 Action，
    * 否则会每 tick 产生一堆 `skillRejected` 事件。
+   *
+   * ------------------------------------------------------------------
+   * ⚠️ GCD 要**多留一个 tick 的余量**
+   * ------------------------------------------------------------------
+   *
+   * 踩过的坑：这里与引擎门禁在同一时刻判断，但动作是在**下一个 tick**
+   * 才被引擎处理。于是 GCD 还剩 1 个 tick 时这里判"可用"，
+   * 动作入队后到下一 tick 已被 GCD 拦住 —— 表现为玩家每次按普攻
+   * 都会看到一次「公共冷却中」的误报。
+   *
+   * 修法：要求 GCD 在**下一 tick 之后**才结束，即剩余 > 1。
+   * 代价是最坏情况晚 1 tick（16.7ms）施放，远小于感知阈值。
    */
   private isUsable(skillId: string): boolean {
     const skill = this.engine.skillOf(skillId);
@@ -165,7 +182,11 @@ export class BattleLoop {
     const actor = state.combatants.find((c) => c.side === 'ally');
     if (!actor || !actor.alive) return false;
     if (actor.casts.length > 0) return false;
-    if (skill.gcd && actor.buffs.some((b) => b.defId === 'gcd')) return false;
+    if (skill.gcd) {
+      const gcd = actor.buffs.find((b) => b.defId === 'gcd');
+      // 见上面的说明：留一个 tick 的余量，避免"入队即被拒"的误报
+      if (gcd !== undefined && gcd.expiresAtTick > state.tick + 1) return false;
+    }
     const readyAt = actor.cooldowns[skillId] ?? 0;
     if (readyAt > state.tick) return false;
     for (const cost of skill.cost) {

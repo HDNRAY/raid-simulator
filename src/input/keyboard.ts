@@ -35,22 +35,23 @@ export interface KeyBinding {
 }
 
 /**
- * 默认键位。
+ * 默认键位（2026-10-09 重做）。
  *
- * 布局按**循环里的角色**排，不按技能强弱：
- *   1 = 基础技（最常按，放在最顺手的食指位）
- *   2 = 强击 / 3 = 派生 / 4 = 持续伤害   （输出技能的优先级顺序）
- *   5 = 终结技（要求斗炁满，按下去就该有"憋了很久"的手感）
- *   Q / E = 防御（左手小指与无名指位，能在输出节奏里随时插进去）
+ * 只有 6 个技能，所以布局按**手位**而不是"循环优先级"排：
+ *
+ *   1 / 2 / 3 = 输出与增益（食指、中指、无名指，最顺）
+ *   4         = 破（打断）—— 放在最外侧，因为它是"应急键"，
+ *               不该和输出键混在一起误触
+ *   Q         = 闪 —— 拇指/小指位，闪避要能在输出节奏中零延迟插入
+ *   E         = 御 —— 按住键，无名指按住时其余手指还能按 1/2/3
  *
  * 本作没有位移，所以 WASD 整块空出来给技能。
  */
 export const DEFAULT_BINDINGS: readonly KeyBinding[] = [
-  { key: '1', skillId: 'strike' },
-  { key: '2', skillId: 'heavyStrike' },
-  { key: '3', skillId: 'riposte' },
-  { key: '4', skillId: 'rend' },
-  { key: '5', skillId: 'finisher' },
+  { key: '1', skillId: 'attack' },
+  { key: '2', skillId: 'blast' },
+  { key: '3', skillId: 'focus' },
+  { key: '4', skillId: 'break' },
   { key: 'q', skillId: 'dodge' },
   { key: 'e', skillId: 'guard' },
 ];
@@ -105,6 +106,13 @@ export interface InputOptions {
   readonly currentTick: () => number;
   /** 暂停/恢复等界面动作 */
   readonly onUiKey?: (key: string) => void;
+  /**
+   * 判断某个技能是否是"按住型"（`holdDrain`）。
+   *
+   * 按住型技能用 `hold` 而不是 `useSkill` 入队，并且在松手时发
+   * `releaseSkill` —— 引擎据此维护"按住"状态并每逻辑步扣资源。
+   */
+  readonly isHoldSkill?: (skillId: string) => boolean;
 }
 
 /**
@@ -123,6 +131,8 @@ export function createKeyboardInput(
   for (const binding of bindings) keyToSkill.set(binding.key, binding.skillId);
 
   const held = new Set<string>();
+  /** 当前被按住的"按住型"技能：键 → 技能 id */
+  const heldSkills = new Map<string, string>();
   const queue: Action[] = [];
 
   const onKeyDown = (rawEvent: Event): void => {
@@ -145,7 +155,14 @@ export function createKeyboardInput(
 
     const skillId = keyToSkill.get(key);
     if (skillId) {
-      queue.push({ type: 'useSkill', skillId, atTick: options.currentTick() });
+      const atTick = options.currentTick();
+      if (options.isHoldSkill?.(skillId)) {
+        // 按住型：进入按住状态（引擎每逻辑步扣资源，松手才结束）
+        heldSkills.set(key, skillId);
+        queue.push({ type: 'hold', skillId, atTick });
+      } else {
+        queue.push({ type: 'useSkill', skillId, atTick });
+      }
     }
   };
 
@@ -153,10 +170,22 @@ export function createKeyboardInput(
     const key = normalizeKey(rawEvent as KeyboardEvent);
     held.delete(key);
     queue.push({ type: 'releaseKey', key, atTick: options.currentTick() });
+
+    // 松开按住型技能 → 明确结束它（否则 buff 会挂到 duration 到期）
+    const heldSkill = heldSkills.get(key);
+    if (heldSkill !== undefined) {
+      heldSkills.delete(key);
+      queue.push({ type: 'releaseSkill', skillId: heldSkill, atTick: options.currentTick() });
+    }
   };
 
   const onBlur = (): void => {
-    // 失焦时清空按住状态：否则切走再回来会误判"还在按住"
+    // 失焦时清空按住状态：否则切走再回来会误判"还在按住"，
+    // 而"还在按住"意味着引擎会继续扣资源 —— 那会白扣玩家的精力。
+    for (const [key, skillId] of heldSkills) {
+      queue.push({ type: 'releaseSkill', skillId, atTick: options.currentTick() });
+      heldSkills.delete(key);
+    }
     held.clear();
   };
 
@@ -194,10 +223,19 @@ export function repeatHeld(
   bindings: readonly KeyBinding[],
   tick: number,
   isSkillUsable: (skillId: string) => boolean,
+  isHoldSkill?: (skillId: string) => boolean,
 ): readonly Action[] {
   const out: Action[] = [];
   for (const binding of bindings) {
     if (!input.isHeld(binding.key)) continue;
+    /**
+     * **按住型技能不参与连发。**
+     *
+     * 它已经在按住状态里了（引擎每逻辑步扣资源维持效果）。
+     * 如果这里也补 `useSkill`，会变成每 tick 重放一次技能 ——
+     * 既白扣"施放代价"，又会把持续时间不断刷新。
+     */
+    if (isHoldSkill?.(binding.skillId)) continue;
     if (!isSkillUsable(binding.skillId)) continue;
     out.push({ type: 'useSkill', skillId: binding.skillId, atTick: tick });
   }

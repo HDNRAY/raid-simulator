@@ -2,15 +2,21 @@ import { BattleLoop } from './app/battleLoop';
 import { DEFAULT_SLOTS } from './app/viewAdapter';
 import { createRegistry } from './core/content/registry';
 import { VERROT_BEHAVIORS } from './core/ai';
-import { ALL_BUFFS, ALL_SKILLS } from './data/content';
-import { ENTROPY_CLOCK } from './data/entities/entropyClock';
+import {
+  ALL_BUFFS,
+  ALL_SKILLS,
+  DOUQI_MAX,
+  ENERGY_MAX,
+  HP_MAX,
+} from './data/content';
+import { BOSS_HP_DISPLAY } from './data/entities/bossHp';
 import { DEFAULT_BINDINGS } from './input/keyboard';
 import { flattenCatalog, translator } from './i18n/translator';
 import { zhCN } from './i18n/locales/zh-CN';
 import { LOGICAL_H, LOGICAL_W, type ScalingMode } from './render/scaling';
 import { observeStage } from './render/sizes';
 import { BattleScene } from './render/BattleScene';
-import type { Combatant, StatKey, StatModifier } from './core/types';
+import type { Combatant, StatKey } from './core/types';
 import './styles.css';
 
 /**
@@ -30,31 +36,39 @@ const TIME_LIMIT_MS = 180_000;
 /**
  * 玩家基础属性。
  *
- * `energyRegen` 是这套技能组的**节奏来源**：防御技（闪避 30 / 格挡 20）
- * 只消耗精力，所以"我现在躲得起吗"完全由它决定。
- * 22/秒 大致支持"每 1.4 秒一次防御"或"连续两次闪避"。
+ * 新刻度下**不需要**主属性参与伤害计算了 —— 6 个技能的伤害都是
+ * 内容里写死的固定值（攻 10 / 轰 30）。所以这里只留最小的基础值，
+ * 属性系统本身仍然可用（装备/增益可以往里加）。
+ *
+ * 精力回复**不走属性**：它是固定"每 0.1 秒 1 点"，
+ * 由 `data/balance.ts` 的 `ENERGY_PER_LOGIC_TICK` 决定。
  */
 const PLAYER_BASE: Partial<Record<StatKey, number>> = {
-  strength: 120,
-  agility: 100,
-  intelligence: 110,
-  spirit: 100,
-  energyRegen: 22,
-  critChance: 0.2,
-  critDamage: 0.5,
+  strength: 10,
+  agility: 10,
+  intelligence: 10,
+  spirit: 10,
 };
 
-/** 玩家资源上限。 */
-const PLAYER_CAPS = { hp: 12_000, energy: 120, douqi: 100 };
+/**
+ * 资源上限。
+ *
+ * 需求：双方都是 100 血，精力与斗炁上限也是 100。
+ *
+ * **直接用展示刻度**（不再乘 `DISPLAY_SCALE`）：内容的伤害值
+ * （攻 10 / 轰 30）本身就是展示刻度，两边同刻度才能对上 ——
+ * 早期把血量乘了 10 而伤害没乘，结果 10 点伤害变成打掉 1 点血，
+ * 一场战斗要按上百次。
+ */
+const PLAYER_CAPS = { hp: HP_MAX, energy: ENERGY_MAX, douqi: DOUQI_MAX };
 
 /**
  * Boss 资源上限。
  *
- * 17 万血配实测约 1300 DPS → 一场约 2.2 分钟的战斗。
- * 刻意留出余量：**玩得差的循环（不接派生、不放终结技）会打不完**，
- * 于是"把循环打对"变成通关的必要条件，而不是可选的优化。
+ * 血量取值依据见 `data/entities/bossHp.ts` —— 那是实测出来的
+ * （玩家 214 DPS vs Boss 66 DPS），不是拍脑袋定的。
  */
-const BOSS_CAPS = { hp: 170_000, energy: 0, douqi: 0 };
+const BOSS_CAPS = { hp: BOSS_HP_DISPLAY, energy: 0, douqi: 0 };
 
 function makePlayer(): Combatant {
   return {
@@ -92,16 +106,6 @@ function makeBoss(): Combatant {
   };
 }
 
-/** 把熵之钟的能力展开成被动修正池（装备就是"被动修正的集合"）。 */
-function clockModifiers(): StatModifier[] {
-  const out: StatModifier[] = [];
-  for (const ability of ENTROPY_CLOCK.abilities) {
-    if (ability.kind === 'modifier') out.push(ability.modifier);
-    else if (ability.kind === 'derived') out.push({ ...ability.modifier, value: ability.value });
-  }
-  return out;
-}
-
 async function bootstrap(): Promise<void> {
   const stage = document.querySelector<HTMLElement>('#stage');
   if (!stage) throw new Error('index.html is missing the #stage container');
@@ -122,7 +126,7 @@ async function bootstrap(): Promise<void> {
 
   /* ---------- 内容（校验通过才允许使用） ---------- */
   const registry = createRegistry(
-    { entities: [ENTROPY_CLOCK], skills: [...ALL_SKILLS], buffs: [...ALL_BUFFS] },
+    { entities: [], skills: [...ALL_SKILLS], buffs: [...ALL_BUFFS] },
     { localeKeys: new Set(flattenCatalog(zhCN).keys()) },
   );
 
@@ -154,7 +158,7 @@ async function bootstrap(): Promise<void> {
           ['player', PLAYER_BASE],
           ['verrot', {}],
         ]),
-        passiveModifiers: new Map([['player', clockModifiers()]]),
+        passiveModifiers: new Map(),
       },
       bindings: DEFAULT_BINDINGS_LOCAL,
       slots: DEFAULT_SLOTS,

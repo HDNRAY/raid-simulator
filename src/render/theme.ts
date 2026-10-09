@@ -79,6 +79,30 @@ export const TYPE = {
   xl: 20,
 } as const;
 
+/**
+ * 字体族。
+ *
+ * ------------------------------------------------------------------
+ * 为什么用楷体
+ * ------------------------------------------------------------------
+ *
+ * 技能图标就是技能名那个字（攻 / 闪 / 御 / 破 / 轰 / 凝）。
+ * 这些字需要**一眼可辨**，而楷体的笔画对比强、结构舒展，
+ * 在 40px 的小方块里比黑体更容易认 —— 黑体在小字号下容易糊成一团。
+ *
+ * 字体族顺序：macOS 的 `KaiTi` → Windows 的 `KaiTi`/`STKaiti` →
+ * 通用 `cursive` 兜底（Linux 上通常是楷体风格的字体）。
+ *
+ * ⚠️ canvas 里**没有**"字体文件的子集化"这回事 —— 缺字会静默回退。
+ * 所以这里给的是候选链而不是单一字体名。
+ */
+export const FONT_FAMILY =
+  'KaiTi, STKaiti, KaiTi_GB2312, 楷体, Songti SC, serif';
+
+/** 数字与拉丁字母用的等宽字体（数值对齐需要）。 */
+export const FONT_FAMILY_MONO =
+  'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+
 /** 常用颜色转换：给 Pixi 的 Text 用（它接受 CSS 字符串）。 */
 export function css(color: number): string {
   return `#${color.toString(16).padStart(6, '0')}`;

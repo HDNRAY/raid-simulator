@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { BattleEngine } from '../../src/core/combat/battleState';
 import { applyBuff } from '../../src/core/buffs';
 import { ENTROPY_CLOCK } from '../../src/data/entities/entropyClock';
-import { ALL_BUFFS, ALL_SKILLS, HASTE_BUFF } from '../../src/data/content';
-import type { BuffDef, Combatant, StatModifier } from '../../src/core/types';
+import { ALL_BUFFS, ALL_SKILLS, FOCUS_BUFF } from '../../src/data/content';
+import type { Combatant, StatModifier } from '../../src/core/types';
 
 /**
  * 属性溯源（数据模型规范 §5.4）。
@@ -120,32 +120,29 @@ describe('属性溯源', () => {
   it('buff 的修正在溯源里带 buffId 命名空间', () => {
     const engine = makeEngine();
     const combatant = engine.snapshot.combatants[0]!;
-    const haste: BuffDef = HASTE_BUFF;
-    const applied = applyBuff(combatant, haste, combatant.id, 0);
+    const applied = applyBuff(combatant, FOCUS_BUFF, combatant.id, 0);
     engine.replaceCombatantForTest({ ...combatant, buffs: applied.buffs });
 
     const bd = engine.statsBreakdownOf('player')!;
-    // HASTE_BUFF 用的是 `op: 'add'`，所以进 add 层；值是 0.2（不是 20）
-    expect(bd.haste?.add).toBeCloseTo(0.2, 5);
-    expect(bd.haste?.final).toBeCloseTo(0.2, 5);
-    expect(bd.haste?.flat.some((f) => f.namespace === 'haste-buff')).toBe(true);
+    // 「凝」用 addPercent 20 → 进 percentSum 层
+    expect(bd.damageBoost?.percentSum).toBeCloseTo(20, 5);
+    expect(bd.damageBoost?.flat.some((f) => f.namespace === 'focus')).toBe(true);
   });
 
   it('buff 消失后溯源里不再有它的贡献（动态重算）', () => {
     const engine = makeEngine();
     const combatant = engine.snapshot.combatants[0]!;
-    const applied = applyBuff(combatant, HASTE_BUFF, combatant.id, 0);
+    const applied = applyBuff(combatant, FOCUS_BUFF, combatant.id, 0);
     engine.replaceCombatantForTest({ ...combatant, buffs: applied.buffs });
-    expect(engine.statsBreakdownOf('player')!.haste?.add).toBeCloseTo(0.2, 5);
+    expect(engine.statsBreakdownOf('player')!.damageBoost?.percentSum).toBeCloseTo(20, 5);
 
     // 摘掉 buff（模拟过期）
     engine.replaceCombatantForTest({ ...combatant, buffs: [] });
-    expect(engine.statsBreakdownOf('player')!.haste?.add ?? 0).toBe(0);
-    // 派生值也要跟着回落：增伤回到 0（没有装备时）
-    expect(engine.statsOf('player').haste).toBe(0);
+    expect(engine.statsBreakdownOf('player')!.damageBoost?.percentSum ?? 0).toBe(0);
+    expect(engine.statsOf('player').damageBoost).toBe(0);
   });
 
-  it('没有装备时派生增伤为 0（说明它真的来自装备）', () => {
+  it('没有装备时增伤为 0（说明它真的来自外部来源）', () => {
     const engine = makeEngine();
     expect(engine.statsBreakdownOf('player')!.damageBoost?.percentSum ?? 0).toBe(0);
     expect(engine.statsOf('player').damageBoost).toBe(0);

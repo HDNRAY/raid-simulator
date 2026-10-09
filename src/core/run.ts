@@ -245,7 +245,12 @@ export function roughlyUsable(
   const actor = state.combatants.find((c) => c.id === actorId);
   if (!actor || !actor.alive) return false;
   if (actor.casts.length > 0) return false;
-  if (skill.gcd && actor.buffs.some((b) => b.defId === 'gcd')) return false;
+  if (skill.gcd) {
+    // 与 `battleLoop.isUsable` 同一条修正：动作在**下一个 tick** 才生效，
+    // 所以 GCD 要多留一个 tick 的余量，否则会"入队即被拒"。
+    const gcd = actor.buffs.find((b) => b.defId === 'gcd');
+    if (gcd !== undefined && gcd.expiresAtTick > state.tick + 1) return false;
+  }
   if ((actor.cooldowns[skillId] ?? 0) > state.tick) return false;
   for (const cost of skill.cost) {
     const need = typeof cost.value === 'number' ? cost.value : 0;

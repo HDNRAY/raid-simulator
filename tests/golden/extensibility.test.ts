@@ -5,7 +5,6 @@ import { RunRecorder } from '../../src/core/run';
 import { flattenCatalog } from '../../src/i18n/translator';
 import { zhCN } from '../../src/i18n/locales/zh-CN';
 import { ALL_BUFFS, ALL_SKILLS } from '../../src/data/content';
-import { ENTROPY_CLOCK } from '../../src/data/entities/entropyClock';
 import type {
   Behavior,
   BuffDef,
@@ -61,7 +60,7 @@ function registryWith(extra: {
 }) {
   return createRegistry(
     {
-      entities: [...(extra.entities ?? []), ENTROPY_CLOCK],
+      entities: [...(extra.entities ?? [])],
       skills: [...ALL_SKILLS, ...(extra.skills ?? [])],
       buffs: [...ALL_BUFFS, ...(extra.buffs ?? [])],
     },
@@ -72,7 +71,7 @@ function registryWith(extra: {
 function makeCombatant(id: string, side: 'ally' | 'enemy', hp: number, base: Partial<Record<StatKey, number>> = {}): Combatant {
   return {
     id,
-    nameKey: 'hud.you',
+    nameKey: 'skill.attack.name',
     side,
     caps: { hp, energy: 120, douqi: 100 },
     resources: { hp, energy: 120, douqi: 0 },
@@ -113,7 +112,7 @@ describe('可扩展性：新增一个技能只需要写数据', () => {
   const customSkill: SkillDef = {
     id: 'test-sigil',
     kind: 'activeSkill',
-    nameKey: 'skill.strike.name',
+    nameKey: 'skill.attack.name',
     icon: 'test',
     abilities: [
       {
@@ -179,7 +178,13 @@ describe('可扩展性：新增一个技能只需要写数据', () => {
     // 施法者拿到 buff + 斗炁
     const player = engine.snapshot.combatants.find((c) => c.id === 'player')!;
     expect(player.buffs.some((b) => b.defId === 'test-brand')).toBe(true);
-    expect(player.resources.douqi).toBe(25);
+    /**
+     * 斗炁 = 内容直接给的 25（`delta: 25`）
+     *      + 命中造成的伤害换算来的量（两段共 120 伤害 → 120 点斗炁）。
+     *
+     * 会被上限截断到 `makeCombatant` 的 100 —— 这正好验证了钳制。
+     */
+    expect(player.resources.douqi).toBe(100);
 
     // 目标被挂上 debuff（stack 模式）
     const dummy = engine.snapshot.combatants.find((c) => c.id === 'dummy')!;
@@ -217,7 +222,7 @@ describe('可扩展性：新增一个 Boss 只需要写数据', () => {
   const bossSkillA: SkillDef = {
     id: 'test-boss-beam',
     kind: 'activeSkill',
-    nameKey: 'boss.corruption.name',
+    nameKey: 'boss.cleave.name',
     icon: 'test',
     abilities: [],
     castTime: 800,
@@ -307,7 +312,7 @@ describe('可扩展性：新增一个 Boss 只需要写数据', () => {
     const heavy: SkillDef = {
       id: 'test-heavy',
       kind: 'activeSkill',
-      nameKey: 'skill.strike.name',
+      nameKey: 'skill.attack.name',
       icon: 'test',
       abilities: [],
       castTime: 0,
@@ -329,7 +334,7 @@ describe('可扩展性：新增一个 Boss 只需要写数据', () => {
     };
     const withHeavy = createRegistry(
       {
-        entities: [ENTROPY_CLOCK],
+        entities: [],
         skills: [...ALL_SKILLS, bossSkillA, bossSkillB, heavy],
         buffs: [...ALL_BUFFS],
       },
@@ -379,7 +384,7 @@ describe('可扩展性：新增一个 Boss 只需要写数据', () => {
   it('同一套引擎代码能同时驱动两个完全不同的 Boss', () => {
     // Verrot 与新 Boss 各自跑 10 秒，都应有自己的行为表现
     const a = new BattleEngine({
-      ...{ combatants: [makeCombatant('player', 'ally', 30_000), { ...makeCombatant('verrot', 'enemy', 50_000), behaviors: [{ kind: 'opener', skillId: 'crimson-arc', delayMs: 500 }] }] },
+      ...{ combatants: [makeCombatant('player', 'ally', 30_000), { ...makeCombatant('verrot', 'enemy', 50_000), behaviors: [{ kind: 'opener', skillId: 'boss-cleave', delayMs: 500 }] }] },
       seed: 5,
       bossId: 'verrot',
       buffs: registryWith({}).buffs,
@@ -392,7 +397,7 @@ describe('可扩展性：新增一个 Boss 只需要写数据', () => {
       a.tick();
       for (const e of a.drainEvents()) if (e.kind === 'skillUsed') aUsed.add(e.skillId);
     }
-    expect(aUsed.has('crimson-arc')).toBe(true);
+    expect(aUsed.has('boss-cleave')).toBe(true);
 
     const b = makeBossEngine();
     const bUsed = new Set<string>();
@@ -542,7 +547,7 @@ describe('可扩展性：全新内容也能跑完一整场战斗', () => {
   const newSkill: SkillDef = {
     id: 'test-nuke',
     kind: 'activeSkill',
-    nameKey: 'skill.strike.name',
+    nameKey: 'skill.attack.name',
     icon: 'test',
     abilities: [],
     castTime: 0,

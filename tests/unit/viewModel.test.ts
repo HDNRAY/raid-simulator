@@ -55,7 +55,7 @@ describe('telegraphHint —— 预警必须告诉玩家该做什么', () => {
   it('可打断的技能给出"可打断"的 key 与剩余秒数', () => {
     const hint = telegraphHint({
       skillId: 'corruption',
-      nameKey: 'boss.corruption.name',
+      nameKey: 'boss.cleave.name',
       progress: 0.5,
       interruptible: true,
       remainingMs: 1500,

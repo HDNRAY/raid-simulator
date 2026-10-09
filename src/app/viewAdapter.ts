@@ -51,8 +51,20 @@ function isDefensiveBuff(buffId: string): boolean {
  */
 const INTERNAL_BUFF_IDS = new Set(['gcd', 'boss-telegraph-active', 'boss-telegraph']);
 
-function isInternalBuff(buffId: string): boolean {
-  return INTERNAL_BUFF_IDS.has(buffId) || buffId.startsWith('combo-window');
+/**
+ * 该 buff 是否**不应该出现在图标条上**。
+ *
+ * 两个来源：
+ *   1. id 在内部集合里（引擎标记）
+ *   2. 内容里显式声明了 `hidden: true`
+ *
+ * 第二条让内容作者可以自己决定"这个 buff 不需要图标"
+ * （公共冷却由按钮变灰表达、Boss 前摇由预警条表达），
+ * 不必回头改这个文件。
+ */
+function isInternalBuff(buffId: string, hidden?: boolean): boolean {
+  if (hidden) return true;
+  return INTERNAL_BUFF_IDS.has(buffId);
 }
 
 /** 拒绝原因 → 本地化 key 后缀。 */
@@ -84,18 +96,14 @@ const POLARITY_COLORS = {
  * 没登记时回退到中性占位，不影响玩法。
  */
 const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
-  'dodge-iframe': 'buffShort.dodgeIframe',
-  guard: 'buffShort.guard',
-  'guard-perfect': 'buffShort.guardPerfect',
-  'combo-window': 'buffShort.comboWindow',
-  'haste-buff': 'buffShort.haste',
-  bleed: 'buffShort.bleed',
+  'dodge-iframe': 'skill.dodge.name',
+  guard: 'skill.guard.name',
+  focus: 'skill.focus.name',
+  sunder: 'debuff.sunder.name',
   'boss-enrage': 'buffShort.enrage',
-  'boss-enrage-active': 'buffShort.enrage',
   'boss-empowered': 'buffShort.empowered',
   'boss-telegraph': 'buffShort.telegraph',
   gcd: 'buffShort.gcd',
-  'douqi-full': 'buffShort.douqiFull',
 };
 
 function shortLabelKeyOf(buffId: string): string {
@@ -437,7 +445,9 @@ function toCombatantView(engine: BattleEngine, id: string, tick: number): Combat
     };
   }
 
-  const buffs: BuffView[] = raw.buffs.filter((buff) => !isInternalBuff(buff.defId)).map((buff) => {
+  const buffs: BuffView[] = raw.buffs
+    .filter((buff) => !isInternalBuff(buff.defId, engine.buffDef(buff.defId)?.hidden))
+    .map((buff) => {
     const def = engine.buffDef(buff.defId);
     const durationMs = def?.duration ?? 0;
     const remainingMs = Number.isFinite(buff.expiresAtTick)
@@ -508,13 +518,12 @@ function emptyView(tick: number): BattleSnapshotView {
  * （基础 → 强击 → 派生 → 持续 → 终结 → 防御）。
  */
 export const DEFAULT_SLOTS: readonly SlotBinding[] = [
-  { index: 0, key: '1', skillId: 'strike' },
-  { index: 1, key: '2', skillId: 'heavyStrike' },
-  { index: 2, key: '3', skillId: 'riposte' },
-  { index: 3, key: '4', skillId: 'rend' },
-  { index: 4, key: '5', skillId: 'finisher' },
-  { index: 5, key: 'q', skillId: 'dodge' },
-  { index: 6, key: 'e', skillId: 'guard' },
+  { index: 0, key: '1', skillId: 'attack' },
+  { index: 1, key: '2', skillId: 'blast' },
+  { index: 2, key: '3', skillId: 'focus' },
+  { index: 3, key: '4', skillId: 'break' },
+  { index: 4, key: 'q', skillId: 'dodge' },
+  { index: 5, key: 'e', skillId: 'guard' },
 ];
 
 /** GCD 时长再导出，避免渲染层直接 import core/combat。 */

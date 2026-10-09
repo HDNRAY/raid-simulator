@@ -434,7 +434,7 @@ const initialState: BattleState = {
   combatants: [
     {
       id: 'player',
-      nameKey: 'hud.level',
+      nameKey: 'hud.you',
       side: 'ally',
       caps: { hp: 10_000, energy: 120, douqi: 100 },
       resources: { hp: 10_000, energy: 120, douqi: 0 },

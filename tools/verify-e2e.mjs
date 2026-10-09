@@ -48,9 +48,9 @@ console.log();
 const checks = [
   ['战斗在推进（tick 增长）', c.tick > a.tick, `tick ${a.tick} → ${c.tick}`],
   ['Boss 受到伤害', c.bossHp < a.bossHp, `${a.bossHp} → ${c.bossHp}`],
-  ['斗炁增长（斩击产生斗炁）', c.playerDouqi > a.playerDouqi, `${a.playerDouqi} → ${c.playerDouqi}`],
+  ['斗炁增长（攻击造成伤害换斗炁）', c.playerDouqi > a.playerDouqi, `${a.playerDouqi} → ${c.playerDouqi}`],
   ['Boss 会施放技能（有读条或已造成伤害）', c.bossCasts > 0 || c.bossHp < c.bossHpCap, `bossCasts=${c.bossCasts}`],
-  ['技能栏有 7 个槽位', c.skillCount === 7, `skillCount=${c.skillCount}`],
+  ['技能栏有 6 个槽位', c.skillCount === 6, `skillCount=${c.skillCount}`],
   ['无运行期异常', errors.length === 0, errors.slice(0,1).join('')],
 ];
 let failed = 0;

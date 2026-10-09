@@ -44,6 +44,8 @@ import {
   syncResourceGateBuff,
 } from './index';
 import { computeStats, type StatBreakdown } from '../stats/pipeline';
+import { DOUQI_PER_INTERNAL_DAMAGE } from '../../data/balance';
+import { TICKS_PER_LOGIC_TICK } from '../loopConstants';
 import { createAiState, decide, type AiState, type AiView } from '../ai';
 import { nextRandom, type RngState } from '../rng';
 import type {
@@ -82,6 +84,7 @@ interface MutableCombatant {
   cooldowns: Record<string, number>;
   casts: CastInstance[];
   uses: Record<string, number>;
+  activeHold?: { readonly skillId: string } | undefined;
   behaviors: Combatant['behaviors'];
   alive: boolean;
 }
@@ -408,6 +411,126 @@ export class BattleEngine {
   }
 
   /* ---------------------------------------------------------------- *
+   * 按住型技能（「御」）
+   * ---------------------------------------------------------------- */
+
+  /**
+   * 开始按住一个技能。
+   *
+   * 与 `useSkill` 的区别：按住型技能施放后**保持生效**，
+   * 由 `tickHolds` 每个逻辑步扣 `holdDrain`。资源耗尽或松手即结束。
+   */
+  private startHold(skillId: string, actorId: string): void {
+    const actor = this.work?.get(actorId);
+    if (!actor) return;
+    const skill = this.options.skills.get(skillId);
+    if (!skill?.holdDrain) {
+      // 不是按住型技能 → 退化成普通施放，这样输入层不必区分两种技能
+      this.tryUseSkill(skillId, actorId);
+      return;
+    }
+    if (actor.activeHold?.skillId === skillId) return;
+
+    this.tryUseSkill(skillId, actorId);
+    const after = this.work?.get(actorId);
+    if (!after) return;
+    // 只有施放真的成功（身上有它授予的 buff）才进入按住状态
+    const granted = skill.abilities.some(
+      (a) => a.kind === 'grant' && after.buffs.some((b) => b.defId === a.buff.id),
+    );
+    if (!granted) return;
+    this.replaceCombatant({ ...after, activeHold: { skillId } });
+  }
+
+  /** 结束按住：移除它授予的 buff。 */
+  private endHold(skillId: string, actorId: string): void {
+    const actor = this.work?.get(actorId);
+    if (!actor) return;
+    if (actor.activeHold?.skillId !== skillId) return;
+
+    const skill = this.options.skills.get(skillId);
+    const grantedIds = new Set(
+      (skill?.abilities ?? [])
+        .filter((a): a is Extract<typeof a, { kind: 'grant' }> => a.kind === 'grant')
+        .map((a) => a.buff.id),
+    );
+
+    this.replaceCombatant({
+      ...actor,
+      activeHold: undefined,
+      buffs: actor.buffs.filter((b) => !grantedIds.has(b.defId)),
+    });
+  }
+
+  /**
+   * 每个逻辑步处理按住状态：扣资源，资源不够就自动松开。
+   *
+   * 为什么按**逻辑步**而不是每 tick：需求定义"每 0.1 秒扣 2 点"，
+   * 按 tick（1/60 秒）扣会让玩家算不清代价，也会被整数化吃掉小数。
+   */
+  private tickHolds(): void {
+    if (this.state.tick % TICKS_PER_LOGIC_TICK !== 0) return;
+
+    for (const id of this.state.combatants.map((c: Combatant) => c.id)) {
+      const actor = this.work?.get(id);
+      const hold = actor?.activeHold;
+      if (!actor || !hold) continue;
+
+      const skill = this.options.skills.get(hold.skillId);
+      const drain = skill?.holdDrain;
+      if (!drain) {
+        this.endHold(hold.skillId, id);
+        continue;
+      }
+
+      const have = (actor.resources as Record<string, number>)[drain.resource] ?? 0;
+      if (have < drain.perLogicTick) {
+        // 资源耗尽 → 自动松开，并告诉玩家原因
+        this.endHold(hold.skillId, id);
+        this.events.push({
+          kind: 'skillRejected',
+          tick: this.state.tick,
+          sourceId: id,
+          skillId: hold.skillId,
+          reason: 'cost',
+        });
+        continue;
+      }
+      const result = changeResource(actor, drain.resource, -drain.perLogicTick, this.state.tick);
+      this.replaceCombatant(result.combatant);
+      this.events.push(...result.events);
+    }
+  }
+
+  /**
+   * 按伤害量换算斗炁。
+   *
+   * 需求：「斗炁根据造成或受到的伤害数值」—— 造成 1 点伤害得 1 点，
+   * 受到 1 点伤害也得 1 点。
+   *
+   * 换算放在**引擎**而不是逐条写进内容，因为它必须对**每一次伤害**生效
+   * （包括 DoT、反击、任何来源）—— 写进内容一定会漏。
+   */
+  private gainDouqiFromDamage(combatantId: string, damage: number, tick: number): void {
+    if (damage <= 0) return;
+    /**
+     * `damage` 是**内部刻度**，而系数是展示刻度的 —— 必须用换算过的版本。
+     *
+     * 踩过的坑：直接用展示刻度系数会让斗炁攒得快 `DISPLAY_SCALE` 倍，
+     * 玩家一路「轰」秒杀 Boss（实测 7 秒通关一场本该 2 分钟的战斗）。
+     * 而且单点伤害小到 10 内部点时，`Math.round` 会把 1 点斗炁算成 1 ——
+     * 所以系数的换算必须在这里做，不能靠调用方记得。
+     */
+    const gain = Math.round(damage * DOUQI_PER_INTERNAL_DAMAGE);
+    if (gain <= 0) return;
+    const target = this.work?.get(combatantId);
+    if (!target) return;
+    const result = changeResource(target, 'douqi', gain, tick);
+    this.replaceCombatant(result.combatant);
+    this.events.push(...result.events);
+  }
+
+  /* ---------------------------------------------------------------- *
    * 工作副本：一次 tick 内只有一份可变状态
    * ---------------------------------------------------------------- */
 
@@ -492,6 +615,8 @@ export class BattleEngine {
       const resolvedActor = actorId ?? this.defaultActorId();
       for (const action of actions) {
         if (action.type === 'useSkill') this.tryUseSkill(action.skillId, resolvedActor);
+        else if (action.type === 'hold') this.startHold(action.skillId, resolvedActor);
+        else if (action.type === 'releaseSkill') this.endHold(action.skillId, resolvedActor);
       }
     } finally {
       if (owned) this.commitWork();
@@ -540,6 +665,9 @@ export class BattleEngine {
 
     // 5. 资源回复
     this.regenerateResources();
+
+    // 5b. 按住型技能的持续消耗（按逻辑步）
+    this.tickHolds();
 
     // 6. 时间限制
     this.checkTimeLimit();
@@ -924,6 +1052,15 @@ export class BattleEngine {
           );
           this.replaceCombatant(applied.combatant);
           this.events.push(...applied.events);
+
+          /**
+           * 斗炁按伤害换算：**造成伤害的人**与**受到伤害的人**各得一份。
+           * 放在这里（而不是内容里）才能覆盖所有伤害来源。
+           */
+          if (result.amount > 0) {
+            this.gainDouqiFromDamage(actor.id, result.amount, this.state.tick);
+            this.gainDouqiFromDamage(target.id, result.amount, this.state.tick);
+          }
           break;
         }
         case 'heal': {
@@ -999,11 +1136,20 @@ export class BattleEngine {
 
     if (effect.kind === 'interrupt') {
       if (target.casts.length > 0) {
-        const interrupted = target.casts.filter((c: CastInstance) => c.interruptible);
+        /**
+         * `force: true` 时**不看可打断性** —— 这是「破」的语义
+         * （需求：可以打断任何技能）。默认仍尊重目标技能的可打断性。
+         */
+        const interrupted = effect.force
+          ? [...target.casts]
+          : target.casts.filter((c: CastInstance) => c.interruptible);
         if (interrupted.length > 0) {
+          const interruptedIds = new Set(interrupted.map((c: CastInstance) => c.skillId));
           this.replaceCombatant({
             ...this.current(target.id),
-            casts: target.casts.filter((c: CastInstance) => !c.interruptible),
+            casts: this.current(target.id).casts.filter(
+              (c: CastInstance) => !interruptedIds.has(c.skillId),
+            ),
           });
           for (const cast of interrupted) {
             this.events.push({
@@ -1068,7 +1214,7 @@ export class BattleEngine {
   private regenerateResources(): void {
     for (const combatant of this.mutableAll()) {
       const stats = this.statsOf(combatant.id);
-      const result = regenerate(combatant, stats, this.state.tick, 0.1);
+      const result = regenerate(combatant, stats, this.state.tick);
       if (result.events.length > 0) {
         this.replaceCombatant(result.combatant);
         this.events.push(...result.events);

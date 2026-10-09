@@ -35,6 +35,8 @@ import type {
   StatKey,
 } from '../types';
 import { aggregateFlags, applyBuff } from '../buffs';
+import { TICKS_PER_LOGIC_TICK } from '../loopConstants';
+import { ENERGY_PER_LOGIC_TICK } from '../../data/balance';
 
 /** 结算环境：引擎把内容定义与属性查询注入进来。 */
 export interface CombatContext {
@@ -584,29 +586,44 @@ export function payCosts(
   return { combatant: current, events };
 }
 
-/** 资源自然回复（每 tick 的小额回复；整数化以避免小数堆积）。 */
+/**
+ * 资源自然回复。
+ *
+ * ------------------------------------------------------------------
+ * 按**逻辑步**（0.1 秒）而不是按秒或按 tick
+ * ------------------------------------------------------------------
+ *
+ * 需求是"每 0.1 秒恢复 1 点精力"。三种做法里只有一种是对的：
+ *
+ *   按秒聚合（每秒 +10）：玩家看到精力一秒跳一次，
+ *     而「御」是按 0.1 秒扣的 —— 收支节奏对不上，手感会很怪。
+ *   按 tick（每 1/60 秒 +1/6 点）：被整数化吃掉小数，实际不回复。
+ *   按逻辑步：与内容里的时长单位一致，收支都在同一个时间网格上。
+ *
+ * 所以回复量与时长常量都放在 `data/balance.ts` / `loopConstants.ts`，
+ * 由内容层决定"每步回多少"。
+ */
 export function regenerate(
   combatant: Combatant,
   stats: Readonly<Record<StatKey, number>>,
   tick: number,
-  perTickEnergy = 0.1,
 ): { readonly combatant: Combatant; readonly events: readonly EventDef[] } {
-  // 用"每 tick 累积"而不是"每 100ms 跳一次"会让整数化吃掉小数，
-  // 所以按 60 tick 为一秒聚合：每秒回复量 × (1/60)
   const events: EventDef[] = [];
   let current = combatant;
 
-  // 精力回复：基础回复 + 精神提供的加成
-  const energyPerSecond = (stats.energyRegen ?? 0) + (stats.spirit ?? 0) * perTickEnergy * 10;
-  if (energyPerSecond > 0 && tick % 60 === 0) {
-    const result = changeResource(current, 'energy', energyPerSecond, tick);
+  if (tick % TICKS_PER_LOGIC_TICK !== 0) return { combatant: current, events };
+
+  // 精力：固定每逻辑步回复（不再受精神加成影响 —— 刻度太小，加法会失真）
+  if (ENERGY_PER_LOGIC_TICK > 0) {
+    const result = changeResource(current, 'energy', ENERGY_PER_LOGIC_TICK, tick);
     current = result.combatant;
     events.push(...result.events);
   }
 
-  const hpPerSecond = stats.hpRegen ?? 0;
-  if (hpPerSecond > 0 && tick % 60 === 0) {
-    const result = changeResource(current, 'hp', hpPerSecond, tick);
+  // 生命回复仍走属性（内容可以给回血装备）
+  const hpPerLogicTick = (stats.hpRegen ?? 0) / 10;
+  if (hpPerLogicTick > 0) {
+    const result = changeResource(current, 'hp', Math.round(hpPerLogicTick), tick);
     current = result.combatant;
     events.push(...result.events);
   }

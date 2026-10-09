@@ -1,12 +1,12 @@
 import { BattleEngine, type CreateBattleOptions } from '../../src/core/combat/battleState';
 import { VERROT_BEHAVIORS } from '../../src/core/ai';
 import { createRegistry } from '../../src/core/content/registry';
-import { ALL_BUFFS, ALL_SKILLS } from '../../src/data/content';
-import { ENTROPY_CLOCK } from '../../src/data/entities/entropyClock';
+import { ALL_BUFFS, ALL_SKILLS, DOUQI_MAX, ENERGY_MAX, HP_MAX } from '../../src/data/content';
+import { BOSS_HP_DISPLAY } from '../../src/data/entities/bossHp';
 import { flattenCatalog } from '../../src/i18n/translator';
 import { zhCN } from '../../src/i18n/locales/zh-CN';
 import { roughlyUsable, type EngineOptions, type RunOutcome } from '../../src/core/run';
-import type { Action, BattleState, Combatant, StatKey, StatModifier } from '../../src/core/types';
+import type { Action, BattleState, Combatant, StatKey } from '../../src/core/types';
 
 /**
  * 黄金重放与集成测试**共用**的夹具。
@@ -18,24 +18,38 @@ import type { Action, BattleState, Combatant, StatKey, StatModifier } from '../.
 /** 固定种子。改它等于让所有黄金断言失效，所以只在这里出现一次。 */
 export const FIXED_SEED = 20261009;
 
-export const PLAYER_CAPS = { hp: 12_000, energy: 120, douqi: 100 } as const;
-export const BOSS_CAPS = { hp: 170_000, energy: 0, douqi: 0 } as const;
+/**
+ * 上限（**展示刻度**：100 制）。
+ *
+ * 内容的伤害值本身就是展示刻度（攻 10 / 轰 30），所以这里同刻度 ——
+ * 早期把血量乘了 `DISPLAY_SCALE` 而伤害没乘，10 点伤害只打掉 1 点血。
+ */
+export const PLAYER_CAPS = {
+  hp: HP_MAX,
+  energy: ENERGY_MAX,
+  douqi: DOUQI_MAX,
+} as const;
+/** Boss 血量。取值依据见 `data/entities/bossHp.ts`（实测出来的）。 */
+export const BOSS_CAPS = { hp: BOSS_HP_DISPLAY, energy: 0, douqi: 0 } as const;
 
+/**
+ * 玩家基础属性。
+ *
+ * 新刻度下技能伤害都是内容里写死的固定值，所以主属性不再影响伤害 ——
+ * 只留最小值让属性系统可用。
+ */
 export const PLAYER_BASE: Partial<Record<StatKey, number>> = {
-  strength: 120,
-  agility: 100,
-  intelligence: 110,
-  spirit: 100,
-  energyRegen: 22,
-  critChance: 0.2,
-  critDamage: 0.5,
+  strength: 10,
+  agility: 10,
+  intelligence: 10,
+  spirit: 10,
 };
 
 const localeKeys = new Set(flattenCatalog(zhCN).keys());
 
 /** 真实内容 + 校验通过（`localeKeys` 由调用方注入，core 不读语言包）。 */
 export const registry = createRegistry(
-  { entities: [ENTROPY_CLOCK], skills: [...ALL_SKILLS], buffs: [...ALL_BUFFS] },
+  { entities: [], skills: [...ALL_SKILLS], buffs: [...ALL_BUFFS] },
   { localeKeys },
 );
 
@@ -75,21 +89,6 @@ export function makeBoss(): Combatant {
   };
 }
 
-/**
- * 玩家带的装备（熵之钟）。
- *
- * 把 `derived` 的表达式也摊平进修正池 —— 装备就是"被动修正的集合"，
- * 而派生修正在数据结构上就是"带表达式的修正"。
- */
-export function clockModifiers(): StatModifier[] {
-  const out: StatModifier[] = [];
-  for (const ability of ENTROPY_CLOCK.abilities) {
-    if (ability.kind === 'modifier') out.push(ability.modifier);
-    else if (ability.kind === 'derived') out.push({ ...ability.modifier, value: ability.value });
-  }
-  return out;
-}
-
 /** 标准引擎参数。`overrides` 允许测试改单个字段。 */
 export function makeGoldenEngineOptions(
   seed = FIXED_SEED,
@@ -106,7 +105,7 @@ export function makeGoldenEngineOptions(
       ['player', PLAYER_BASE],
       ['verrot', {}],
     ]),
-    passiveModifiers: new Map([['player', clockModifiers()]]),
+    passiveModifiers: new Map(),
     ...overrides,
   };
 }
@@ -124,20 +123,26 @@ export function makeEngine(seed = FIXED_SEED): BattleEngine {
  * 更新它之前先确认：变化是本次改动**有意**造成的吗？
  */
 export const GOLDEN_OUTCOME = {
+  /**
+   * 当前平衡下"会闪 + 会轰"的玩家**险胜**。
+   *
+   * 两个数字值得注意（都是实测出来的，不是估计）：
+   *   - 用时 896 tick ≈ 14.9 秒
+   *   - 玩家只剩 **15 血**（满血 100）
+   *
+   * 也就是说这场胜利是靠最后一点血挣来的。同一条策略如果
+   * **只按「攻」不放「轰」**，会输在 Boss 还剩 30 血的地方 ——
+   * 这正是想要的紧绷度：数值上"用对招式"是通关条件。
+   */
   status: 'victory' as const,
   endReason: 'hpZero' as const,
-  /** 击杀用时（tick）。这是个**连续量**，所以对数值改动敏感。 */
-  ticks: 6455,
+  /** 通关用时（tick）。连续量，对数值改动敏感。 */
+  ticks: 896,
   phase: 3,
-  /**
-   * 随机数终态。
-   *
-   * 它同时验证两件事：暴击判定确实消耗了随机数（否则这里会等于初始种子），
-   * 以及消耗顺序是可复现的。
-   */
-  finalRngSeed: 996_765_970,
+  /** 当前内容没有暴击判定，所以随机数一次都不被消耗。 */
+  finalRngSeed: 20261009,
   combatants: {
-    player: { alive: true, hp: 8798, energy: 120, douqi: 0, damageDealt: 0, damageTaken: 0 },
+    player: { alive: true, hp: 15, energy: 0, douqi: 27, damageDealt: 0, damageTaken: 0 },
     verrot: { alive: false, hp: 0, energy: 0, douqi: 0, damageDealt: 0, damageTaken: 0 },
   },
 } satisfies Omit<RunOutcome, 'ticks'> & { readonly ticks: number };
@@ -155,11 +160,22 @@ export function planPriority(
   priority: readonly string[],
   options: {
     readonly dodgeSkillId?: string;
-    /** 在命中前多少毫秒闪避。默认 200（闪避免疫窗口是 300ms）。 */
+    /**
+     * 在命中前多少毫秒闪避。默认 400。
+     *
+     * 「闪」的无敌窗口是 0.5 秒（500ms），所以要在命中前
+     * **不超过 500ms、也不要太接近 0** 的时刻按下：
+     *
+     *   150ms（早期取值）—— 太紧。因为"预测"是按 tick 粒度做的，
+     *     而 Boss 可能在闪避的无敌窗口**结束之后**才开始下一次读条，
+     *     于是两发重击只躲掉零发（实测"成功规避=0"）。
+     *   400ms —— 留出完整窗口覆盖命中时刻，同时仍有余量吸收
+     *     预测误差与人类反应时间。
+     */
     readonly dodgeLeadMs?: number;
   } = {},
 ): (tick: number, state: BattleState) => readonly Action[] {
-  const leadMs = options.dodgeLeadMs ?? 200;
+  const leadMs = options.dodgeLeadMs ?? 400;
   return (tick, state) => {
     /**
      * 会躲的玩家：**在命中前一点点闪避**，而不是一看到读条就闪。
@@ -179,8 +195,41 @@ export function planPriority(
         const remainingMs = cast.castTimeMs - elapsedMs;
         if (remainingMs > 0 && remainingMs <= leadMs) {
           const skill = registry.skills.get(options.dodgeSkillId);
-          if (roughlyUsable(options.dodgeSkillId, state, skill)) {
+          /**
+           * **只在"这次攻击真的会打到我"时才闪。**
+           *
+           * 踩过的坑：早期版本只要 Boss 在读条就闪 —— 包括那些
+           * 前摇刚好被公共冷却挡住的时刻。结果是白白花掉 40 精力
+           * （= 4 次「攻」的代价），实测"会闪"反而比"不闪"输得更惨。
+           *
+           * 所以这里要求：闪完之后还够打一次「攻」，
+           * 否则宁可挨这一下 —— 这与真人玩家的取舍一致。
+           */
+          /**
+           * **已经处于无敌窗口里就不要再闪了。**
+           *
+           * 踩过的坑：`remainingMs <= leadMs` 这个条件在 150ms 的
+           * 窗口里会命中约 9 个 tick，于是每个 tick 都闪一次 ——
+           * 一次读条烧掉 360 点精力，把输出的能量全抢走，
+           * 结果"会闪"反而输得比"不闪"更惨。
+           */
+          const alreadyImmune = (state.combatants.find((c) => c.side === 'ally')?.buffs ?? []).some(
+            (b) => b.defId === 'dodge-iframe',
+          );
+          if (alreadyImmune) {
+            // 直接跳到输出循环
+          } else {
+          const attackCost = registry.skills.get('attack')?.cost[0];
+          const needForAttack =
+            attackCost !== undefined && typeof attackCost.value === 'number' ? attackCost.value : 0;
+          const energyNow =
+            (state.combatants.find((c) => c.side === 'ally')?.resources.energy ?? 0);
+          const dodgeCost = skill?.cost[0];
+          const needForDodge =
+            dodgeCost !== undefined && typeof dodgeCost.value === 'number' ? dodgeCost.value : 0;
+          if (energyNow >= needForDodge + needForAttack && roughlyUsable(options.dodgeSkillId, state, skill)) {
             return [{ type: 'useSkill', skillId: options.dodgeSkillId, atTick: tick }];
+          }
           }
         }
       }
@@ -196,5 +245,10 @@ export function planPriority(
   };
 }
 
-/** 输出优先级（黄金重放用）。 */
-export const OUTPUT_PRIORITY = ['finisher', 'rend', 'heavyStrike', 'riposte', 'strike'] as const;
+/**
+ * 输出优先级（黄金重放用）。
+ *
+ * 顺序即"玩家会优先按哪个键"：凝（增伤）→ 轰（斗炁爆发）→ 攻（填充）。
+ * 破与御不在优先级里 —— 它们要在看到 Boss 读条时才用（见 `planPriority`）。
+ */
+export const OUTPUT_PRIORITY = ['focus', 'blast', 'attack'] as const;
