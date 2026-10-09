@@ -15,6 +15,7 @@ import { createRng, nextRandom, type RngState } from './rng';
 import { SimClock } from './simClock';
 import {
   SNAPSHOT_INTERVAL_TICKS,
+  type RenderState,
   type FromWorker,
   type SimEvent,
   type SimSnapshot,
@@ -169,6 +170,13 @@ export class SimSession {
     const events: SimEvent[] =
       advance.steps > 0 ? [{ kind: 'tick', tick: snapshot.tick }] : [];
 
+    // 渲染载荷每个推进帧都带 —— 否则画面会冻结到下一次快照（实测 184ms/36px 的跳）。
+    const render: RenderState = {
+      tick: snapshot.tick,
+      time: snapshot.time,
+      demoX: snapshot.demoX,
+    };
+
     // 节流：worker 路径每 SNAPSHOT_INTERVAL_TICKS 才带一次全量快照；
     // 主线程退回路径每帧都带（没有序列化成本，且渲染需要最新状态）。
     const shouldSnapshot =
@@ -177,6 +185,7 @@ export class SimSession {
     return {
       kind: 'frame',
       stats,
+      render,
       ...(shouldSnapshot ? { snapshot } : {}),
       ...(events.length > 0 ? { events } : {}),
     };

@@ -82,7 +82,17 @@ async function bootstrap(): Promise<void> {
   });
   sim.start(Date.now() >>> 0, performance.now());
 
-  /** 上一份快照的 x，用于插值。 */
+  /**
+   * 插值端点。
+   *
+   * 注意两个都踩过的坑：
+   *
+   * 1. **必须用逐 tick 的 render 载荷，不能用每 60 tick 的 snapshot。**
+   *    用快照会让位置在两次快照之间冻住 —— 实测"静止 184ms 然后跳 36px"。
+   * 2. **不要在这里做 Math.round。** Pixi 已经开了 `roundPixels: true`，
+   *    再取整会把平滑插值量化成整像素阶梯 —— 实测 ±1~2px 的持续抖动。
+   *    要让位置保持亚像素精度，由渲染器统一决定如何对齐像素。
+   */
   let prevX = 0;
   let currX = 0;
 
@@ -90,18 +100,16 @@ async function bootstrap(): Promise<void> {
     const realNow = performance.now();
     sim.frame(realNow);
 
-    const { snapshot, stats } = sim.view;
-    if (snapshot) {
-      // 快照更新了才推进插值端点：worker 节流发送时不能每帧都把 curr 当成 prev
-      if (snapshot.demoX !== currX) {
-        prevX = currX;
-        currX = snapshot.demoX;
-      }
+    const { render, snapshot, stats } = sim.view;
+    // 优先用逐 tick 载荷；退回时用快照（主线程路径每帧都带快照）
+    const authoritativeX = render?.demoX ?? snapshot?.demoX;
+    if (authoritativeX !== undefined && authoritativeX !== currX) {
+      prevX = currX;
+      currX = authoritativeX;
     }
 
     const alpha = stats?.alpha ?? 0;
-    const interpX = prevX + (currX - prevX) * alpha;
-    box.x = Math.round(interpX);
+    box.x = prevX + (currX - prevX) * alpha;
 
     debug.update({
       tick: stats?.tick ?? 0,
@@ -126,6 +134,17 @@ async function bootstrap(): Promise<void> {
    * 需要能查询 tick 是否真的在推进。M5 起会被真正的调试面板与
    * 录制回放取代。
    */
+  // 渲染侧探针：报告**实际写到 Pixi 上的值**，用于诊断视觉跳动
+  window.__raidProbe = () => ({
+    boxX: box.x,
+    currX,
+    prevX,
+    snapX: sim.view.snapshot?.demoX ?? -1,
+    simX: sim.view.render?.demoX ?? -1,
+    tick: sim.view.stats?.tick ?? -1,
+    snapshotTick: sim.view.snapshot?.tick ?? -1,
+  });
+
   window.__raidDebug = {
     probe: () => {
       const { snapshot, stats } = sim.view;

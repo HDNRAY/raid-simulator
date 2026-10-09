@@ -14,6 +14,7 @@ import { SimSession } from '../core/worker';
 import type {
   Action,
   FromWorker,
+  RenderState,
   SimEvent,
   SimSnapshot,
   ToWorker,
@@ -29,7 +30,10 @@ export interface WorkerLike {
 
 /** 当前可见的世界状态：最近一次快照 + 之后累积的事件。 */
 export interface SimView {
+  /** 权威状态（每 60 tick 一次） */
   readonly snapshot: SimSnapshot | undefined;
+  /** 逐 tick 的渲染载荷（用于连续插值，见 RenderState 的说明） */
+  readonly render: RenderState | undefined;
   readonly stats: WorkerStats | undefined;
   /** 自上次快照以来收到的事件（渲染层消费后由 clearEvents 清空） */
   readonly events: readonly SimEvent[];
@@ -51,6 +55,7 @@ export class SimClient {
   private fallback: SimSession | undefined;
 
   private snapshot: SimSnapshot | undefined;
+  private renderState: RenderState | undefined;
   private stats: WorkerStats | undefined;
   private events: SimEvent[] = [];
   private droppedMs = 0;
@@ -65,6 +70,7 @@ export class SimClient {
   get view(): SimView {
     return {
       snapshot: this.snapshot,
+      render: this.renderState,
       stats: this.stats,
       events: this.events,
       droppedMs: this.droppedMs,
@@ -214,6 +220,7 @@ export class SimClient {
       case 'frame': {
         this.stats = message.stats;
         this.droppedMs = message.stats.droppedMs;
+        if (message.render) this.renderState = message.render;
         if (message.snapshot) this.snapshot = message.snapshot;
         if (message.events) this.events.push(...message.events);
         break;

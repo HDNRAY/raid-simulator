@@ -60,6 +60,9 @@ export type FromWorker =
   | {
       readonly kind: 'frame';
       readonly stats: WorkerStats;
+      /** 每个推进帧都带：渲染插值用（见 RenderState 的说明） */
+      readonly render?: RenderState;
+      /** 每 SNAPSHOT_INTERVAL_TICKS 才带一次：权威状态 */
       readonly snapshot?: SimSnapshot;
       readonly events?: readonly SimEvent[];
     }
@@ -76,6 +79,27 @@ export type FromWorker =
  * 刻意先定义在这，是为了让协议层与模拟实现解耦：
  * worker 与 client 只依赖这个形状。
  */
+
+/**
+ * 每 tick 都发的小载荷，**专供渲染插值**。
+ *
+ * 为什么需要它：完整快照为了省序列化开销每 60 tick 才发一次，
+ * 于是渲染层在两次快照之间只能把位置冻住 —— 实测画面会
+ * **静止 184ms 然后跳 36px**，肉眼就是"一顿一顿"。
+ *
+ * 所以把"渲染关心的那几个字段"独立出来，每 tick 发一次。
+ * 它必须是**极小且扁平**的（几个 number），否则就失去了节流的意义。
+ *
+ * 快照仍然是权威状态（用于暂停恢复、回放、调试）；
+ * 这个载荷只负责"让画面连续"。
+ */
+export interface RenderState {
+  readonly tick: number;
+  /** 模拟时间（ms） */
+  readonly time: number;
+  /** M0 占位：演示对象的横坐标（逻辑像素） */
+  readonly demoX: number;
+}
 
 export interface SimSnapshot {
   /** 已推进的 tick 数 */

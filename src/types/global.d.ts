@@ -6,6 +6,16 @@
  */
 declare global {
   interface Window {
+    /** 渲染侧探针：报告实际写到 Pixi 上的位置 */
+    __raidProbe?(): {
+      boxX: number;
+      currX: number;
+      prevX: number;
+      snapX: number;
+      simX: number;
+      tick: number;
+      snapshotTick: number;
+    };
     __raidDebug?:
       | {
           probe(): {
