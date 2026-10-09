@@ -50,9 +50,10 @@ export function applyStageSize(
   size: StageSize,
 ): void {
   if (canvas.width !== LOGICAL_W || canvas.height !== LOGICAL_H) {
+    // 开发者错误，不是面向玩家的文案 —— 所以用英文，不进 i18n 表。
     throw new Error(
-      `canvas 内部尺寸必须是 ${LOGICAL_W}x${LOGICAL_H}，实际是 ` +
-        `${canvas.width}x${canvas.height}。缩放只能改 CSS 尺寸（scaling.ts 的约定）。`,
+      `canvas backing size must stay ${LOGICAL_W}x${LOGICAL_H}, got ` +
+        `${canvas.width}x${canvas.height}. Scaling must only change CSS size.`,
     );
   }
   canvas.style.width = `${size.width}px`;

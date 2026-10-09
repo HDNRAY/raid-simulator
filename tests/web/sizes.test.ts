@@ -67,7 +67,7 @@ describe('applyStageSize', () => {
     canvas.width = 1920;
     expect(() =>
       applyStageSize(canvas, { width: 1920, height: 1080, scale: 2, padX: 0, padY: 0 }),
-    ).toThrow(/内部尺寸必须是 960x540/);
+    ).toThrow(/backing size must stay 960x540/);
   });
 });
 

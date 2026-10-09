@@ -25,7 +25,7 @@ const BOX_Y = 200;
 
 async function bootstrap(): Promise<void> {
   const stage = document.querySelector<HTMLElement>('#stage');
-  if (!stage) throw new Error('缺少 #stage 容器');
+  if (!stage) throw new Error('index.html is missing the #stage container');
 
   // 动态 import：Pixi 只在真正需要时加载，失败时错误更清楚
   const { Application, Container, Graphics, Text } = await import('pixi.js');
@@ -69,7 +69,7 @@ async function bootstrap(): Promise<void> {
   box.y = BOX_Y;
   world.addChild(box);
 
-  const debug = new DebugPanel();
+  const debug = new DebugPanel({ Container, Graphics, Text });
   app.stage.addChild(debug.root);
 
   // ---- 模拟接线 ----

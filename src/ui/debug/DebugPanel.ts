@@ -1,4 +1,4 @@
-import { Container, Graphics, Text } from 'pixi.js';
+import type { Container, Graphics, Text } from 'pixi.js';
 
 /**
  * 调试面板（M0-7）。
@@ -70,13 +70,28 @@ export function formatDebugValue(field: FieldName, v: DebugValues): string {
   }
 }
 
+/**
+ * 注入 pixi 的构造器。
+ *
+ * 为什么不直接 `import { Container } from 'pixi.js'`：
+ * 那会让 pixi 同时被静态与动态导入，动态 import 就失去意义
+ * （Vite 会警告 INEFFECTIVE_DYNAMIC_IMPORT，且分包失效）。
+ * 由入口统一 await import('pixi.js') 再注入，是唯一干净的做法。
+ */
+export interface PixiConstructors {
+  readonly Container: typeof Container;
+  readonly Graphics: typeof Graphics;
+  readonly Text: typeof Text;
+}
+
 export class DebugPanel {
   readonly root: Container;
   private readonly valueTexts = new Map<FieldName, Text>();
   /** 上一帧的显示值，用于跳过无变化的赋值 */
   private readonly lastShown = new Map<FieldName, string>();
 
-  constructor() {
+  constructor(pixi: PixiConstructors) {
+    const { Container, Graphics, Text } = pixi;
     this.root = new Container();
     this.root.x = PANEL_X;
     this.root.y = PANEL_Y;

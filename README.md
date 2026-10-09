@@ -3,8 +3,9 @@
 一个**单挑 Boss**的实时战斗数值模拟器。第三人称视角、无位移、全键盘操作、
 PixiJS 像素渲染。
 
-> **项目状态：设计阶段。** 代码尚未开始。当前仓库里只有设计规范、画面示意图
-> 和发布配置。
+> **项目状态：M0 完成，进入 M1。** M0（工程骨架）已完成并通过 87 个单测 +
+> CDP 端到端验证（实测 tick 速率 60.0Hz）。当前有一个 tick 驱动的占位画面，
+> 真正的战斗逻辑从 M1 开始写。
 
 ---
 
@@ -74,8 +75,8 @@ PixiJS 像素渲染。
 
 | # | 内容 | 状态 |
 |---|---|---|
-| M0 | 工程骨架：Vite + TS + Pixi + 固定步长循环 | ⬜ |
-| M1 | `core/` 确定性模拟（数据模型 + 修正树 + 资源 + CD + 读条 + DoT） | ⬜ |
+| M0 | 工程骨架：Vite + TS + Pixi + 固定步长循环 | ✅ 完成 |
+| M1 | `core/` 确定性模拟（数据模型 + 修正树 + 资源 + CD + 读条 + DoT） | 🚧 进行中 |
 | M2 | 判定层（hit frame + 无敌/减伤 + 中断 + 属性溯源重算） | ⬜ |
 | M3 | 输入层（键位 + Action 队列 + 按住连发 + 回放录制） | ⬜ |
 | M4 | Boss AI 与行为数组（时间轴 + 阶段 + 狂暴 + 打断） | ⬜ |
@@ -89,16 +90,23 @@ PixiJS 像素渲染。
 
 ## 开发
 
-> 尚未初始化。M0 完成后本节会填入真实命令。
+
 
 ```bash
 pnpm install
-pnpm run dev        # 本地开发
-pnpm run test       # 单元 + 黄金重放 + 内容校验
-pnpm run typecheck
-pnpm run lint       # 包含 core/ 纯净性检查
-pnpm run build      # 产出 dist/
+pnpm run dev            # 本地开发（http://localhost:5273）
+pnpm run typecheck      # tsc --noEmit
+pnpm run lint           # 含架构硬约束 C1-C5 / I1-I3
+pnpm run test:run       # 87 个单测（含 lint 反向用例）
+pnpm run test:core      # 只跑纯逻辑，node 环境，不碰浏览器
+pnpm run verify:e2e     # CDP 端到端：验证 tick 真的在 60Hz 推进
+pnpm run build          # 产出 dist/（base 为 /raid/）
 ```
+
+**lint 的硬约束不是风格偏好**：`core/` 里出现 `Math.random`、`import 'pixi.js'`、
+`document`、`await`、`new Map()`，或者 `src/` 下写死中文，都会**构建失败**。
+反向用例在 `tools/lint-fixtures/`，由 `tests/unit/lintRules.test.ts` 断言规则真的生效
+（不实测的 lint 规则等于没写）。
 
 推送 `main` 会触发 [.github/workflows/deploy.yml](.github/workflows/deploy.yml)：
 typecheck → lint → test → build → 发布到 GitHub Pages。
