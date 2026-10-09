@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    /* ---- 语言与模块 ---- */
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["vite/client"],
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": false,
+
+    /* ---- 严格档位（刻意高于默认） ---- */
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    /* ---- 输出 ---- */
+    "noEmit": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+
+    /* 刻意不配 paths 别名：
+       跨层依赖用相对路径，这样 import 语句本身就暴露了"谁依赖谁"，
+       lint 的层级约束（C1/C3/I3）也更容易写准。 */
+  },
+  "include": ["src", "tests", "vite.config.ts", "eslint.config.js"]
+}

@@ -1,0 +1,35 @@
+/*
+ * 页面外壳样式。只有 4 条规则，且刻意保持最小 ——
+ * UI 全部画在 canvas 里，DOM 只承担"把 canvas 摆正"这一件事。
+ *
+ * 注意：这三条不糊的必要条件缺一不可（architecture 规范 §10.3）。
+ */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #000;
+  overflow: hidden;
+}
+
+/* 初始 display:none，等 Pixi 初始化完、canvas 尺寸算好后再加 .ready，
+   避免首帧 canvas 以错误尺寸闪现。 */
+#stage {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+#stage.ready {
+  display: flex;
+}
+
+#stage > canvas {
+  display: block;
+  /* ① CSS 放大必须用最近邻，否则像素画会被线性插值糊掉 */
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
