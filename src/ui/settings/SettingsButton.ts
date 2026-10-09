@@ -1,21 +1,22 @@
 /**
- * 设置按钮（canvas 里的一个小按钮）。
+ * 战斗 HUD 上的设置按钮。
  *
  * ------------------------------------------------------------------
- * 为什么按钮也自己做而不是用 DOM
+ * 这里只剩"放哪儿 + 写什么键位"，视觉与交互都在 `IconButton` 里
  * ------------------------------------------------------------------
  *
- * 架构规范定的是"所有 UI 走 canvas"。一个 `<button>` 确实更省事，
- * 但那样一来"设置"就成了唯一一个 DOM 元素，跨屏缩放的坐标系
- * 会多出一套（DOM 用 CSS 像素、canvas 用逻辑像素），
- * letterbox 时会错位。
+ * 原先这个文件自己画图标、自己算命中、自己管悬停/焦点状态。
+ * 抽成通用组件（`ui/IconButton.ts`）之后，它退化成一层薄封装：
  *
- * 所以这里就是一个 canvas 图形 + 自己算的命中测试。
+ *   - 位置：右下角，压在技能栏上方
+ *   - 内容：齿轮图标 + 快捷键提示
+ *
+ * 需求："进入设置也要支持快捷键，而且要写在图标旁边。
+ * 这个最好抽成组件，以后非战斗画面会经常用。"
  */
 
 import type { Container } from 'pixi.js';
-import { Icon } from '../../render/icons';
-import { PALETTE } from '../../render/theme';
+import { IconButton } from '../IconButton';
 import { LOGICAL } from '../layout';
 import type { PixiCtor } from '../primitives';
 
@@ -28,104 +29,58 @@ export interface SettingsButtonOptions {
 /** 按钮几何：右下角，压在技能栏上方一点。 */
 const SIZE = 26;
 const MARGIN = 8;
-/** 图标边长与颜色（比按钮小一圈，留出内边距）。 */
-const ICON_SIZE = 18;
-const ICON_COLOR = 0xb0b0be;
 
 export class SettingsButton {
   readonly root: Container;
 
-  private readonly icon: Icon;
-  private readonly rect: { x: number; y: number; w: number; h: number };
-  private hovered = false;
-  private focused = false;
-  private lastDrawnHover = false;
+  private readonly button: IconButton;
 
-  constructor(private readonly options: SettingsButtonOptions) {
+  constructor(options: SettingsButtonOptions) {
     const { pixi } = options;
-    this.rect = {
-      x: LOGICAL.width - MARGIN - SIZE,
-      // 技能栏底部在 530 左右，所以按钮放在它上面
-      y: LOGICAL.height - MARGIN - SIZE - 62,
-      w: SIZE,
-      h: SIZE,
-    };
-
-    this.root = new pixi.Container();
-    /**
-     * 图标用 SVG（`render/icons.ts`）。
-     *
-     * 这里换过三种做法：字符「设」→ 命令式绘制的齿轮 → SVG。
-     * SVG 胜出的理由是**美术能参与**：它就是一个标准的图形文件，
-     * 而前两种都要改代码。
-     */
-    this.icon = new Icon({
+    this.button = new IconButton({
       pixi,
-      name: 'gear',
-      size: ICON_SIZE,
-      color: ICON_COLOR,
+      icon: 'gear',
+      // 图标 + 快捷键提示，整体居中在"压在技能栏上方"的位置
+      anchor: {
+        x: LOGICAL.width - MARGIN - SIZE / 2,
+        y: LOGICAL.height - MARGIN - SIZE - 62,
+      },
+      shortcut: options.translate('settings.openKey'),
+      hintSide: 'left',
+      onClick: options.onClick,
     });
-    this.root.addChild(this.icon.root);
-    this.placeIcon();
+    this.root = this.button.root;
+
+    /**
+     * ⚠️ 按钮**没有边框与底色**（需求明确）。
+     *
+     * 状态只靠图标（与文字）的颜色表达 —— 这是本项目"画面上
+     * 只有图形"的统一语言，与技能栏的处理一致。
+     */
   }
 
-  /** 命中测试（坐标是逻辑像素）。 */
+  /** 命中测试（逻辑像素）。 */
   hitTest(px: number, py: number): boolean {
-    const hit =
-      px >= this.rect.x &&
-      px <= this.rect.x + this.rect.w &&
-      py >= this.rect.y &&
-      py <= this.rect.y + this.rect.h;
-    if (hit) this.options.onClick();
-    return hit;
+    return this.button.hitTest(px, py);
   }
 
   /** 指针悬停。 */
   setHovered(hovered: boolean): void {
-    this.hovered = hovered;
+    this.button.setHovered(hovered);
   }
 
-  /**
-   * 键盘是否选中了它。
-   *
-   * 与"悬停"分开：两者视觉一致（图标变亮），但来源不同 ——
-   * 混成一个字段会让"鼠标移开时把键盘选中也一起清掉"。
-   */
+  /** 键盘焦点。 */
   setFocused(focused: boolean): void {
-    this.focused = focused;
-    this.update();
+    this.button.setFocused(focused);
   }
 
-  /**
-   * 悬停 / 键盘选中状态。
-   *
-   * **没有边框、没有底色**（需求明确"不需要边框"）—— 状态只靠
-   * **图标颜色**表达，与技能栏"不要按钮方框"的处理一致：
-   * 画面上只有图形本身。
-   */
+  /** 每帧（状态变化时才真正重绘）。 */
   update(): void {
-    const lit = this.hovered || this.focused;
-    if (lit === this.lastDrawnHover) return;
-    this.lastDrawnHover = lit;
-    this.icon.setColor(lit ? PALETTE.douqi.bright : ICON_COLOR);
+    this.button.update();
   }
 
-  /**
-   * 图标居中。
-   *
-   * 图标是 16px 的正方形，`Icon` 的原点在左上角，所以手动偏移
-   * 半个尺寸 —— 这也解释了为什么不用 `root.width`：SVG 纹理的
-   * 尺寸要到渲染时才确定，而这里是布局期。
-   */
-  private placeIcon(): void {
-    const { x, y, w, h } = this.rect;
-    this.icon.root.x = x + (w - ICON_SIZE) / 2;
-    this.icon.root.y = y + (h - ICON_SIZE) / 2;
-  }
-
-  /** 无障碍/调试用：按钮的语义名称。 */
-  get labelKey(): string {
-    return 'settings.open';
+  /** 可点区域（供调试与布局断言）。 */
+  get bounds(): { readonly x: number; readonly y: number; readonly w: number; readonly h: number } {
+    return this.button.bounds;
   }
 }
-
