@@ -133,9 +133,13 @@ addEventListener: (type, listener) =>
 | 文件 | 天花板 |
 |---|---|
 | `src/core/combat/battleState.ts` | 1580 |
-| `src/render/BattleScene.ts` | 1421 |
 | `src/core/types.ts` | 1091 |
 | `src/ui/settings/SettingsPanel.ts` | 938 |
+
+✅ 已拆到 700 以下、**从表里移除**的：
+`src/render/BattleScene.ts`（1421 → **668**，拆成
+`skillBar` / `IconStrip` / `FloatingTextLayer` / `background` /
+`sceneTypes` / `hudUtils` / `actorLayout` + `parts/` 下 7 个帧部件）。
 
 改这些文件时**必然触线**，所以每次都要走上面的"问一句"流程。
 

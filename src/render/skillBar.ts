@@ -11,7 +11,7 @@ import { FONT, LAYOUT, skillSlotLabels, skillSlotRect } from '../ui/layout';
 import { Label, type PixiCtor } from '../ui/primitives';
 import { PALETTE } from './theme';
 import type { ResourceKeyName, SkillSlotView } from './viewModel';
-import type { TranslateFn } from './sceneTypes';
+import type { FrameContext, FramePart, TranslateFn } from './sceneTypes';
 
 /**
  * 技能格右上角"资源代价"的颜色。
@@ -28,7 +28,9 @@ const RESOURCE_COLORS: Readonly<Record<ResourceKeyName, number>> = {
 /** 冷却矮条的最大高度（取自布局表，避免两处写魔数）。 */
 const SLOT_COOLDOWN_BAR_H = LAYOUT.skillBar.cooldownBarHeight;
 
-export class SkillBarView {
+export class SkillBarView implements FramePart {
+  readonly name = 'skillBar';
+
   readonly root: Container;
   private readonly slots: Array<{
     gfx: Graphics;
@@ -227,7 +229,17 @@ export class SkillBarView {
     }
   }
 
-  update(skills: readonly SkillSlotView[]): void {
+  /**
+   * 帧部件入口：自己去 ctx 里取技能栏需要的字段。
+   *
+   * 形状从 `update(skills)` 改成 `render(ctx)` —— 由场景替它取字段，
+   * 变成部件自己取。这一行就是"注册机制"与"场景逐个调用"的分界。
+   */
+  render(ctx: FrameContext): void {
+    this.draw(ctx.view.skills);
+  }
+
+  private draw(skills: readonly SkillSlotView[]): void {
     this.ensure(skills.length);
 
     for (let i = 0; i < this.slots.length; i += 1) {

@@ -23,10 +23,18 @@ import { LogPanel } from '../ui/LogPanel';
 import { drawBackground } from './background';
 import { SkillBarView } from './skillBar';
 import { IconStrip } from './IconStrip';
+import { FloatingTextLayer } from './FloatingTextLayer';
+import { BossTopBarPart } from './parts/bossTopBar';
+import { BossCastBarPart } from './parts/bossCastBar';
+import { PlayerPanelPart } from './parts/playerPanel';
+import { PlayerCastBarPart } from './parts/playerCastBar';
+import { PlayerActorPart } from './parts/playerActor';
+import { StatusLinePart } from './parts/statusLine';
+import { FlashPart } from './parts/flash';
+import { FrameRegistry } from './sceneTypes';
 import type { BattleSceneOptions } from './sceneTypes';
 import { FONT, LAYOUT, LOGICAL } from '../ui/layout';
 import { UiLayout } from '../ui/uiLayout';
-import { DISPLAY_SCALE } from '../data/balance';
 
 /**
  * 类型从这里**重新导出**，所以 `import { BattleSceneOptions } from
@@ -36,20 +44,10 @@ import { DISPLAY_SCALE } from '../data/balance';
 export type { BattleSceneOptions, TranslateFn } from './sceneTypes';
 
 
-/**
- * 闪避位移的峰值（逻辑像素，向右）。
- *
- * 演进 26 → **52**（需求："幅度按现在的翻倍"）。
- *
- * 玩家本体宽约 108（cx±54），中心在 x=300，所以右移 52 之后
- * 最右缘到 406 —— 与 Boss（约 x 630，本体宽 100+）之间仍有 200px，
- * 不会撞上。左缘到 194，距左边界也够。
- */
-const DODGE_PEAK_X = 52;
 
-import { Bar, Label, PANEL_STYLE, Panel, type PixiCtor } from '../ui/primitives';
+import { Bar, Label, PANEL_STYLE, Panel } from '../ui/primitives';
 import { BossSprite } from './actors/BossSprite';
-import { ratioOf, type BattleSnapshotView } from './viewModel';
+import type { BattleSnapshotView } from './viewModel';
 import type { LogEntry } from '../app/logFormat';
 
 /* ================================================================== *
@@ -71,45 +69,6 @@ import type { LogEntry } from '../app/logFormat';
  * 飘字
  * ================================================================== */
 
-class FloatingTextLayer {
-  readonly root: Container;
-  private readonly pool: Array<{ label: Label }> = [];
-
-  constructor(private readonly pixi: PixiCtor) {
-    this.root = new pixi.Container();
-  }
-
-  update(items: BattleSnapshotView['floatingText']): void {
-    while (this.pool.length < items.length && this.pool.length < 24) {
-      const label = new Label(this.pixi, {
-        x: 0,
-        y: 0,
-        size: FONT.title,
-        color: 0xffffff,
-        anchorX: 0.5,
-        stroke: 0x000000,
-        strokeWidth: 3,
-      });
-      this.root.addChild(label.root);
-      this.pool.push({ label });
-    }
-    for (let i = 0; i < this.pool.length; i += 1) {
-      const slot = this.pool[i];
-      const view = items[i];
-      if (!slot) continue;
-      if (!view) {
-        slot.label.root.visible = false;
-        continue;
-      }
-      slot.label.root.visible = true;
-      slot.label.set(view.text);
-      slot.label.setColor(view.color);
-      slot.label.root.x = view.x;
-      slot.label.root.y = view.y;
-      slot.label.root.alpha = Math.min(1, view.life * 1.5);
-    }
-  }
-}
 
 /* ================================================================== *
  * 主场景
@@ -173,7 +132,13 @@ export class BattleScene {
   private readonly resultStats: Label;
   private readonly resultHint: Label;
 
-  private lastPlayerPose = 1;
+  /**
+   * 帧部件注册表（见 `FrameRegistry` / `FramePart`）。
+   *
+   * 场景只持有它并广播；**不持有任何部件内部状态**
+   * （比如玩家姿态的 `lastPose` 已经跟着 `PlayerActorPart` 走了）。
+   */
+  private readonly registry = new FrameRegistry();
 
   private readonly options: BattleSceneOptions;
 
@@ -202,7 +167,6 @@ export class BattleScene {
      */
     this.playerRoot = new pixi.Container();
     this.playerAnim = new pixi.Graphics();
-    this.drawPlayer(1);
     this.playerRoot.addChild(this.playerAnim);
     this.root.addChild(this.playerRoot);
 
@@ -500,33 +464,93 @@ export class BattleScene {
     );
     // 加到 HUD 之后（同一父级），所以天然压在 HUD 之上
     this.root.addChild(this.resultLayer);
+
+    this.registerFrameParts();
   }
 
-  /** 玩家背影。`pose`：1 = 站姿，0.85 = 下沉（闪避/格挡）。 */
-  private drawPlayer(pose: number): void {
-    const g = this.playerAnim;
-    const P = PALETTE;
-    const cx = 300;
-    const base = 456 + (1 - pose) * 12;
-    const h = 84 * pose;
-    g.clear();
-
-    g.poly([cx - 54, base, cx - 30, base - h, cx + 30, base - h, cx + 54, base, cx + 34, base, cx - 34, base]);
-    g.fill(P.playerCloak);
-    g.poly([cx - 54, base, cx - 30, base - h, cx - 7, base - h, cx - 12, base]);
-    g.fill(P.playerCloakDark);
-    g.poly([cx - 52, base, cx - 29, base - h - 3, cx - 14, base - h + 5, cx - 36, base]);
-    g.fill(P.playerCloakLight);
-    g.poly([cx + 52, base, cx + 29, base - h - 3, cx + 14, base - h + 5, cx + 36, base]);
-    g.fill(P.playerCloakLight);
-    g.ellipse(cx, base - h - 14, 16, 17).fill(0x1a2036);
-    g.ellipse(cx, base - h - 13, 13, 14).fill(0x2a3450);
-    g.poly([cx + 40, base - 5, cx + 71, base - 92, cx + 80, base - 88, cx + 49, base + 3]);
-    g.fill(0x8a90a0);
-    g.poly([cx + 44, base - 8, cx + 68, base - 87, cx + 74, base - 84, cx + 48, base + 1]);
-    g.fill(0xb8bcc8);
-    g.rect(cx + 34, base - 11, 18, 12).fill(0xa8863c);
+  /**
+   * **注册帧部件**（需求："ui 的各个部分注册在 tick 上，tick 直接通知
+   * 大家就好了"）。
+   *
+   * ⚠️ **注册顺序 = 绘制顺序**，所以这里必须按视觉层叠排：
+   *   背景/角色 → HUD 面板 → 读条 → 技能栏 → 飘字 → 闪光 → 结算
+   *
+   * 顺序是有语义的（飘字要盖在面板上、结算要盖在所有东西上），
+   * 所以 `FrameRegistry` 保序、这里也按人的阅读顺序排列。
+   */
+  private registerFrameParts(): void {
+    this.registry.add(new BossTopBarPart({
+      bossName: this.bossName,
+      bossPhase: this.bossPhase,
+      timerLabel: this.timerLabel,
+      bossHpBar: this.bossHpBar,
+      bossHpText: this.bossHpText,
+      enrageBadge: this.enrageBadge,
+      bossBuffs: this.bossBuffs,
+    }));
+    this.registry.add(new BossCastBarPart(this.castBar));
+    this.registry.add(new PlayerPanelPart({
+      playerName: this.playerName,
+      hpBar: this.hpBar,
+      energyBar: this.energyBar,
+      douqiBar: this.douqiBar,
+      hpLabel: this.hpLabel,
+      energyLabel: this.energyLabel,
+      douqiLabel: this.douqiLabel,
+      hpText: this.hpText,
+      energyText: this.energyText,
+      douqiText: this.douqiText,
+      playerBuffs: this.playerBuffs,
+    }));
+    this.registry.add(new PlayerCastBarPart(this.playerCastBar));
+    this.registry.add(new PlayerActorPart(this.playerRoot, this.playerAnim));
+    this.registry.add(this.skillBar);
+    this.registry.add(this.floating);
+    this.registry.add(new StatusLinePart(this.statusLabel, this.statusSub));
+    this.registry.add(new FlashPart(this.flashOverlay));
+    this.registry.add({
+      name: 'logPanel',
+      render: (ctx) => this.logPanel.update(ctx.logEntries),
+    });
+    this.registry.add({
+      name: 'bossActor',
+      render: (ctx) =>
+        this.boss.update(ctx.view.telegraphing, ctx.view.bossFlash, ctx.view.armored),
+    });
+    this.registry.add({
+      name: 'result',
+      render: (ctx) => this.renderResult(ctx),
+    });
   }
+
+  /**
+   * 结算面板。
+   *
+   * ⚠️ 它是**唯一用闭包注册**的部件：它要改 5 个自己持有的字段
+   * （标题/原因/统计/提示），字段太多不值得为它单独开一个文件传 6 个引用。
+   * 闭包把它留在场景里，同时仍然走注册机制 —— 顺序照样由注册决定。
+   */
+  private renderResult(ctx: { view: BattleSnapshotView; translate: (k: string) => string }): void {
+    const { view, translate } = ctx;
+    const result = view.result;
+    this.resultLayer.visible = result !== undefined;
+    if (!result) return;
+    this.resultTitle.set(translate(result.titleKey));
+    this.resultTitle.setColor(result.victory ? 0xffd870 : PALETTE.danger.bright);
+    this.resultReason.set(translate(result.reasonKey));
+    this.resultHint.set(translate('screen.hintRestart'));
+
+    // 统计用等宽对齐的"标签  值"，比堆一串数字好读
+    const rows: Array<[string, string]> = [
+      [translate('screen.statTime'), `${result.seconds}s`],
+      [translate('screen.statRemainingHp'), `${result.remainingHp}/${result.remainingHpCap}`],
+      [translate('screen.statTotalDamage'), `${result.totalDamage}`],
+      [translate('screen.statDps'), `${result.dps}`],
+    ];
+    const width = Math.max(...rows.map(([k]) => k.length));
+    this.resultStats.set(rows.map(([k, v]) => `${k.padEnd(width, ' ')}   ${v}`).join('\n'));
+  }
+
 
   /**
    * **UI 缩放**（需求："缩放游戏 UI……战斗画面和战斗文字保持不变"）。
@@ -617,233 +641,29 @@ export class BattleScene {
    * 数据流（各自消费同一批引擎事件），所以不该硬塞进 `view` 里。
    * 这样"要不要显示日志"就只是调用方传不传数组的问题。
    */
+  /**
+   * 每帧广播。
+   *
+   * ⚠️ **这里不再逐个 update 部件**（需求："tick 对 ui 的更新，应该是
+   * 注册机制，ui 的各个部分注册在 tick 上，tick 直接通知大家就好了"）。
+   *
+   * 原先这个方法是一个 **202 行的顺序调用清单**：场景知道每个部件
+   * 需要 `view` 里的哪个字段（`bossHpBar.update(ratioOf(view.boss.hp))`），
+   * 每加一个部件都要回来改这里。
+   *
+   * 现在只有一件事：**组装这一帧的上下文，然后广播**。
+   * 部件自己去 `ctx` 里取它要的字段 —— 场景不再知道任何部件的内部。
+   */
   update(view: BattleSnapshotView, logEntries: readonly LogEntry[] = []): void {
-    const { translate } = this.options;
-
-    /* ---------- 战斗日志（右侧） ---------- */
-    this.logPanel.update(logEntries);
-
-    /* ---------- 角色 ---------- */
-    this.boss.update(view.telegraphing, view.bossFlash, view.armored);
-
-    const dodging = view.player.buffs.some((b) => b.id.startsWith('dodge') && b.remainingMs > 0);
-    const guarding = view.player.buffs.some((b) => b.id.startsWith('guard') && b.remainingMs > 0);
-    /**
-     * 姿态下沉**只给防御**（需求："闪避的动画不要变矮了"）。
-     *
-     * 原先闪避和防御共用 `pose = 0.85`。但区分两者的手段已经够了：
-     * 闪避是**横向位移**、防御是**下沉 + 冷色**。再让闪避也变矮，
-     * 两者就只剩颜色差异，在余光里反而不好分。
-     */
-    const pose = guarding ? 0.85 : 1;
-    if (pose !== this.lastPlayerPose) {
-      this.lastPlayerPose = pose;
-      this.drawPlayer(pose);
-    }
-    this.playerAnim.tint = dodging ? 0x9ad8ff : guarding ? 0xc8d0e8 : 0xffffff;
-
-    /**
-     * 闪避位移：**往右闪一下，然后复位**（需求）。
-     *
-     * 形状是一条"上去再下来"的三角波：
-     *   - 位移在闪避窗口的**中点**达到峰值（`DODGE_PEAK_X`）
-     *   - 窗口结束正好回到 0，所以不需要额外的缓动状态机
-     *
-     * 为什么用 `remainingMs / durationMs` 而不是自己记时间：
-     * 无敌窗口本来就是"这段动画的时间轴"，跟着它走就不会出现
-     * "动画还在播但无敌已经结束"的错位。
-     *
-     * ⚠️ 位移与防御**明显区分**（需求）：防御只有下沉（pose）+ 冷色，
-     * 不位移；闪避才横移 —— 两者在余光里也不会混。
-     */
-    const dodge = view.player.buffs.find((b) => b.id.startsWith('dodge') && b.remainingMs > 0);
-    if (dodge) {
-      const total = Math.max(1, dodge.durationMs);
-      const progress = 1 - Math.min(1, dodge.remainingMs / total);
-      // 三角波：0 → 1 → 0
-      const wave = 1 - Math.abs(progress * 2 - 1);
-      this.playerRoot.x = Math.round(DODGE_PEAK_X * wave);
-    } else {
-      this.playerRoot.x = 0;
-    }
-
-    /* ---------- 顶栏 ---------- */
-    const bb = LAYOUT.bossBar;
-    this.bossName.set(translate(view.boss.nameKey));
-    // 阶段紧跟名字，用实际宽度定位（不硬编码偏移，换语言也不会重叠）
-    this.bossPhase.root.x = bb.x + 2 + this.bossName.root.width + 10;
-    /**
-     * 不再显示"阶段 N"。
-     *
-     * 阶段是**内容概念**（一层 buff），引擎不知道它是什么，
-     * 所以这里也没有数字可显示 —— 阶段由 Boss buff 条上那个图标表达，
-     * 玩家看到「狂怒」就知道进二阶段了。
-     * 名字后面保留的那格用来显示**非阶段类**的状态（目前是空的）。
-     */
-    this.bossPhase.set('');
-    this.bossPhase.setColor(view.enraged ? PALETTE.danger.bright : PALETTE.textDim);
-    this.timerLabel.set(view.remainingMs === undefined ? '' : formatClockSafe(view.remainingMs));
-    this.timerLabel.setColor(
-      view.remainingMs !== undefined && view.remainingMs < 30_000 ? PALETTE.danger.bright : 0xf0c060,
-    );
-
-    this.bossHpBar.update(ratioOf(view.boss.hp));
-    // 血量与狂暴标记共用一行：狂暴时用它替换血量数字（更紧急的信息优先）
-    if (view.enraged) {
-      this.enrageBadge.set(translate('event.enrage'));
-      this.bossHpText.set('');
-    } else {
-      this.enrageBadge.set('');
-      this.bossHpText.set(
-        `${display(view.boss.hp.current)} / ${display(view.boss.hp.cap)}   ${percentOf(view.boss.hp)}%`,
-      );
-    }
-    this.bossBuffs.update(view.boss.buffs);
-
-    /* ---------- 预警条 ---------- */
-    const cast = view.boss.cast;
-    this.castBar.visible = cast !== undefined;
-    if (cast) {
-      /**
-       * 招式的提示标签（需求："boss 的招式的 tags 显示在它的读条中"）。
-       *
-       * 「霸体」= 打不断，别浪费「破」；「高伤」= 闪避比防御更值。
-       */
-      const tagLabel = (cast.hintTags ?? [])
-        .map((tag) => translate(`settings.hintTags.${tag}`))
-        .join(' · ');
-      this.castBar.setContent(
-        translate(cast.nameKey),
-        `${(cast.remainingMs / 1000).toFixed(1)}s`,
-        tagLabel,
-      );
-      /**
-       * 文字颜色表达**能不能打断**：可打断 → 青绿；霸体 → 青蓝。
-       * 需求去掉了"闪避或格挡"那行字（永远适用 = 噪声），
-       * 只留剩余秒数。
-       */
-      this.castBar.setNameColor(cast.interruptible ? PALETTE.interrupt.bright : 0x30c8d0);
-      this.castBar.update(cast.progress);
-      /**
-       * ⚠️ 边框**不再随进度变色**。
-       *
-       * 曾经在进度过 70% 时把边框从危险红转成亮金（"快命中了"的压力感）。
-       * 去掉了，两个原因：
-       *   1. 信息重复 —— 剩余秒数已经直接写在条上
-       *   2. 阈值的语义不一致 —— 硬编码 70% 对 1.8 秒的重斩和 2.2 秒的
-       *      横扫意味着不同的剩余时间（0.54s vs 0.66s），
-       *      玩家没法把它当成一个稳定的规则来学
-       *
-       * 现在边框恒为红色（构造时定下），只用来界定"这是一条威胁读条"。
-       */
-    }
-
-    /* ---------- 玩家读条 ---------- */
-    /**
-     * 玩家自己的读条。
-     *
-     * 与 Boss 预警条共用一个组件形状（Panel + Label + Bar），
-     * 但用**暖金色**而不是危险红 —— 颜色在这里承担语义：
-     * 红色 = "要挨打了"，金色 = "我在出手"。
-     *
-     * 不显示"可打断 / 需闪避"那类提示：那是 Boss 预警条的信息，
-     * 对自己没有意义。
-     */
-    const playerCast = view.player.cast;
-    this.playerCastBar.visible = playerCast !== undefined;
-    if (playerCast) {
-      this.playerCastBar.setContent(
-        translate(playerCast.nameKey),
-        `${(playerCast.remainingMs / 1000).toFixed(1)}s`,
-      );
-      this.playerCastBar.update(playerCast.progress);
-      // 同上：边框恒为金色，不随进度变色
-    }
-
-    /* ---------- 玩家面板 ---------- */
-    this.playerName.set(translate(view.player.nameKey));
-    this.hpBar.update(ratioOf(view.player.hp));
-    this.energyBar.update(ratioOf(view.player.energy));
-    this.douqiBar.update(ratioOf(view.player.douqi));
-    // 单字标签：生 / 精 / 炁（楷体）。用展示刻度显示数值（100 制）
-    this.hpLabel.set(translate('resource.hpShort'));
-    this.energyLabel.set(translate('resource.energyShort'));
-    this.douqiLabel.set(translate('resource.douqiShort'));
-    this.hpText.set(`${display(view.player.hp.current)}/${display(view.player.hp.cap)}`);
-    this.energyText.set(`${display(view.player.energy.current)}/${display(view.player.energy.cap)}`);
-    this.douqiText.set(`${display(view.player.douqi.current)}/${display(view.player.douqi.cap)}`);
-    this.playerBuffs.update(view.player.buffs);
-
-    /* ---------- 技能栏 / 飘字 / 状态 ---------- */
-    this.skillBar.update(view.skills);
-    this.floating.update(view.floatingText);
-
-    const status = view.statusLine;
-    /**
-     * 状态提示区只显示**技能被拒的原因**（「攻 · 公共冷却中」这类）。
-     *
-     * "可打断"曾经也画在这里 —— 但预警条右侧已经有同一句话，
-     * 屏幕中央再出现一次纯属噪音（那个位置应该留给真正的突发事件）。
-     */
-    if (status !== undefined && view.statusDetail !== undefined) {
-      this.statusLabel.set('');
-      this.statusSub.set(`${translate(view.statusDetail)}  ·  ${translate(status)}`);
-      this.statusSub.setColor(0xffb0a0);
-    } else {
-      this.statusLabel.set(status === undefined ? '' : translate(status));
-      this.statusSub.set('');
-    }
-    this.statusLabel.root.visible = this.statusLabel.root.text !== '';
-    this.statusSub.root.visible = this.statusSub.root.text !== '';
-
-    /* ---------- 闪光 ---------- */
-    this.flashOverlay.alpha = Math.min(0.3, view.playerFlash * 0.3);
-
-    /* ---------- 结算 ---------- */
-    const result = view.result;
-    this.resultLayer.visible = result !== undefined;
-    if (result) {
-      this.resultTitle.set(translate(result.titleKey));
-      this.resultTitle.setColor(result.victory ? 0xffd870 : PALETTE.danger.bright);
-      this.resultReason.set(translate(result.reasonKey));
-      this.resultHint.set(translate('screen.hintRestart'));
-
-      // 统计用等宽对齐的"标签  值"，比堆一串数字好读
-      const rows: Array<[string, string]> = [
-        [translate('screen.statTime'), `${result.seconds}s`],
-        [translate('screen.statRemainingHp'), `${result.remainingHp}/${result.remainingHpCap}`],
-        [translate('screen.statTotalDamage'), `${result.totalDamage}`],
-        [translate('screen.statDps'), `${result.dps}`],
-      ];
-      const width = Math.max(...rows.map(([k]) => k.length));
-      this.resultStats.set(rows.map(([k, v]) => `${k.padEnd(width, ' ')}   ${v}`).join('\n'));
-    }
+    this.registry.notify({
+      view,
+      logEntries,
+      translate: this.options.translate,
+      uiScale: this.uiScale,
+    });
   }
 }
 
 /* ================================================================== *
  * 小工具
  * ================================================================== */
-
-function formatClockSafe(ms: number): string {
-  if (!Number.isFinite(ms)) return '--:--';
-  const total = Math.max(0, Math.ceil(ms / 1000));
-  return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, '0')}`;
-}
-
-/**
- * 内部刻度 → 展示刻度。
- *
- * 内容是"100 血 / 10 伤害"这种可读的小整数，但内部按 10 倍刻度存储
- * （见 `data/content.ts` 顶部说明）。UI 必须显示展示刻度，
- * 否则玩家会看到 1000 血、100 伤害这种大数字。
- */
-function display(internal: number): number {
-  return Math.round(internal / DISPLAY_SCALE);
-}
-
-function percentOf(resource: { current: number; cap: number }): number {
-  if (!Number.isFinite(resource.cap) || resource.cap <= 0) return 0;
-  return Math.max(0, Math.min(100, Math.round((resource.current / resource.cap) * 100)));
-}
-

@@ -238,8 +238,9 @@ describe('AGENTS.md 硬规则：禁止类型断言逃生舱', () => {
      */
     const GRANDFATHERED: Record<string, number> = {
       // ⚠️ 口径是 `content.split('\n').length`（末行没有换行符时比 `wc -l` 多 1）
+      // ✅ `src/render/BattleScene.ts` 已拆到 700 以下（1421 → 669），
+      //    条目已移除 —— 棘轮只往一个方向转。
       'src/core/combat/battleState.ts': 1580,
-      'src/render/BattleScene.ts': 1421,
       'src/core/types.ts': 1091,
       'src/ui/settings/SettingsPanel.ts': 938,
     };

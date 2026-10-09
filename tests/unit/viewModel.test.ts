@@ -15,6 +15,34 @@ import {
  * 不需要 pixi、不需要 DOM。这是把 UI 拆成"数据规则 + 绘制"的收益。
  */
 
+/**
+ * **读整个渲染层**。
+ *
+ * 超长文件拆分后，实现会在 `render/` 内部搬家（`BattleScene.ts` →
+ * `skillBar.ts` / `parts/playerActor.ts` / …）。断言的是"这段逻辑
+ * 存在/不存在"，不是"它在哪个文件里"，所以整层扫描才不会因为
+ * 一次纯搬运而假失败。
+ *
+ * ⚠️ 副作用：这些断言变弱了（不再限定单一文件）。但它们的原意
+ * 本来就是防"顺手加回来"，整层扫描足够，而且更耐用。
+ */
+const readRenderLayer = async (): Promise<string> => {
+  const { readdirSync, readFileSync: rf } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const { dirname, join } = await import('node:path');
+  const rootDir = dirname(fileURLToPath(new URL('../../src/render/', import.meta.url)));
+  const out: string[] = [];
+  const walk = (dir: string): void => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.name.endsWith('.ts')) out.push(rf(full, 'utf8'));
+    }
+  };
+  walk(rootDir);
+  return out.join('\n');
+};
+
 describe('ratioOf', () => {
   it('正常比例', () => {
     expect(ratioOf({ current: 50, cap: 100 })).toBe(0.5);
@@ -234,16 +262,7 @@ describe('技能格：冷却遮罩（白）与数字的层叠', () => {
    * 而且每一版都能"看起来差不多能用" —— 所以必须用断言锁住
    * 三件容易改坏的事。
    */
-  const read = async (rel: string): Promise<string> =>
-    (await import('node:fs')).readFileSync(new URL(rel, import.meta.url), 'utf8');
-
-  /**
-   * 技能格相关的实现**已经搬到 `skillBar.ts`**（拆分超长文件）。
-   * 这里同时读两个文件，断言在"技能栏代码所在之处"匹配 ——
-   * 这样再搬家也不会因为路径变了而假失败。
-   */
-  const readSkillBar = async (): Promise<string> =>
-    (await read('../../src/render/skillBar.ts')) + (await read('../../src/render/BattleScene.ts'));
+  const readSkillBar = readRenderLayer;
 
   it('遮罩是**白色**半透明，而不是黑色', async () => {
     const src = await readSkillBar();
@@ -294,8 +313,7 @@ describe('读条边框：恒色，不随进度变色', () => {
    * 这条断言防止它被"顺手加回来"。
    */
   it('渲染层不再有按进度改边框色的逻辑', async () => {
-    const { readFileSync } = await import('node:fs');
-    const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    const src = await readRenderLayer();
     expect(src).not.toContain('setBorderColor');
     expect(src).not.toMatch(/progress\s*>\s*0\.7/);
   });
@@ -315,8 +333,7 @@ describe('Boss 读条上的招式提示标签', () => {
    * 提示玩家无法被打断，'高伤'提示玩家闪避比防御更值得"
    */
   it('读条视图带 hintTags，且文案 key 走 settings.hintTags.*', async () => {
-    const { readFileSync } = await import('node:fs');
-    const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    const src = await readRenderLayer();
     expect(src).toMatch(/cast\.hintTags/);
     expect(src).toMatch(/settings\.hintTags\.\$\{tag\}/);
   });
@@ -341,8 +358,7 @@ describe('Boss 读条上的招式提示标签', () => {
 
 describe('闪避位移（与防御区分）', () => {
   it('闪避往右位移、然后复位；峰值是一个三角波', async () => {
-    const { readFileSync } = await import('node:fs');
-    const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    const src = await readRenderLayer();
     /**
      * 需求："闪避的画面效果改成往右移动，然后复位，和防御区分开来"。
      * 用三角波（0 → 峰值 → 0）而不是缓动状态机：无敌窗口本身就是
@@ -355,11 +371,10 @@ describe('闪避位移（与防御区分）', () => {
   });
 
   it('防御**不**位移 —— 两者要在余光里也能区分', async () => {
-    const { readFileSync } = await import('node:fs');
-    const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
-    // 位移只在 dodge 分支里发生
-    expect(src).toMatch(/const dodge = view\.player\.buffs\.find/);
-    expect(src).not.toMatch(/guarding.*playerRoot\.x/);
+    const src = await readRenderLayer();
+    // 位移只在 dodge 分支里发生（部件里 `buffs` 是它自己从 ctx 取出的局部量）
+    expect(src).toMatch(/const dodge = buffs\.find\(/);
+    expect(src).not.toMatch(/guarding[\s\S]{0,80}playerRoot\.x/);
   });
 
   it('闪避**不**变矮 —— 姿态下沉只给防御', async () => {
@@ -369,15 +384,13 @@ describe('闪避位移（与防御区分）', () => {
      * 原先闪避和防御共用 `pose = 0.85`，于是两者的区别只剩颜色。
      * 现在区分手段是：闪避 = 横向位移；防御 = 下沉 + 冷色。
      */
-    const { readFileSync } = await import('node:fs');
-    const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    const src = await readRenderLayer();
     expect(src).toMatch(/const pose = guarding \? 0\.85 : 1;/);
     expect(src).not.toMatch(/dodging \|\| guarding \? 0\.85/);
   });
 
   it('位移峰值是 52（26 的翻倍）', async () => {
-    const { readFileSync } = await import('node:fs');
-    const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    const src = await readRenderLayer();
     expect(src).toMatch(/const DODGE_PEAK_X = 52;/);
   });
 });
