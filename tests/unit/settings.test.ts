@@ -533,10 +533,13 @@ describe('标签只出现在详情区，不占技能格', () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync(new URL('../../src/ui/settings/SettingsPanel.ts', import.meta.url), 'utf8');
     // 详情区的 tags Label 还在，并且仍被赋值
-    expect(src).toMatch(/tags: detailLine\(/);
-    expect(src).toMatch(/this\.detail\.tags\.set\(tags\)/);
+    // （实现已抽到 `SkillDetail.ts`，所以整层拼接后再匹配）
+    const detail = readFileSync(new URL('../../src/ui/settings/SkillDetail.ts', import.meta.url), 'utf8');
+    const all = src + detail;
+    expect(all).toMatch(/this\.tags = line\(1, FONT\.tiny/);
+    expect(all).toMatch(/this\.tags\.set\(tags\)/);
     // 文案 key 仍然来自 settings.hintTags.<id>
-    expect(src).toMatch(/settings\.hintTags\.\$\{tag\}/);
+    expect(src + detail).toMatch(/settings\.hintTags\.\$\{tag\}/);
   });
 
   it('tagColor 已随格子标签一起删除（不留死代码）', async () => {

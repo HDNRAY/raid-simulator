@@ -133,13 +133,28 @@ addEventListener: (type, listener) =>
 | 文件 | 天花板 |
 |---|---|
 | `src/core/combat/battleState.ts` | 1580 |
-| `src/core/types.ts` | 1091 |
-| `src/ui/settings/SettingsPanel.ts` | 938 |
+| `src/core/types.ts` | 973 |
 
 ✅ 已拆到 700 以下、**从表里移除**的：
-`src/render/BattleScene.ts`（1421 → **668**，拆成
-`skillBar` / `IconStrip` / `FloatingTextLayer` / `background` /
-`sceneTypes` / `hudUtils` / `actorLayout` + `parts/` 下 7 个帧部件）。
+
+| 原文件 | 原行数 | 现在 | 拆成了 |
+|---|---|---|---|
+| `src/render/BattleScene.ts` | 1421 | **668** | `skillBar` / `IconStrip` / `FloatingTextLayer` / `background` / `sceneTypes` / `hudUtils` / `actorLayout` + `parts/` 下 7 个帧部件 |
+| `src/ui/settings/SettingsPanel.ts` | 938 | **646** | `KeyGrid` / `SkillDetail` / `SettingsFrame` / `KeysFooter` / `ScaleSlider` / `rows` |
+
+### ⚠️ `src/core/types.ts` 是特例：类型图是"中心辐射"的
+
+它已经拆出了两个**干净的叶子**（`core/events.ts`、`core/actions.ts`），
+但**再切下去会造出类型层的 import 环**：核心类型被 8 个以上的段落
+互相引用（第 9 段 `GameEntity` 就被 8 个段引用）。
+
+想继续拆只有一条路：把第 1–3 段（基础标识 / 资源 / 属性）抽成
+`baseTypes`，再把其余段也各自拆开、全部从 `baseTypes` import。
+那是**几百行、跨 10 个文件的搬迁**，收益只是"一个类型文件的行数"。
+
+**所以这里停在 973 行并保留了棘轮** —— 在需要动它时再决定，
+而不是为了行数去做一次高风险的大搬迁（这正是 §3 说"拆不拆由用户
+决定"的场景）。
 
 改这些文件时**必然触线**，所以每次都要走上面的"问一句"流程。
 

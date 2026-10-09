@@ -934,146 +934,6 @@ export interface BattleState {
   readonly endReason?: EndReason;
 }
 
-/* ================================================================== *
- * 13. 事件（慢通道，给渲染层 / 日志）
- * ================================================================== */
-
-export type SkillRejectReason =
-  | 'cooldown'
-  | 'cost'
-  | 'casting'
-  | 'condition'
-  | 'locked'
-  | 'target';
-
-export type EventDef =
-  | {
-      readonly kind: 'damage';
-      readonly tick: number;
-      readonly sourceId: CombatantId;
-      readonly targetId: CombatantId;
-      readonly amount: number;
-      readonly crit: boolean;
-      readonly school: School;
-      readonly absorbed: number;
-      readonly overkill: number;
-    }
-  | {
-      readonly kind: 'heal';
-      readonly tick: number;
-      readonly sourceId: CombatantId;
-      readonly targetId: CombatantId;
-      readonly amount: number;
-      readonly crit: boolean;
-      readonly overheal: number;
-    }
-  /** 闪避成功必须有独立事件，否则玩家不知道躲掉了 */
-  | {
-      readonly kind: 'avoided';
-      readonly tick: number;
-      readonly sourceId: CombatantId;
-      readonly targetId: CombatantId;
-      readonly skillId: SkillId;
-      readonly reason: 'dodged' | 'immune';
-    }
-  | {
-      readonly kind: 'buffApplied' | 'buffExpired' | 'buffRefreshed' | 'buffStackChanged';
-      readonly tick: number;
-      readonly targetId: CombatantId;
-      readonly buffId: BuffId;
-      readonly stacks: number;
-      readonly sourceId: CombatantId;
-    }
-  | {
-      readonly kind: 'castStarted' | 'castFinished' | 'castInterrupted';
-      readonly tick: number;
-      readonly sourceId: CombatantId;
-      readonly skillId: SkillId;
-      /**
- * 中断原因：
- *   `interrupted` 被「破」这类效果打断
- *   `sourceLost`   施法者丢失目标
- *   `death`        施法者死亡
- *   `replaced`     施法者**主动改用了别的技能**（读条中出招规则）
- */
-readonly reason?: 'interrupted' | 'sourceLost' | 'death' | 'replaced';
-    }
-  /**
-   * 打断被**霸体**挡下。
-   *
-   * 单独一个事件（而不是复用 `skillRejected`）：被打断方是"状态生效"，
-   * 打断方是"技能放出来了但没生效" —— 两边的反馈不同。
-   */
-  | {
-      readonly kind: 'interruptImmune';
-      readonly tick: number;
-      readonly targetId: CombatantId;
-      readonly skillId: SkillId;
-    }
-  | {
-      readonly kind: 'interruptSuccess';
-      readonly tick: number;
-      readonly sourceId: CombatantId;
-      readonly targetId: CombatantId;
-      readonly skillId: SkillId;
-    }
-  | {
-      readonly kind: 'resourceChanged';
-      readonly tick: number;
-      readonly targetId: CombatantId;
-      readonly resource: ResourceKey | string;
-      readonly delta: number;
-      readonly current: number;
-    }
-  | { readonly kind: 'skillUsed'; readonly tick: number; readonly sourceId: CombatantId; readonly skillId: SkillId }
-  /**
-   * 施放被拒绝。
-   *
-   * 玩家按键没反应时必须能知道原因（GCD？CD？资源？条件？被锁？），
-   * 渲染层才能给出正确反馈。旧项目这里只写了一句"我还不能使用这个技能"。
-   */
-  | {
-      readonly kind: 'skillRejected';
-      readonly tick: number;
-      readonly sourceId: CombatantId;
-      readonly skillId: SkillId;
-      readonly reason: SkillRejectReason;
-    }
-  /** 某个 Boss 行为（含 `onHpBelow` 触发的能力）生效了 */
-  | { readonly kind: 'behaviorTriggered'; readonly tick: number; readonly bossId: CombatantId; readonly kindName: string }
-  | { readonly kind: 'enrageStarted'; readonly tick: number; readonly bossId: CombatantId }
-  | { readonly kind: 'death'; readonly tick: number; readonly targetId: CombatantId }
-  | {
-      readonly kind: 'encounterEnd';
-      readonly tick: number;
-      readonly result: 'victory' | 'defeat';
-      readonly reason: EndReason;
-    };
-
-export type EventKind = EventDef['kind'];
-
-/* ================================================================== *
- * 14. 输入（唯一入口，可录制可重放）
- * ================================================================== */
-
-export type Action =
-  | { readonly type: 'useSkill'; readonly skillId: SkillId; readonly atTick: number }
-  /**
-   * 按住不放：施放一个"按住型"技能，并保持它。
-   *
-   * 与 `useSkill` 的区别：按住型技能在松开前一直是生效状态，
-   * 引擎按逻辑步扣 `holdDrain`；`useSkill` 是"点一下"的语义。
-   */
-  | { readonly type: 'hold'; readonly skillId: SkillId; readonly atTick: number }
-  | { readonly type: 'releaseKey'; readonly key: string; readonly atTick: number }
-  | { readonly type: 'releaseSkill'; readonly skillId: SkillId; readonly atTick: number }
-  | { readonly type: 'setTarget'; readonly targetId: CombatantId; readonly atTick: number }
-  | { readonly type: 'cancelCast'; readonly atTick: number }
-  | { readonly type: 'pause'; readonly atTick: number }
-  | { readonly type: 'resume'; readonly atTick: number }
-  | { readonly type: 'restart'; readonly seed: number; readonly atTick: number };
-
-export type ActionType = Action['type'];
 
 /* ================================================================== *
  * 15. 关卡定义
@@ -1088,3 +948,25 @@ export interface EncounterDef {
   readonly defeat: readonly Condition[];
   readonly timeLimitMs?: number;
 }
+
+/* ================================================================== *
+ * 事件：**定义在 `./events.ts`**，这里只做转发
+ * ================================================================== */
+
+/**
+ * 事件的类型定义搬到了 `./events.ts`（见那里的说明：它是干净的叶子，
+ * 只依赖标识类型）。
+ *
+ * ⚠️ 这里**转发**它们，所以 `import type { EventDef } from '../core/types'`
+ * 依然可用 —— 拆文件不该是个破坏性改动。
+ *
+ * ⚠️ 不要在这两段里再写事件定义：`events.ts` 反向 import 本文件的
+ * 标识类型，如果本文件再定义事件，就会形成两个模块互相 import 的环。
+ */
+export type { EventDef, EventKind, SkillRejectReason } from './events';
+
+/* ================================================================== *
+ * 输入：**定义在 `./actions.ts`**，这里只做转发
+ * ================================================================== */
+
+export type { Action, ActionType } from './actions';

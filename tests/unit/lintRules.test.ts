@@ -241,8 +241,14 @@ describe('AGENTS.md 硬规则：禁止类型断言逃生舱', () => {
       // ✅ `src/render/BattleScene.ts` 已拆到 700 以下（1421 → 669），
       //    条目已移除 —— 棘轮只往一个方向转。
       'src/core/combat/battleState.ts': 1580,
-      'src/core/types.ts': 1091,
-      'src/ui/settings/SettingsPanel.ts': 938,
+      /**
+       * ⚠️ `src/core/types.ts` 是**唯一**还没拆到 700 以下的大文件，
+       * 原因是它的引用图是"中心辐射"的：`GameEntity`（9 段）被 8 个段
+       * 引用，硬拆会造出类型层的 import 环。见 AGENTS.md §3 的说明。
+       *
+       * 已经拆出去的：事件（`core/events.ts`）、输入（`core/actions.ts`）。
+       */
+      'src/core/types.ts': 973,
     };
 
     const overLimit: string[] = [];

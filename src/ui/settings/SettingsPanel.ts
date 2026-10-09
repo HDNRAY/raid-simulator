@@ -25,28 +25,23 @@
  */
 
 import type { Container, Graphics } from 'pixi.js';
-import { PALETTE } from '../../render/theme';
-import { FONT, LOGICAL } from '../layout';
+import { LOGICAL } from '../layout';
 import { isReservedKey, reservedKeyLabel } from '../../input/keyboard';
+import { KeyGrid } from './KeyGrid';
+import { SkillDetail } from './SkillDetail';
+import { SettingsFrame } from './SettingsFrame';
+import { KeysFooter } from './KeysFooter';
+import type { KeyRow } from './rows';
 import { ScaleSlider } from './ScaleSlider';
-import { Label, Panel, type PixiCtor } from '../primitives';
+import type { PixiCtor } from '../primitives';
 import {
   INITIAL_FOCUS,
-  SETTINGS_PANEL,
   cycleZone,
   hitTest as hitTestLogic,
-  keyLabel as formatKey,
-  keyCellRect,
-  CLOSE_BUTTON,
-  resetButtonRect,
-  skillDetailRect,
   resolveKeyAction,
   uiScaleFromPointer,
   uiScaleSliderRect,
   contains,
-  tabRect,
-  KEY_GRID_CAPACITY,
-  hintLineY,
   moveFocus,
   resolveActivate,
   type SettingsFocus,
@@ -54,27 +49,7 @@ import {
 } from './logic';
 
 export type { SettingsTab };
-
-export interface KeyRow {
-  /** 技能 id */
-  readonly skillId: string;
-  /** 技能名的 i18n key（图标就是那个字） */
-  readonly nameKey: string;
-  /** 当前绑定（归一化键名） */
-  readonly key: string;
-  /**
-   * 玩法提示标签（需求："玩家技能的 tags 显示在设置里"）。
-   *
-   * 给的是**标签 id**，文案在 i18n 里（渲染层不持有可显示文字）。
-   */
-  readonly hintTags?: readonly string[];
-  /** 技能说明的 i18n key（详情区用） */
-  readonly descKey?: string;
-  /** 代价文案（已格式化，如 `10 炁` / `2 炁/秒`）；没有代价则为空 */
-  readonly costText?: string;
-  /** 固有冷却文案（如 `5 秒`）；没有冷却则为空 */
-  readonly cdText?: string;
-}
+export type { KeyRow } from './rows';
 
 export interface SettingsPanelOptions {
   readonly pixi: PixiCtor;
@@ -105,9 +80,6 @@ export class SettingsPanel {
   readonly root: Container;
 
   private readonly dim: Graphics;
-  private readonly panel: Panel;
-  private readonly title: Label;
-  private readonly closeHint: Label;
 
   /**
    * UI 缩放滑块。
@@ -124,29 +96,26 @@ export class SettingsPanel {
    * 需求："除了显示标签，还显示一下技能说明和代价，cd 等信息"。
    * 只为**当前焦点**那一项显示 —— 十几个格子各塞一段中文会挤成一团。
    */
-  private readonly detail: {
-    readonly name: Label;
-    readonly tags: Label;
-    readonly desc: Label;
-    readonly stats: Label;
-  };
+  /** 选中技能的详情（独立组件，见 `SkillDetail`） */
+  private readonly detail: SkillDetail;
 
-  private readonly tabButtons: Array<{
-    tab: SettingsTab;
-    gfx: Graphics;
-    label: Label;
-    rect: { x: number; y: number; w: number; h: number };
-  }> = [];
+  /** 外框：底板 + 标题 + 「关闭」 + tab 按钮（独立组件） */
+  private readonly frame: SettingsFrame;
 
   private readonly body: Container;
-  private readonly rowGfx: Graphics;
-  private readonly rowLabels: Array<{
-    name: Label;
-    key: Label;
-    rect: { x: number; y: number; w: number; h: number };
-  }> = [];
-  private readonly hintLabel: Label;
-  private readonly resetButton: { gfx: Graphics; label: Label; rect: { x: number; y: number; w: number; h: number } };
+  /**
+   * 按键页的技能格（独立组件，见 `KeyGrid` 的说明）。
+   *
+   * 原先格子的构造与绘制直接写在这里 —— "面板顺手把格子也画了"。
+   */
+  private readonly keyGrid: KeyGrid;
+  /**
+   * 底部：提示行 + 「恢复默认」按钮（独立组件）。
+   *
+   * ⚠️ 恢复按钮原先**借用格子的 `rowGfx`**（两者共用一个 Graphics）
+   * —— 那是"顺手画上去"，格子抽走后就断了。现在归它自己管。
+   */
+  private readonly footer: KeysFooter;
 
   private tab: SettingsTab = 'keys';
   /**
@@ -169,11 +138,6 @@ export class SettingsPanel {
   private notice = '';
   private noticeTtl = 0;
 
-  private readonly origin = {
-    x: Math.round((LOGICAL.width - SETTINGS_PANEL.w) / 2),
-    y: Math.round((LOGICAL.height - SETTINGS_PANEL.h) / 2),
-  };
-
   constructor(private readonly options: SettingsPanelOptions) {
     const { pixi } = options;
     this.root = new pixi.Container();
@@ -183,140 +147,22 @@ export class SettingsPanel {
     this.dim.rect(0, 0, LOGICAL.width, LOGICAL.height).fill({ color: 0x000000, alpha: 0.66 });
     this.root.addChild(this.dim);
 
-    const { x, y } = this.origin;
-    this.panel = new Panel(pixi, {
-      x,
-      y,
-      w: SETTINGS_PANEL.w,
-      h: SETTINGS_PANEL.h,
-      fill: 0x0e0e16,
-      line: 0x6a6c80,
-      fillAlpha: 0.98,
-      radius: 4,
-    });
-    this.title = new Label(pixi, {
-      x: x + 16,
-      y: y + 10,
-      size: FONT.title,
-      color: PALETTE.text,
-      kai: true,
-    });
-    this.closeHint = new Label(pixi, {
-      x: x + SETTINGS_PANEL.w - CLOSE_BUTTON.right,
-      y: y + CLOSE_BUTTON.top + 3,
-      size: FONT.small,
-      color: PALETTE.textDim,
-      anchorX: 1,
-    });
-    this.root.addChild(this.panel.root, this.title.root, this.closeHint.root);
-
-    /* ---- tab 按钮 ---- */
-    const tabs: SettingsTab[] = ['general', 'keys'];
-    for (const [i, tab] of tabs.entries()) {
-      const rect = tabRect(i);
-      const gfx = new pixi.Graphics();
-      const label = new Label(pixi, {
-        x: rect.x + rect.w / 2,
-        y: rect.y + 6,
-        size: FONT.body,
-        color: PALETTE.textDim,
-        anchorX: 0.5,
-        kai: true,
-      });
-      this.root.addChild(gfx, label.root);
-      this.tabButtons.push({ tab, gfx, label, rect });
-    }
+    this.frame = new SettingsFrame(pixi, (key) => this.options.translate(key));
+    this.root.addChild(this.frame.root);
 
     /* ---- 内容区 ---- */
     this.body = new pixi.Container();
     this.root.addChild(this.body);
 
-    this.rowGfx = new pixi.Graphics();
-    this.body.addChild(this.rowGfx);
+    this.keyGrid = new KeyGrid(pixi, (key) => this.options.translate(key));
+    this.body.addChild(this.keyGrid.root);
 
-    /**
-     * 技能格：每个格子显示"技能字 + 当前按键"。
-     *
-     * 用 grid 而不是单列清单：技能会越来越多，单列 15 个技能就要
-     * 450px 高度。grid 每行 3 个，同样数量只要 1/3 的高度。
-     */
-    for (let i = 0; i < KEY_GRID_CAPACITY; i += 1) {
-      const rect = keyCellRect(i);
-      const glyph = new Label(pixi, {
-        x: rect.x + 12,
-        y: rect.y + 12,
-        size: FONT.warn,
-        color: PALETTE.text,
-        kai: true,
-      });
-      const key = new Label(pixi, {
-        x: rect.x + rect.w - 12,
-        y: rect.y + 14,
-        size: FONT.body,
-        color: PALETTE.textDim,
-        anchorX: 1,
-      });
-      /**
-       * ⚠️ 格子里**不画提示标签**（需求："按键设置里，grid 的 cell 里
-       * 就不要显示 tag 了"）。
-       *
-       * 原先在技能字下方画一行 `tiny` 的标签（如「打断」）。去掉了：
-       *   - 格子是 188×56 的小面积，塞第三行字之后"技能名 + 按键 +
-       *     标签"三者互相挤，扫一眼分不清主次
-       *   - 玩家在这一页真正要确认的是"**哪个技能绑了哪个键**"，
-       *     标签属于"这个技能是什么"，那是详情区的事
-       *
-       * 标签现在只在底部**详情区**显示（跟说明、代价、冷却放一起）。
-       */
-      this.body.addChild(glyph.root, key.root);
-      this.rowLabels.push({ name: glyph, key, rect });
-    }
-
-    this.hintLabel = new Label(pixi, {
-      x: x + 16,
-      y: y + hintLineY(),
-      size: FONT.small,
-      color: PALETTE.textDim,
-    });
-    this.body.addChild(this.hintLabel.root);
-
-    /* ---- 恢复默认按钮 ---- */
-    const resetRect = resetButtonRect();
-    const resetGfx = new pixi.Graphics();
-    const resetLabel = new Label(pixi, {
-      x: resetRect.x + resetRect.w / 2,
-      y: resetRect.y + 4,
-      size: FONT.small,
-      color: PALETTE.text,
-      anchorX: 0.5,
-    });
-    this.resetButton = { gfx: resetGfx, label: resetLabel, rect: resetRect };
-    this.body.addChild(resetGfx, resetLabel.root);
+    this.footer = new KeysFooter(pixi, (key) => this.options.translate(key), () => this.notice);
+    this.body.addChild(this.footer.root);
 
     /* ---------- 通用页：UI 缩放滑块 ---------- */
-    /* ---------- 按键页：选中技能的详情 ---------- */
-    const dr = skillDetailRect();
-    /**
-     * 四行的行距 = **22px**，按 `Label` 的**实测占高**取。
-     *
-     * Pixi 的 `Label` 实际占高远大于字号：13px 的字量出来是 **22px**
-     * （行高 ≠ 字号）。我先用了 14、15、18，三次都叠字
-     * （"说明"与"代价"糊在一起）—— 这是量出来的，不是估出来的。
-     */
-    const detailLine = (row: number, size: number, color: number): Label =>
-      new Label(pixi, { x: dr.x, y: dr.y + row * 22, size, color });
-    this.detail = {
-      name: detailLine(0, FONT.body, PALETTE.text),
-      tags: detailLine(1, FONT.tiny, PALETTE.douqi.bright),
-      desc: detailLine(2, FONT.tiny, PALETTE.textDim),
-      stats: detailLine(3, FONT.tiny, PALETTE.textDim),
-    };
-    this.body.addChild(
-      this.detail.name.root,
-      this.detail.tags.root,
-      this.detail.desc.root,
-      this.detail.stats.root,
-    );
+    this.detail = new SkillDetail(pixi, (key) => this.options.translate(key));
+    this.body.addChild(this.detail.root);
 
     this.scaleSlider = new ScaleSlider({
       pixi,
@@ -729,103 +575,18 @@ export class SettingsPanel {
    *
    * ⚠️ 只在焦点落在技能格上时调用（见调用处的说明）。
    */
+  /** 画选中技能的详情（实现见 `SkillDetail`）。 */
   private drawDetail(row: KeyRow): void {
-    const t = this.options.translate;
-    const tags = (row.hintTags ?? []).map((tag) => t(`settings.hintTags.${tag}`)).join(' · ');
-    /**
-     * 说明可能很长，而详情区是一行固定宽度 —— 超出就**截断加省略号**。
-     * 不做换行：换行会让下面三行的位置随内容浮动，焦点移动时文字
-     * 会上下跳，反而更难读。
-     */
-    /**
-     * ⚠️ 说明文案里可能带 **Markdown 的强调标记**（如"**无法被打断**"）——
-     * 那是给文档/提示看的，直接画到 canvas 上会原样显示星号。
-     * 这里统一剥掉（本作没有富文本渲染，所以标记没有意义）。
-     */
-    const desc =
-      row.descKey === undefined
-        ? ''
-        : truncate(t(row.descKey).replaceAll('**', ''), DETAIL_DESC_MAX_CHARS);
-    /**
-     * 代价与冷却都由上层**格式化好**（走 i18n 模板）——
-     * 面板只负责把两段拼起来，不自己造文案（否则又会出现硬编码中文）。
-     */
-    const stats = [row.costText, row.cdText]
-      .filter((x): x is string => x !== undefined && x !== '')
-      .join('   ');
-
-    /**
-     * **没有标签就收上来**（不留空档）。
-     *
-     * 标签行不是每个技能都有（目前只有「破」有「打断」）。
-     * 如果位置写死，四个位置里会有一个永远是空的 —— 看起来像漏画了。
-     * 所以按"实际有几行"重排 y。
-     */
-    const dr = skillDetailRect();
-    const rows: Label[] = [];
-    if (tags !== '') rows.push(this.detail.tags);
-    rows.push(this.detail.desc, this.detail.stats);
-    for (const [i, label] of rows.entries()) {
-      label.root.y = dr.y + (i + 1) * 22;
-    }
-
-    this.detail.name.set(t(row.nameKey));
-    this.detail.tags.set(tags);
-    this.detail.desc.set(desc);
-    this.detail.stats.set(stats);
+    this.detail.render(row);
   }
 
+  /** 画外框（实现见 `SettingsFrame`）。 */
   private drawFrame(): void {
-    const { x, y } = this.origin;
-    this.title.set(this.options.translate('settings.title'));
-    this.closeHint.set(this.options.translate('settings.close'));
-
-    for (const [i, button] of this.tabButtons.entries()) {
-      const active = button.tab === this.tab;
-      const focused = this.focus.zone === 'tabs' && this.focus.index === i;
-      const label =
-        button.tab === 'general'
-          ? this.options.translate('settings.tabGeneral')
-          : this.options.translate('settings.tabKeys');
-      button.label.set(label);
-      button.label.setColor(active || focused ? 0xffffff : PALETTE.textDim);
-      const g = button.gfx;
-      g.clear();
-      if (active) {
-        // 选中的 tab 只用一个很淡的底色 + 下划线，不用整块高亮
-        g.rect(button.rect.x, button.rect.y, button.rect.w, button.rect.h).fill({
-          color: 0xffffff,
-          alpha: 0.07,
-        });
-        g.rect(button.rect.x, button.rect.y + button.rect.h - 2, button.rect.w, 2).fill(
-          PALETTE.douqi.base,
-        );
-      }
-      /**
-       * 键盘焦点：**一圈描边**。
-       *
-       * 与"选中"（下划线）刻意用不同的视觉手段 —— 它们语义不同：
-       * 选中 = 当前显示哪个 tab，焦点 = 回车会作用在谁身上。
-       * 两者可能同时存在（焦点在选中的 tab 上），也可能分开
-       * （焦点移走了但 tab 没切）。
-       */
-      if (focused) {
-        g.rect(button.rect.x, button.rect.y, button.rect.w, button.rect.h).stroke({
-          color: PALETTE.douqi.bright,
-          width: 1.5,
-        });
-      }
-    }
-    void x;
-    void y;
+    this.frame.update(this.tab, this.focus.zone, this.focus.zone === 'tabs' ? this.focus.index : -1);
   }
 
   private drawBody(): void {
-    this.rowGfx.clear();
-    for (const row of this.rowLabels) {
-      row.name.set('');
-      row.key.set('');
-    }
+    this.keyGrid.setVisible(this.tab === 'keys');
     /**
      * **离开通用页时藏起滑块。**
      *
@@ -837,14 +598,12 @@ export class SettingsPanel {
      * 详情同样"只属于按键页" —— 与滑块一个道理：**只在这一处写隐藏**，
      * 按键页分支只写显示。
      */
-    for (const line of Object.values(this.detail)) line.set('');
+    this.detail.clear();
 
     if (this.tab === 'general') {
       // 通用 tab 目前是空的 —— 明确写出来，而不是给一片空白
-      this.hintLabel.set(this.options.translate('settings.generalHint'));
       // 通用页没有"恢复默认键位"，那一栏留空（它属于按键页）
-      this.resetButton.label.set('');
-      this.resetButton.gfx.clear();
+      this.footer.showGeneralHint();
       /**
        * 通用页的控件：**显示** + 重画。
        *
@@ -859,64 +618,20 @@ export class SettingsPanel {
 
     /* ---- 按键 tab ---- */
     const rows = this.options.getRows();
-    this.hintLabel.set(
-      this.notice !== ''
-        ? this.notice
-        : this.capturingSkill !== undefined
-          ? this.options.translate('settings.keysCapturingHint')
-          : this.options.translate('settings.keysHint'),
-    );
-    this.hintLabel.setColor(this.notice !== '' ? 0xff9080 : PALETTE.textDim);
 
-    for (const [i, row] of rows.entries()) {
-      if (i >= KEY_GRID_CAPACITY) break;
-      const slot = this.rowLabels[i];
-      if (!slot) continue;
+    /**
+     * 格子交给组件画。
+     *
+     * ⚠️ 详情区由**格子驱动**（`onFocused` 回调）：焦点在哪一格就显示
+     * 哪个技能。这样"画格子"与"显示谁"只有一个真相来源，
+     * 不会再出现"点完格子、详情还停在上一个技能"。
+     */
+    this.keyGrid.update(rows, {
+      focusIndex: this.focus.zone === 'grid' ? this.focus.index : -1,
+      capturingSkillId: this.capturingSkill,
+    }, (row) => this.drawDetail(row));
 
-      const capturing = this.capturingSkill === row.skillId;
-      const focused = this.focus.zone === 'grid' && this.focus.index === i;
-      slot.name.set(this.options.translate(row.nameKey));
-      // 按键名统一大写显示，与技能栏上的提示一致
-      slot.key.set(capturing ? '…' : formatKey(row.key, this.options.translate('settings.keyUnbound')));
-      slot.key.setColor(capturing || focused ? PALETTE.douqi.bright : PALETTE.text);
-      /**
-       * 详情只为**当前焦点**那一项显示。
-       *
-       * 焦点可能在 tabs / slider / reset 上，那时 `focus.zone !== 'grid'`，
-       * 就没有"选中项" —— 详情留空，而不是残留上一个技能的信息。
-       */
-      if (focused) this.drawDetail(row);
-
-      const g = this.rowGfx;
-      // 交替底色 + 捕获/键盘焦点的高亮
-      g.rect(slot.rect.x, slot.rect.y, slot.rect.w, slot.rect.h).fill({
-        color: capturing || focused ? PALETTE.douqi.base : 0xffffff,
-        alpha: capturing ? 0.18 : focused ? 0.12 : i % 2 === 0 ? 0.03 : 0.06,
-      });
-      if (capturing || focused) {
-        g.rect(slot.rect.x, slot.rect.y, slot.rect.w, slot.rect.h).stroke({
-          color: PALETTE.douqi.bright,
-          width: focused ? 1.5 : 1,
-        });
-      }
-    }
-
-    // 恢复默认按钮
-    const rb = this.resetButton;
-    const closeFocused = this.focus.zone === 'close';
-    this.closeHint.setColor(closeFocused ? PALETTE.douqi.bright : PALETTE.textDim);
-    const resetFocused = this.focus.zone === 'reset';
-    rb.label.set(this.options.translate('settings.keysReset'));
-    rb.label.setColor(resetFocused ? PALETTE.douqi.bright : PALETTE.text);
-    const g = this.rowGfx;
-    g.roundRect(rb.rect.x, rb.rect.y, rb.rect.w, rb.rect.h, 3).fill({
-      color: resetFocused ? PALETTE.douqi.base : 0xffffff,
-      alpha: resetFocused ? 0.16 : 0.08,
-    });
-    g.roundRect(rb.rect.x, rb.rect.y, rb.rect.w, rb.rect.h, 3).stroke({
-      color: resetFocused ? PALETTE.douqi.bright : 0x6a6c80,
-      width: resetFocused ? 1.5 : 1,
-    });
+    this.footer.updateKeys(this.capturingSkill !== undefined, this.focus.zone === 'reset');
   }
 
   /** 空 tab 的占位：一行主文案 + 一行提示，避免一片空白让人以为坏了。 */
@@ -928,10 +643,3 @@ export class SettingsPanel {
  * 取**优先级最高的那一个**标签的颜色 —— 一行小字里混两种颜色会更乱，
  * 而标签本来就是"最该注意的那条"提示。
  */
-/** 详情里说明的最大字符数（超出截断加省略号）。 */
-const DETAIL_DESC_MAX_CHARS = 46;
-
-/** 截断一段文案，超出加省略号。 */
-function truncate(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
-}
