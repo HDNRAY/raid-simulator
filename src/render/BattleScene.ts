@@ -841,17 +841,16 @@ export class BattleScene {
     this.floating.update(view.floatingText);
 
     const status = view.statusLine;
-    // 状态提示 = 主文案（原因）+ 副文案（技能名）。
-    // 副文案只在"技能被拒"时才有值，读条时的可打断提示优先。
+    /**
+     * 状态提示区只显示**技能被拒的原因**（「攻 · 公共冷却中」这类）。
+     *
+     * "可打断"曾经也画在这里 —— 但预警条右侧已经有同一句话，
+     * 屏幕中央再出现一次纯属噪音（那个位置应该留给真正的突发事件）。
+     */
     if (status !== undefined && view.statusDetail !== undefined) {
-      this.statusLabel.set(translate(status));
+      this.statusLabel.set('');
       this.statusSub.set(`${translate(view.statusDetail)}  ·  ${translate(status)}`);
-      this.statusLabel.set('');
       this.statusSub.setColor(0xffb0a0);
-    } else if (cast?.interruptible === true) {
-      this.statusLabel.set('');
-      this.statusSub.set(translate('hint.interruptible'));
-      this.statusSub.setColor(PALETTE.interrupt.bright);
     } else {
       this.statusLabel.set(status === undefined ? '' : translate(status));
       this.statusSub.set('');

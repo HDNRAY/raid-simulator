@@ -126,23 +126,24 @@ export const GOLDEN_OUTCOME = {
   /**
    * 当前平衡下"会闪 + 会轰"的玩家**险胜**。
    *
-   * 两个数字值得注意（都是实测出来的，不是估计）：
-   *   - 用时 896 tick ≈ 14.9 秒
-   *   - 玩家只剩 **15 血**（满血 100）
+   * 实测（不是估计）：
+   *   - 用时 898 tick ≈ 15.0 秒
+   *   - 玩家剩 **30 血**（满血 100）
+   *   - Boss 承伤约 4.9 DPS，所以玩家约能撑 20 秒
    *
-   * 也就是说这场胜利是靠最后一点血挣来的。同一条策略如果
-   * **只按「攻」不放「轰」**，会输在 Boss 还剩 30 血的地方 ——
-   * 这正是想要的紧绷度：数值上"用对招式"是通关条件。
+   * 同一条策略如果**只按「攻」**也能赢，但要多花 3 秒（17.9s）——
+   * 说明「轰」是效率工具而不是通关必需。真正的门槛是**别站着挨打**：
+   * Boss 不还手时玩家 12.4 秒满血通关。
    */
   status: 'victory' as const,
   endReason: 'hpZero' as const,
   /** 通关用时（tick）。连续量，对数值改动敏感。 */
-  ticks: 896,
+  ticks: 898,
   phase: 3,
   /** 当前内容没有暴击判定，所以随机数一次都不被消耗。 */
   finalRngSeed: 20261009,
   combatants: {
-    player: { alive: true, hp: 15, energy: 0, douqi: 27, damageDealt: 0, damageTaken: 0 },
+    player: { alive: true, hp: 30, energy: 0, douqi: 12, damageDealt: 0, damageTaken: 0 },
     verrot: { alive: false, hp: 0, energy: 0, douqi: 0, damageDealt: 0, damageTaken: 0 },
   },
 } satisfies Omit<RunOutcome, 'ticks'> & { readonly ticks: number };

@@ -121,8 +121,13 @@ export const DODGE_IFRAME: BuffDef = {
 /**
  * 御：减伤 40%。
  *
- * 由"按住"维护、松开时移除 —— 所以 duration 只是兜底上限
- * （防止按键状态丢失时永久挂着），真实生命周期由输入驱动。
+ * **刻意不给持续时间**（`Number.POSITIVE_INFINITY`）。
+ *
+ * 它的生命周期完全由"按住 / 松开"驱动：按下时挂上，松开时由
+ * `endHold` 移除。加一个有限 duration 反而会产生错误的语义 ——
+ * 玩家一直按着，而 buff 却因为到期自己掉了（表现为"格挡莫名其妙失效"）。
+ *
+ * 唯一的结束条件是**精力耗尽**（引擎在 `tickHolds` 里检查并自动松开）。
  */
 export const GUARD_REDUCE: BuffDef = {
   id: 'guard',
@@ -130,7 +135,7 @@ export const GUARD_REDUCE: BuffDef = {
   icon: 'char_guard',
   polarity: 'buff',
   color: C.guard,
-  duration: logicMs(20),
+  duration: Number.POSITIVE_INFINITY,
   maxStacks: 1,
   stacking: { mode: 'refresh' },
   flags: { damageReduce: 0.4 },
@@ -437,7 +442,13 @@ const BOSS_CLEAVE: SkillDef = {
       effects: [
         {
           kind: 'damage',
-          damage: { base: S(18), school: 'physical', canCrit: false, countsAsHit: true },
+          /**
+           * 8 点伤害。**数值是按"玩家 100 血能撑多久"倒推的**：
+           * 收紧出招节奏后 Boss 每 2–4 秒一招，如果单发 18 点，
+           * 实测 9.1 秒就能打死玩家（承伤 111 DPS），而玩家完全打不完。
+           * 单发 8 点 → 承伤约 11 DPS，战斗长度回到 15 秒左右。
+           */
+          damage: { base: S(8), school: 'physical', canCrit: false, countsAsHit: true },
         },
       ],
     },
@@ -466,7 +477,12 @@ const BOSS_SWEEP: SkillDef = {
       effects: [
         {
           kind: 'damage',
-          damage: { base: S(30), school: 'fire', canCrit: false, countsAsHit: true },
+          /**
+           * 14 点火焰伤害 —— **这是为「闪」准备的那一招**：
+           * 前摇 1.2 秒够长，玩家来得及反应；伤害是重斩的近两倍，
+           * 所以躲掉它的收益明显。
+           */
+          damage: { base: S(14), school: 'fire', canCrit: false, countsAsHit: true },
         },
       ],
     },

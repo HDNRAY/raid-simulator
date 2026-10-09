@@ -167,9 +167,9 @@ describe('对内容改动的敏感度（回归保护）', () => {
     });
     expect(silentBoss.status).toBe('victory');
     expect(silentBoss.combatants['player']!.hp).toBe(PLAYER_CAPS.hp);
-    // 而正常一场是**险胜**：玩家只剩个位数百分比的血
+    // 而正常一场是**险胜**：玩家只剩三成血
     expect(base.status).toBe('victory');
-    expect(base.combatants['player']!.hp).toBeLessThan(PLAYER_CAPS.hp * 0.3);
+    expect(base.combatants['player']!.hp).toBeLessThan(PLAYER_CAPS.hp * 0.5);
   });
 
   it('只按「攻」不放「轰」会打得更慢 —— 斗炁爆发确实是主要伤害来源', () => {

@@ -1,4 +1,4 @@
-# Raid Simulator — 架构与 UI 规范
+# 斗 — 架构与 UI 规范
 
 > 状态：待评审
 > 日期：2026-10-09
@@ -537,7 +537,7 @@ base: command === 'serve' ? '/' : '/raid/'
 |---|---|
 | URL | `https://hdnray.github.io/raid/` |
 | 路由形式 | **hash 路由**（`#/battle`），不是 history 路由 |
-| 页面标题 | `Code:Raid` |
+| 页面标题 | `斗` |
 
 路由**不引库**——只有 2 个状态，手写约 20 行 `hashchange` 监听即可。
 

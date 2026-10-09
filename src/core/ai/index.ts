@@ -243,17 +243,24 @@ export const VERROT_BEHAVIORS: readonly Behavior[] = [
   { kind: 'timeLimit', ms: 180_000 },
   { kind: 'enrage', atMs: 120_000, dmgMult: 2 },
   { kind: 'phases', at: [0.6, 0.3] },
-  // 开场 1.5 秒后先来一发重斩：让玩家第一次看到前摇就该反应
-  { kind: 'opener', skillId: 'boss-cleave', delayMs: 1500 },
+  // 开场 1.2 秒后先来一发重斩：让玩家第一次看到前摇就该反应
+  { kind: 'opener', skillId: 'boss-cleave', delayMs: 1200 },
   {
     kind: 'rotation',
     steps: [
-      // 蓄能优先：给玩家一个"该用破了"的考题
-      { skillId: 'boss-empower', gapMs: 22_000 },
-      // 横扫：长前摇重击，该闪
-      { skillId: 'boss-sweep', gapMs: 14_000 },
-      // 重斩：兜底技能，CD 最短
-      { skillId: 'boss-cleave', gapMs: 6_000 },
+      /**
+       * `gapMs` 必须**短于**技能的冷却，否则轮转会空转。
+       *
+       * 踩过的坑：早期把 gap 写成 6–22 秒，而轮转的逻辑是
+       * "按顺序取第一个「冷却已好 且 距上次使用超过 gap」的技能" ——
+       * 于是高优先级的技能（蓄能 22 秒 gap）会长时间把低优先级的顶掉，
+       * 表现为 **Boss 大部分时间站着不动**（用户直接问"Boss 咋不攻击了"）。
+       *
+       * 现在的节奏：每 2–4 秒出一招，招式之间几乎不留空档。
+       */
+      { skillId: 'boss-empower', gapMs: 16_000 },
+      { skillId: 'boss-sweep', gapMs: 9_000 },
+      { skillId: 'boss-cleave', gapMs: 2_500 },
     ],
   },
 ];
