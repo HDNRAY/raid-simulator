@@ -279,13 +279,15 @@ type ModifierNamespace = string;   // 如 'entropy-clock.potential'
 ```ts
 // 奇物 A 声明 potential 命名空间
 { kind: 'derived', namespace: 'entropy-clock.potential',
-  modifier: { stat: 'damageBoost', op: 'addPercent', source: '熵之钟·势能' },
+  modifier: { stat: 'damageBoost', op: 'addPercent',
+              sourceKey: 'entity.entropyClock.sources.potential' },
   value: { e: 'mul', of: [{ e: 'const', value: 0.10 },
                            { e: 'stat', who: 'self', stat: 'intelligence' }] } }
 
 // 天赋 B 引用它："势能类效果再提升 50%"
 { kind: 'derived',
-  modifier: { stat: 'damageBoost', op: 'addPercent', source: '天赋·共鸣' },
+  modifier: { stat: 'damageBoost', op: 'addPercent',
+              sourceKey: 'talent.resonance.name' },
   value: { e: 'mul', of: [{ e: 'contrib', namespace: 'entropy-clock.potential' },
                           { e: 'const', value: 0.5 }] } }
 ```
@@ -395,8 +397,8 @@ interface StatModifier {
   op: Op;
   /** 可为表达式 → 动态重算（G3） */
   value: number | Expr;
-  /** 来源标记：必须填，用于 UI 溯源与调试（G6） */
-  source: string;
+  /** 来源标记的 i18n key（必须填）。溯源面板要显示它，所以是 key 而非文案 */
+  sourceKey: string;
   /** 命名空间：让本修正可被 contrib 引用（§3.3） */
   namespace?: ModifierNamespace;
   /** 条件修正：不满足则整条不生效 */
@@ -456,7 +458,7 @@ computeStats(state, combatant) -> { stats, breakdown }
 
 ```ts
 type StatBreakdown = Record<StatKey, Array<{
-  source: string;             // "熵之钟·势能"
+  sourceKey: string;          // 'entity.entropyClock.sources.potential'（i18n key）
   namespace?: ModifierNamespace;
   op: Op;
   value: number;              // 求值后的实际值
@@ -468,7 +470,7 @@ type StatBreakdown = Record<StatKey, Array<{
 
 用途：
 
-1. **调试面板**：鼠标悬停力量 → 看到 `基础 10 + 熵之钟 2 + 天赋 3 = 15`
+1. **调试面板**：悬停力量 → 看到 `10 + 2 + 3 = 15`，各项的标签由 `sourceKey` 查 i18n 得到
 2. **属性面板 UI**：MMO 玩家对"我的属性从哪来的"有强需求
 3. **测试断言**：可以直接断言"某来源贡献了某值"，而不是断言一个总数
 
@@ -490,7 +492,8 @@ type Polarity = 'buff' | 'debuff' | 'neutral';
 
 interface BuffDef {
   id: BuffId;
-  name: string;
+  /** 显示名的 i18n key（见 i18n 规范 §5 命名规则） */
+  nameKey: string;
   icon: string;
   polarity: Polarity;              // 仅影响 UI 颜色，不影响逻辑
   duration: number;                // ms；Infinity 表示永久
@@ -593,7 +596,7 @@ buff 上的 `modifiers` 里的 `Expr` 每次 `computeStats` 时重新求值（G3
 ```ts
 interface SkillDef extends GameEntity {
   id: SkillId;
-  name: string;
+  nameKey: string;
   icon: string;
   type: 'active' | 'passive';
 
@@ -735,9 +738,11 @@ interface GameEntity {
   id: EntityId;
   /** 类型标签：决定 UI 分组、能否装备、能否主动使用 */
   kind: EntityKind;
-  name: string;
+  /** 显示名的 i18n key。引擎与内容数据里零文案（i18n 规范 §2） */
+  nameKey: string;
   icon: string;
-  description?: string;
+  /** 描述的 i18n key，可选 */
+  descKey?: string;
   abilities: Ability[];          // ← 一切效果都挂在这里
   /** 自己的资源池：使用次数、充能住这里（§2.2） */
   pool?: ResourcePool;
@@ -875,7 +880,8 @@ value: { e: 'mul', of: [{ e: 'buffStacks', who:'self', buffId:'killing-intent' }
 ```ts
 export const ENTROPY_CLOCK: EquipmentEntity = {
   id: 'entropy-clock',
-  name: '熵之钟',
+  nameKey: 'entity.entropyClock.name',
+  descKey: 'entity.entropyClock.desc',
   icon: 'relic_entropy',
   slot: 'relic',
   rarity: 'legendary',
@@ -883,15 +889,15 @@ export const ENTROPY_CLOCK: EquipmentEntity = {
     // ── 效果 1：被动 +2 属性 ──────────────────────────────────
     { kind: 'modifier',
       modifier: { stat: 'intelligence', op: 'add', value: 2,
-                  source: '熵之钟', tier: 'item' } },
+                  sourceKey: 'entity.entropyClock.name', tier: 'item' } },
     { kind: 'modifier',
       modifier: { stat: 'spirit', op: 'add', value: 2,
-                  source: '熵之钟', tier: 'item' } },
+                  sourceKey: 'entity.entropyClock.name', tier: 'item' } },
 
     // ── 效果 2：根据属性增伤（动态、可被引用） ────────────────
     { kind: 'derived',
       modifier: { stat: 'damageBoost', op: 'addPercent',
-                  source: '熵之钟·势能',
+                  sourceKey: 'entity.entropyClock.sources.potential',
                   namespace: 'entropy-clock.potential',
                   tier: 'item' },
       value: { e: 'mul', of: [
@@ -910,7 +916,7 @@ export const ENTROPY_CLOCK: EquipmentEntity = {
             target: { mode: 'self' },
             buff: {
               id: 'entropy-surge',
-              name: '势能涌动',
+              nameKey: 'buff.entropySurge.name',
               icon: 'buff_surge',
               polarity: 'buff',
               duration: 10_000,
@@ -921,7 +927,7 @@ export const ENTROPY_CLOCK: EquipmentEntity = {
                 op: 'addPercent',
                 // 关键：不是写死的 10%，而是"引用势能命名空间的当前值"
                 value: { e: 'contrib', namespace: 'entropy-clock.potential' },
-                source: '熵之钟·涌动',
+                sourceKey: 'entity.entropyClock.sources.surge',
                 tier: 'buff',
               }],
             } },
@@ -1041,7 +1047,7 @@ interface ValidationIssue {
 | `CYCLE` | 派生 stat 的依赖图有环 | error |
 | `DANGLING_REF` | `contrib` 引用了不存在的命名空间 | error |
 | `MISSING_BUFF` | `buffId` / `skillId` 不存在 | error |
-| `MISSING_SOURCE` | `StatModifier.source` 为空 | error |
+| `MISSING_SOURCE` | `StatModifier.sourceKey` 为空 | error |
 | `BAD_TIER` | 派生 stat 引用了 tier 相同或更高的 stat | error |
 | `DUP_ID` | 内容 id 重复 | error |
 | `HIT_ORDER` | `hits[].at` 未按升序 / 有重复 | error |
@@ -1050,6 +1056,14 @@ interface ValidationIssue {
 | `SLOT_FULL` | 技能栏容量 < 授予技能数 | warning |
 | `UNCAPPED_STACK` | `stacking.mode:'stack'` 但 `max` 未设 | error |
 | `UNREACHABLE` | 技能 `requires` 条件永不可能满足 | warning |
+| `MISSING_LOCALE_KEY` | `nameKey`/`descKey`/`sourceKey` 在 catalog 里不存在 | error |
+| `KEY_ID_MISMATCH` | `entity.entropyClock.*` 存在但 `id !== 'entropy-clock'` | error |
+| `LOCALE_PARITY` | 非基准语言的 key 集合与基准不一致 | error |
+| `PLACEHOLDER_MISMATCH` | 同一 key 在不同语言里的 `{placeholder}` 集合不同 | error |
+| `EMPTY_STRING` | 某个 i18n key 的值是空串 | error |
+| `HARDCODED_TEXT` | 内容定义里出现了 `name`/`description`/`source` 等文案字段 | error |
+
+> i18n 相关的校验细节见 [i18n 规范](2026-10-09-i18n.md) §6。
 
 **`GCD_LOOP` 值得单独说**：派生的经典错误是自己把自己锁死。
 加载期静态图分析能抓到它，比在战斗里 debug"为什么按键没反应"便宜得多。
@@ -1124,7 +1138,8 @@ AND  intelligence === base + 2
 ```
 GIVEN 装备 entropy-clock, intelligence = 100
 THEN damageBoost === 0.10 × 102 = 0.102     (注意含效果 1 的 +2)
-AND  breakdown 含 { source:'熵之钟·势能', namespace:'entropy-clock.potential' }
+AND  breakdown 含 { sourceKey:'entity.entropyClock.sources.potential',
+                     namespace:'entropy-clock.potential' }
 ```
 
 ### T3 — 动态重算（G3，最关键）
@@ -1298,3 +1313,16 @@ src/
 > 这是"属性溯源必须有"的真实原因——它决定了重算的**范围**，
 > 而不是只提供 UI 展示。测试 T3 与新增的 T3b 覆盖这一条。
 
+### i18n 验收测试
+
+细节见 [i18n 规范](2026-10-09-i18n.md) §9。
+
+```
+I18N-T1  catalog 扁平化后每条 key 都能被 t() 取到，且值非空
+I18N-T2  所有 data/ 内容通过校验（无 MISSING_LOCALE_KEY / KEY_ID_MISMATCH）
+I18N-T3  同一 key 在基准语言里唯一（扁平化时检测重复）
+I18N-T4  带占位符的 key：t('x', {name:'a'}) 正确替换，缺失参数时抛错
+I18N-T5  number/percent/duration 的输出与预期字符串一致
+I18N-T6  ORPHAN_LOCALE_KEY 检测能找出刻意插入的孤立 key
+I18N-T7  lint I1 实测：src/ 里写一行含中文的字符串字面量 → 报错
+```

@@ -3,7 +3,7 @@
 > 状态：待评审
 > 日期：2026-10-09
 > 范围：技术选型 / 分层架构 / 目录结构 / 测试策略 / UI 组件化与设计系统 / 里程碑 / 发布流程
-> 配套文档：`2026-10-09-data-model.md`
+> 配套文档：`2026-10-09-data-model.md` · `2026-10-09-i18n.md`
 
 ---
 
@@ -61,6 +61,9 @@
 | C3 | `render/` 不许 import `core/` 的内部模块，只能 import `core/snapshot.ts` 暴露的类型 | 防止渲染层反向依赖引擎内部 |
 | C4 | `core/` 不许出现异步（`Promise` / `async` / `await`） | 引擎是同步的纯计算；异步会破坏确定性 |
 | C5 | 状态里不许有 `Map` / `Set` / 类实例 / 函数 | 必须可结构化克隆（worker 通信）且可哈希（golden test） |
+| **I1** | `src/**` 里禁止出现中日韩字符（`console.*` 的开发者日志除外） | 强制走 i18n，见 [i18n 规范](2026-10-09-i18n.md) |
+| **I2** | 只有 `src/i18n/locales/**` 允许 CJK | I1 的白名单 |
+| **I3** | `core/` 与 `data/` 禁止 import `i18n` | 引擎与内容数据只持 key，零文案 |
 
 C5 值得展开：worker 通信要求结构化克隆，golden test 要求稳定哈希。
 **所以 `BattleState` 一律用 plain object + array。** 这一条同时干掉了旧项目
@@ -159,6 +162,11 @@ raid-simulator/
 │  │  ├─ skills/  talents/  buffs/
 │  │  ├─ encounters/                  # 关卡定义
 │  │  └─ palette.ts                   # ★ 设计 token（代码与美术共用）
+│  ├─ i18n/                           # ★ 强制：所有玩家可见文案
+│  │  ├─ types.ts                     # 从基准语言推导的 key 类型
+│  │  ├─ locales/zh-CN.ts             # 当前唯一语言
+│  │  ├─ translator.ts                # t() / number / percent / duration
+│  │  └─ keys.ts                      # 代码里引用的固定 key 常量
 │  ├─ input/                          # keyboard.ts queue.ts bindings.ts focus.ts
 │  ├─ render/                         # app.ts scene.ts camera.ts interp.ts
 │  │  ├─ actors/                      # bossView.ts playerView.ts vfx.ts
@@ -394,18 +402,21 @@ interface FocusState {
 
 ### 6.6 canvas 里显示中文
 
-所有面向玩家的文字走 Pixi 的 `Text`。**中文渲染是像素风 / H5 小游戏最常见的翻车点**，
-所以提前定：
+文案**全部来自 i18n 表**（[i18n 规范](2026-10-09-i18n.md)），不在代码里硬编码。
+这里只讲渲染层要注意的：
 
-- 中文没有能覆盖常用字的现成像素字体，**不要用点阵中文字体**（体积巨大）。
-- 方案：引入一个等宽无衬线中文字体，**裁剪成只含本项目用到的字符子集**
-  （`fontmin` / `subfont` 之类工具，通常能压到 100KB 以内），
-  配 `Pixi.Text` + 整数坐标。
-- **中文字号必须 >= 16 逻辑像素**，14px 的中文在 960x540 下不可读。
-  所以 `TYPE` 表里中文用 `sm`(16) 起步，`xs`(14) 只给数字和拉丁字母。
+- **中文没有能覆盖常用字的现成像素字体**，不要用点阵中文字体（体积巨大）。
+- 方案：引一个等宽无衬线中文字体，**裁剪成只含 catalog 里出现过的字符子集**
+  （`fontmin` / `subfont`，通常能压到 100KB 以内），配 `Pixi.Text` + 整数坐标。
+  **裁剪的输入就是 `zh-CN.ts` 的全部字符串**——这是 i18n 集中化的附带好处。
+- **中文字号必须 >= 16 逻辑像素**。14px 中文在 960x540 下读不清，所以
+  `TYPE.xs`(14) 只给数字和拉丁字母，中文从 `TYPE.sm`(16) 起。
+- 文本节点**缓存复用**：`Pixi.Text` 改 `text` 会重建内部 canvas 纹理，
+  是明显的性能开销。所以 HUD 文本节点创建一次、只在值真变化时赋值
+  （比较新旧字符串），不要每帧无条件赋值。
 
-
----
+**中文渲染是像素风 / H5 小游戏最常见的翻车点**，所以字体子集化放在 M5
+（表现层）第一件事做，不拖到最后。
 
 ## 7. 输入与全键盘
 
@@ -682,6 +693,8 @@ ro.observe(stage);
 | 7 | 包管理器 | ✅ pnpm |
 | 8 | CI 硬门槛 | ✅ typecheck / lint / test 不通过则不发布 |
 | 9 | 主题系统 | ✅ 不做多主题；`data/palette.ts` 保留为 UI 与美术的唯一配色真相源（§6.3） |
+| 10 | i18n | ✅ **强制**。引擎与内容只持 key，UI 查表；当前仅 `zh-CN`。lint I1–I3 + 6 个构建期校验码。见 [i18n 规范](2026-10-09-i18n.md) |
+| 11 | 沙箱网络 | ✅ 实际可用（`registry.npmjs.org` 200）。需用 `--store-dir ./.pnpm-store` 绕开只读的 `~/.npm` |
 
 ### 11.1 唯一待办（不是设计问题，是运维）
 
@@ -692,7 +705,7 @@ ro.observe(stage);
 
 以下未单独确认、按默认值推进，如不认可请指出：
 
-1. **玩家可见文案保持中文**，不做 i18n 铺垫。
-   （`data/` 里字符串直接写中文；若以后要 i18n，用 `id` + 文案表重构。）
+1. ~~玩家可见文案保持中文，不做 i18n 铺垫~~ -> **已推翻**：
+   **i18n 强制**，当前只支持 `zh-CN`，见 [i18n 规范](2026-10-09-i18n.md)。
 2. **默认缩放模式 `fit`**（§10.2），设置里可切 `integer`。
 3. **不做多主题系统**；`data/palette.ts` 作为唯一配色真相源（§6.3）。
