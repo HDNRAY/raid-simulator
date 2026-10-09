@@ -6,7 +6,7 @@ import {
   computeCanvasCssSize,
   computeScale,
 } from '../../src/render/scaling';
-import { FONT, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../../src/ui/layout';
+import { FONT, GLYPH_NUDGE, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../../src/ui/layout';
 
 describe('逻辑分辨率常量', () => {
   it('是 960x540 且为 16:9', () => {
@@ -371,11 +371,21 @@ describe('技能格四角布局', () => {
     expect(pos.cooldown.y).toBeCloseTo(r.y + r.h / 2, 5);
   });
 
-  it('图标在正中', () => {
+  it('图标**水平**正中；纵向做光学补偿', () => {
+    /**
+     * ⚠️ 纵向**故意**不是几何中心。
+     *
+     * Pixi 的 `Text` 按整行高居中，而 CJK 字形重心偏低（26px 楷体：
+     * 行框 28px、字形约 20.5px 且偏下），所以几何居中看起来"坐得太低"。
+     * 上移 `GLYPH_NUDGE` 才是视觉居中。
+     */
     const r = rect();
     const pos = skillSlotLabels(r);
     expect(pos.glyph.x).toBeCloseTo(r.x + r.w / 2, 5);
-    expect(pos.glyph.y).toBeCloseTo(r.y + r.h / 2, 5);
+    expect(pos.glyph.y).toBeCloseTo(r.y + r.h / 2 - GLYPH_NUDGE, 5);
+    // 补偿量必须是个小正数：太大就会撞到上边缘的按键提示
+    expect(GLYPH_NUDGE).toBeGreaterThan(0);
+    expect(GLYPH_NUDGE).toBeLessThanOrEqual(6);
   });
 
   it('代价只给数字 + 可选后缀，不拼资源名（角落放不下"30炁"）', async () => {
@@ -385,12 +395,17 @@ describe('技能格四角布局', () => {
     expect(src).toMatch(/s\.cost\.set\(`\$\{Math\.round\(view\.cost\.value\)\}\$\{view\.cost\.suffix \?\? ''\}`\)/);
   });
 
-  it('**实时**冷却只给数字；**固有**冷却带单位', async () => {
+  it('两个 CD 都只给数字 —— 单位一律不显示', async () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
-    // 实时："4"（不给单位，格子太小）
+    // 实时："4"
     expect(src).toMatch(/s\.cd\.set\(view\.cooldownRatio > 0\.001 \? Math\.ceil\(view\.cooldownSec\)\.toString\(\) : ''\)/);
-    // 固有："30s"（给单位，它是规格说明而不是剩余量）
-    expect(src).toMatch(/s\.skillCd\.set\(view\.skillCdSec > 0 \? `\$\{Math\.round\(view\.skillCdSec\)\}s` : ''\)/);
+    /**
+     * 固有：也只有数字（需求："cd 的单位's'，不要显示出来"）。
+     * 我原先给它加了 `s`（理由："它是规格说明，需要单位"）—— 已按需求去掉。
+     */
+    expect(src).toMatch(/s\.skillCd\.set\(view\.skillCdSec > 0 \? String\(Math\.round\(view\.skillCdSec\)\) : ''\)/);
+    // 而且整个技能格渲染里不该再出现 `}s` 这种拼单位
+    expect(src).not.toMatch(/skillCd\.set\([^)]*\}s`/);
   });
 });

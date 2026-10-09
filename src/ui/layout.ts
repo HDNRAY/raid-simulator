@@ -304,6 +304,14 @@ export interface SlotLabelRects {
   readonly key: { readonly x: number; readonly y: number };
 }
 
+/**
+ * 技能字纵向的光学补偿（像素）。
+ *
+ * 见 `skillSlotLabels` 里对 `glyph` 的说明 —— 这个数不是调到手感对为止，
+ * 是由"行框高 28 / 字形高 20.5、重心偏下"算出来再实测校准的。
+ */
+export const GLYPH_NUDGE = 4;
+
 export function skillSlotLabels(rect: {
   readonly x: number;
   readonly y: number;
@@ -312,13 +320,20 @@ export function skillSlotLabels(rect: {
 }): SlotLabelRects {
   return {
     /**
-     * 技能字（图标）：**正中**。
+     * 技能字（图标）：水平正中 + **光学居中**。
      *
-     * 需求把周围四角分配给了别的信息（左上按键、右上代价、左下冷却），
-     * 所以图标不能再做纵向偏移 —— 它必须老老实实居中，
-     * 否则会和某个角撞上。
+     * ⚠️ 纵向必须减去 `GLYPH_NUDGE`。
+     *
+     * 我一度把它删了（理由："四角都占满了，图标必须老实居中"）——
+     * 那是错的。Pixi 的 `Text` 是按**整行高**居中的，而 CJK 字形的
+     * 重心明显低于行框中心：26px 的楷体，行框 28px 而字形只有约 20.5px，
+     * 且偏下。所以"数学居中"看起来就是**坐得太低**。
+     *
+     * 实测（26px 楷体、40px 格子）：按行框居中时字形落在
+     * y 498..526（格子 492..532），下边缘几乎贴底；
+     * 上移 `GLYPH_NUDGE` 之后才是视觉居中。
      */
-    glyph: { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 },
+    glyph: { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 - GLYPH_NUDGE },
     /**
      * **实时**冷却秒数：格子**正中**。
      *

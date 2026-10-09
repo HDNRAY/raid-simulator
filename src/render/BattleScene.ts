@@ -524,8 +524,15 @@ class SkillBarView {
        */
       // 实时剩余：只给数字（格子太小，`4s` 会挤掉图标）
       s.cd.set(view.cooldownRatio > 0.001 ? Math.ceil(view.cooldownSec).toString() : '');
-      // 固有冷却：带单位，"这个技能多长 CD"的规格说明
-      s.skillCd.set(view.skillCdSec > 0 ? `${Math.round(view.skillCdSec)}s` : '');
+      /**
+       * 固有冷却：**只给数字**（需求："cd的单位's'，不要显示出来"）。
+       *
+       * 我原先给它加了 `s`，理由是"它是规格说明而不是剩余量，有单位
+       * 才不会被误读"。但用户要求去掉 —— 而且格子已经够挤了，
+       * 少一个字母确实更干净。位置（左下）与字号（tiny）已经足够
+       * 区分"这是固有 CD"和中间那个实时数字。
+       */
+      s.skillCd.set(view.skillCdSec > 0 ? String(Math.round(view.skillCdSec)) : '');
       /**
        * 资源代价：数字 + **资源色**。
        *
