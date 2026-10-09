@@ -25,7 +25,15 @@ import {
 /** 演示用的往复运动范围（逻辑像素） */
 const DEMO_MIN_X = 60;
 const DEMO_MAX_X = 900;
-const DEMO_SPEED_PX_PER_MS = 0.28;
+/** 一个完整往返的基准时长（ms）。实际会被 RNG 缓慢调制。 */
+const DEMO_CYCLE_MS = 11000;
+/**
+ * 相位推进速度的低通滤波系数（指数移动平均）。
+ *
+ * 0.02 → 60Hz 下时间常数约 0.8 秒：肉眼看得出"节奏在缓慢变化"，
+ * 但相邻帧的速度差不到 0.01px，不会呈现为抖动或卡顿。
+ */
+const DEMO_RATE_SMOOTHING = 0.02;
 
 /**
  * M0 的占位模拟。
@@ -38,8 +46,19 @@ const DEMO_SPEED_PX_PER_MS = 0.28;
 export class DemoSim {
   private tick = 0;
   private rng: RngState;
-  private x = DEMO_MIN_X;
-  private direction: 1 | -1 = 1;
+  /**
+   * 相位（弧度）。**增量累加**，不参与任何乘法调制。
+   *
+   * 这是踩过的坑：如果写成 `phase = 2π * t / period` 而 period 会变，
+   * 那么 period 的微小变化会被 `-phase/period` 放大 ——
+   * 相位随时间无限增长，放大倍数也随之增长，最终表现为位置突变
+   * （实测 jerk 5.3px，肉眼可见的一次"跳"）。
+   *
+   * 增量累加则天然连续：相位只按当前角速度往前走。
+   */
+  private phase = 0;
+  /** 平滑后的角速度倍率（1 = 基准），由 RNG 缓慢驱动。 */
+  private rate = 1;
   /** 累计被丢弃的真实时间，用于调试面板 */
   droppedMs = 0;
 
@@ -47,24 +66,48 @@ export class DemoSim {
     this.rng = createRng(seed);
   }
 
-  /** 推进一个固定步长。actions 目前未使用，M1 起会在这里应用。 */
+  /**
+   * 推进一个固定步长。actions 目前未使用，M1 起会在这里应用。
+   *
+   * ------------------------------------------------------------------
+   * 这个占位模拟要同时满足两个目的
+   * ------------------------------------------------------------------
+   *
+   * 1. **证明随机源在状态里**（C2）：同一 seed 必须走出同一条轨迹。
+   * 2. **看起来不像 bug**：第一版把随机值直接当速度倍率，
+   *    相邻 tick 位移在 1.6~5.4px 之间跳（jerk ≈ 5px），
+   *    看上去就是"帧率不稳/卡顿"，反而像演示出了毛病。
+   *
+   * 所以轨迹用**正弦往复**（位置连续、速度连续、边界无硬拐弯），
+   * 再由 RNG 缓慢调制它的**周期**：
+   *
+   *   periodScale ← 低通滤波(RNG)    // 时间常数约 0.7 秒
+   *   x = center + amplitude * sin(2π * time / (period * periodScale))
+   *
+   * 于是：
+   *   - 每次刷新都有变化（不可能是"忘记用 RNG"）
+   *   - 变化是秒级的平滑漂移，不是逐帧抖动
+   *   - 完全没有边界反弹，不会出现"卡一下"
+   *   - 同一 seed 的轨迹唯一可复现
+   */
   step(): void {
-    // 用 RNG 做一点点速度抖动，证明随机源是确定性的
-    const jitter = nextRandom(this.rng);
-    this.rng = jitter.state;
-    const speed = DEMO_SPEED_PX_PER_MS * (0.85 + 0.3 * jitter.value);
+    const roll = nextRandom(this.rng);
+    this.rng = roll.state;
 
-    this.x += speed * DT * this.direction;
+    // 角速度在基准的 0.55~1.6 倍之间平滑漂移（慢 ↔ 快）
+    const target = 0.55 + 1.05 * roll.value;
+    this.rate += (target - this.rate) * DEMO_RATE_SMOOTHING;
 
-    if (this.x >= DEMO_MAX_X) {
-      this.x = DEMO_MAX_X;
-      this.direction = -1;
-    } else if (this.x <= DEMO_MIN_X) {
-      this.x = DEMO_MIN_X;
-      this.direction = 1;
-    }
+    // 相位增量累加：连续，且不会被漂移量放大
+    this.phase += ((2 * Math.PI) / DEMO_CYCLE_MS) * this.rate * DT;
 
     this.tick += 1;
+  }
+
+  private get x(): number {
+    const center = (DEMO_MIN_X + DEMO_MAX_X) / 2;
+    const amplitude = (DEMO_MAX_X - DEMO_MIN_X) / 2;
+    return center + amplitude * Math.sin(this.phase);
   }
 
   snapshot(): SimSnapshot {
