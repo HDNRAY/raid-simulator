@@ -243,23 +243,28 @@ describe('玩家面板：读条与资源条都是"实心填充进度条"', () =>
      * （条高 16 → 30，面板反而更高）。正确做法是**减少留白**：
      *   8（上边距）+ 16×3 + 8×2 + 18（下边距）= 90
      */
-    expect(LAYOUT.player.h).toBeLessThanOrEqual(96);
+    expect(LAYOUT.player.h).toBeLessThanOrEqual(84);
     // 条必须是"细条"，不能靠加粗去填面板
     expect(LAYOUT.playerBars.h).toBeLessThanOrEqual(18);
   });
 
-  it('三根条铺满面板，底部留白不超过面板的 30%', () => {
-    const { h: barH, top, stride } = LAYOUT.playerBars;
-    const lastBottom = top + 2 * stride + barH;
-    const slack = LAYOUT.player.h - lastBottom;
-    expect(slack).toBeGreaterThan(0);
-    expect(slack).toBeLessThanOrEqual(LAYOUT.player.h * 0.3);
+  it('【关键】三根条在面板里**上下留白相等**', () => {
+    /**
+     * 需求反复提过："使上下 padding 一致"。
+     *
+     * 根因是"面板高度"和"条的位置"分散在两处算，
+     * 谁都不会主动保证对称 —— 所以之前几轮改来改去都对不上。
+     * 现在三个值都在 `LAYOUT.playerBars` 里，并且**由这条断言守住**：
+     *
+     *   h = top + barH×3 + gap×2 + bottom
+     *   且 top === bottom
+     */
+    const { h: barH, top, stride, bottom } = LAYOUT.playerBars;
+    const gap = stride - barH;
+    expect(LAYOUT.player.h).toBe(top + barH * 3 + gap * 2 + bottom);
+    expect(top).toBe(bottom);
   });
 
-  it('布局表声明的 bottom 与实际留白一致（防止两处漂移）', () => {
-    const { h: barH, top, stride, bottom } = LAYOUT.playerBars;
-    expect(LAYOUT.player.h - (top + 2 * stride + barH)).toBe(bottom);
-  });
 
   it('两处读条都够高：要放"技能名 + 剩余秒数"一行字', () => {
     /**
