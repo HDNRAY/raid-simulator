@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { translator } from '../../src/i18n/translator';
 import { ALL_SKILLS } from '../../src/data/content';
+import { FONT, LAYOUT } from '../../src/ui/layout';
 import {
   formatClock,
   isTightWindow,
@@ -167,5 +168,43 @@ describe('数据一致性：命中时刻必须等于读条时长', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('读条组件（CastBar）：两处读条共用同一个实现', () => {
+  /**
+   * 需求："boss 读条依旧看不到上 border，玩家读条也有 bug，
+   * 这 2 个你没有抽成组件？所有的进度条，都应该抽成同一个组件。"
+   *
+   * 抽组件的**直接收益**是：层叠顺序只定义一次。所以这里守住
+   * 那个顺序 —— 它是"边框被填充盖住"这个 bug 的根因。
+   *
+   * 组件本身要构造 Pixi 对象（jsdom 里不好跑），所以这里用
+   * 源码断言 + 行为断言组合：
+   *   - 源码里 `addChild` 的参数顺序必须是 底 → 填充 → 描边 → 文字
+   *   - LAYOUT 里两处读条的矩形不重叠，且都在画布内
+   */
+  it('【关键】层叠顺序是 底 → 填充 → 描边 → 文字', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/ui/CastBar.ts', import.meta.url), 'utf8');
+    const m = /this\.root\.addChild\(([^)]*)\)/.exec(src);
+    expect(m).not.toBeNull();
+    const order = m![1]!.split(',').map((x) => x.trim());
+    expect(order).toEqual(['bg', 'this.fillGfx', 'this.border', 'this.nameText', 'this.timeText']);
+  });
+
+  it('填充区域左右各让 1px —— 否则会压住左右边框', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/ui/CastBar.ts', import.meta.url), 'utf8');
+    // 填充从 x+1 开始、宽 w-2、高 h-2
+    expect(src).toMatch(/rect\(x \+ 1, y \+ 1, filled, h - 2\)/);
+    expect(src).toMatch(/const innerW = Math\.max\(0, w - 2\)/);
+  });
+
+  it('两处读条都够高，且都不与所属面板重叠', () => {
+    // Boss 预警条在顶部、独立
+    expect(LAYOUT.castBar.h).toBeGreaterThanOrEqual(FONT.body + 8);
+    // 玩家读条必须在玩家面板上方（面板后绘制会盖住它）
+    expect(LAYOUT.playerCastBar.y + LAYOUT.playerCastBar.h).toBeLessThanOrEqual(LAYOUT.player.y);
   });
 });

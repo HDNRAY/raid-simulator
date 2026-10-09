@@ -18,6 +18,7 @@
 
 import type { Application, Container, Graphics } from 'pixi.js';
 import { PALETTE } from './theme';
+import { CastBar } from '../ui/CastBar';
 import { FONT, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../ui/layout';
 import { DISPLAY_SCALE } from '../data/balance';
 
@@ -28,7 +29,6 @@ import { BossSprite } from './actors/BossSprite';
 import {
   isTightWindow,
   ratioOf,
-  telegraphHint,
   type BattleSnapshotView,
   type BuffView,
   type SkillSlotView,
@@ -496,17 +496,10 @@ export class BattleScene {
   private readonly enrageBadge: Label;
 
   /* 预警条 */
-  private readonly castPanel: Panel;
-  private readonly castName: Label;
-  private readonly castHint: Label;
-  /** Boss 读条的纯色填充块（宽度随进度增长） */
-  private readonly castFill: Graphics;
-  /** 玩家读条的纯色填充块（宽度随进度增长） */
-  private readonly playerCastFill: Graphics;
-  /** 玩家自己的读条（面板顶部）。与 Boss 预警条是**两套**对象 —— 见布局说明。 */
-  private readonly playerCastPanel: Panel;
-  private readonly playerCastName: Label;
-  private readonly playerCastTime: Label;
+  /** Boss 预警条（与玩家读条共用 `ui/CastBar.ts`） */
+  private readonly castBar: CastBar;
+  /** 玩家读条（同一个组件，换配色） */
+  private readonly playerCastBar: CastBar;
 
   /* 玩家面板 */
   private readonly playerPanel: Panel;
@@ -616,143 +609,46 @@ export class BattleScene {
     this.bossBuffs = new IconStrip(pixi, LAYOUT.bossBuffs, translate);
     hud.addChild(this.bossBuffs.root);
 
-    /* 预警条 */
-    const cb = LAYOUT.castBar;
-    this.castPanel = new Panel(pixi, {
-      x: cb.x,
-      y: cb.y,
-      w: cb.w,
-      h: cb.h,
-      fill: 0x2a0c0e,
+    /* Boss 预警条 */
+    /**
+     * 读条用**共用组件**（`ui/CastBar.ts`）。
+     *
+     * Boss 与玩家原先各写一份，于是"修了一处忘了另一处"。
+     * 现在两者都是这一个组件，层叠顺序（底 → 填充 → 描边 → 文字）
+     * 只在一处定义。
+     */
+    this.castBar = new CastBar({
+      pixi,
+      rect: LAYOUT.castBar,
+      fill: 0xe8542c,
+      track: 0x2a0c0e,
       line: PALETTE.danger.base,
-      fillAlpha: 0.9,
-      radius: 2,
+      labelColor: 0xffe8c0,
+      timeColor: 0xffd0b0,
+      // Boss 预警条**不显示剩余秒数**？不 —— 它是最需要读的信息，保留
+      showTime: true,
     });
-    /**
-     * 文字位置：**垂直居中**在面板里（用 anchorY 而不是猜偏移）。
-     *
-     * 踩过的坑：之前写的是固定 `y + 6` / `y + 9`，而面板只有 28px 高 ——
-     * 剩余秒数的字底（约 y+28）正好压到底边，看起来"被边框挤住"。
-     * 现在面板加高到 32 并把两者按中线对齐。
-     */
-    const castMidY = cb.y + cb.h / 2;
-    this.castName = new Label(pixi, {
-      x: cb.x + 12,
-      y: castMidY,
-      size: FONT.warn,
-      color: 0xffe0d0,
-      anchorY: 0.5,
-    });
-    this.castHint = new Label(pixi, {
-      x: cb.x + cb.w - 10,
-      y: castMidY,
-      size: FONT.body,
-      color: 0xffd0b0,
-      anchorX: 1,
-      anchorY: 0.5,
-    });
-    /**
-    /**
-     * 读条 = **面板底 + 一块纯色方块从左往右长**（像水位 / 电量条）。
-     *
-     * ------------------------------------------------------------------
-     * 需求澄清（我理解错过两次，记下来）
-     * ------------------------------------------------------------------
-     *
-     * 需求原话是"背景色作为 progress"。"**渐变**"指的是 **gradient**
-     * —— 也就是"整块面板颜色从暗到亮地过渡"，那是**不要**的。
-     *
-     * 正确形态：面板是一层**暗色底**（未完成部分），进度用一块
-     * **纯色**（无渐变）从左边铺到右边，铺满面板内部高度。
-     * 这正是最经典的进度条：一眼能读出"还剩多少"。
-     *
-     * 所以结构是：
-     *   `castPanel`（暗底 + 描边，铺满整块）
-     *   `castFill`（纯色，宽度 = 进度 × 内部宽）
-     *   文字在两者之上
-     */
-    this.castPanel.root.visible = false;
-    this.castFill = new pixi.Graphics();
-    this.castFill.visible = false;
-    this.castName.root.visible = false;
-    this.castHint.root.visible = false;
-    /**
-     * 层叠顺序：**填充 → 面板（底+描边）→ 文字**。
-     *
-     * ⚠️ 踩过的坑：早期是"面板 → 填充 → 文字"，于是填充块**把描边
-     * 盖住了** —— 而且只盖住中间一段，看起来像"上边框缺失/不完整"。
-     * 把描边画在填充之上，边框才始终完整。
-     */
-    hud.addChild(this.castFill, this.castPanel.root, this.castName.root, this.castHint.root);
+    hud.addChild(this.castBar.root);
 
-    /* 玩家读条（面板顶部） */
-    const pcb = LAYOUT.playerCastBar;
+    /* 玩家读条 */
     /**
-     * 玩家读条：**背景色推进 + 亮金文字**。
+     * 同一个 `CastBar` 组件，只是换配色（暖金 = "自己的动作"，
+     * 红色留给 Boss 的威胁提示）。
      *
-     * ------------------------------------------------------------------
-     * 为什么改（用户反馈"太不清晰了，颜色太暗"）
-     * ------------------------------------------------------------------
-     *
-     * 早期是"深灰底 + 一条 3px 的暗金细线"，两个问题：
-     *   1. 底色 `0x14100c` 几乎是黑的，与面板分不开；
-     *   2. 文字 `0xffe8c0` 在中文字形下偏暗，而且细线只有 3px，
-     *      斜眼看根本读不出进度。
-     *
-     * 现在改成与 **Boss 预警条同一套表达**（进度 = 背景色推进）：
-     * 底色从暗金推进到亮金，文字更亮、秒数更大。两处读条用同一套
-     * 视觉语言，玩家不必学两次。
+     * ⚠️ 它必须放在玩家面板**上方**、不能重叠 —— 面板是后绘制的，
+     * 重叠会把读条盖住（见 `LAYOUT.playerCastBar` 的说明）。
      */
-    this.playerCastPanel = new Panel(pixi, {
-      x: pcb.x,
-      y: pcb.y,
-      w: pcb.w,
-      h: pcb.h,
-      // 暗底 = "还没走完的那一段"
-      fill: 0x2a1c06,
+    this.playerCastBar = new CastBar({
+      pixi,
+      rect: LAYOUT.playerCastBar,
+      fill: 0xb8860f,
+      track: 0x2a1c06,
       line: 0xd8a840,
-      fillAlpha: 1,
-      radius: 2,
+      labelColor: 0xffffff,
+      timeColor: 0xffffff,
+      showTime: true,
     });
-    /**
-     * 读条文字：**不加描边**。
-     *
-     * 踩过的坑：我先给它们加了深色描边（那是"数字压在亮条上"的标准做法），
-     * 结果在**亮金底**上深描边把白字包成一圈暗边，整块看起来反而更暗 ——
-     * 用户反馈的"颜色太暗"有一部分就来自这里。
-     *
-     * 底色已经是饱和金（亮度足够），纯白字直接压上去对比度最高。
-     */
-    this.playerCastName = new Label(pixi, {
-      x: pcb.x + 8,
-      y: pcb.y + 2,
-      size: FONT.body,
-      color: 0xffffff,
-      kai: true,
-    });
-    this.playerCastTime = new Label(pixi, {
-      x: pcb.x + pcb.w - 8,
-      y: pcb.y + 2,
-      size: FONT.body,
-      color: 0xffffff,
-      anchorX: 1,
-    });
-    this.playerCastPanel.root.visible = false;
-    /**
-     * 玩家读条同样用"纯色方块从左往右长"，配色换暖金。
-     * 层叠顺序：暗底 → 纯色填充 → 文字。
-     */
-    this.playerCastFill = new pixi.Graphics();
-    this.playerCastFill.visible = false;
-    this.playerCastName.root.visible = false;
-    this.playerCastTime.root.visible = false;
-    // 同 Boss：填充在下、面板（含描边）在上
-    hud.addChild(
-      this.playerCastFill,
-      this.playerCastPanel.root,
-      this.playerCastName.root,
-      this.playerCastTime.root,
-    );
+    hud.addChild(this.playerCastBar.root);
 
     /* 玩家面板：生命 / 缠 / 炁 **垂直排列** */
     const pf = LAYOUT.player;
@@ -1016,50 +912,18 @@ export class BattleScene {
 
     /* ---------- 预警条 ---------- */
     const cast = view.boss.cast;
-    /**
-     * ⚠️ 四个对象必须**一起**切可见性。
-     *
-     * 踩过的坑：`castFill` 原先只在 `if (cast)` 分支里被设为 `true`，
-     * 但没有把它设回 `false` —— 于是**最后一次读条的填充块永久留在
-     * 画面上**（表现为"Boss 没读条时那条底色还在"）。
-     * 玩家的读条有同样的问题。
-     */
-    this.castPanel.root.visible = cast !== undefined;
-    this.castFill.visible = cast !== undefined;
-    this.castName.root.visible = cast !== undefined;
-    this.castHint.root.visible = cast !== undefined;
-
+    this.castBar.visible = cast !== undefined;
     if (cast) {
-      this.castName.set(translate(cast.nameKey));
-      const hint = telegraphHint(cast);
-      this.castHint.set(hint ? `${hint.seconds}s` : '');
+      this.castBar.setContent(translate(cast.nameKey), `${(cast.remainingMs / 1000).toFixed(1)}s`);
       /**
-       * 提示区**只显示剩余秒数**。
-       *
-       * 需求：不要"闪避或格挡"字样。理由也很直接 —— 这两种应对
-       * 永远都适用，写出来是纯噪声；而"还有多久命中"才是玩家真正
-       * 需要读的信息。霸体状态改由**技能名颜色**表达（见下）。
+       * 文字颜色表达**能不能打断**：可打断 → 青绿；霸体 → 青蓝。
+       * 需求去掉了"闪避或格挡"那行字（永远适用 = 噪声），
+       * 只留剩余秒数。
        */
-      this.castHint.set(`${hint?.seconds ?? ''}s`);
-      this.castHint.setColor(cast.interruptible ? PALETTE.interrupt.bright : 0x30c8d0);
-
-      /**
-       * 进度 → **纯色方块宽度**（无渐变）。
-       *
-       * 底槽是暗红（未完成部分），方块是纯橙红（已完成部分）。
-       * 块宽按面板**内部**宽度算（左右各让 1px 给描边）。
-       */
-      const cbr = LAYOUT.castBar;
-      const fillW = Math.max(0, Math.round((cbr.w - 2) * Math.min(1, Math.max(0, cast.progress))));
-      this.castFill.clear();
-      if (fillW > 0) {
-        this.castFill
-          .rect(cbr.x + 1, cbr.y + 1, fillW, cbr.h - 2)
-          .fill({ color: 0xd8482a });
-      }
-      this.castFill.visible = true;
+      this.castBar.setNameColor(cast.interruptible ? PALETTE.interrupt.bright : 0x30c8d0);
+      this.castBar.update(cast.progress);
       // 越接近命中，边框越亮 —— 把"快到了"变成视觉压力
-      this.castPanel.set({ line: cast.progress > 0.7 ? 0xffd060 : PALETTE.danger.base });
+      this.castBar.setBorderColor(cast.progress > 0.7 ? 0xffd060 : PALETTE.danger.base);
     }
 
     /* ---------- 玩家读条 ---------- */
@@ -1074,28 +938,14 @@ export class BattleScene {
      * 对自己没有意义。
      */
     const playerCast = view.player.cast;
-    this.playerCastPanel.root.visible = playerCast !== undefined;
-    this.playerCastName.root.visible = playerCast !== undefined;
-    this.playerCastTime.root.visible = playerCast !== undefined;
+    this.playerCastBar.visible = playerCast !== undefined;
     if (playerCast) {
-      this.playerCastName.set(translate(playerCast.nameKey));
-      this.playerCastTime.set(`${(playerCast.remainingMs / 1000).toFixed(1)}s`);
-      /**
-       * 进度 → **纯色方块宽度**（与 Boss 预警条同一形态，
-       * 配色换成暖金 —— 红色是威胁、金色是自己的动作）。
-       */
-      const pbr = LAYOUT.playerCastBar;
-      const pw = Math.max(0, Math.round((pbr.w - 2) * Math.min(1, Math.max(0, playerCast.progress))));
-      this.playerCastFill.clear();
-      if (pw > 0) {
-        this.playerCastFill
-          .rect(pbr.x + 1, pbr.y + 1, pw, pbr.h - 2)
-          .fill({ color: 0xb8860f });
-      }
-      this.playerCastFill.visible = true;
-      this.playerCastPanel.set({
-        line: playerCast.progress > 0.7 ? 0xfff4c0 : 0xd8a840,
-      });
+      this.playerCastBar.setContent(
+        translate(playerCast.nameKey),
+        `${(playerCast.remainingMs / 1000).toFixed(1)}s`,
+      );
+      this.playerCastBar.update(playerCast.progress);
+      this.playerCastBar.setBorderColor(playerCast.progress > 0.7 ? 0xfff4c0 : 0xd8a840);
     }
 
     /* ---------- 玩家面板 ---------- */
