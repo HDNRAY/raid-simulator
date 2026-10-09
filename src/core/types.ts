@@ -532,6 +532,13 @@ export interface GrantAbility {
   readonly kind: 'grant';
   readonly buff: BuffDef;
   readonly target: TargetRule;
+  /**
+   * 结算时刻（默认 `'castFinish'`）。
+   *
+   * 传 `'castStart'` 让这个 buff **起手就挂上** —— 用于"施法期间的状态"
+   * （霸体、施法光环）。详见 `AbilityTiming` 的说明。
+   */
+  readonly on?: AbilityTiming;
 }
 
 export interface DealAbility {
@@ -582,6 +589,22 @@ export interface ConsumeAbility {
  * 一个具体的机制永远是这两类的组合。所以新增增伤类型通常
  * **不需要新的 kind**，只需要新的 StatKey / Expr 节点 / Hook。
  */
+/**
+ * 能力在**读条的哪个时刻**结算。
+ *
+ *   - `'castFinish'`（默认）：读条走完才生效 —— 绝大多数能力（伤害、增伤）
+ *     都该在这个时刻
+ *   - `'castStart'`：**起手就生效**，整个前摇期间都在
+ *
+ * 需求逼出来的：重斩要"自带霸体"，而霸体的意义就是"整个前摇打不断"。
+ * 如果它跟其它能力一样在读条完成时才挂上，前摇期间照样能被「破」
+ * 打断 —— 霸体等于没有。
+ *
+ * 一个技能可以同时有两组能力：`castStart` 用于"施法期间的状态"
+ * （霸体、施法光环），默认的 `castFinish` 用于"结算结果"。
+ */
+export type AbilityTiming = 'castStart' | 'castFinish';
+
 export type Ability =
   | ModifierAbility
   | DerivedAbility

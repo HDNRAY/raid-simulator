@@ -703,7 +703,6 @@ export class BattleEngine {
 
     // 4. buff 过期
     this.expireBuffs();
-
     // 5. 资源回复
     this.regenerateResources();
 
@@ -867,6 +866,18 @@ export class BattleEngine {
         sourceId: actor.id,
         skillId,
       });
+      /**
+       * **起手就生效**的能力（`on: 'castStart'`）。
+       *
+       * 需求："重斩加上霸体标签和霸体效果" —— 霸体的意义是"整个前摇
+       * 打不断"，所以它必须在起手时挂上。之前 skills 的 abilities 只在
+       * 读条**完成**时结算，于是前摇期间照样能被「破」打断，
+       * 霸体等于没有（实测确认过）。
+       *
+       * 时机放在 `castStarted` 事件之后：事件流上读起来是
+       * "开始了 → 因此获得霸体"，消费者按顺序理解不会歧义。
+       */
+      this.applyCastStartAbilities(skill, actor.id);
     } else {
       // 瞬发：先同步冷却，再结算 —— 之后**不再写回**
       this.replaceCombatant(next);
@@ -999,6 +1010,32 @@ export class BattleEngine {
     }
   }
 
+  /**
+   * 结算 `on: 'castStart'` 的能力。
+   *
+   * 与 `fireCastFinishTriggers` 是**两套**：那个处理"完成时的结果"，
+   * 这个处理"施法期间的状态"。分成两个方法而不是加一个参数，
+   * 是因为它们的**写入对象不同** —— 完成时的结算必须操作累积对象
+   * （见那里的长注释），而起手时 `state` 已经是最新的。
+   */
+  private applyCastStartAbilities(skill: SkillDef, actorId: string): void {
+    for (const ability of skill.abilities) {
+      if (ability.kind !== 'grant' || ability.on !== 'castStart') continue;
+      const targetId = ability.target.mode === 'self' ? actorId : (this.opponentOf(actorId)?.id ?? actorId);
+      const target = this.current(targetId);
+      const applied = applyBuff(target, ability.buff, actorId, this.state.tick);
+      this.replaceCombatant({ ...target, buffs: applied.buffs });
+      this.events.push({
+        kind: 'buffApplied',
+        tick: this.state.tick,
+        targetId,
+        buffId: ability.buff.id,
+        stacks: applied.stacks,
+        sourceId: actorId,
+      });
+    }
+  }
+
   /** 瞬发技能：立刻结算全部 hit 段。 */
   private resolveSkillHits(actor: Combatant, skill: SkillDef): void {
     for (const hit of skill.hits) {
@@ -1121,7 +1158,15 @@ export class BattleEngine {
       this.events.push(...result.events);
     };
 
+    /**
+     * ⚠️ 这里只结算**读条完成**时刻的能力。
+     *
+     * `on: 'castStart'` 的那组在起手时就结算过了（见 `tryUseSkill`），
+     * 如果在完成时再算一次，霸体会被刷新成"从完成时刻起算"——
+     * 那正好把"整个前摇都免疫"这个语义破坏掉。
+     */
     for (const ability of skill.abilities) {
+      if (ability.kind === 'grant' && ability.on === 'castStart') continue;
       if (ability.kind === 'grant') {
         grantTo(ability.buff, targetIdOf(ability.target.mode));
         continue;

@@ -212,6 +212,32 @@ export const BOSS_ARMOR: BuffDef = {
 };
 
 /**
+ * 重斩**自带**的霸体（起手挂上，覆盖整个前摇）。
+ *
+ * ⚠️ 与 `BOSS_ARMOR` 是**同一个概念、不同时长**，所以是两个 id：
+ *   - `BOSS_ARMOR`        3.0 秒，给独立的「霸体」技能用
+ *   - `BOSS_CLEAVE_ARMOR` 1.8 秒 = **重斩的前摇时长**，只覆盖这一招
+ *
+ * 共用一个 id 的话，重斩结束之后霸体会**多留 1.2 秒**，
+ * 那段时间里「破」也打不断 —— 玩家会以为工具坏了。
+ *
+ * 文案/图标/颜色与 `BOSS_ARMOR` 完全一致（同一个东西），
+ * 所以 UI 上看起来就是"重斩期间 boss 有一层霸体"。
+ */
+export const BOSS_CLEAVE_ARMOR: BuffDef = {
+  id: 'boss-cleave-armor',
+  nameKey: 'boss.armor.name',
+  icon: 'boss_armor',
+  polarity: 'buff',
+  color: 0x30c8d0,
+  /** = 重斩的 `castTime`（logicMs(18)），读条走完就消失 */
+  duration: logicMs(18),
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+  flags: { interruptImmune: true },
+};
+
+/**
  * 玩家给 Boss 挂的易伤。
  *
  * 为什么需要它：玩家只有 6 招，如果全是"直接伤害"，循环会没有层次。
@@ -454,7 +480,19 @@ const BOSS_CLEAVE: SkillDef = {
   nameKey: 'boss.cleave.name',
   descKey: 'boss.cleave.desc',
   icon: 'boss_cleave',
-  abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: BOSS_TELEGRAPH }],
+  /**
+   * 起手就给自己挂**霸体**（`BOSS_ARMOR`）—— 于是整个前摇期间打不断。
+   *
+   * 需求："重斩加上 霸体标签和霸体效果"。
+   *
+   * 语义上这是"重斩是一记压上全部重心的斩击，起手就没有退路"：
+   * 玩家看到读条就只能闪/挡，别浪费「破」。
+   * 与独立的 `boss-armor` 技能共用同一个 buff 定义（一个概念一处定义）。
+   */
+  abilities: [
+    { kind: 'grant', target: { mode: 'self' }, buff: BOSS_TELEGRAPH },
+    { kind: 'grant', target: { mode: 'self' }, buff: BOSS_CLEAVE_ARMOR, on: 'castStart' },
+  ],
   castTime: logicMs(18),
   /**
    * 冷却 **4.5 秒**（原 3 秒）。
@@ -495,7 +533,7 @@ const BOSS_CLEAVE: SkillDef = {
    * 「高伤」—— 单次 28 点，而玩家的「攻」只有 10。
    * 提示玩家：**闪避比防御更值**（闪避全免，防御只减 55%）。
    */
-  hintTags: ['highDamage'],
+  hintTags: ['highDamage', 'interruptImmune'],
   interruptible: true,
 };
 
@@ -642,6 +680,7 @@ export const ALL_BUFFS: readonly BuffDef[] = [
   BOSS_TELEGRAPH,
   BOSS_ENRAGE,
   BOSS_ARMOR,
+  BOSS_CLEAVE_ARMOR,
 ];
 
 void logicTicks;

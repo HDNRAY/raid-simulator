@@ -17,6 +17,7 @@ import {
 import { LOG_PANEL_METRICS } from '../../src/ui/LogPanel';
 import { translator } from '../../src/i18n/translator';
 import type { EventDef } from '../../src/core/types';
+import { ALL_BUFFS, ALL_SKILLS } from '../../src/data/content';
 
 /**
  * 战斗日志的**格式化层**。
@@ -266,5 +267,62 @@ describe('UI 缩放（设置 · 通用页的 slider）', () => {
     // slider 的左右**不移动焦点**（调用方拿它们当调值键）——
     // 模型这一层把左右都当作"回到 tabs"
     expect(moveFocus(toSlider, 'up', 0, true, false).zone).toBe('tabs');
+  });
+});
+
+describe('能力结算时刻：castStart 与 castFinish', () => {
+  /**
+   * 需求："重斩加上霸体标签和霸体效果"
+   *
+   * ⚠️ 这个需求逼出了一个新的能力时刻 `on: 'castStart'`。
+   *
+   * 原先 skills 的 abilities **只在读条完成时**结算。而霸体的意义是
+   * "整个前摇打不断" —— 如果它跟其它能力一样在完成时才挂上，
+   * 前摇期间照样能被「破」打断（实测确认过：重斩读条 216 tick，
+   * 带霸体 0 tick，3 次「破」全部成功）。
+   */
+  it('重斩的霸体标了 castStart —— 否则前摇期间不免疫', () => {
+    const cleave = ALL_SKILLS.find((s) => s.id === 'boss-cleave');
+    expect(cleave).toBeDefined();
+    const armorGrant = cleave!.abilities.find(
+      (a) => a.kind === 'grant' && a.buff.id === 'boss-cleave-armor',
+    );
+    expect(armorGrant, '重斩应该有霸体 grant').toBeDefined();
+    expect(armorGrant!.kind === 'grant' && armorGrant!.on).toBe('castStart');
+  });
+
+  it('霸体时长 == 重斩前摇（读条走完就消失，不会溢出到下一招）', () => {
+    const cleave = ALL_SKILLS.find((s) => s.id === 'boss-cleave')!;
+    const armor = ALL_BUFFS.find((b) => b.id === 'boss-cleave-armor');
+    expect(armor).toBeDefined();
+    expect(armor!.flags?.interruptImmune).toBe(true);
+    expect(armor!.duration).toBe(cleave.castTime);
+  });
+
+  it('重斩的提示标签同时有「高伤」和「霸体」', () => {
+    const cleave = ALL_SKILLS.find((s) => s.id === 'boss-cleave')!;
+    expect([...(cleave.hintTags ?? [])].sort()).toEqual(['highDamage', 'interruptImmune']);
+  });
+
+  it('读条完成时**不会**再结算一次 castStart 的能力', async () => {
+    /**
+     * 如果在完成时再算一次，霸体会被刷新成"从完成时刻起算"，
+     * 于是它溢出到下一招 —— 那正好破坏"整个前摇免疫"的语义，
+     * 而且会让「破」在一段时间内莫名其妙失效。
+     */
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/core/combat/battleState.ts', import.meta.url), 'utf8');
+    expect(src).toMatch(/if \(ability\.kind === 'grant' && ability\.on === 'castStart'\) continue;/);
+  });
+
+  it('起手时确实有一条结算路径，且放在 castStarted 事件之后', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/core/combat/battleState.ts', import.meta.url), 'utf8');
+    expect(src).toMatch(/private applyCastStartAbilities\(/);
+    // 顺序：先发 castStarted，再结算 —— 事件流读起来是"开始了 → 因此获得霸体"
+    const idx = src.indexOf("kind: 'castStarted'");
+    const callIdx = src.indexOf('this.applyCastStartAbilities(');
+    expect(idx).toBeGreaterThan(0);
+    expect(callIdx).toBeGreaterThan(idx);
   });
 });
