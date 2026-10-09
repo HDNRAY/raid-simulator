@@ -167,7 +167,7 @@ export const ICON_BUTTON_DEFAULTS = {
    * 描边是为了在任意背景上都读得清（需求："esc 可以考虑加描边"）。
    */
   cornerSize: 9,
-  cornerStroke: 2,
+  cornerStroke: 3,
 } as const;
 
 export class IconButton {
@@ -214,7 +214,16 @@ export class IconButton {
         x: 0,
         y: 0,
         size: corner ? ICON_BUTTON_DEFAULTS.cornerSize : FONT.small,
-        color: PALETTE.textDim,
+        /**
+         * 颜色用**亮**的 `PALETTE.text`，不是 `textDim`。
+         *
+         * 需求："esc 的描边没有让它看起来足够清晰"。
+         *
+         * 根因不是描边不够粗，而是**文字本身太暗**：Esc 压在浅色的齿轮上，
+         * 深灰字与齿轮笔画糊成一团，再加粗描边也只是把糊的部分圈起来。
+         * 改成亮色 + 3px 黑描边之后，它才从齿轮上"跳"出来。
+         */
+        color: corner ? PALETTE.text : PALETTE.textDim,
         ...(corner
           ? { stroke: 0x000000, strokeWidth: ICON_BUTTON_DEFAULTS.cornerStroke }
           : {}),
@@ -270,7 +279,7 @@ export class IconButton {
          * （第一版只偏移 +2 / +1，结果 Esc 完全落在齿轮**外面**，
          * 看起来像两个互不相干的元素。）
          */
-        this.hint.root.x = box.iconX + 10;
+        this.hint.root.x = box.iconX + 12;
         /**
          * 纵向偏移要**大于** `+5`。
          *
@@ -280,10 +289,14 @@ export class IconButton {
          * 只在左上角勉强碰到，看起来仍是"贴在旁边"。
          * `+10` 让它明显压住齿轮的左上角。
          *
-         * 横向也取 `+10`：Esc 的字形自带很重的描边，且右边最后一笔
-         * 离字形框有 1–2px 空隙，所以 `+4` 时看上去只挨上 2px。
+         * 横向取 `+12`：Esc 的字形自带描边，且右边最后一笔离字形框
+         * 还有 1–2px 空隙，所以 `+4` 时看上去只挨上 2px。
+         *
+         * ⚠️ 描边宽度 2 → **3**：需求"esc 的描边没有让它看起来足够清晰"。
+         * 2px 的黑色描边在深色背景上压根看不出来，等于没加；
+         * 3px 才让 Esc 从齿轮的浅色笔画里跳出来。
          */
-        this.hint.root.y = box.iconY + 10;
+        this.hint.root.y = box.iconY + 12;
         this.hint.root.anchor.x = 1;
         this.hint.root.anchor.y = 1;
       }

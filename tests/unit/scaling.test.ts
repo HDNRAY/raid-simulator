@@ -6,7 +6,7 @@ import {
   computeCanvasCssSize,
   computeScale,
 } from '../../src/render/scaling';
-import { FONT, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../../src/ui/layout';
+import { FONT, GLYPH_BASELINE_NUDGE, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../../src/ui/layout';
 
 describe('逻辑分辨率常量', () => {
   it('是 960x540 且为 16:9', () => {
@@ -157,15 +157,21 @@ describe('技能格内三个标签都不越界、互不重叠', () => {
     }
   });
 
-  it('技能字与冷却数字**同心** —— 数字要盖在 icon 上', () => {
+  it('技能字与冷却数字**水平同心**；垂直方向技能字上移一个补偿量', () => {
     /**
-     * 需求："数字应该盖在按键 icon 上"。
-     * 两者中心点必须一致，否则数字会偏向一侧。
+     * 需求："数字应该盖在按键 icon 上" —— 两者要叠在一起。
+     *
+     * 水平方向必须同心（否则数字会偏向一侧）。
+     * 垂直方向**故意错开 `GLYPH_BASELINE_NUDGE`**：Pixi 的 `Text` 按
+     * 整行高居中，而 CJK 字形重心偏下，所以图标要上移才**视觉**居中；
+     * 数字是纯数字、没有这个问题，保持几何居中。两者因此差一个补偿量。
      */
     for (let i = 0; i < 6; i += 1) {
-      const pos = skillSlotLabels(skillSlotRect(i, 6));
-      expect(pos.glyph.x).toBeCloseTo(pos.cooldown.x, 5);
-      expect(pos.glyph.y).toBeCloseTo(pos.cooldown.y, 5);
+      const rect = skillSlotRect(i, 6);
+      const pos = skillSlotLabels(rect);
+      expect(pos.glyph.x, `槽位 ${i} 水平`).toBeCloseTo(pos.cooldown.x, 5);
+      // 垂直方向相差恰好一个补偿量（不是随手错开）
+      expect(pos.cooldown.y - pos.glyph.y, `槽位 ${i} 垂直`).toBeCloseTo(GLYPH_BASELINE_NUDGE, 5);
     }
   });
 
@@ -295,5 +301,50 @@ describe('玩家面板：读条与资源条都是"实心填充进度条"', () =>
     const pcb = LAYOUT.playerCastBar;
     const pf = LAYOUT.player;
     expect(pcb.y + pcb.h).toBeLessThanOrEqual(pf.y);
+  });
+});
+
+describe('技能格：图标尺寸与冷却时的可读性', () => {
+  it('技能字（图标）至少 32px —— 需求下限', () => {
+    /**
+     * 需求："按键的'楷体字'图标，再大一点，至少 32 吧"。
+     *
+     * 32px 楷体实测只占 32×25.2（`measureText` 的
+     * `actualBoundingBox`，**不是行高**），放进 40×40 的格子上下各余 7px。
+     * ⚠️ 楷体的行高远大于字形本身，按行高估算会误判为放不下。
+     */
+    expect(FONT.skillIcon).toBeGreaterThanOrEqual(32);
+    // 而且必须放得进格子（字形高约 0.79×字号）
+    expect(LAYOUT.skillBar.slot).toBeGreaterThanOrEqual(FONT.skillIcon * 0.79);
+  });
+
+  it('图标比冷却数字**大**，冷却时"数字盖住图标"才成立', () => {
+    expect(FONT.skillIcon).toBeGreaterThan(FONT.cd);
+  });
+
+  it('技能字有纵向视觉补偿 —— 按行高居中会让 CJK 字形偏下', () => {
+    /**
+     * Pixi 的 `Text` 按**整行高**居中，而 CJK 字形重心偏下。
+     * 实测 32px 楷体在 40px 格子里：字形占 495..529（格子 492..532），
+     * 视觉上明显"坐得太低"。所以要上移一个补偿量。
+     */
+    expect(GLYPH_BASELINE_NUDGE).toBeGreaterThan(0);
+    const pos = skillSlotLabels(skillSlotRect(0, 6));
+    expect(pos.glyph.y).toBeLessThan(skillSlotRect(0, 6).y + LAYOUT.skillBar.slot / 2);
+  });
+});
+
+describe('角落快捷键提示（Esc）的可读性', () => {
+  it('描边 3px 且文字用亮色 —— 深色字压在浅色图标上会糊', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/ui/IconButton.ts', import.meta.url), 'utf8');
+    /**
+     * 需求："esc 的描边没有让它看起来足够清晰"。
+     *
+     * 根因不是描边不够粗，而是**文字本身太暗**：Esc 压在浅色齿轮上，
+     * 深灰字与齿轮笔画糊在一起。所以两件事都要保证。
+     */
+    expect(src).toMatch(/cornerStroke: 3,/);
+    expect(src).toMatch(/color: corner \? PALETTE\.text : PALETTE\.textDim/);
   });
 });

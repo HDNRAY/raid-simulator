@@ -279,7 +279,8 @@ class SkillBarView {
       const glyph = new Label(this.pixi, {
         x: pos.glyph.x,
         y: pos.glyph.y,
-        size: FONT.small,
+        // 图标用专门的字号（32px），比 body 大得多 —— 见 FONT.skillIcon
+        size: FONT.skillIcon,
         color: 0xffffff,
         // 双向居中 —— 需求指出技能字原先"位置也不是居中的"
         anchorX: 0.5,
@@ -421,6 +422,16 @@ class SkillBarView {
       s.glyph.setColor(
         view.usable ? 0xffffff : view.cooldownRatio > 0.001 ? 0xb0b0be : 0x5a5a68,
       );
+      /**
+       * 冷却时把技能字**压暗**。
+       *
+       * 图标放大到 32px 之后，它和 18px 的冷却数字在同一格里会互相打架。
+       * 白色半透明遮罩本身不够——两层重字叠在一起仍然乱。
+       *
+       * 所以冷却时让图标退到 alpha 0.4：它仍然"在那儿"（不丢失识别），
+       * 但数字是格里唯一清晰的东西。这正是"数字盖住图标"该有的观感。
+       */
+      s.glyph.root.alpha = view.cooldownRatio > 0.001 ? 0.4 : 1;
       s.key.set(view.key.toUpperCase());
       /**
        * **键位提示也要跟着状态变。**

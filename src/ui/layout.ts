@@ -50,6 +50,17 @@ export const FONT = {
   body: 15,
   /** 技能格里的冷却数字（比 body 大、比 big 小 —— 40px 格子放不下 26px） */
   cd: 18,
+  /**
+   * 技能格里的**技能字（图标）**。
+   *
+   * 需求："按键的'楷体字'图标，再大一点，至少 32 吧"。
+   *
+   * 32px 楷体实测只占 **32×25.2**（`measureText` 的
+   * actualBoundingBox，不是行高），放进 40×40 的格子上下各余 7px —— 放得下。
+   * 注意楷体字形的行高远大于字形本身，所以**不能按行高估算**，
+   * 否则会误判为放不下。
+   */
+  skillIcon: 32,
   /** 面板标题 */
   title: 17,
   /** 预警主文案 */
@@ -223,6 +234,14 @@ export const LAYOUT = {
 } as const;
 
 /**
+ * 技能字纵向的视觉补偿（像素）。
+ *
+ * 与 `skillSlotLabels` 里的字形居中配合使用；数值由实测得出，
+ * 不是调到手感对为止 —— 见那里的说明。
+ */
+export const GLYPH_BASELINE_NUDGE = 4;
+
+/**
  * 技能栏某个槽位的坐标。
  *
  * 整条栏**右对齐**而不是居中 —— 技能栏属于操作区，
@@ -286,7 +305,16 @@ export function skillSlotLabels(rect: {
      * "数字应该盖在按键 icon 上"），所以技能字也回到正中 ——
      * 两者同心地叠在一起，冷却时数字压住图标。
      */
-    glyph: { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 },
+    /**
+     * ⚠️ 纵向要**减去 `GLYPH_BASELINE_NUDGE`**。
+     *
+     * Pixi 的 `Text` 是按**整行高**居中的，而 CJK 字体的字形只占行高的
+     * 一部分、且重心偏下 —— 直接按 `h/2` 居中会让字看起来"坐得太低"。
+     * 实测（32px 楷体、40px 格子）：字形占 495..529，格子 492..532，
+     * 上方只余 3px、下方 3px，但视觉上明显偏下。
+     * 上移 `GLYPH_BASELINE_NUDGE` 之后才真正居中。
+     */
+    glyph: { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 - GLYPH_BASELINE_NUDGE },
     /**
      * 冷却秒数：**格子正中，直接盖在技能字上**。
      *
