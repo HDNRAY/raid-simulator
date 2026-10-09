@@ -211,12 +211,13 @@ describe('aggregateFlags —— 判定层的输入', () => {
     expect(aggregateFlags(c).damageReduce).toBeCloseTo(0.6, 10);
   });
 
-  it('GCD 与动作锁', () => {
-    const gcd = def({ id: 'gcd', stacking: { mode: 'refresh' }, flags: { blocksGcd: true } });
+  it('动作锁', () => {
+    /**
+     * 早期这里还测 `blocksGcd`（公共冷却）。GCD 已经被删掉 ——
+     * 节奏改由「攻 / 轰 的读条」表达，所以只剩动作锁这一个 flag。
+     */
     const lock = def({ id: 'lock', stacking: { mode: 'refresh' }, flags: { actionLock: true } });
     let c = makeCombatant();
-    c = { ...c, buffs: applyBuff(c, gcd, 'src', 0).buffs };
-    expect(aggregateFlags(c).blocksGcd).toBe(true);
     expect(aggregateFlags(c).actionLock).toBeUndefined();
     c = { ...c, buffs: applyBuff(c, lock, 'src', 0).buffs };
     expect(aggregateFlags(c).actionLock).toBe(true);

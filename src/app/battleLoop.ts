@@ -13,7 +13,6 @@
 import { BattleEngine, type CreateBattleOptions } from '../core/combat/battleState';
 import { MS_PER_TICK } from '../core/loopConstants';
 import { createKeyboardInput, repeatHeld, type InputSource, type KeyBinding } from '../input/keyboard';
-import { isOnGcd } from '../core/combat';
 import { ViewAdapter, DEFAULT_SLOTS, type SlotBinding } from './viewAdapter';
 import type { BattleSnapshotView } from '../render/viewModel';
 import type { Action } from '../core/types';
@@ -177,8 +176,6 @@ export class BattleLoop {
     const actor = state.combatants.find((c) => c.side === 'ally');
     if (!actor || !actor.alive) return false;
     if (actor.casts.length > 0) return false;
-    // 与引擎共用同一个 GCD 判据（见 `isOnGcd` 的说明）
-    if (isOnGcd(actor, skill)) return false;
     const readyAt = actor.cooldowns[skillId] ?? 0;
     if (readyAt > state.tick) return false;
     for (const cost of skill.cost) {

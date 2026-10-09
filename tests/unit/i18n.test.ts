@@ -47,7 +47,6 @@ describe('I18N-T1 / T3：扁平化', () => {
     const flat = flattenCatalog(zhCN);
     expect(flat.has('resource.hp')).toBe(true);
     expect(flat.has('stat.strength')).toBe(true);
-    expect(flat.has('reject.gcd')).toBe(true);
     expect(flat.has('resource')).toBe(false);
     expect(flat.has('stat')).toBe(false);
   });
@@ -76,7 +75,8 @@ describe('I18N-T4：模板与占位符', () => {
      * 而译文本身并不是这条测试要验证的东西（它验证的是"无占位符时原样返回"）。
      */
     expect(t.t('resource.hp')).toBe(zhCN.resource.hp);
-    expect(t.t('reject.gcd')).toBe('公共冷却中');
+    // 同上：引用语言包而不是写死文案（`reject.gcd` 已随 GCD 一起删除）
+    expect(t.t('reject.casting')).toBe(zhCN.reject.casting);
   });
 
   it('字符串参数被替换', () => {

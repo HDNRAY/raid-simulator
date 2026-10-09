@@ -151,17 +151,6 @@ const guardBuff: BuffDef = {
 };
 
 /** GCD：300ms */
-const gcdBuff: BuffDef = {
-  id: 'gcd',
-  nameKey: 'reject.gcd',
-  icon: 'gcd',
-  polarity: 'neutral',
-  duration: 300,
-  maxStacks: 1,
-  stacking: { mode: 'refresh' },
-  flags: { blocksGcd: true },
-};
-
 /** 派生窗口：让 arc 在 1.5 秒内可用 */
 const comboBuff: BuffDef = {
   id: 'combo-window',
@@ -208,11 +197,9 @@ const slash: SkillDef = {
   icon: 'skill_slash',
   abilities: [
     { kind: 'trigger', trigger: { on: 'onCastFinish', then: [{ kind: 'grant', buff: comboBuff, target: { mode: 'self' } }] } },
-    { kind: 'trigger', trigger: { on: 'onCastFinish', then: [{ kind: 'grant', buff: gcdBuff, target: { mode: 'self' } }] } },
   ],
-  castTime: 0,
+  castTime: 500,
   cooldown: 0,
-  gcd: true,
   cost: [{ resource: 'energy', value: 10 }],
   targeting: { mode: 'primaryEnemy' },
   hits: slashHits,
@@ -228,8 +215,7 @@ const dodge: SkillDef = {
   icon: 'skill_dodge',
   abilities: [{ kind: 'grant', buff: dodgeBuff, target: { mode: 'self' } }],
   castTime: 0,
-  cooldown: 0,
-  gcd: false, // 不占 GCD —— 这就是"闪避随时可用"的落地方式
+  cooldown: 0, // 瞬发无冷却 —— 这就是"闪避随时可用"的落地方式
   cost: [{ resource: 'energy', value: 30 }],
   targeting: { mode: 'self' },
   hits: [],
@@ -246,7 +232,6 @@ const guard: SkillDef = {
   abilities: [{ kind: 'grant', buff: guardBuff, target: { mode: 'self' } }],
   castTime: 0,
   cooldown: 0,
-  gcd: false,
   cost: [{ resource: 'energy', value: 20 }],
   targeting: { mode: 'self' },
   hits: [],
@@ -264,7 +249,6 @@ const arc: SkillDef = {
   abilities: [],
   castTime: 0,
   cooldown: 0,
-  gcd: true,
   cost: [{ resource: 'energy', value: 15 }],
   targeting: { mode: 'primaryEnemy' },
   hits: [
@@ -291,7 +275,6 @@ export const heavySkill: SkillDef = {
   abilities: [],
   castTime: 2500,
   cooldown: 8000,
-  gcd: true,
   cost: [{ resource: 'energy', value: 2000 }],
   targeting: { mode: 'primaryEnemy' },
   hits: heavyHits,
@@ -319,7 +302,6 @@ const passiveTalent: SkillDef = {
   ],
   castTime: 0,
   cooldown: 0,
-  gcd: false,
   cost: [],
   targeting: { mode: 'self' },
   hits: [],
@@ -350,7 +332,6 @@ export const crimsonArcSkill: SkillDef = {
   abilities: [{ kind: 'grant', buff: bossCastBuff, target: { mode: 'self' } }],
   castTime: 1200,
   cooldown: 9000,
-  gcd: false,
   cost: [],
   targeting: { mode: 'primaryEnemy' },
   hits: [
@@ -501,10 +482,16 @@ describe('类型层能表达规范承诺的内容', () => {
     expect(comboBuff.flags?.comboWindow).toContain('arc');
   });
 
-  it('不占 GCD 的技能显式声明 gcd: false', () => {
-    expect(slash.gcd).toBe(true);
-    expect(dodge.gcd).toBe(false);
-    expect(guard.gcd).toBe(false);
+  it('读条技能声明 castTime，瞬发技能不声明（GCD 已删除）', () => {
+    /**
+     * 早期这里测的是 `gcd: true/false`。公共冷却被删掉了 ——
+     * 出招节奏改由**读条时间**表达，所以现在看 `castTime`。
+     */
+    // 这个 fixture 里的 slash 是读条技能
+    expect(slash.castTime).toBeGreaterThan(0);
+    // 闪避必须瞬发 —— 它的整个意义就是"随时能按出来"
+    expect(dodge.castTime).toBe(0);
+    expect(guard.castTime).toBe(0);
   });
 
   it('派生技能用统一的 Condition 表达前置条件', () => {

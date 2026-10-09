@@ -126,7 +126,6 @@ export class BattleEngine {
   private rng: RngState;
   private readonly options: CreateBattleOptions;
   private readonly events: EventDef[] = [];
-  private readonly gcdBuff: BuffDef;
   /**
    * AI 状态（已用的 opener、各技能上次施放 tick、阶段、狂暴）。
    *
@@ -138,7 +137,6 @@ export class BattleEngine {
   constructor(options: CreateBattleOptions) {
     this.options = options;
     this.rng = { seed: options.seed >>> 0 };
-    this.gcdBuff = options.buffs.get('gcd') ?? makeFallbackGcdBuff();
     this.state = {
       tick: 0,
       rngSeed: options.seed >>> 0,
@@ -736,7 +734,56 @@ export class BattleEngine {
 
     const stats = this.statsOf(actor.id);
     const opponent = this.opponentOf(actor.id);
-    const gate = checkGate(actor, skill, this.ctx, { hasTarget: opponent !== undefined });
+
+    /**
+     * 按住型技能（有 `holdDrain`）在读条中**允许放行**，其它技能不行。
+     *
+     * 理由见 `checkGate` 的 `allowedWhileCasting` 说明：按住型每个逻辑步
+     * 都重复请求一次，若让它在读条中放行，按住「防」就能把自己的
+     * 「攻」无限打断 —— 那不是玩家想要的。
+     *
+     * ⚠️ 方向：**只有按住型在读条中放行**（`allowedWhileCasting: true`），
+     * 其它技能用默认的 `false`，于是在读条中会被 `casting` 拒绝 ——
+     * 但我们已经在上面主动打断了旧读条，所以实际上会成功施放。
+     */
+    const isHold = skill.holdDrain !== undefined;
+
+    /* ------------------------------------------------------------------ *
+     * 读条中施放**其它**技能 → 打断当前读条。
+     *
+     * 需求：「读条的时候如果使用其他技能，就打断当前的读条」。
+     *
+     * 这是删掉公共冷却之后的**主要限速机制**，也是"攻 / 轰 要挑空档"
+     * 这一博弈的来源。注意代价在开始读条时就已扣除、**中断不退** ——
+     * 所以"酝酿大招被打断"是有真实损失的。
+     * ------------------------------------------------------------------ */
+
+    // 先做门禁检查（含资源、冷却）
+    const gate = checkGate(actor, skill, this.ctx, {
+      hasTarget: opponent !== undefined,
+      allowedWhileCasting: !isHold,
+    });
+
+    /**
+     * ⚠️ 顺序很重要：**门禁通过之后才能打断**。
+     *
+     * 踩过的坑：早期把打断放在门禁之前，于是"资源不足被拒绝"也会
+     * 顺手把正在读的条打断 —— 玩家按下幻想的「轰」（缠不够），
+     * 结果连「攻」的读条也没了。用日志才看出来：同一 tick 里
+     * 先 `castInterrupted`、再 `skillRejected`。
+     */
+    if (gate.ok && actor.casts.length > 0) {
+      for (const cast of actor.casts) {
+        this.events.push({
+          kind: 'castInterrupted',
+          tick: this.state.tick,
+          sourceId: actor.id,
+          skillId: cast.skillId,
+          reason: 'replaced',
+        });
+      }
+      actor.casts = [];
+    }
 
     if (!gate.ok) {
       this.events.push({
@@ -753,12 +800,6 @@ export class BattleEngine {
     const paid = payCosts(actor, skill, this.state.tick);
     this.events.push(...paid.events);
     let next = paid.combatant;
-
-    // GCD（不占 GCD 的技能跳过）
-    if (skill.gcd) {
-      const withGcd = applyBuff(next, this.gcdBuff, next.id, this.state.tick);
-      next = { ...next, buffs: withGcd.buffs };
-    }
 
     // 技能冷却（受急速影响）
     if (skill.cooldown > 0) {
@@ -843,6 +884,22 @@ export class BattleEngine {
             skillId: cast.skillId,
             reason: 'sourceLost',
           });
+          continue;
+        }
+
+        /**
+         * **刚在本 tick 创建的读条不结算**（进度从下一帧开始算）。
+         *
+         * 踩过的坑：「攻」的 `hit.at` 是 0（伤害在读条结束时结算），
+         * 而读条创建后**同一个 tick** 就会被推进到这里 ——
+         * `elapsedMs = 0`、`0 <= 0` 成立，于是伤害**立刻**打出去，
+         * 读条形同虚设（实测按下「攻」当场掉 10 血）。
+         *
+         * 从"读条"的语义看这也更对：读条是跨时间的动作，
+         * 它不应该在开始的那一帧就完成。
+         */
+        if (cast.startedAtTick === this.state.tick) {
+          stillCasting.push(cast);
           continue;
         }
 
@@ -1386,16 +1443,3 @@ function clampStart(combatant: Combatant): Combatant['resources'] {
   return out;
 }
 
-/** 内容里没给 gcd buff 时的兜底（保证引擎不会因为缺内容而崩）。 */
-function makeFallbackGcdBuff(): BuffDef {
-  return {
-    id: 'gcd',
-    nameKey: 'reject.gcd',
-    icon: 'gcd',
-    polarity: 'neutral',
-    duration: 300,
-    maxStacks: 1,
-    stacking: { mode: 'refresh' },
-    flags: { blocksGcd: true },
-  };
-}

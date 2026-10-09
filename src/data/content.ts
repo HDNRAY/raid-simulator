@@ -24,7 +24,7 @@
  * | 攻 | 10 炁 | 造成 10 点伤害（普攻） |
  * | 闪 | 40 炁 | 0.5 秒完全无敌 |
  * | 防 | 按住，每 0.1 秒 2 炁 | 减伤 40%，松开即取消 |
- * | 破 | —（5 秒 CD） | 打断任何技能，不占公共冷却 |
+ * | 破 | —（5 秒 CD） | 瞬发，打断任何技能 |
  * | 轰 | 50 缠 | 造成 30 点伤害 |
  * | 凝 | 50 缠 | 增伤 20%，持续 30 秒 |
  *
@@ -32,7 +32,7 @@
  *   炁（`energy`）—— 每 0.1 秒自动恢复 1 点（= 每秒 10 点）
  *   缠（`douqi`） —— **按伤害换算**：造成 1 点伤害得 1 点，受到 1 点也得 1 点
  *
- * 时间刻度：公共冷却 0.5 秒 = 5 个逻辑步（0.1 秒/步）。
+ * 时间刻度：10 个逻辑步 = 1 秒（0.1 秒/步）；读条时间用毫秒声明。
  */
 
 import { logicTicks, logicMs } from '../core/loopConstants';
@@ -68,8 +68,6 @@ export const ENERGY_PER_LOGIC_TICK = 1;
  */
 export const DOUQI_PER_DAMAGE = 1;
 
-/** 公共冷却：0.5 秒 = 5 个逻辑步。 */
-export const GCD_STEPS = 5;
 
 /* ================================================================== *
  * 玩家图标配色（单色方块占位）
@@ -89,21 +87,6 @@ const C = {
 /* ================================================================== *
  * 共享 buff
  * ================================================================== */
-
-/** 公共冷却。`blocksGcd` 让"不占 GCD 的技能"能跳过它。 */
-export const GCD_BUFF: BuffDef = {
-  id: 'gcd',
-  nameKey: 'skill.attack.name',
-  icon: 'gcd',
-  polarity: 'neutral',
-  color: 0x8a8ca0,
-  duration: logicMs(GCD_STEPS),
-  maxStacks: 1,
-  stacking: { mode: 'refresh' },
-  flags: { blocksGcd: true },
-  /** 引擎内部标记，不在 UI 上显示图标（否则按钮旁边一直挂一个灰块）。 */
-  hidden: true,
-};
 
 /** 闪：0.5 秒完全无敌。 */
 export const DODGE_IFRAME: BuffDef = {
@@ -231,18 +214,16 @@ const ATTACK: SkillDef = {
   nameKey: 'skill.attack.name',
   descKey: 'skill.attack.desc',
   icon: 'char_attack',
-  abilities: [
-    {
-      kind: 'trigger',
-      trigger: {
-        on: 'onCastFinish',
-        then: [{ kind: 'grant', target: { mode: 'self' }, buff: GCD_BUFF }],
-      },
-    },
-  ],
-  castTime: 0,
+  abilities: [],
+  /**
+   * **读条 0.5 秒**（原先瞬发、靠公共冷却限速）。
+   *
+   * 公共冷却被删掉了 —— 它对玩家是**看不见的**（唯一的反馈就是按了
+   * 没反应），而读条同样是限速，却是**看得见的**。代价也一样真实：
+   * 读条时改用别的技能会把它打断，而代价在开始时已经扣了、不退。
+   */
+  castTime: 500,
   cooldown: 0,
-  gcd: true,
   cost: [{ resource: 'energy', value: S(10) }],
   targeting: { mode: 'primaryEnemy' },
   hits: [
@@ -263,7 +244,8 @@ const ATTACK: SkillDef = {
   ],
   tags: ['melee'],
   school: 'physical',
-  interruptible: false,
+  /** 读条 0.5 秒，所以会被打断 —— 这正是"轰要挑空档放"的博弈来源 */
+  interruptible: true,
 };
 
 /** 闪：0.5 秒完全无敌。代价是 40 缠（满缠的 40%）。 */
@@ -283,8 +265,7 @@ const DODGE: SkillDef = {
    * 等于这个技能不存在。现在的约束是缠：满缠 100 只能连闪两次。
    */
   cooldown: 0,
-  /** 不占公共冷却 —— 否则"该躲时躲不了"。 */
-  gcd: false,
+  /** 瞬发无冷却 —— 否则"该躲时躲不了"。 */
   cost: [{ resource: 'energy', value: S(40) }],
   targeting: { mode: 'self' },
   hits: [],
@@ -308,7 +289,6 @@ const GUARD: SkillDef = {
   abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: GUARD_REDUCE }],
   castTime: 0,
   cooldown: 0,
-  gcd: false,
   cost: [],
   /** 按住期间每 0.1 秒扣 2 点缠。 */
   holdDrain: { resource: 'energy', perLogicTick: 2 },
@@ -329,7 +309,6 @@ const BREAK: SkillDef = {
   abilities: [],
   castTime: 0,
   cooldown: logicMs(50),
-  gcd: false,
   cost: [],
   targeting: { mode: 'primaryEnemy' },
   hits: [
@@ -353,18 +332,16 @@ const BLAST: SkillDef = {
   nameKey: 'skill.blast.name',
   descKey: 'skill.blast.desc',
   icon: 'char_blast',
-  abilities: [
-    {
-      kind: 'trigger',
-      trigger: {
-        on: 'onCastFinish',
-        then: [{ kind: 'grant', target: { mode: 'self' }, buff: GCD_BUFF }],
-      },
-    },
-  ],
-  castTime: 0,
+  abilities: [],
+  /**
+   * **读条 0.9 秒** —— 比「攻」长得多。
+   *
+   * 这是有意的取舍：轰是最高伤害的一招（30 点，普攻的 3 倍），
+   * 代价是"酝酿得久、更容易被打断"。玩家得挑 Boss 刚出完招的
+   * 空档来放，而不是无脑按。
+   */
+  castTime: 900,
   cooldown: 0,
-  gcd: true,
   cost: [{ resource: 'douqi', value: S(50) }],
   targeting: { mode: 'primaryEnemy' },
   hits: [
@@ -387,7 +364,8 @@ const BLAST: SkillDef = {
   ],
   tags: ['spell'],
   school: 'arcane',
-  interruptible: false,
+  /** 读条 0.9 秒 —— 最高伤害的代价就是最容易被打断 */
+  interruptible: true,
 };
 
 /** 凝：消耗 50 炁，增伤 20%，持续 30 秒。 */
@@ -406,7 +384,6 @@ const FOCUS: SkillDef = {
   ],
   castTime: 0,
   cooldown: 0,
-  gcd: true,
   cost: [{ resource: 'douqi', value: S(50) }],
   targeting: { mode: 'self' },
   hits: [],
@@ -433,7 +410,6 @@ const BOSS_CLEAVE: SkillDef = {
   abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: BOSS_TELEGRAPH }],
   castTime: logicMs(8),
   cooldown: logicMs(30),
-  gcd: false,
   cost: [],
   targeting: { mode: 'primaryEnemy' },
   hits: [
@@ -468,7 +444,6 @@ const BOSS_SWEEP: SkillDef = {
   abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: BOSS_TELEGRAPH }],
   castTime: logicMs(12),
   cooldown: logicMs(60),
-  gcd: false,
   cost: [],
   targeting: { mode: 'primaryEnemy' },
   hits: [
@@ -527,7 +502,6 @@ const BOSS_EMPOWER: SkillDef = {
   ],
   castTime: logicMs(10),
   cooldown: logicMs(120),
-  gcd: false,
   cost: [],
   targeting: { mode: 'self' },
   hits: [],
@@ -547,7 +521,6 @@ export const BOSS_SKILLS: readonly SkillDef[] = [BOSS_CLEAVE, BOSS_SWEEP, BOSS_E
 export const ALL_SKILLS: readonly SkillDef[] = [...PLAYER_SKILLS, ...BOSS_SKILLS];
 
 export const ALL_BUFFS: readonly BuffDef[] = [
-  GCD_BUFF,
   DODGE_IFRAME,
   GUARD_REDUCE,
   FOCUS_BUFF,

@@ -59,7 +59,6 @@ export function makeSkillDef(
     abilities: [],
     castTime: 0,
     cooldown: 0,
-    gcd: true,
     cost: [],
     targeting: { mode: 'primaryEnemy' },
     hits: [],

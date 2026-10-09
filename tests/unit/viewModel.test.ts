@@ -128,7 +128,6 @@ describe('本地化 key 契约（i18n 规范 I1）', () => {
     const required = [
       'block.comboWindow',
       'block.cost',
-      'block.gcd',
       'block.cooldown',
       'block.casting',
       'hint.dodgeOrGuard',

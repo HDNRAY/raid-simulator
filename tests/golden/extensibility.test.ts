@@ -128,7 +128,6 @@ describe('可扩展性：新增一个技能只需要写数据', () => {
     ],
     castTime: 0,
     cooldown: 0,
-    gcd: false,
     cost: [],
     targeting: { mode: 'primaryEnemy' },
     hits: [
@@ -227,7 +226,6 @@ describe('可扩展性：新增一个 Boss 只需要写数据', () => {
     abilities: [],
     castTime: 800,
     cooldown: 0,
-    gcd: false,
     cost: [],
     targeting: { mode: 'primaryEnemy' },
     hits: [
@@ -254,7 +252,6 @@ describe('可扩展性：新增一个 Boss 只需要写数据', () => {
     abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: { ...ALL_BUFFS[0]!, id: 'test-boss-focus', nameKey: 'boss.empower.name' } }],
     castTime: 0,
     cooldown: 0,
-    gcd: false,
     cost: [],
     targeting: { mode: 'self' },
     hits: [],
@@ -346,7 +343,6 @@ describe('可扩展性：新增一个 Boss 只需要写数据', () => {
       abilities: [],
       castTime: 0,
       cooldown: 0,
-      gcd: false,
       cost: [],
       targeting: { mode: 'primaryEnemy' },
       hits: [
@@ -580,7 +576,6 @@ describe('可扩展性：全新内容也能跑完一整场战斗', () => {
     abilities: [],
     castTime: 0,
     cooldown: 0,
-    gcd: false,
     cost: [],
     targeting: { mode: 'primaryEnemy' },
     hits: [
@@ -607,7 +602,6 @@ describe('可扩展性：全新内容也能跑完一整场战斗', () => {
     abilities: [],
     castTime: 0,
     cooldown: 0,
-    gcd: false,
     cost: [],
     targeting: { mode: 'primaryEnemy' },
     hits: [

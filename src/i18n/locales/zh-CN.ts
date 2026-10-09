@@ -98,7 +98,6 @@ export const zhCN = {
     enrage: '狂暴',
     empowered: '强化',
     telegraph: '前摇',
-    gcd: '冷却',
     douqiFull: '炁满',
     sunder: '裂',
   },
@@ -120,7 +119,6 @@ export const zhCN = {
   block: {
     comboWindow: '派生窗口未开启',
     cost: '炁或缠不足',
-    gcd: '公共冷却中',
     cooldown: '冷却中',
     casting: '正在施法中',
     locked: '被限制',
@@ -142,7 +140,6 @@ export const zhCN = {
 
   /** 技能施放被拒绝的原因（对应 EventDef 的 reject reason） */
   reject: {
-    gcd: '公共冷却中',
     cooldown: '技能冷却中',
     cost: '资源不足',
     casting: '正在施法',
@@ -193,7 +190,7 @@ export const zhCN = {
     },
     dodge: {
       name: '闪',
-      desc: '消耗 40 炁，获得 0.5 秒完全无敌。不占公共冷却。'
+      desc: '消耗 40 炁，获得 0.5 秒完全无敌。瞬发，随时可按。'
     },
     guard: {
       name: '防',
@@ -201,7 +198,7 @@ export const zhCN = {
     },
     break: {
       name: '破',
-      desc: '打断目标的任何招式。固定 5 秒冷却，不占公共冷却。',
+      desc: '瞬发。打断目标的任何招式。固定 5 秒冷却。',
     },
     blast: {
       name: '轰',

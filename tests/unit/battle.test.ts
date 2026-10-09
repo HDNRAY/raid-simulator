@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { BattleEngine } from '../../src/core/combat/battleState';
-import { GCD_MS } from '../../src/core/combat';
 import { ENTROPY_CLOCK } from '../../src/data/entities/entropyClock';
 import type {
   BuffDef,
@@ -18,18 +17,10 @@ import { makeBuffDef, makeCombatant, makeSkillDef } from './helpers';
  * 整个战斗在 Node 里跑完，不启动浏览器。
  */
 
-const GCD_BUFF = makeBuffDef({
-  id: 'gcd',
-  duration: GCD_MS,
-  stacking: { mode: 'refresh' },
-  flags: { blocksGcd: true },
-});
-
 const SLASH = makeSkillDef({
   id: 'slash',
   castTime: 0,
   cooldown: 0,
-  gcd: true,
   cost: [{ resource: 'energy', value: 10 }],
   hits: [
     {
@@ -48,7 +39,6 @@ const HEAVY = makeSkillDef({
   id: 'heavy',
   castTime: 1000,
   cooldown: 5000,
-  gcd: true,
   interruptible: true,
   cost: [{ resource: 'energy', value: 40 }],
   hits: [
@@ -67,8 +57,7 @@ const HEAVY = makeSkillDef({
 const DODGE = makeSkillDef({
   id: 'dodge',
   castTime: 0,
-  cooldown: 0,
-  gcd: false, // 不占 GCD
+  cooldown: 0, // 不占 GCD
   cost: [{ resource: 'energy', value: 30 }],
   abilities: [
     {
@@ -89,7 +78,6 @@ const BOSS_SWING = makeSkillDef({
   id: 'boss-swing',
   castTime: 1000,
   cooldown: 0,
-  gcd: false,
   cost: [],
   hits: [
     {
@@ -110,7 +98,6 @@ function makeEngine(options: {
   baseStats?: ReadonlyMap<string, Partial<Record<StatKey, number>>>;
 } = {}): BattleEngine {
   const buffs = new Map<string, BuffDef>([
-    ['gcd', GCD_BUFF],
     ['dodge-iframe', (DODGE.abilities[0] as { buff: BuffDef }).buff],
   ]);
   const skills = new Map<string, SkillDef>([
@@ -169,64 +156,19 @@ describe('引擎：技能施放与门禁', () => {
     expect(damage.amount).toBe(100);
   });
 
-  it('GCD 会拒绝紧接着的第二次施放，且原因正确', () => {
-    const engine = makeEngine();
-    const events = run(
-      engine,
-      3,
-      new Map([
-        [0, [{ type: 'useSkill', skillId: 'slash', atTick: 0 }]],
-        [1, [{ type: 'useSkill', skillId: 'slash', atTick: 1 }]],
-      ]),
-    );
-    const rejected = events.filter((e) => e.kind === 'skillRejected');
-    expect(rejected).toHaveLength(1);
-    if (rejected[0]?.kind !== 'skillRejected') return;
-    expect(rejected[0].reason).toBe('gcd');
-  });
-
-  it('GCD 结束后可以再施放', () => {
-    const engine = makeEngine();
-    // GCD 300ms = 18 tick
-    const events = run(
-      engine,
-      25,
-      new Map([
-        [0, [{ type: 'useSkill', skillId: 'slash', atTick: 0 }]],
-        [20, [{ type: 'useSkill', skillId: 'slash', atTick: 20 }]],
-      ]),
-    );
-    expect(events.filter((e) => e.kind === 'skillUsed')).toHaveLength(2);
-  });
-
-  it('不占 GCD 的技能在 GCD 内也能施放', () => {
-    const engine = makeEngine();
-    const events = run(
-      engine,
-      3,
-      new Map([
-        [0, [{ type: 'useSkill', skillId: 'slash', atTick: 0 }]],
-        [1, [{ type: 'useSkill', skillId: 'dodge', atTick: 1 }]],
-      ]),
-    );
-    expect(events.filter((e) => e.kind === 'skillRejected')).toHaveLength(0);
-    expect(events.filter((e) => e.kind === 'skillUsed')).toHaveLength(2);
-  });
-
   it('代价不足时拒绝，原因是 cost', () => {
     // 构造一个代价超过角色资源上限的技能
     const expensive = makeSkillDef({
       id: 'expensive',
       castTime: 0,
       cooldown: 0,
-      gcd: false,
       cost: [{ resource: 'energy', value: 999_999 }],
       hits: [],
     });
     const engine = new BattleEngine({
       combatants: [makeCombatant({ id: 'player', side: 'ally' })],
       seed: 1,
-      buffs: new Map([['gcd', GCD_BUFF]]),
+      buffs: new Map(),
       skills: new Map([['expensive', expensive]]),
       baseStats: new Map([['player', {}]]),
       passiveModifiers: new Map(),
@@ -239,7 +181,12 @@ describe('引擎：技能施放与门禁', () => {
     expect(rejected.reason).toBe('cost');
   });
 
-  it('正在读条时拒绝其它技能，原因是 casting', () => {
+  it('正在读条时施放其它技能 → 打断旧读条并施放新技能', () => {
+    /**
+     * 旧版这条测试断言"被 casting 拒绝"。玩法改成了
+     * **读条中出招会打断当前读条**（公共冷却已删除），所以现在的
+     * 正确结果是：旧读条被打断、新技能正常施放。
+     */
     const engine = makeEngine();
     const events = run(
       engine,
@@ -249,10 +196,15 @@ describe('引擎：技能施放与门禁', () => {
         [1, [{ type: 'useSkill', skillId: 'slash', atTick: 1 }]],
       ]),
     );
-    const rejected = events.find((e) => e.kind === 'skillRejected');
-    expect(rejected?.kind).toBe('skillRejected');
-    if (rejected?.kind !== 'skillRejected') return;
-    expect(rejected.reason).toBe('casting');
+    const interrupted = events.find((e) => e.kind === 'castInterrupted');
+    expect(interrupted?.kind).toBe('castInterrupted');
+    if (interrupted?.kind !== 'castInterrupted') return;
+    expect(interrupted.skillId).toBe('heavy');
+    expect(interrupted.reason).toBe('replaced');
+
+    // 新技能已经接上读条
+    const used = events.filter((e) => e.kind === 'skillUsed' && e.skillId === 'slash');
+    expect(used.length).toBe(1);
   });
 });
 
@@ -310,7 +262,6 @@ describe('引擎：判定层（M2 的核心）', () => {
       id: 'boss-swing',
       castTime: 200,
       cooldown: 0,
-      gcd: false,
       cost: [],
       hits: [
         {
@@ -326,7 +277,6 @@ describe('引擎：判定层（M2 的核心）', () => {
     });
 
     const buffs = new Map<string, BuffDef>([
-      ['gcd', GCD_BUFF],
       ['dodge-iframe', (DODGE.abilities[0] as { buff: BuffDef }).buff],
     ]);
     const skills = new Map<string, SkillDef>([
@@ -384,7 +334,6 @@ describe('引擎：判定层（M2 的核心）', () => {
       id: 'boss-swing',
       castTime: 100,
       cooldown: 0,
-      gcd: false,
       cost: [],
       hits: [
         {
@@ -400,7 +349,6 @@ describe('引擎：判定层（M2 的核心）', () => {
     });
 
     const buffs = new Map<string, BuffDef>([
-      ['gcd', GCD_BUFF],
       ['dodge-iframe', (DODGE.abilities[0] as { buff: BuffDef }).buff],
     ]);
     const skills = new Map<string, SkillDef>([
@@ -485,7 +433,6 @@ describe('引擎：时间限制与胜负', () => {
       id: 'nuke',
       castTime: 0,
       cooldown: 0,
-      gcd: false,
       cost: [],
       hits: [
         {
@@ -510,7 +457,7 @@ describe('引擎：时间限制与胜负', () => {
         }),
       ],
       seed: 1,
-      buffs: new Map([['gcd', GCD_BUFF]]),
+      buffs: new Map(),
       skills: new Map([['nuke', nuke]]),
       baseStats: new Map([
         ['player', {}],

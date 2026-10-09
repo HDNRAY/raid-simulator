@@ -13,7 +13,6 @@
 
 import type { BattleEngine } from '../core/combat/battleState';
 import type { SkillDef, EventDef } from '../core/types';
-import { GCD_MS } from '../core/combat';
 import { PALETTE } from '../render/theme';
 import { LAYOUT } from '../ui/layout';
 import type {
@@ -305,7 +304,7 @@ export class ViewAdapter {
   build(
     engine: BattleEngine,
     slots: readonly SlotBinding[],
-    options: { readonly timeLimitMs?: number; readonly gcdBuffId?: string } = {},
+    options: { readonly timeLimitMs?: number } = {},
   ): BattleSnapshotView {
     const state = engine.snapshot;
     const playerRaw = state.combatants.find((c) => c.side === 'ally');
@@ -401,10 +400,6 @@ export class ViewAdapter {
     const remainTicks = Math.max(0, readyAt - tick);
     const cooldownRatio = skill.cooldown > 0 ? Math.min(1, remainTicks / totalTicks) : 0;
 
-    // GCD：引擎用 buff 表达，所以 UI 直接读 buff
-    const gcdBuff = state.buffs.find((b) => b.defId === (this.gcdBuffId ?? 'gcd'));
-    const inGcd = skill.gcd && gcdBuff !== undefined;
-
     // 资源是否够（UI 需要提前变灰，而不是等玩家按了才拒绝）
     let costOk = true;
     for (const cost of skill.cost) {
@@ -422,13 +417,12 @@ export class ViewAdapter {
     }
 
     const casting = state.casts.length > 0;
-    const usable = costOk && conditionOk && !inGcd && cooldownRatio <= 0.001 && !casting;
+    const usable = costOk && conditionOk && cooldownRatio <= 0.001 && !casting;
 
     // 不可用原因用**本地化 key**表达，UI 层负责取文案
     let blockedKey: string | undefined;
     if (!conditionOk) blockedKey = 'block.comboWindow';
     else if (!costOk) blockedKey = 'block.cost';
-    else if (inGcd) blockedKey = 'block.gcd';
     else if (cooldownRatio > 0.001) blockedKey = 'block.cooldown';
     else if (casting) blockedKey = 'block.casting';
 
@@ -441,13 +435,11 @@ export class ViewAdapter {
       usable,
       cooldownRatio,
       cooldownSec: (remainTicks * (1000 / 60)) / 1000,
-      offGcd: !skill.gcd,
       comboReady: (skill.requires?.length ?? 0) > 0 && conditionOk,
       ...(blockedKey === undefined ? {} : { blockedKey }),
     };
   }
 
-  private gcdBuffId = 'gcd';
 }
 
 /** 从引擎状态构建一个单位的渲染视图。 */
@@ -554,4 +546,3 @@ export const DEFAULT_SLOTS: readonly SlotBinding[] = [
 ];
 
 /** GCD 时长再导出，避免渲染层直接 import core/combat。 */
-export { GCD_MS };

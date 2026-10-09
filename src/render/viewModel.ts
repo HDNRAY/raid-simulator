@@ -80,8 +80,6 @@ export interface SkillSlotView {
   readonly cooldownRatio: number;
   /** 冷却剩余秒数（展示用） */
   readonly cooldownSec: number;
-  /** 不占 GCD（UI 上会和普通技能区分显示） */
-  readonly offGcd: boolean;
   /** 是否是派生技且当前窗口已开 */
   readonly comboReady: boolean;
   /** 不可用的原因（**本地化 key**，不是文案） */

@@ -276,7 +276,7 @@ export function buffRemainingMs(
  * 汇总所有生效 buff 的判定旗标。
  *
  * **这是判定层的输入**：hit 结算时看 `invulnerable` / `damageReduce`，
- * 施法时看 `blocksGcd` / `actionLock`，派生时看 `comboWindow`。
+ * 施法时看 `actionLock`，派生时看 `comboWindow`。
  *
  * 多个来源的 `damageReduce` 用"取最大值"而不是相加：
  * 相加会让两层 60% 减伤变成 120%（超过免疫），而且玩家无法预期。
@@ -286,7 +286,6 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
   let damageReduce = 0;
   let ccImmune = false;
   let interruptImmune = false;
-  let blocksGcd = false;
   let actionLock = false;
   const comboWindow: string[] = [];
 
@@ -298,7 +297,6 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
     if (f.damageReduce !== undefined) damageReduce = Math.max(damageReduce, f.damageReduce);
     if (f.ccImmune) ccImmune = true;
     if (f.interruptImmune) interruptImmune = true;
-    if (f.blocksGcd) blocksGcd = true;
     if (f.actionLock) actionLock = true;
     if (f.comboWindow) comboWindow.push(...f.comboWindow);
   }
@@ -308,7 +306,6 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
     ...(damageReduce > 0 ? { damageReduce } : {}),
     ...(ccImmune ? { ccImmune: true } : {}),
     ...(interruptImmune ? { interruptImmune: true } : {}),
-    ...(blocksGcd ? { blocksGcd: true } : {}),
     ...(actionLock ? { actionLock: true } : {}),
     ...(comboWindow.length > 0 ? { comboWindow } : {}),
   };

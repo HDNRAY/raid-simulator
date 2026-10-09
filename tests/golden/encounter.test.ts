@@ -7,6 +7,7 @@ import {
   planPriority,
 } from './fixtures';
 import { roughlyUsable } from '../../src/core/run';
+import { registry } from './fixtures';
 
 /**
  * 真实内容的集成测试。
@@ -22,6 +23,32 @@ import { roughlyUsable } from '../../src/core/run';
 
 function makeEngine(): BattleEngine {
   return new BattleEngine(makeGoldenEngineOptions());
+}
+
+/**
+ * 施放一个技能并**推进到读条结算完**，返回这期间的事件。
+ *
+ * 为什么需要它：早期「攻」「轰」是瞬发（伤害在施放那一 tick 就打出去），
+ * 后来改成读条（0.5s / 0.9s），于是所有"施放后立刻检查伤害"的断言
+ * 都会失败 —— 但失败原因是**测试的假设过期了**，不是功能坏了。
+ *
+ * 用这个 helper 就不必在几十个测试里各补一遍 `for (t...)` 魔法数字。
+ */
+function castAndResolve(
+  engine: BattleEngine,
+  skillId: string,
+  maxTicks = 120,
+): ReturnType<BattleEngine['drainEvents']>[number][] {
+  const events: ReturnType<BattleEngine['drainEvents']>[number][] = [];
+  engine.tick([{ type: 'useSkill', skillId, atTick: engine.snapshot.tick }]);
+  events.push(...engine.drainEvents());
+  for (let i = 0; i < maxTicks; i += 1) {
+    const player = engine.snapshot.combatants.find((c) => c.side === 'ally');
+    if (!player || player.casts.length === 0) break;
+    engine.tick();
+    events.push(...engine.drainEvents());
+  }
+  return events;
 }
 
 /** 跑 n 个 tick，收集事件。`playerSkill` 每 `everyTicks` 施放一次。 */
@@ -91,13 +118,39 @@ describe('真实内容：Boss 的机制都接线了', () => {
     expect(sawEnd).toBeDefined();
   });
 
-  it('只按「攻」在当前平衡下打不死 Boss（必须用上「轰」）', () => {
+  it('只按「攻」也能打赢，但明显比用上「轰」慢', () => {
+    /**
+     * 早期这条测试断言"只按攻会输"。改成读条机制之后结论变了 ——
+     * 而且**旧写法本身就是错的**：`run` helper 每 30 tick 无脑发一次
+     * 「攻」，而读条正好也是 30 tick，于是它一直在自我打断，
+     * 测的不是"只按攻"，而是"不断打断自己的攻"。
+     *
+     * 现在按真实打法来：**读条结束再按下一个**。
+     */
     const engine = makeEngine();
-    const events = run(engine, 60 * 250, { skillId: 'attack', everyTicks: 30 });
-    const end = events.find((e) => e.kind === 'encounterEnd');
-    expect(end?.kind).toBe('encounterEnd');
-    if (end?.kind !== 'encounterEnd') return;
-    expect(end.result).toBe('defeat');
+    let attacks = 0;
+    for (let t = 0; t < 60 * 250; t += 1) {
+      const st = engine.snapshot;
+      if (st.status !== 'running') break;
+      const actor = st.combatants.find((c) => c.side === 'ally')!;
+      const busy = actor.casts.length > 0;
+      engine.tick(
+        busy ? [] : [{ type: 'useSkill' as const, skillId: 'attack', atTick: st.tick }],
+      );
+      for (const e of engine.drainEvents()) {
+        if (e.kind === 'skillUsed' && e.skillId === 'attack' && e.sourceId === 'player') {
+          attacks += 1;
+        }
+      }
+    }
+    const player = engine.snapshot.combatants.find((c) => c.side === 'ally')!;
+    const boss = engine.snapshot.combatants.find((c) => c.side === 'enemy')!;
+
+    // 确实一直在按（否则下面的结论没有意义）
+    expect(attacks).toBeGreaterThan(10);
+    // 结论：单靠普攻也能赢，只是慢
+    expect(boss.resources.hp).toBe(0);
+    expect(player.alive).toBe(true);
   });
 
   it('3 分钟超时判负', () => {
@@ -148,10 +201,9 @@ describe('真实内容：Boss 的机制都接线了', () => {
 });
 
 describe('真实内容：玩家招式都接线了', () => {
-  it('攻：消耗 10 缠、造成 10 点伤害', () => {
+  it('攻：读条 0.5 秒后造成 10 点伤害', () => {
     const engine = makeEngine();
-    engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
-    const events = engine.drainEvents();
+    const events = castAndResolve(engine, 'attack');
     const damage = events.find((e) => e.kind === 'damage');
     expect(damage?.kind).toBe('damage');
     if (damage?.kind !== 'damage') return;
@@ -191,21 +243,23 @@ describe('真实内容：玩家招式都接线了', () => {
     expect(player.buffs.some((b) => b.defId === 'dodge-iframe')).toBe(true);
   });
 
-  it('轰：消耗 50 炁、造成 30 点伤害', () => {
+  it('轰：读条 0.9 秒后造成 30 点伤害', () => {
     const options = makeGoldenEngineOptions();
-    const player = options.combatants[0]!;
+    const p0 = options.combatants[0]!;
+    // 给足缠 —— 自然积攒要几十秒，那不是这条测试要验的东西
+    const rich = {
+      ...p0,
+      resources: { ...p0.resources, douqi: 100 },
+    };
     const engine = new BattleEngine({
       ...options,
-      combatants: [
-        { ...player, resources: { ...player.resources, douqi: PLAYER_CAPS.douqi } },
-        options.combatants[1]!,
-      ],
+      combatants: [rich, options.combatants[1]!],
     });
-    engine.tick([{ type: 'useSkill', skillId: 'blast', atTick: 0 }]);
-    const events = engine.drainEvents();
-    const damage = events.find((e) => e.kind === 'damage');
-    if (damage?.kind !== 'damage') throw new Error('expected damage');
-    expect(damage.amount).toBe(30); // 需求：轰造成 30 点伤害
+    const events = castAndResolve(engine, 'blast');
+    const damage = events.filter((e) => e.kind === 'damage').pop();
+    expect(damage?.kind).toBe('damage');
+    if (damage?.kind !== 'damage') return;
+    expect(damage.amount).toBe(30);
   });
 
   it('凝：给自己挂上增伤 buff', () => {
@@ -297,8 +351,8 @@ describe('炁按伤害换算', () => {
   it('造成伤害会给自己攒炁', () => {
     const engine = makeEngine();
     const before = engine.snapshot.combatants.find((c) => c.side === 'ally')!.resources.douqi;
-    engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
-    engine.drainEvents();
+    // 「攻」现在是读条技能，要等它结算完才会造成伤害、才谈得上攒炁
+    castAndResolve(engine, 'attack');
     const after = engine.snapshot.combatants.find((c) => c.side === 'ally')!.resources.douqi;
     expect(after).toBeGreaterThan(before);
   });
@@ -382,5 +436,116 @@ describe('公共冷却不应产生误报（用户报过的 bug）', () => {
       }
     }
     expect(rejects).toBeGreaterThan(100);
+  });
+});
+
+describe('读条与打断（公共冷却已删除，节奏改由读条表达）', () => {
+  it('「攻」是读条技能：按下后不会立刻造成伤害', () => {
+    const engine = makeEngine();
+    const bossBefore = engine.snapshot.combatants[1]!.resources.hp;
+    engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
+    engine.drainEvents();
+    // 刚开始读条，伤害还没结算
+    expect(engine.snapshot.combatants[1]!.resources.hp).toBe(bossBefore);
+    expect(engine.snapshot.combatants[0]!.casts.length).toBe(1);
+  });
+
+  it('【核心】读条中施放其它技能会打断当前读条', () => {
+    const engine = makeEngine();
+    engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
+    engine.drainEvents();
+    expect(engine.snapshot.combatants[0]!.casts.length).toBe(1);
+
+    // 读 5 tick 后改用「破」（瞬发，不占用的资源），它应当打断「攻」
+    for (let t = 1; t <= 5; t += 1) engine.tick();
+    engine.tick([{ type: 'useSkill', skillId: 'break', atTick: 6 }]);
+    const events = engine.drainEvents();
+
+    const interrupted = events.find((e) => e.kind === 'castInterrupted');
+    expect(interrupted).toBeDefined();
+    // 原因必须是"主动换招"，而不是被 Boss 打断
+    expect(interrupted?.kind === 'castInterrupted' && interrupted.reason).toBe('replaced');
+    // 「攻」的读条已经被打断，「破」是瞬发所以现在没有读条
+    expect(engine.snapshot.combatants[0]!.casts.length).toBe(0);
+  });
+
+  it('【核心】读条中施放"会消费资源的技能"但资源不足 → 只被拒绝，不打断读条', () => {
+    /**
+     * 踩过的坑：早期打断检查放在门禁**之前**，于是"资源不足被拒绝"
+     * 也会顺手把正在读的条打断 —— 玩家按下幻想的「轰」（缠不够），
+     * 结果连「攻」的读条也没了。日志里表现为同一 tick 先
+     * `castInterrupted` 再 `skillRejected`。
+     */
+    const engine = makeEngine();
+    engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
+    engine.drainEvents();
+
+    // 缠很少（刚开局 0 点），「轰」必然因代价被拒
+    expect(engine.snapshot.combatants[0]!.resources.douqi).toBeLessThan(50);
+    engine.tick([{ type: 'useSkill', skillId: 'blast', atTick: 1 }]);
+    const events = engine.drainEvents();
+
+    expect(events.some((e) => e.kind === 'skillRejected' && e.skillId === 'blast')).toBe(true);
+    // 关键：读条必须还在
+    expect(events.some((e) => e.kind === 'castInterrupted')).toBe(false);
+    expect(engine.snapshot.combatants[0]!.casts[0]?.skillId).toBe('attack');
+  });
+
+  it('瞬发技能（闪）也能打断正在读的条 —— "想躲就躲得掉"', () => {
+    const engine = makeEngine();
+    engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
+    engine.drainEvents();
+    engine.tick([{ type: 'useSkill', skillId: 'dodge', atTick: 1 }]);
+    const events = engine.drainEvents();
+    expect(events.some((e) => e.kind === 'castInterrupted')).toBe(true);
+    // 无敌窗口必须已经挂上 —— 否则"打断"就成了纯损失
+    expect(engine.snapshot.combatants[0]!.buffs.some((b) => b.defId === 'dodge-iframe')).toBe(true);
+  });
+
+  it('打断不退代价 —— 酝酿大招被打断是有真实损失的', () => {
+    const engine = makeEngine();
+    const energyBefore = engine.snapshot.combatants[0]!.resources.energy;
+    engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
+    engine.drainEvents();
+    // 代价在读条开始时已扣
+    const afterStart = engine.snapshot.combatants[0]!.resources.energy;
+    expect(afterStart).toBeLessThan(energyBefore);
+
+    for (let t = 1; t <= 3; t += 1) engine.tick();
+    engine.tick([{ type: 'useSkill', skillId: 'blast', atTick: 4 }]);
+    engine.drainEvents();
+    // 中断之后「攻」的那 10 点炁**不会退回来**
+    expect(engine.snapshot.combatants[0]!.resources.energy).toBeLessThanOrEqual(afterStart);
+  });
+
+  it('按住型「防」不会打断自己的读条（否则按住防就永远放不出攻）', () => {
+    const engine = makeEngine();
+    engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
+    engine.drainEvents();
+    const castSkill = engine.snapshot.combatants[0]!.casts[0]!.skillId;
+
+    // 模拟玩家一边读条一边按住「防」：每个 tick 都发一次 hold
+    for (let t = 1; t <= 10; t += 1) {
+      engine.tick([{ type: 'hold', skillId: 'guard', atTick: t }]);
+      engine.drainEvents();
+      const casts = engine.snapshot.combatants[0]!.casts;
+      // 读条必须还在，而且没被换成「防」
+      expect(casts.length).toBe(1);
+      expect(casts[0]!.skillId).toBe(castSkill);
+    }
+  });
+
+  it('「轰」比「攻」读条更久（高伤害的代价是更容易被打断）', () => {
+    const a = registry.skills.get('attack')!;
+    const b = registry.skills.get('blast')!;
+    expect(b.castTime).toBeGreaterThan(a.castTime);
+    expect(a.castTime).toBeGreaterThan(0);
+  });
+
+  it('「闪」「破」是瞬发 —— 它们必须能随时按出来', () => {
+    // 闪避的意义就是"看到前摇随时能按"；破要能打断 Boss 的读条。
+    // 如果它们也读条，这两个核心玩法就废了。
+    expect(registry.skills.get('dodge')!.castTime).toBe(0);
+    expect(registry.skills.get('break')!.castTime).toBe(0);
   });
 });

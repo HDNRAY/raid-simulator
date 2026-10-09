@@ -118,7 +118,6 @@ export function changeResource(
  * ------------------------------------------------------------------ */
 
 export type RejectReason =
-  | 'gcd'
   | 'cooldown'
   | 'cost'
   | 'casting'
@@ -132,38 +131,13 @@ export interface GateResult {
 }
 
 /**
- * 是否处于公共冷却中。
- *
- * **这是 GCD 的唯一判据** —— 引擎门禁与输入层的"预测可用性"都调用它。
- *
- * 为什么要抽出来（踩过的坑）：输入层原本自己写了一份
- * `gcd.expiresAtTick > tick + 1`（我按经验猜的余量），而引擎用的是
- * `> tick`。差的那一个 tick 让**每个公共冷却周期都漏出 1–2 次
- * 「公共冷却中」的误报** —— 玩家按住普攻时每隔 0.5 秒就看到一次，
- * 而技能其实马上就要放出来了。
- *
- * 修法不是再去调那个余量数字（那只是在猜另一个数字），
- * 而是让两侧**共用同一个判据**，从结构上不可能不一致。
- *
- * 注意 `flags.blocksGcd` 这条路：它由 buff 的 flag 提供，
- * 是"不占 GCD"之外的另一种表达方式，同样要认。
- */
-export function isOnGcd(combatant: Combatant, skill: { readonly gcd: boolean }): boolean {
-  if (!skill.gcd) return false;
-  const flags = aggregateFlags(combatant);
-  if (flags.blocksGcd) return true;
-  return combatant.buffs.some((b) => b.defId === 'gcd');
-}
-
-/**
  * 施法门禁检查。**顺序是确定的**，因为它决定了"同时多个原因时报告哪个"。
  *
- * 顺序：locked → casting → gcd → cooldown → cost → condition
+ * 顺序：locked → casting → cooldown → cost → condition
  *
  * 为什么这个顺序合理：
  *   - `locked`（动作锁）是最高优先级：连行动都不行，谈别的没意义
  *   - `casting` 其次：正在读条时按键，玩家最需要知道的就是"我在读条"
- *   - `gcd` 比 `cooldown` 优先：GCD 是全局的，更容易被玩家忽略
  *   - `cost` 比 `condition` 优先：资源不足比"条件不满足"更可操作
  */
 /**
@@ -229,7 +203,26 @@ export function checkGate(
   combatant: Combatant,
   skill: SkillDef,
   ctx: CombatContext,
-  options: { readonly hasTarget: boolean; readonly ignoreCost?: boolean } = {
+  options: {
+    readonly hasTarget: boolean;
+    readonly ignoreCost?: boolean;
+    /**
+     * 正在读条时，这个技能是否**放行**（由调用方负责打断旧读条）。
+     *
+     * 命名说清楚方向：`true` = "读条中也能用"，`false` = "读条中不能用"。
+     * （早期叫 `interruptCasts`，名字描述的是"会不会打断"，
+     * 调用点容易传反 —— 我就传反过一次，表现为"所有技能都被 casting
+     * 拒绝、打断功能整个失效"。）
+     *
+     * 默认 `false`。**按住型技能（「防」）传 `true`**：它每个逻辑步
+     * 都会重复请求一次，如果按默认规则办，按住「防」会把自己的读条
+     * 无限打断，「攻」永远打不出来。
+     *
+     * 放行时门禁跳过读条判断，由调用方**自己清掉读条**并补发中断事件
+     * （否则读条会与新技能共存，两条一起结算）。
+     */
+    readonly allowedWhileCasting?: boolean;
+  } = {
     hasTarget: true,
   },
 ): GateResult {
@@ -238,21 +231,18 @@ export function checkGate(
   // 1. 动作锁
   if (flags.actionLock) return { ok: false, reason: 'locked' };
 
-  // 2. 正在读条
-  if (combatant.casts.length > 0) return { ok: false, reason: 'casting' };
+  // 2. 正在读条 —— 默认不放行，由调用方决定是否要打断它
+  if (combatant.casts.length > 0 && options.allowedWhileCasting !== true) {
+    return { ok: false, reason: 'casting' };
+  }
 
   const tick = ctx.currentTick();
 
-  // 3. GCD（由 buff 实现，不占 GCD 的技能不看它）
-  if (isOnGcd(combatant, skill)) {
-    return { ok: false, reason: 'gcd' };
-  }
-
-  // 4. 技能冷却
+  // 3. 技能冷却
   const readyAt = combatant.cooldowns[skill.id];
   if (readyAt !== undefined && readyAt > tick) return { ok: false, reason: 'cooldown' };
 
-  // 5. 代价
+  // 4. 代价
   if (!options.ignoreCost) {
     for (const cost of skill.cost) {
       const need = typeof cost.value === 'number' ? cost.value : 0;
@@ -261,14 +251,14 @@ export function checkGate(
     }
   }
 
-  // 6. 前置条件（派生窗口等）
+  // 5. 前置条件（派生窗口等）
   if (skill.requires && skill.requires.length > 0) {
     for (const condition of skill.requires) {
       if (!evaluateCondition(combatant, condition, ctx)) return { ok: false, reason: 'condition' };
     }
   }
 
-  // 7. 目标
+  // 6. 目标
   if (!options.hasTarget && skill.targeting.mode === 'primaryEnemy') {
     return { ok: false, reason: 'target' };
   }
@@ -539,29 +529,12 @@ export function applyHeal(
 }
 
 /* ------------------------------------------------------------------ *
- * 5. GCD 与冷却
+ * 5. 冷却
  * ------------------------------------------------------------------ */
-
-/** GCD 时长（ms）。作为内容常量放这里，方便以后做急速影响。 */
-export const GCD_MS = 300;
 
 export interface CooldownResult {
   readonly combatant: Combatant;
   readonly events: readonly EventDef[];
-}
-
-/**
- * 施加 GCD（挂一个 gcd buff）。
- *
- * 用 buff 实现 GCD 的好处：不占 GCD 的技能只需不检查它，
- * 而且 UI 可以直接把 gcd buff 显示成技能栏上的扫描线。
- */
-export function applyGcd(combatant: Combatant, gcdBuff: BuffDef, tick: number): CooldownResult {
-  const result = applyBuff(combatant, gcdBuff, combatant.id, tick);
-  return {
-    combatant: { ...combatant, buffs: result.buffs },
-    events: [],
-  };
 }
 
 /** 设置技能冷却（绝对 tick）。急速会缩短冷却，由调用方算好传入。 */

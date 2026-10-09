@@ -260,12 +260,11 @@ export type StackingRule =
 /**
  * 判定旗标。
  *
- * **闪避 / 格挡 / 派生 / GCD 全部落在这里，零新引擎机制**：
+ * **闪避 / 格挡 / 派生全部落在这里，零新引擎机制**：
  *   闪避   duration:300  + invulnerable
  *   格挡   duration:1500 + damageReduce:0.6
  *   精防   再叠一层更短、减伤更高的（不需要单独的"精防"概念）
  *   派生   技能 A 挂 comboWindow buff；技能 B 的 requires 检查它
- *   GCD    施放后挂 gcd buff；gcd:true 的技能 requires notHasBuff('gcd')
  */
 export interface BuffFlags {
   readonly invulnerable?: boolean;
@@ -274,7 +273,6 @@ export interface BuffFlags {
   readonly interruptImmune?: boolean;
   /** 派生窗口：在此期间这些技能可用 */
   readonly comboWindow?: readonly SkillId[];
-  readonly blocksGcd?: boolean;
   /** 动作锁：期间不能施放任何技能（施法僵直） */
   readonly actionLock?: boolean;
 }
@@ -645,7 +643,6 @@ export interface EquipmentEntity extends GameEntity {
 export interface ConsumableEntity extends GameEntity {
   readonly kind: 'consumable';
   readonly destroyOnEmpty: boolean;
-  readonly gcd: boolean;
   readonly cooldownMs: number;
 }
 
@@ -671,8 +668,6 @@ export interface SkillDef extends GameEntity {
   /** 0 = 无 CD */
   readonly cooldown: number;
   readonly charges?: ChargesDef;
-  /** 默认 true；不占 GCD 的技能显式写 false */
-  readonly gcd: boolean;
   readonly cost: readonly Cost[];
   /**
    * 「按住」技能：按住期间**每个逻辑步**扣一次资源。
@@ -893,7 +888,6 @@ export interface BattleState {
  * ================================================================== */
 
 export type SkillRejectReason =
-  | 'gcd'
   | 'cooldown'
   | 'cost'
   | 'casting'
@@ -944,7 +938,14 @@ export type EventDef =
       readonly tick: number;
       readonly sourceId: CombatantId;
       readonly skillId: SkillId;
-      readonly reason?: 'interrupted' | 'sourceLost' | 'death';
+      /**
+ * 中断原因：
+ *   `interrupted` 被「破」这类效果打断
+ *   `sourceLost`   施法者丢失目标
+ *   `death`        施法者死亡
+ *   `replaced`     施法者**主动改用了别的技能**（读条中出招规则）
+ */
+readonly reason?: 'interrupted' | 'sourceLost' | 'death' | 'replaced';
     }
   | {
       readonly kind: 'interruptSuccess';

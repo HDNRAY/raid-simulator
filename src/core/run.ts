@@ -22,7 +22,6 @@
  */
 
 import { BattleEngine } from './combat/battleState';
-import { isOnGcd } from './combat';
 import type {
   Action,
   BattleState,
@@ -232,7 +231,6 @@ export function roughlyUsable(
   state: BattleState,
   skill:
     | {
-        readonly gcd: boolean;
         readonly cooldown: number;
         readonly cost: readonly { readonly resource: string; readonly value: unknown }[];
         readonly requires?: readonly Condition[];
@@ -244,8 +242,6 @@ export function roughlyUsable(
   const actor = state.combatants.find((c) => c.id === actorId);
   if (!actor || !actor.alive) return false;
   if (actor.casts.length > 0) return false;
-  // 与引擎门禁共用同一个 GCD 判据（见 `isOnGcd` 的说明）
-  if (isOnGcd(actor, skill)) return false;
   if ((actor.cooldowns[skillId] ?? 0) > state.tick) return false;
   for (const cost of skill.cost) {
     const need = typeof cost.value === 'number' ? cost.value : 0;
