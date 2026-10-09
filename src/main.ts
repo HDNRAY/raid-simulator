@@ -204,6 +204,26 @@ async function bootstrap(): Promise<void> {
   let frameCount = 0;
 
   window.__raidBattle = {
+    /**
+     * 直接注入一个动作（调试用）。
+     *
+     * 存在的理由：headless 环境下 rAF 会被降频，所以"按键 → 等技能进冷却"
+     * 这条路在自动验证里不可靠。这个入口让验证脚本能精确地
+     * 把游戏推到某个状态（例如"某个技能正在冷却"）再截图。
+     */
+    act: (skillId: string) => {
+      loop.engineState.tick([
+        { type: 'useSkill', skillId, atTick: loop.engineState.snapshot.tick },
+      ]);
+      loop.engineState.drainEvents();
+    },
+    /**
+     * 把 Pixi stage 暴露出来。
+     *
+     * 用途：让验证脚本能读取**渲染层实际写进去的文本** ——
+     * 只看截图无法区分"没画"和"画了但看不见"。
+     */
+    stage: app.stage,
     probe: () => {
       const state = loop.engineState.snapshot;
       const player = state.combatants.find((c) => c.side === 'ally');

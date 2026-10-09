@@ -266,25 +266,35 @@ class SkillBarView {
        */
       const glyph = new Label(this.pixi, {
         x: rect.x + rect.w / 2,
+        // 略高于几何中心：下方要放冷却秒数
         y: rect.y + 6,
         size: FONT.big,
         color: 0xffffff,
         anchorX: 0.5,
         kai: true,
       });
-      // 按键提示放**右下角小字**，不占图标位置
+      /**
+       * 按键提示放在格子**外的左下角**。
+       *
+       * 早期放在格子内部右下角，结果**被冷却弧压住**（弧的直径几乎等于
+       * 格子宽度）。移到格外既避开了弧，也不必和技能字抢位置。
+       */
       const key = new Label(this.pixi, {
-        x: rect.x + rect.w - 4,
-        y: rect.y + rect.h - 15,
+        x: rect.x + 2,
+        y: rect.y + rect.h + 1,
         size: FONT.tiny,
         color: 0x9090a0,
-        anchorX: 1,
       });
-      // 冷却剩余秒数居中（弧形遮罩之上）
+      /**
+       * 冷却剩余秒数：放在格子**底部居中**。
+       *
+       * 早期放在正中，结果与技能字**完全重叠**（两者都在格子中心），
+       * 数字被字盖住 —— 用探针读渲染层实际文本才发现（截图上看不出来）。
+       */
       const cd = new Label(this.pixi, {
         x: rect.x + rect.w / 2,
-        y: rect.y + rect.h / 2 - 8,
-        size: FONT.title,
+        y: rect.y + rect.h - FONT.small - 1,
+        size: FONT.small,
         color: 0xffffff,
         anchorX: 0.5,
         stroke: 0x000000,
@@ -304,10 +314,10 @@ class SkillBarView {
         s.rect = rect;
         s.glyph.root.x = rect.x + rect.w / 2;
         s.glyph.root.y = rect.y + 6;
-        s.key.root.x = rect.x + rect.w - 4;
-        s.key.root.y = rect.y + rect.h - 15;
+        s.key.root.x = rect.x + 2;
+        s.key.root.y = rect.y + rect.h + 1;
         s.cd.root.x = rect.x + rect.w / 2;
-        s.cd.root.y = rect.y + rect.h / 2 - 8;
+        s.cd.root.y = rect.y + rect.h - FONT.small - 1;
       }
     }
   }
@@ -343,30 +353,47 @@ class SkillBarView {
        * 这样画面上只有"字 + 一个弧形"，是这套 UI 最干净的状态。
        */
       if (view.cooldownRatio > 0.001) {
-        // 弧形遮罩：从 12 点方向顺时针扫过剩余比例。
-        // 比竖条好在它不遮挡中间的字（字在弧内侧）。
+        /**
+         * 冷却：从 12 点方向顺时针扫过的一条**弧线**。
+         *
+         * 三个刻意的选择（都是被实际观感逼出来的）：
+         *
+         * 1. **不画描边边框**（需求明确）。弧本身就是一根有宽度的线，
+         *    再叠一圈描边会在两个端点上形成突兀的直线接头。
+         * 2. **不填充**。早期版本填一个扇形/圆环，实测**把技能字盖住了**
+         *    —— 那正是玩家最需要看清的东西。只留弧线，字始终完整。
+         * 3. **半径留足余量**（`- 3`）。贴边会导致弧的两端在
+         *    视觉上被按钮方框"切掉"，看起来像渲染 bug。
+         */
         const cx = x + w / 2;
         const cy = y + h / 2;
-        const r = Math.min(w, h) / 2 - 1;
+        const r = Math.min(w, h) / 2 - 3;
         const start = -Math.PI / 2;
         const end = start + Math.PI * 2 * view.cooldownRatio;
-        g.moveTo(cx, cy);
         g.arc(cx, cy, r, start, end);
-        g.closePath();
-        g.fill({ color: 0x05050a, alpha: 0.72 });
-        // 弧的边线，让"正在恢复"这件事有方向感
-        g.arc(cx, cy, r, start, end);
-        g.stroke({ color: 0x6a6c80, width: 1, alpha: 0.9 });
-      } else if (!view.usable) {
-        // 没有冷却但不可用（资源不足 / 条件不满足）：淡淡压暗即可
-        g.roundRect(x + 1, y + 1, w - 2, h - 2, 4).fill({ color: 0x000000, alpha: 0.4 });
+        g.stroke({ color: PALETTE.iframe.base, width: 3, alpha: 0.95 });
       }
+      /**
+       * 不可用（资源不足 / 条件不满足）**不画任何方框**。
+       *
+       * 早期这里填一个半透明圆角方块 —— 那就是需求里要去掉的
+       * "按钮方框"。现在只用**字的明暗**表达：
+       * 可用纯白、冷却中偏灰、不可用更暗。画面上只剩字与弧。
+       */
 
       s.glyph.set(this.translate(view.nameKey));
-      s.glyph.setColor(view.usable ? 0xffffff : view.cooldownRatio > 0.001 ? 0xc0c0cc : 0x606070);
+      s.glyph.setColor(
+        view.usable ? 0xffffff : view.cooldownRatio > 0.001 ? 0xb0b0be : 0x5a5a68,
+      );
       s.key.set(view.key.toUpperCase());
       // 剩余秒数：0.1 秒精度（逻辑步长就是 0.1 秒，再细没意义）
-      s.cd.set(view.cooldownRatio > 0.001 ? view.cooldownSec.toFixed(1) : '');
+      /**
+       * 冷却剩秒**取整**。
+       *
+       * 早期显示到 0.1 秒（`toFixed(1)`）：一是"还剩 4.3 秒"对玩家没有
+       * 额外信息量，二是那个宽度会把技能字挤掉。取整后一位数字放得下。
+       */
+      s.cd.set(view.cooldownRatio > 0.001 ? Math.ceil(view.cooldownSec).toString() : '');
     }
   }
 }
