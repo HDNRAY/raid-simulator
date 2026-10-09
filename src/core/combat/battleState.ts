@@ -43,20 +43,23 @@ import {
   type CombatContext,
   syncResourceGateBuff,
 } from './index';
-import { computeStats, type StatBreakdown } from '../stats/pipeline';
 import { DOUQI_PER_INTERNAL_DAMAGE } from '../../data/balance';
 import { TICKS_PER_LOGIC_TICK } from '../loopConstants';
 import { createAiState, decide, type AiState, type AiView } from '../ai';
+import type { StatBreakdown } from '../stats/pipeline';
+import {
+  applyEnrage,
+  statsBreakdownOf,
+  statsOf,
+  type StatsContext,
+} from './stats';
 import { nextRandom, type RngState } from '../rng';
 import type {  Ability,
 Action,
   BattleState,
   BuffDef,
-  BuffInstance,
   CastInstance,
   Combatant,
-  ResourceKey,
-  Who,
   Effect,
   EventDef,
   HitDef,
@@ -164,19 +167,6 @@ export class BattleEngine {
     return { ...this.state, rngSeed: this.rng.seed };
   }
 
-  /**
-   * 属性溯源：某个 stat 的当前值由哪些来源构成。
-   *
-   * 为什么必须有对外接口（数据模型规范 §5.4）：数值问题一旦出现，
-   * "为什么是 3.2 而不是 2.5"是最高频的问题。没有溯源就只能靠猜。
-   *
-   * **与 `statsOf` 共用同一份计算**（只是多要一个 breakdown）。
-   * 早期版本我另写了一份修正收集逻辑，结果是两份实现会各自漂移 ——
-   * 而溯源的全部价值就是"它和真实计算一致"。
-   */
-  statsBreakdownOf(id: string): Readonly<Partial<Record<StatKey, StatBreakdown>>> | undefined {
-    return this.computeStatsFor(id, true).breakdown;
-  }
 
   /**
    * 按 id 查技能定义。
@@ -314,30 +304,39 @@ export class BattleEngine {
     }
   }
 
-  /** 狂暴：挂一个伤害倍率 buff（`damageMultBoost` 由伤害公式读取）。 */
-  private applyEnrage(boss: Combatant): void {
-    const behavior = boss.behaviors.find((b) => b.kind === 'enrage');
-    const mult = behavior?.kind === 'enrage' ? behavior.dmgMult : 2;
-    const applied = applyBuff(
-      this.current(boss.id),
-      this.enrageBuff(mult),
-      boss.id,
-      this.state.tick,
-    );
-    this.replaceCombatant({ ...this.current(boss.id), buffs: applied.buffs });
-    this.events.push({ kind: 'enrageStarted', tick: this.state.tick, bossId: boss.id });
+
+
+  /**
+   * 属性计算与狂暴 —— 实现搬到 `./stats.ts`（约 105 行）。
+   *
+   * 这里只留**薄委托**：把引擎的能力打包成 `StatsContext` 交过去。
+   * 公开方法（`statsOf` / `statsBreakdownOf`）名字不变 —— 拆文件
+   * 不该改动对外 API。
+   */
+  statsBreakdownOf(id: string): Readonly<Partial<Record<StatKey, StatBreakdown>>> | undefined {
+    return statsBreakdownOf(this.statsContext(), id);
   }
 
-  private enrageBuff(dmgMult: number): BuffDef {
+  statsOf(combatantId: string): Readonly<Record<StatKey, number>> {
+    return statsOf(this.statsContext(), combatantId);
+  }
+
+  private applyEnrage(boss: Combatant): void {
+    applyEnrage(this.statsContext(), boss);
+  }
+
+  /** 属性计算阶段需要的引擎能力（每次现取，避免持有可变引用）。 */
+  private statsContext(): StatsContext {
     return {
-      id: 'boss-enrage-active',
-      nameKey: 'event.enrage',
-      icon: 'buff_enrage',
-      polarity: 'debuff',
-      duration: Number.POSITIVE_INFINITY,
-      maxStacks: 1,
-      stacking: { mode: 'refresh' },
-      damageMultBoost: dmgMult,
+      tick: this.state.tick,
+      combatants: this.state.combatants,
+      options: this.options,
+      current: (id) => this.current(id),
+      replaceCombatant: (updated) => this.replaceCombatant(updated),
+      resolveCombatantFor: (selfId, who) => this.resolveCombatant(selfId, who),
+      pushEnrageStarted: (bossId) => {
+        this.events.push({ kind: 'enrageStarted', tick: this.state.tick, bossId });
+      },
     };
   }
 
@@ -351,72 +350,7 @@ export class BattleEngine {
     return ctx;
   }
 
-  /**
-   * 计算某个单位的全部属性。
-   *
-   * **每次调用都重新结算** —— 没有缓存，也就没有快照。
-   * 这是"动态重算"的落地方式（数据模型规范 §7.2 规则 6）。
-   * 实测性能足够：一次结算在几十微秒量级。
-   */
-  statsOf(combatantId: string): Readonly<Record<StatKey, number>> {
-    return this.computeStatsFor(combatantId, false).values;
-  }
 
-  /**
-   * 属性结算的**唯一实现**。
-   *
-   * `statsOf` 与 `statsBreakdownOf` 都走它 —— 溯源数据必须与真实计算
-   * 出自同一次求值，否则"面板上写的"和"实际用的"会不一致。
-   */
-  private computeStatsFor(
-    combatantId: string,
-    wantBreakdown: boolean,
-  ): { values: Readonly<Record<StatKey, number>>; breakdown?: Readonly<Partial<Record<StatKey, StatBreakdown>>> } {
-    const combatant = this.state.combatants.find((c: Combatant) => c.id === combatantId);
-    if (!combatant) return { values: EMPTY_STATS };
-
-    const modifiers: StatModifier[] = [
-      ...(this.options.passiveModifiers.get(combatantId) ?? []),
-    ];
-
-    // 把 buff 的修正展开进来，并带上 buffId 作为命名空间
-    for (const buff of combatant.buffs) {
-      const def = buff.def ?? this.options.buffs.get(buff.defId);
-      if (!def?.modifiers) continue;
-      for (const modifier of def.modifiers) {
-        modifiers.push(
-          modifier.namespace ? modifier : { ...modifier, namespace: buff.defId },
-        );
-      }
-    }
-
-    const stackLookup = (key: string): number => {
-      let total = 0;
-      for (const buff of combatant.buffs) {
-        if (buff.defId === key) total += buff.stacks;
-      }
-      return total === 0 ? 1 : total;
-    };
-
-    return computeStats({
-      base: this.options.baseStats.get(combatantId) ?? {},
-      modifiers,
-      wantBreakdown,
-      stackCount: stackLookup,
-      evaluateCondition: () => true,
-      resourceAccess: {
-        getResource: (who: Who, resource: ResourceKey) =>
-          this.resolveCombatant(combatantId, who).resources[resource],
-        getMaxResource: (who: Who, resource: ResourceKey) =>
-          this.resolveCombatant(combatantId, who).caps[resource],
-        getBuffStacks: (who: Who, buffId: string) =>
-          this.resolveCombatant(combatantId, who).buffs
-            .filter((b: BuffInstance) => b.defId === buffId)
-            .reduce((sum: number, b: BuffInstance) => sum + b.stacks, 0),
-        getCounter: () => 0,
-      },
-    });
-  }
 
   /**
    * 直接写入一个单位的状态。
@@ -1567,7 +1501,6 @@ export class BattleEngine {
  * 辅助
  * ------------------------------------------------------------------ */
 
-const EMPTY_STATS = {} as Readonly<Record<StatKey, number>>;
 
 function clampStart(combatant: Combatant): Combatant['resources'] {
   const out = { ...combatant.resources };
