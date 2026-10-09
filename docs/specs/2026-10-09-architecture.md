@@ -530,29 +530,35 @@ base: command === 'serve' ? '/' : '/raid/'
 
 路由**不引库**——只有 2 个状态，手写约 20 行 `hashchange` 监听即可。
 
-### 9.4 过渡期策略
+### 9.4 新项目就绪前的行为
 
-新项目还没有构建入口时，workflow 自动改为构建 `archive/` 里的旧版本：
+`archive/` 已从工作区删除（v1 源码完整保留在 git 历史，见 README）。
+所以新项目就绪前，workflow **只做校验、不发布**：
 
 ```
-src/main.ts 不存在  ->  构建 archive/，推到 HDNRAY.github.io/raid/
-src/main.ts 存在    ->  构建新项目，推到 HDNRAY.github.io/raid/
+src/main.ts 不存在  ->  workflow 空转，线上 /raid/ 保持 2022 年内容不变
+src/main.ts 存在    ->  构建并推送到 HDNRAY.github.io/raid/
 ```
 
-切换靠检测构建入口文件，**不需要改 workflow**。
-`archive/package.json` 的 `homepage: "."` 让 CRA 产出相对路径（`./static/...`），
-所以放在 `/raid/` 下不需要任何 `PUBLIC_URL` 覆盖。
+用 `git` 的 `if` 条件实现（`steps.detect.outputs.ready`），**不需要改 workflow**。
 
 **CI 以 typecheck / lint / test 为发布硬门槛**：任一失败则不推送，
 `HDNRAY.github.io/raid/` 继续保留上一次成功的内容。
 
 `.github/workflows/deploy.yml` 已按此写好。
 
-**注意**：`cpina` 这个 action 会同步 `source-directory` 到 `target-directory`，
-所以 `raid/` 下不属于构建产物的文件会被清掉（例如 2022 年那个 `Readme.md`
-在下次发布时会消失）。这是与 bdgame / colorGuess 相同的行为，属于预期。
+### 9.5 当前阻塞项
 
----
+`raid-simulator` 仓库**没有** `SSH_DEPLOY_KEY` secret（2026-10-09 核查），
+所以发布链路目前是断的：push `main` 会构建成功但推送失败。
+
+配置步骤见 [`docs/setup-deploy-key.md`](../setup-deploy-key.md)，约 3 分钟。
+要点：公钥加到 `HDNRAY.github.io` 的 Deploy keys 并**勾选 Allow write access**；
+私钥存为 `raid-simulator` 的 Actions secret，名字必须是 `SSH_DEPLOY_KEY`。
+
+**注意**：`cpina` 会同步整个 `target-directory`，所以 `raid/` 会被**完全替换**成
+新产物——2022 年那个 `Readme.md` 和旧构建都会消失（与 bdgame / colorGuess 行为一致）。
+旧版源码不受影响，它在 git 历史里。
 
 ## 10. 分辨率与自适应缩放
 
@@ -665,6 +671,9 @@ ro.observe(stage);
 | # | 议题 | 结论 |
 |---|---|---|
 | 1 | 发布源 | ✅ 已确认：`cpina/github-action-push-to-another-repository` 推到 `HDNRAY.github.io/raid/`（§9.1）。上一版"GitHub Actions artifact"的推断**作废** |
+| 1b | `SSH_DEPLOY_KEY` | ❌ **当前不存在**，发布链路断了，需按 `docs/setup-deploy-key.md` 配置（§9.5） |
+| 1c | `archive/` | ✅ 已删除。v1 源码完整保留在 git 历史（`993e2db`） |
+| 1d | 旧版是否保留在线 | ✅ 不保留。`raid/` 会被新产物完全替换 |
 | 2 | 缩放模式 | 默认 `fit`（填满屏幕），设置可切 `integer`（§10.2） |
 | 3 | UI 层 | ✅ **全部走 canvas，零 DOM**，包括设置与改键（§6.0、§6.5） |
 | 4 | 第三方库 | ✅ **默认不引**；PixiJS 覆盖不到时允许引入（Konva / Three / Spine 等），但只允许出现在 `render/` 与 `ui/`（§6.4） |
@@ -674,13 +683,16 @@ ro.observe(stage);
 | 8 | CI 硬门槛 | ✅ typecheck / lint / test 不通过则不发布 |
 | 9 | 主题系统 | ✅ 不做多主题；`data/palette.ts` 保留为 UI 与美术的唯一配色真相源（§6.3） |
 
-### 11.1 仍需你确认
+### 11.1 唯一待办（不是设计问题，是运维）
 
-1. **`SSH_DEPLOY_KEY` secret 是否还在** `raid-simulator` 仓库里？
-   （bdgame / colorGuess 用的是同一对密钥，公钥需在 `HDNRAY.github.io` 有写权限。）
-   本地无法确认。若已清理，需要在两个仓库重新配置。
-2. **`archive/` 旧版本不再从线上可访问**（`cpina` 会同步 `target-directory`，
-   `raid/` 会被完全替换成新产物）。这是与 bdgame / colorGuess 一致的行为。
-   如果你希望保留旧版在线，我改成把旧版一并放进 `dist/archive/`。
-3. **中文字段**：项目里所有玩家可见文案保持中文（默认），还是需要 i18n 铺垫？
-   （影响 `data/` 里字符串的组织方式，早定便宜。）
+按 [`docs/setup-deploy-key.md`](../setup-deploy-key.md) 配置 `SSH_DEPLOY_KEY`
+（约 3 分钟）。这一步不阻塞写代码，只阻塞"看到线上效果"。
+
+### 11.2 已默认采用的假设
+
+以下未单独确认、按默认值推进，如不认可请指出：
+
+1. **玩家可见文案保持中文**，不做 i18n 铺垫。
+   （`data/` 里字符串直接写中文；若以后要 i18n，用 `id` + 文案表重构。）
+2. **默认缩放模式 `fit`**（§10.2），设置里可切 `integer`。
+3. **不做多主题系统**；`data/palette.ts` 作为唯一配色真相源（§6.3）。

@@ -4,10 +4,11 @@ name: Deploy to GitHub Pages
 #   在 raid-simulator 仓库里构建，然后把产物推到 HDNRAY.github.io 仓库的 raid/ 子目录。
 #   线上地址 https://hdnray.github.io/raid/ 保持不变。
 #
-# 需要的仓库 secret：SSH_DEPLOY_KEY（与 bdgame / colorGuess 用的是同一对部署密钥）
+# 依赖仓库 secret：SSH_DEPLOY_KEY
+#   配置步骤见 docs/setup-deploy-key.md
 #
-# 过渡期：新项目还没有构建入口（src/main.ts）时，自动改为构建 archive/ 里的旧版本，
-# 保证推送不会让线上站点失效。src/main.ts 一出现就自动切换到构建新项目。
+# 新项目尚未就绪时（src/main.ts 不存在），本 workflow 只做校验不做发布，
+#   这样不会用空产物覆盖线上内容。
 
 on:
   push:
@@ -35,7 +36,7 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
-      # 判断新项目是否已有构建入口；没有则退回构建 archive/
+      # 新项目就绪判定：有构建入口才算就绪
       - name: Detect project
         id: detect
         run: |
@@ -45,23 +46,12 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # ---------- 旧版本（archive/）：保证 /raid/ 在任何时候都有内容 ----------
-      # archive/package.json 里 homepage 是 "."，CRA 会产出相对路径（./static/...），
-      # 所以放在 /raid/ 下不需要任何 PUBLIC_URL 覆盖。
-      - name: Build archive (legacy v1)
-        if: steps.detect.outputs.ready == 'false'
-        working-directory: archive
-        run: |
-          npm install --no-audit --no-fund
-          npm run build
-          cp build/index.html build/404.html
-          touch build/.nojekyll
-
-      - name: Point dist at archive output
+      - name: Not ready yet
         if: steps.detect.outputs.ready == 'false'
         run: |
-          rm -rf dist
-          mv archive/build dist
+          echo "::notice title=Sketch stage::src/main.ts not found. \
+          Design/docs-only commit; skipping build and deploy. \
+          Live site at https://hdnray.github.io/raid/ is left untouched."
 
       # ---------- 新项目 ----------
       - uses: pnpm/action-setup@v4
@@ -95,6 +85,7 @@ jobs:
         if: steps.detect.outputs.ready == 'true'
         run: pnpm run build
 
+      # hash 路由下用于兜底未知路径；.nojekyll 让 Pages 跳过 Jekyll 处理
       - name: Add Pages extras
         if: steps.detect.outputs.ready == 'true'
         run: |
@@ -102,7 +93,7 @@ jobs:
           touch dist/.nojekyll
 
       - name: Push to github pages
-        if: github.event_name != 'pull_request'
+        if: steps.detect.outputs.ready == 'true' && github.event_name != 'pull_request'
         uses: cpina/github-action-push-to-another-repository@v1.7.2
         env:
           SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}

@@ -4,7 +4,7 @@
 PixiJS 像素渲染。
 
 > **项目状态：设计阶段。** 代码尚未开始。当前仓库里只有设计规范、画面示意图
-> 和归档的旧版本。
+> 和发布配置。
 
 ---
 
@@ -52,7 +52,7 @@ PixiJS 像素渲染。
         └────────────────┘        └──────────────────────┘
 ```
 
-旧版本（见 `archive/`）失败的原因是**引擎逻辑写在了 React 组件的 `useCallback` 里**，
+旧版本（已删除，可从 git 历史取回，见文末）失败的原因是**引擎逻辑写在了 React 组件的 `useCallback` 里**，
 伤害结算、buff 计时、公式全靠 `useEffect` 监听时间变化来驱动。
 新版本用五条**由 lint 强制**的约束把它彻底隔开（见架构规范 §2.1）：
 
@@ -107,9 +107,8 @@ typecheck → lint → test → build → 发布到 GitHub Pages。
 `/raid-simulator/`。新项目的 Vite `base` 必须是 `/raid/`，
 路由必须是 **hash 形式**（`#/battle`），页面标题保持 `Code:Raid`。
 
-在 M6 之前，线上发布的仍是 `archive/` 里的 2022 版
-（`deploy.yml` 会自动检测新项目是否就绪并切换）。
-旧版本可从 **https://hdnray.github.io/raid/archive/** 访问。
+新项目就绪前（`src/main.ts` 不存在），`deploy.yml` 只做校验、**不发布**，
+所以线上会保留 2022 年的旧版本，不会被空产物覆盖。
 
 ### 分辨率
 
@@ -122,9 +121,29 @@ typecheck → lint → test → build → 发布到 GitHub Pages。
 
 ## 旧版本
 
-`archive/` 目录保留 2021 年的初版实现（CRA + React 17 + Redux Toolkit + SCSS）。
-它在战斗数值上做得相当完整（四资源、主副属性、读条 + GCD、
-DoT/HoT、伤害飘字、槽位键位映射），**作为设计参考有很高价值**，
-但因为逻辑与 UI 无法分离而停止维护。
+2021 年的初版实现（CRA + React 17 + Redux Toolkit + SCSS）**已从工作区删除**。
+它在战斗数值上做得相当完整（四资源、主副属性、读条 + GCD、DoT/HoT、伤害飘字、
+槽位键位映射），作为设计参考有很高价值，但因为逻辑与 UI 无法分离而停止维护。
 
-`archive/` 里的 `package.json` 保留但不再维护，依赖也不再安装。
+代码没有丢失，**完整保留在 git 历史里**：
+
+```bash
+# 看 2022 年那次重构前的完整源码树
+git ls-tree -r --name-only 993e2db
+
+# 取任意一个文件
+git show 993e2db:src/core/Battle.ts
+git show 993e2db:src/types/types.d.ts
+
+# 想整体恢复到某个目录
+git archive 993e2db | tar -x -C /tmp/raid-v1
+```
+
+注意 `993e2db` 是 v1 的最后一个提交（`init classes`）。
+`git log --oneline | tail -1` 是 `1744fdf Initial commit`。
+
+## 发布密钥
+
+推送 `main` 需要 `SSH_DEPLOY_KEY` secret 才能发布到 GitHub Pages。
+**当前尚未配置**（2026-10-09 核查）：构建会成功，但推送这一步会失败。
+配置步骤见 [docs/setup-deploy-key.md](docs/setup-deploy-key.md)，约 3 分钟。

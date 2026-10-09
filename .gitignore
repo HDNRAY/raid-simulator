@@ -32,8 +32,3 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
-
-# ---- legacy (archive/) ----
-# 旧版 CRA 项目的构建产物与依赖，不再维护
-archive/build/
-archive/node_modules/
