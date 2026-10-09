@@ -1,33 +1,113 @@
 # Raid Simulator
 
-## Requirements
-This project dev with create-react-app(v5), typescript, redux(toolkit), sass. It requires [Node.js] v14.0+ to be installed locally.
+一个**单挑 Boss**的实时战斗数值模拟器。第三人称视角、无位移、全键盘操作、
+PixiJS 像素渲染。
 
-## Installation
+> **项目状态：设计阶段。** 代码尚未开始。当前仓库里只有设计规范、画面示意图
+> 和归档的旧版本。
 
-1. Download and install Node: <https://nodejs.org>
-2. Clone this repo
-3. Install projecg dependencies: `npm install` (yarn/pnpm)
-4. Start the development environment: `npm start`
+---
 
-## Available Scripts
+## 这是什么
 
-In the project directory, you can run:
+- **一场战斗 = 一个 Boss。** 每场有**时限**（超时判负）和**狂暴机制**
+  （超时后 Boss 伤害翻倍），Boss 有带前摇的技能、阶段转换、可打断的读条。
+- **没有位移，但需要"躲"。** Boss 技能在 **hit frame** 一次性判定，
+  你按下的闪避/格挡会给自己挂一个 **300ms 的短时无敌/减伤 buff**——
+  时机对了就免伤，错了就吃满。**判定窗口就是 buff**，不是另一套系统。
+- **技能派生。** 施放技能 A 后开启一个 1.5s 的"派生窗口"，
+  技能 B 只有在这个窗口内可用。同样是 buff 存在性判断。
+- **玩家和 Boss 数值对等。** 两边跑**同一个引擎、同一套数据模型**，
+  区别只有输入来源：玩家是键盘，Boss 是数据驱动的行为数组。
+- **全键盘。** 没有 WASD，主键区全部留给技能（`1-6` `Q E R T F G Z X C V`）。
 
-### `npm start`
+---
 
-Runs the app in the development mode.<br />
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+## 设计文档
 
-The page will reload if you make edits.<br />
-You will also see any lint errors in the console.
+| 文档 | 内容 |
+|---|---|
+| [数据模型规范](docs/specs/2026-10-09-data-model.md) | `GameEntity` / `Skill` / `Effect` / `Buff` / `Modifier` / `Expr` / `Condition` / `Trigger`，修正树结算算法，14 条验收测试 |
+| [架构与 UI 规范](docs/specs/2026-10-09-architecture.md) | 技术选型、分层架构、硬约束、目录结构、测试策略、UI 组件化与设计系统、里程碑、发布流程 |
+| [画面示意图](docs/mockups/2026-10-09-battle-scene.png) | 960×540 逻辑分辨率下的战斗界面布局（Boss 144×192） |
 
-### `npm run build`
+**新读者建议顺序**：先看画面示意图 → 再看数据模型规范的 §9「熵之钟走查」
+（一个完整的被动装备例子）→ 再看架构规范的 §2 分层。
 
-Builds the app for production to the `build` folder.<br />
-It correctly bundles React in production mode and optimizes the build for the best performance.
+---
 
-The build is minified and the filenames include the hashes.<br />
-Your app is ready to be deployed!
+## 架构核心：一条硬边界
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+```
+        ┌──────────────────────────────────────────────┐
+        │  core/   纯确定性模拟引擎                       │
+        │  (state, input, dt) -> (state', events)      │
+        │  零依赖 · 无 DOM · 无 Math.random · 可在 Node 跑 │
+        └──────────────────────────────────────────────┘
+                 ▲                          │
+      Action[]   │                          │  Snapshot + Events
+                 │                          ▼
+        ┌────────────────┐        ┌──────────────────────┐
+        │ input/ 键盘     │        │ render/ Pixi 消费者   │
+        └────────────────┘        └──────────────────────┘
+```
+
+旧版本（见 `archive/`）失败的原因是**引擎逻辑写在了 React 组件的 `useCallback` 里**，
+伤害结算、buff 计时、公式全靠 `useEffect` 监听时间变化来驱动。
+新版本用五条**由 lint 强制**的约束把它彻底隔开（见架构规范 §2.1）：
+
+1. `core/` 不许 import `pixi` / DOM / UI
+2. `core/` 里不许出现 `Math.random` / `Date.now`
+3. `render/` 不许反向依赖 `core/` 内部
+4. `core/` 里不许出现异步
+5. 状态必须可结构化克隆、可哈希
+
+**验收标准**：`core/` 能在 Node 里跑完一整场战斗并断言结果——不启动浏览器。
+只有这个测试通过，才允许开始写 UI。
+
+---
+
+## 里程碑
+
+| # | 内容 | 状态 |
+|---|---|---|
+| M0 | 工程骨架：Vite + TS + Pixi + 固定步长循环 | ⬜ |
+| M1 | `core/` 确定性模拟（数据模型 + 修正树 + 资源 + CD + 读条 + DoT） | ⬜ |
+| M2 | 判定层（hit frame + 无敌/减伤 + 中断 + 属性溯源重算） | ⬜ |
+| M3 | 输入层（键位 + Action 队列 + 按住连发 + 回放录制） | ⬜ |
+| M4 | Boss AI 与行为数组（时间轴 + 阶段 + 狂暴 + 打断） | ⬜ |
+| M5 | 表现层（战斗场景 + HUD + 飘字 + 预警 + HUD 淡出） | ⬜ |
+| M6 | 内容：Boss「Verrot, the Fallen」全套技能与动画 | ⬜ |
+| M7 | 打磨（音效 + 粒子 + 设置持久化 + 正式像素素材） | ⬜ |
+
+**M1 + M2 结束时，游戏在 Node 里就已经"可玩"了**——没有画面，但能跑出正确的战斗结果。
+
+---
+
+## 开发
+
+> 尚未初始化。M0 完成后本节会填入真实命令。
+
+```bash
+pnpm install
+pnpm run dev        # 本地开发
+pnpm run test       # 单元 + 黄金重放 + 内容校验
+pnpm run typecheck
+pnpm run lint       # 包含 core/ 纯净性检查
+pnpm run build      # 产出 dist/
+```
+
+推送 `main` 会触发 [.github/workflows/deploy.yml](.github/workflows/deploy.yml)：
+typecheck → lint → test → build → 发布到 GitHub Pages。
+**测试或 lint 不通过则不会发布。**
+
+---
+
+## 旧版本
+
+`archive/` 目录保留 2021 年的初版实现（CRA + React 17 + Redux Toolkit + SCSS）。
+它在战斗数值上做得相当完整（四资源、主副属性、读条 + GCD、
+DoT/HoT、伤害飘字、槽位键位映射），**作为设计参考有很高价值**，
+但因为逻辑与 UI 无法分离而停止维护。
+
+`archive/` 里的 `package.json` 保留但不再维护，依赖也不再安装。
