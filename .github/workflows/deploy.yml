@@ -1,5 +1,16 @@
 name: Deploy to GitHub Pages
 
+# 线上地址：https://hdnray.github.io/raid/
+# 这个 workflow 保持该地址与发布机制不变。
+#
+# 过渡期行为（当前）：
+#   新项目还没有构建（src/main.ts 不存在）时，自动构建并发布 archive/ 里的
+#   旧版本。旧版本是 CRA 项目，hash 路由（#/battle），base 为 /raid/，
+#   所以线上表现与之前完全一致。
+#
+# 新项目就绪后（src/main.ts 出现）：
+#   自动切换到构建新项目，并把 archive/ 导出到 dist/archive/ 一起发布。
+
 on:
   push:
     branches: [main]
@@ -16,34 +27,80 @@ concurrency:
 
 jobs:
   build:
-    name: Typecheck, lint, test, build
+    name: Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # ---------- 旧版本（archive/）：始终构建，保证 /raid/ 不会白屏 ----------
+      - name: Build archive (legacy v1)
+        working-directory: archive
+        env:
+          PUBLIC_URL: /raid/
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Stage artifact from archive
+        run: |
+          mkdir -p dist
+          cp -R archive/build/. dist/
+
+      # ---------- 新项目：只有构建入口存在时才跑 ----------
+      - name: Detect new project
+        id: detect
+        run: |
+          if [ -f src/main.ts ] || [ -f src/main.tsx ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: pnpm/action-setup@v4
+        if: steps.detect.outputs.ready == 'true'
         with:
           version: 9
 
       - uses: actions/setup-node@v4
+        if: steps.detect.outputs.ready == 'true'
         with:
           node-version: 22
           cache: pnpm
 
-      - name: Install dependencies
+      - name: Install
+        if: steps.detect.outputs.ready == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck
+        if: steps.detect.outputs.ready == 'true'
         run: pnpm run typecheck
 
       - name: Lint (enforces core/ purity constraints)
+        if: steps.detect.outputs.ready == 'true'
         run: pnpm run lint
 
       - name: Test (unit + golden replay + content validation)
+        if: steps.detect.outputs.ready == 'true'
         run: pnpm run test -- --run
 
       - name: Build
+        if: steps.detect.outputs.ready == 'true'
         run: pnpm run build
+
+      - name: Stage artifact from new project
+        if: steps.detect.outputs.ready == 'true'
+        run: |
+          rm -rf dist-new
+          mv dist dist-new                                   # 新项目构建产物
+          rm -rf dist-new/archive
+          mkdir -p dist-new/archive
+          cp -R archive/build/. dist-new/archive/            # 旧版挂到 /raid/archive/
+          rm -rf dist
+          mv dist-new dist
 
       - uses: actions/configure-pages@v5
 

@@ -368,55 +368,201 @@ export const TYPE = { xs: 14, sm: 16, md: 18, lg: 22, xl: 30 } as const;
 
 ## 9. 发布流程
 
-现状：`origin` = `git@github.com:HDNRAY/raid-simulator.git`，
-**没有 `.github/workflows`**，只有 `main` 一个分支。所以"那个用来自动发布的脚本"
-在仓库里已经不存在了。按当前最佳实践重建：
+### 9.1 现状调查（2026-10-09 实测）
 
-`.github/workflows/deploy.yml`：
+线上地址：**https://hdnray.github.io/raid/**（注意路径是 `/raid/`，
+不是仓库同名的 `/raid-simulator/`）。
 
-```yaml
-name: Deploy to GitHub Pages
-on:
-  push: { branches: [main] }
-  workflow_dispatch:
-permissions: { contents: read, pages: write, id-token: write }
-concurrency: { group: pages, cancel-in-progress: true }
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: pnpm }
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run typecheck
-      - run: pnpm run lint
-      - run: pnpm run test -- --run
-      - run: pnpm run build
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with: { path: dist }
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment: { name: github-pages, url: "${{ steps.deployment.outputs.page_url }}" }
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+实测结果：
+
+| 检查项 | 结果 |
+|---|---|
+| `https://hdnray.github.io/raid/` | `200`，返回旧版 CRA 构建 |
+| `https://hdnray.github.io/raid-simulator/` | `404` |
+| 线上 `asset-manifest.json` | 与 `archive/build/asset-manifest.json` **逐字节一致** |
+| 线上 `main.afc504d1.js` | `207532` 字节 = 本地 `archive/build/static/js/main.afc504d1.js` |
+| 线上 `main.388d8cf3.css` | `8047` 字节 = 本地同名文件 |
+| `git ls-remote --heads origin` | **只有 `main` 一个分支** |
+| `.github/` 目录 | 当前不存在 |
+| `git log --all -- index.html` | **root 的 `index.html` 从未被提交过** |
+| `git log --all -- build/index.html` | **`build/` 从未被提交过** |
+| `git log --all --grep='deploy\|pages\|gh-pages'` | 无相关历史提交 |
+
+**结论**：线上站点**不可能**来自当前 `main` 的任何已提交内容——
+它既不来自 root，也不来自 `build/`，也不来自 `docs/`。
+唯一自洽的解释是 **Pages 发布源为 "GitHub Actions"，且 2022 年 1 月
+那次成功部署的 artifact 仍在被继续服务**（GitHub Pages 会保留最后一次成功部署的
+内容，即使产生它的 workflow 后来消失了）。这也解释了为什么仓库里没有 workflow、
+没有 `gh-pages` 分支、没有构建产物提交。
+
+> 我无法 100% 确认这一点：`api.github.com/repos/HDNRAY/raid-simulator/pages`
+> 需要认证，而当前环境的匿名请求被限流（403）。**请在仓库
+> Settings → Pages 里核对 "Build and deployment → Source" 的值。**
+> 如果是 `GitHub Actions`，下面的方案完全对齐；如果是 `Deploy from a branch`，
+> 请告诉我，我会改成对齐那个模式。
+
+### 9.2 不改动的三件事
+
+需求是"这块我不希望有任何变化"。所以以下三件事**一件都不改**：
+
+| 项 | 保持不变 |
+|---|---|
+| URL | `https://hdnray.github.io/raid/` |
+| 路由形式 | **hash 路由**（`#/battle`），不是 history 路由 |
+| 页面标题 | `Code:Raid` |
+
+于是新项目必须满足：
+
+```ts
+// vite.config.ts
+export default defineConfig({
+  base: '/raid/',          // ← 必须，不能是 '/raid-simulator/'
+  build: { outDir: 'dist' },
+});
 ```
 
-配套：`vite.config.ts` 里 `base: '/raid-simulator/'`（项目页路径）。
-**CI 里跑测试与 lint**，所以 C1–C5 硬约束在 CI 上是真的门槛。
+```ts
+// 路由必须是 hash 形式，才能保持 #/battle 这个 URL 不变
+// 不引路由库：路由表只有 2 个状态，手写 ~20 行
+type Route = '#/battle' | '#/archive' | '#/settings';
+```
+
+`index.html` 的 `<title>` 写 `Code:Raid`。
+
+**`/raid/archive/` 是新增路径**（不覆盖任何现有路径），
+用于从线上访问 2022 年的旧版本。这是"不改变现状"下的净增量。
+
+### 9.3 过渡期发布策略
+
+新项目尚未有构建入口时，workflow 自动构建并发布 `archive/`，
+保证 `/raid/` **始终有一个可用的站点**，不会白屏：
+
+```
+src/main.ts 不存在  →  只构建 archive/，发布到 /
+src/main.ts 存在    →  构建新项目发布到 /，archive/ 构建后挂到 /archive/
+```
+
+切换是自动的（靠检测构建入口文件），不需要改 workflow。
+**CI 以 typecheck / lint / test 为发布硬门槛**：任一失败则不发布，
+线上继续保留上一次成功部署的内容。
+
+`.github/workflows/deploy.yml` 已按此写好。
 
 ---
 
-## 10. 待确认
+## 10. 分辨率与自适应缩放
 
-1. **不引任何 UI 库**（自写 Pixi 组件三层），认可吗？
-2. **`data/palette.ts` 作为 UI 与像素美术的唯一配色真相源**，并加一个
-   "素材调色板 ⊆ PALETTE" 的构建期校验，认可吗？
-3. **包管理器用 pnpm**（CI 里用 pnpm），还是你偏好 npm？
-4. **CI 里 `test` 与 `lint` 作为部署的硬门槛**（不通过就不发布），认可吗？
-5. 旧代码已移到 `archive/`，`node_modules` 已删除（旧依赖不再安装）。
-   `archive/` 里的旧 `package.json` 保留但**不再维护**，认可吗？
+### 10.1 目标
+
+- 逻辑分辨率固定 **960×540**（16:9），游戏内坐标与像素画不受屏幕尺寸影响
+- **始终保持 16:9**，多余区域用黑边（letterbox）填充
+- 像素**在任何屏幕尺寸下都不糊**
+
+### 10.2 方案：定尺寸 canvas + CSS 缩放
+
+两条路线的取舍：
+
+| 方案 | 做法 | 问题 |
+|---|---|---|
+| A. 改 renderer 分辨率 | 按容器尺寸反复 `renderer.resize()` | 每次 resize 重分配 framebuffer；逻辑坐标被拉伸，像素比例失控 |
+| **B. 定尺寸 canvas + CSS 缩放**（选这个） | canvas 内部永远是 960×540，用 CSS 居中缩放 | 需要处理 CSS 缩放的采样方式 |
+
+**选 B**：`app.init()` 里的 `resolution` 固定为 1，`autoDensity: false`，
+**渲染器尺寸在生命周期内永不改变**。缩放完全交给 CSS。
+
+```ts
+// render/scaling.ts
+const LOGICAL_W = 960, LOGICAL_H = 540;
+
+/** 视口内可用的 CSS 像素尺寸 */
+function computeCanvasRect(viewportW: number, viewportH: number, mode: ScalingMode) {
+  const fitScale = Math.min(viewportW / LOGICAL_W, viewportH / LOGICAL_H);
+  // 整数模式：找最大的整数倍；至少 1 倍（小窗口时允许被裁切）
+  const scale = mode === 'integer'
+    ? Math.max(1, Math.floor(fitScale))
+    : fitScale;
+  return {
+    scale,
+    width:  LOGICAL_W * scale,
+    height: LOGICAL_H * scale,
+  };
+}
+```
+
+**两种模式，默认推荐 `fit`**：
+
+| 模式 | 行为 | 取舍 |
+|---|---|---|
+| `fit`（默认） | 按 `min(w/960, h/540)` 等比放大到刚好填满 | **始终填满屏幕**，1920×1080 下正好 2.0 倍；像素比例均匀，观感优于大量黑边 |
+| `integer` | 取 `floor` 到整数倍，周围留黑边 | 每个逻辑像素严格对齐物理像素，绝对锐利，但黑边可能很宽 |
+
+**默认 `fit` 的理由**：非整数倍缩放会让**所有**逻辑像素不均匀（有的 2 物理像素宽、
+有的 3），这比"边缘略软"更伤观感。而 `min()` 采样意味着像素边界落在物理像素栅格上时
+是干净的整数映射——1920×1080、2560×1440、3840×2160 这些常见分辨率下
+`fitScale` 恰好是整数（2/2.667/4），所以实践中大部分情况两者等价。
+设置里提供切换，让在意绝对锐利的玩家用 `integer`。
+
+### 10.3 不糊的三个必要条件（缺一不可）
+
+```css
+/* index.html */
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+#stage { display: flex; align-items: center; justify-content: center; height: 100%; }
+#game {
+  display: block;
+  image-rendering: pixelated;       /* ① CSS 放大用最近邻，禁止线性插值 */
+  image-rendering: crisp-edges;     /*    Firefox 用这个关键字 */
+}
+```
+
+```ts
+// render/app.ts
+await app.init({
+  width: LOGICAL_W, height: LOGICAL_H,
+  resolution: 1,
+  autoDensity: false,               // ② 不让 Pixi 按 devicePixelRatio 改 canvas 尺寸
+  antialias: false,
+  roundPixels: true,                // ③ 精灵落在整数逻辑像素上
+  background: 0x000000,
+});
+```
+
+**关于 `devicePixelRatio`（retina）**：因为 canvas 内部固定 960×540，
+DPR 只影响 CSS 缩放后的最终物理尺寸，不会引入额外采样模糊。
+CSS 的 `pixelated` 负责最后一跳。**这是"定尺寸 canvas"方案相对"改 renderer
+分辨率"方案的又一个优势**——DPR 完全不需要处理。
+
+### 10.4 响应式监听
+
+```ts
+const ro = new ResizeObserver(() => {
+  const { width, height } = computeCanvasRect(stage.clientWidth, stage.clientHeight, mode);
+  canvas.style.width  = `${width}px`;
+  canvas.style.height = `${height}px`;
+  hud.setSafeArea((stage.clientWidth - width) / 2, (stage.clientHeight - height) / 2);
+});
+ro.observe(stage);
+```
+
+**注意 canvas 的内部尺寸在这里完全没有被修改**，只改 CSS 尺寸。
+所以 resize 是廉价的（浏览器重排），不会触发 Pixi 的纹理与 framebuffer 重建。
+
+### 10.5 安全区
+
+黑边意味着 HUD 在超宽屏上可能贴近画面边缘。所以 HUD 布局按
+**960×540 逻辑坐标**定位（`ui/layout.ts`），并额外检查：
+关键元素（Boss 血条、自身血条、技能栏、I-FRAME 提示）距逻辑边界
+**不少于 24 逻辑像素**。这条会在 UI 单测里断言。
+
+---
+
+## 11. 待确认
+
+1. 请在 **Settings → Pages** 核对发布源（§9.1 结论依赖它），告诉我实际值。
+2. **默认缩放模式 `fit`**（填满屏幕）、设置里可切 `integer`（绝对锐利 + 黑边）——
+   认可吗？还是默认就用 `integer`？
+3. `archive/` 旧版本**从线上可访问**（`/raid/archive/`），认可吗？
+   如果不想要，我加一行从 artifact 里剔除。
+4. 上一轮的四个待确认（counters 资源模型 / 不引 UI 库 / pnpm / CI 硬门槛）
+   已在 2026-10-09 全部确认：**1、2、4 认可，3 用 pnpm**。
+

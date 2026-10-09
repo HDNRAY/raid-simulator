@@ -101,6 +101,23 @@ pnpm run build      # 产出 dist/
 typecheck → lint → test → build → 发布到 GitHub Pages。
 **测试或 lint 不通过则不会发布。**
 
+### 线上地址（保持不变）
+
+**https://hdnray.github.io/raid/** —— 路径是 `/raid/`，不是仓库同名的
+`/raid-simulator/`。新项目的 Vite `base` 必须是 `/raid/`，
+路由必须是 **hash 形式**（`#/battle`），页面标题保持 `Code:Raid`。
+
+在 M6 之前，线上发布的仍是 `archive/` 里的 2022 版
+（`deploy.yml` 会自动检测新项目是否就绪并切换）。
+旧版本可从 **https://hdnray.github.io/raid/archive/** 访问。
+
+### 分辨率
+
+逻辑分辨率固定 **960×540**（16:9）。canvas 内部尺寸在生命周期内**永不改变**，
+缩放完全交给 CSS，多余区域用黑边填充。默认 `fit` 模式（按
+`min(w/960, h/540)` 等比填满），设置里可切 `integer`（整数倍 + 绝对锐利）。
+细节见架构规范 §10。
+
 ---
 
 ## 旧版本
