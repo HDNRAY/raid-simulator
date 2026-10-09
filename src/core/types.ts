@@ -294,6 +294,14 @@ export interface BuffDef {
   readonly stacking: StackingRule;
   readonly modifiers?: readonly StatModifier[];
   readonly flags?: BuffFlags;
+  /**
+   * 伤害倍率（乘在最终伤害上）。狂暴这类"整体变强"用它。
+   *
+   * 放在 buff 上而不是写成一条 `damageMult` 修正，是因为它表达的是
+   * "这个单位的输出整体 ×N"，与"某条修正贡献多少"不是一回事 ——
+   * 后者参与修正池聚合，前者是一个整体开关。
+   */
+  readonly damageMultBoost?: number;
   readonly triggers?: readonly TriggerDef[];
   readonly vfx?: BuffVfx;
   readonly dispellable?: boolean;
@@ -492,6 +500,24 @@ export interface GrantSkillAbility {
   readonly autoEquip?: boolean;
 }
 
+/**
+ * 增减资源。
+ *
+ * 为什么需要它（而不是用 modifier 加 `furyRegen`）：
+ * "产生 12 点储能"是**一次性**的资源变动，而 `furyRegen` 修正表达的是
+ * **持续回复速率**。两者语义不同 —— 用后者表达前者会变成"每秒 12 点"
+ * 而不是"这一次 12 点"。
+ *
+ * 这是本引擎唯一为"资源"单独开口的能力类型，因为资源变动确实是
+ * 与"修正 / 触发 / 授予"并列的第五种基本发生方式。
+ */
+export interface ResourceAbility {
+  readonly kind: 'resource';
+  readonly target: TargetRule;
+  readonly resource: ResourceKey | string;
+  readonly delta: number | Expr;
+}
+
 /** 从某个池子扣资源（使用次数、充能、法力都走它）。 */
 export interface ConsumeAbility {
   readonly kind: 'consume';
@@ -517,7 +543,8 @@ export type Ability =
   | GrantAbility
   | DealAbility
   | GrantSkillAbility
-  | ConsumeAbility;
+  | ConsumeAbility
+  | ResourceAbility;
 
 export type AbilityKind = Ability['kind'];
 

@@ -359,10 +359,12 @@ describe('引擎：判定层（M2 的核心）', () => {
     for (let t = 0; t < 40; t += 1) {
       const playerActions =
         t === 0 ? [{ type: 'useSkill' as const, skillId: 'dodge', atTick: 0 }] : [];
-      // Boss 在 t=10 开始读条（模拟 AI）
-      const bossActions =
-        t === 10 ? [{ type: 'useSkill' as const, skillId: 'boss-swing', atTick: 10 }] : [];
-      engine.tick(playerActions, bossActions);
+      // Boss 在 t=10 开始读条。用公开的 applyActions(_, 'boss')，
+      // 它和 AI 走的是**完全相同**的那条施法路径。
+      if (t === 10) {
+        engine.applyActions([{ type: 'useSkill', skillId: 'boss-swing', atTick: 10 }], 'boss');
+      }
+      engine.tick(playerActions);
       events.push(...engine.drainEvents());
     }
 
@@ -432,9 +434,10 @@ describe('引擎：判定层（M2 的核心）', () => {
       // 闪避在 t=12 开（持续到 t=30），覆盖 t=16
       const playerActions =
         t === 12 ? [{ type: 'useSkill' as const, skillId: 'dodge', atTick: 12 }] : [];
-      const bossActions =
-        t === 10 ? [{ type: 'useSkill' as const, skillId: 'boss-swing', atTick: 10 }] : [];
-      engine.tick(playerActions, bossActions);
+      if (t === 10) {
+        engine.applyActions([{ type: 'useSkill', skillId: 'boss-swing', atTick: 10 }], 'boss');
+      }
+      engine.tick(playerActions);
       events.push(...engine.drainEvents());
     }
 

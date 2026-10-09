@@ -115,6 +115,26 @@ export const zhCN = {
     entropySurge: { name: '势能涌动' },
   },
 
+  /** 玩家技能 */
+  skill: {
+    slash: { name: '斩击', desc: '快速近战攻击，少量储能。可开启派生窗口。' },
+    heavy: { name: '龙破斩', desc: '2 秒读条，高额法术伤害。读条期间可被打断。' },
+    rend: { name: '割裂', desc: '造成流血，每层提高目标承受的物理伤害。' },
+    arc: { name: '弧光斩', desc: '派生技。只能在斩击后的派生窗口内使用。' },
+    dodge: { name: '闪避', desc: '300 毫秒无敌。不占公共冷却。' },
+    guard: { name: '格挡', desc: '1.5 秒内减伤 60%。不占公共冷却。' },
+    haste: { name: '风行术', desc: '15 秒内急速提高 20%。' },
+  },
+
+  /** Boss 技能与本体 */
+  boss: {
+    name: '堕落者·维罗特',
+    crimsonArc: { name: '猩红弧光', desc: '前摇后用火焰横扫。必须闪避或格挡。' },
+    tripleSlam: { name: '裂地三连', desc: '三段重击，每段都可闪避。' },
+    corruption: { name: '腐蚀咏唱', desc: '可打断的高额法术。留一手打断技。' },
+    empower: { name: '蓄能', desc: '8 秒内自身伤害提高 30%。' },
+  },
+
   /** 界面文案 */
   screen: {
     pause: '暂停',

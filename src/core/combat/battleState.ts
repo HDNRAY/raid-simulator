@@ -42,6 +42,7 @@ import {
   type CombatContext,
 } from './index';
 import { computeStats } from '../stats/pipeline';
+import { createAiState, decide, type AiState, type AiView } from '../ai';
 import { nextRandom, type RngState } from '../rng';
 import type {
   Action,
@@ -60,17 +61,57 @@ import type {
   StatModifier,
 } from '../types';
 
+/**
+ * tick 内的工作副本类型：把 `Combatant` 的 readonly 去掉。
+ *
+ * 只用于引擎内部；对外暴露的 `BattleState` 仍然是 readonly 的
+ * （快照不可被渲染层改坏）。
+ */
+interface MutableCombatant {
+  id: string;
+  nameKey: Combatant['nameKey'];
+  side: Combatant['side'];
+  caps: Record<string, number>;
+  resources: Record<string, number>;
+  counters: Combatant['counters'];
+  basePrimary: Combatant['basePrimary'];
+  buffs: Combatant['buffs'] extends readonly (infer T)[] ? T[] : never;
+  cooldowns: Record<string, number>;
+  casts: CastInstance[];
+  uses: Record<string, number>;
+  behaviors: Combatant['behaviors'];
+  alive: boolean;
+}
+
+/** 把只读快照转成工作副本（深拷贝需要改的容器）。 */
+function toMutable(combatant: Combatant): MutableCombatant {
+  return {
+    ...combatant,
+    caps: { ...combatant.caps },
+    resources: { ...combatant.resources },
+    counters: { ...combatant.counters },
+    basePrimary: { ...combatant.basePrimary },
+    buffs: [...combatant.buffs],
+    cooldowns: { ...combatant.cooldowns },
+    casts: [...combatant.casts],
+    uses: { ...combatant.uses },
+  };
+}
+
 /** 起始初始状态需要的输入。 */
 export interface CreateBattleOptions {
   readonly combatants: readonly Combatant[];
   readonly seed: number;
+  /** 时间限制（ms）。超时判负。 */
+  readonly timeLimitMs?: number;
+  /** 谁是 Boss（AI 驱动方）。不给则没有 AI。 */
+  readonly bossId?: string;
   readonly buffs: ReadonlyMap<string, BuffDef>;
   readonly skills: ReadonlyMap<string, SkillDef>;
   /** 每个 combatant 的基础属性（内容定义） */
   readonly baseStats: ReadonlyMap<string, Partial<Record<StatKey, number>>>;
   /** 每个 combatant 身上的被动修正（装备 / 天赋） */
   readonly passiveModifiers: ReadonlyMap<string, readonly StatModifier[]>;
-  readonly timeLimitMs?: number;
 }
 
 /** 引擎实例：持有不可变的内容定义 + 可变的战斗状态。 */
@@ -80,6 +121,13 @@ export class BattleEngine {
   private readonly options: CreateBattleOptions;
   private readonly events: EventDef[] = [];
   private readonly gcdBuff: BuffDef;
+  /**
+   * AI 状态（已用的 opener、各技能上次施放 tick、阶段、狂暴）。
+   *
+   * **必须在引擎内部持久**：它是决策的输入，必须随战斗一起可重放。
+   * 如果放在外部，回放时 AI 会做出不同决定。
+   */
+  private aiState: AiState = createAiState();
 
   constructor(options: CreateBattleOptions) {
     this.options = options;
@@ -108,6 +156,105 @@ export class BattleEngine {
     const out = [...this.events];
     this.events.length = 0;
     return out;
+  }
+
+  /* ---------------------------------------------------------------- *
+   * AI（M4）：行为数组 → Action
+   * ---------------------------------------------------------------- */
+
+  /**
+   * 让 AI 决策并应用它的动作。
+   *
+   * 位置很关键：在"玩家动作生效"之后、"读条推进"之前 ——
+   * 于是 Boss 的动作也享受**同一套**门禁与消耗，
+   * 而不是绕过引擎直接改状态。
+   */
+  private runAi(): void {
+    const bossId = this.options.bossId;
+    if (!bossId) return;
+    const self = this.state.combatants.find((c: Combatant) => c.id === bossId);
+    if (!self || !self.alive) return;
+    const opponent = this.opponentOf(bossId);
+    if (!opponent) return;
+
+    const view: AiView = {
+      self,
+      opponent,
+      tick: this.state.tick,
+      elapsedMs: (this.state.tick - this.state.startedAtTick) * (1000 / 60),
+      phase: this.state.phase,
+      skillOf: (id: string) => this.options.skills.get(id),
+      isReady: (id: string) => (self.cooldowns[id] ?? 0) <= this.state.tick,
+      canAct: self.casts.length === 0,
+    };
+
+    const decision = decide(view, self.behaviors, this.aiState);
+    this.aiState = decision.nextState;
+
+    // AI 层面的事件（阶段 / 狂暴）记进事件流，并施加对应效果
+    for (const event of decision.events) {
+      if (event.kind === 'phaseChanged') {
+        this.state = { ...this.state, phase: event.phase };
+        this.events.push({
+          kind: 'phaseChanged',
+          tick: this.state.tick,
+          phase: event.phase,
+          bossId,
+        });
+        this.applyPhaseBehaviors(self);
+      } else {
+        this.applyEnrage(self);
+      }
+    }
+
+    if (decision.actions.length > 0) this.applyActions(decision.actions, bossId);
+  }
+
+  /** 阶段转换时把 `onHpBelow` 里声明的行为也执行掉（行为数组可嵌套）。 */
+  private applyPhaseBehaviors(boss: Combatant): void {
+    const hpRatio = boss.caps.hp > 0 ? boss.resources.hp / boss.caps.hp : 1;
+    for (const behavior of boss.behaviors) {
+      if (behavior.kind !== 'onHpBelow') continue;
+      if (hpRatio > behavior.ratio) continue;
+      for (const nested of behavior.then) {
+        if (nested.kind === 'enrage') {
+          const applied = applyBuff(
+            this.current(boss.id),
+            this.enrageBuff(nested.dmgMult),
+            boss.id,
+            this.state.tick,
+          );
+          this.replaceCombatant({ ...this.current(boss.id), buffs: applied.buffs });
+        }
+      }
+    }
+  }
+
+  /** 狂暴：挂一个伤害倍率 buff（`damageMultBoost` 由伤害公式读取）。 */
+  private applyEnrage(boss: Combatant): void {
+    const behavior = boss.behaviors.find((b) => b.kind === 'enrage');
+    const mult = behavior?.kind === 'enrage' ? behavior.dmgMult : 2;
+    const applied = applyBuff(
+      this.current(boss.id),
+      this.enrageBuff(mult),
+      boss.id,
+      this.state.tick,
+    );
+    this.replaceCombatant({ ...this.current(boss.id), buffs: applied.buffs });
+    this.events.push({ kind: 'enrageStarted', tick: this.state.tick, bossId: boss.id });
+  }
+
+  private enrageBuff(dmgMult: number): BuffDef {
+    return {
+      id: 'boss-enrage-active',
+      nameKey: 'event.enrage',
+      icon: 'buff_enrage',
+      polarity: 'debuff',
+      duration: Number.POSITIVE_INFINITY,
+      maxStacks: 1,
+      stacking: { mode: 'refresh' },
+      damageMultBoost: dmgMult,
+    };
   }
 
   private get ctx(): CombatContext {
@@ -189,6 +336,60 @@ export class BattleEngine {
   }
 
   /* ---------------------------------------------------------------- *
+   * 工作副本：一次 tick 内只有一份可变状态
+   * ---------------------------------------------------------------- */
+
+  /**
+   * 本次 tick 的可变工作副本（`id → Combatant`）。
+   *
+   * **这是引擎的核心不变量**：一次 tick 内所有修改都写进这里，
+   * tick 结束时由 `commitWork()` 一次性提交回 `this.state`。
+   *
+   * 为什么这样设计（有据可查）：早先的版本有 15 处 `replaceCombatant`
+   * 调用，彼此用过期快照互相覆盖，同一个 bug 类反复出现 5 次，
+   * 症状都是"事件发了但状态没变"。改成单一可变副本后，
+   * **结构上不可能再发生覆盖** —— 因为只有一处写回。
+   */
+  private work: Map<string, MutableCombatant> | undefined;
+
+  /** 全部工作副本单位（按 state 原顺序）。 */
+  private mutableAll(): MutableCombatant[] {
+    return this.state.combatants
+      .map((c: Combatant) => this.work?.get(c.id))
+      .filter((c): c is MutableCombatant => c !== undefined);
+  }
+
+  /** 开始一个 tick 的工作副本（浅拷贝 + 需要改的容器深拷贝一层）。 */
+  private beginWork(): void {
+    const work = new Map<string, MutableCombatant>();
+    for (const combatant of this.state.combatants) {
+      work.set(combatant.id, {
+        ...combatant,
+        caps: { ...combatant.caps },
+        resources: { ...combatant.resources },
+        counters: { ...combatant.counters },
+        basePrimary: { ...combatant.basePrimary },
+        buffs: [...combatant.buffs],
+        cooldowns: { ...combatant.cooldowns },
+        casts: [...combatant.casts],
+        uses: { ...combatant.uses },
+      });
+    }
+    this.work = work;
+  }
+
+  /** 把工作副本一次性提交回 state。**这是唯一的写回点。** */
+  private commitWork(): void {
+    const work = this.work;
+    this.work = undefined;
+    if (!work) return;
+    this.state = {
+      ...this.state,
+      combatants: this.state.combatants.map((c: Combatant) => work.get(c.id) ?? c),
+    };
+  }
+
+  /* ---------------------------------------------------------------- *
    * 主循环
    * ---------------------------------------------------------------- */
 
@@ -211,16 +412,24 @@ export class BattleEngine {
    * @param actions 本 tick 要应用的玩家 / AI 动作
    * @param aiActions AI 产出的动作（M4 会填充；现在可以为空）
    */
-  tick(
-    actions: readonly Action[] = [],
-    aiActions: readonly Action[] = [],
-    aiActorId = 'boss',
-  ): void {
+  /**
+   * 推进一个 tick。
+   *
+   * @param actions 玩家本 tick 的动作
+   *
+   * AI 的动作由引擎内部产出（见 `runAi`）—— 它和玩家动作走**同一条**
+   * `applyActions` 路径，只是 actor 不同。这样"Boss 与玩家共用引擎"
+   * 才是真的，而不是两套代码碰巧产生相似结果。
+   */
+  tick(actions: readonly Action[] = []): void {
     if (this.state.status !== 'running') return;
 
-    // 1. 动作生效（两边走同一条路径，只是 actor 不同）
+    // 开一个 tick 的工作副本；结束时一次提交（见 work 的说明）
+    this.beginWork();
+
+    // 1. 动作生效
     this.applyActions(actions, 'player');
-    this.applyActions(aiActions, aiActorId);
+    this.runAi();
 
     // 2. 读条推进
     this.advanceCasts();
@@ -234,10 +443,11 @@ export class BattleEngine {
     // 5. 资源回复
     this.regenerateResources();
 
-    // 6. 时间限制 / 狂暴（M4 会扩展；这里先做时限判定）
+    // 6. 时间限制
     this.checkTimeLimit();
 
-    // 7. 推进 tick 并做死亡判定
+    // 7. 提交 + 推进 tick + 死亡判定
+    this.commitWork();
     this.state = { ...this.state, tick: this.state.tick + 1 };
     this.checkDeaths();
   }
@@ -338,12 +548,20 @@ export class BattleEngine {
    * ---------------------------------------------------------------- */
 
   private advanceCasts(): void {
-    for (const actor of this.state.combatants) {
+    // ⚠️ 遍历 **id 列表**而不是 `this.state.combatants` 的元素快照。
+    //
+    // 原因：`applyActions` 会用新对象替换 combatant（例如扣了储能）。
+    // 如果这里持有循环开始时的旧引用，读到的是**过期状态**，
+    // 随后的写回会把 applyActions 刚做的改动覆盖掉。
+    // （症状：`resourceChanged` 事件发了，但资源回到原值。）
+    for (const id of this.state.combatants.map((c: Combatant) => c.id)) {
+      const actor = this.current(id);
       if (actor.casts.length === 0) continue;
 
-      const stillCasting: typeof actor.casts[number][] = [];
+      const stillCasting: CastInstance[] = [];
 
-      for (const cast of actor.casts) {
+      // 同样遍历副本：循环体里 resolveHit 会改状态
+      for (const cast of [...actor.casts]) {
         // 来源消失（技能被移除）→ 立即中断。见 i18n/数据模型规范 §7.2 规则 4
         const skill = this.options.skills.get(cast.skillId);
         if (!skill) {
@@ -421,34 +639,60 @@ export class BattleEngine {
    * 所以：改动累积对象 → 同步到 state → 继续改。
    */
   private fireCastFinishTriggers(actor: Combatant, skill: SkillDef): void {
-    let working = actor;
+    /**
+     * 本次结算的**唯一工作副本**。
+     *
+     * ⚠️ 这是踩坑最密集的地方，规则只有一条但必须严格遵守：
+     * **每改一次 state，就立刻把 working 同步成最新版本。**
+     *
+     * 违反它会怎样：working 是方法开头捕获的旧对象，
+     * 方法末尾又用它写回 —— 中间所有改动（挂 buff、加储能）全被抹掉。
+     * 症状是"`resourceChanged` / `buffApplied` 事件都发了，但状态没变"，
+     * 极难从事件流上看出来。
+     */
+    let working = this.current(actor.id);
+
+    /** 改 working 并同步到工作副本（单一入口，避免忘记同步）。 */
+    const commit = (next: Combatant): void => {
+      working = next as MutableCombatant;
+      this.replaceCombatant(next);
+    };
+
+    const targetIdOf = (mode: string): string =>
+      mode === 'self' ? working.id : (this.opponentOf(working.id)?.id ?? working.id);
 
     const grantTo = (buff: BuffDef, targetId: string): void => {
-      const target = working.id === targetId ? working : this.current(targetId);
-      const applied = applyBuff(target, buff, working.id, this.state.tick);
-      working =
-        target.id === working.id ? { ...working, buffs: applied.buffs } : working;
-      if (target.id !== working.id) {
-        this.replaceCombatant({ ...target, buffs: applied.buffs });
+      if (targetId === working.id) {
+        const applied = applyBuff(working, buff, working.id, this.state.tick);
+        commit({ ...working, buffs: applied.buffs });
+        this.pushBuffApplied(working.id, buff.id, applied.stacks);
+        return;
       }
-      this.events.push({
-        kind: 'buffApplied',
-        tick: this.state.tick,
-        targetId: target.id,
-        buffId: buff.id,
-        stacks: applied.stacks,
-        sourceId: working.id,
-      });
+      const target = this.current(targetId);
+      const applied = applyBuff(target, buff, working.id, this.state.tick);
+      commit({ ...target, buffs: applied.buffs });
+      this.pushBuffApplied(target.id, buff.id, applied.stacks);
+    };
+
+    const grantResource = (resource: string, delta: number, targetId: string): void => {
+      if (delta === 0) return;
+      const target = targetId === working.id ? working : this.current(targetId);
+      const result = changeResource(target, resource, delta, this.state.tick);
+      commit(result.combatant);
+      this.events.push(...result.events);
     };
 
     for (const ability of skill.abilities) {
-      const targetIdOf = (mode: string): string => {
-        if (mode === 'self') return working.id;
-        return this.opponentOf(working.id)?.id ?? working.id;
-      };
-
       if (ability.kind === 'grant') {
         grantTo(ability.buff, targetIdOf(ability.target.mode));
+        continue;
+      }
+
+      if (ability.kind === 'resource') {
+        // 一次性资源变动（"斩击产生 20 点储能"）。
+        // 与 `furyRegen` 修正的区别：那是持续速率，这是一次性。
+        const delta = typeof ability.delta === 'number' ? ability.delta : 0;
+        grantResource(ability.resource, delta, targetIdOf(ability.target.mode));
         continue;
       }
 
@@ -456,11 +700,24 @@ export class BattleEngine {
         if (ability.trigger.on !== 'onCastFinish') continue;
         for (const then of ability.trigger.then) {
           if (then.kind === 'grant') grantTo(then.buff, targetIdOf(then.target.mode));
+          if (then.kind === 'resource') {
+            const delta = typeof then.delta === 'number' ? then.delta : 0;
+            grantResource(then.resource, delta, targetIdOf(then.target.mode));
+          }
         }
       }
     }
+  }
 
-    this.replaceCombatant(working);
+  private pushBuffApplied(targetId: string, buffId: string, stacks: number): void {
+    this.events.push({
+      kind: 'buffApplied',
+      tick: this.state.tick,
+      targetId,
+      buffId,
+      stacks,
+      sourceId: targetId,
+    });
   }
 
   /* ---------------------------------------------------------------- *
@@ -579,7 +836,7 @@ export class BattleEngine {
    * 而不是每 tick 累加计时器 —— 后者会漂移（架构规范 §12.2）。
    */
   private tickOverTimeEffects(): void {
-    for (const combatant of this.state.combatants) {
+    for (const combatant of this.mutableAll()) {
       for (const buff of combatant.buffs) {
         const def = buff.def ?? this.options.buffs.get(buff.defId);
         if (!def) continue;
@@ -590,7 +847,7 @@ export class BattleEngine {
   }
 
   private expireBuffs(): void {
-    for (const combatant of this.state.combatants) {
+    for (const combatant of this.mutableAll()) {
       const { buffs, expired } = expireBuffs(combatant.buffs, this.state.tick);
       if (expired.length === 0) continue;
       this.replaceCombatant({ ...combatant, buffs });
@@ -608,7 +865,7 @@ export class BattleEngine {
   }
 
   private regenerateResources(): void {
-    for (const combatant of this.state.combatants) {
+    for (const combatant of this.mutableAll()) {
       const stats = this.statsOf(combatant.id);
       const result = regenerate(combatant, stats, this.state.tick, 0.1);
       if (result.events.length > 0) {
@@ -655,15 +912,36 @@ export class BattleEngine {
    * 状态更新辅助
    * ---------------------------------------------------------------- */
 
-  private current(id: string): Combatant {
-    return this.state.combatants.find((c: Combatant) => c.id === id) ?? this.state.combatants[0]!;
+  /** 读某个单位的**当前**状态（优先工作副本）。 */
+  private current(id: string): MutableCombatant {
+    const fromWork = this.work?.get(id);
+    if (fromWork) return fromWork;
+    const found = this.state.combatants.find((c: Combatant) => c.id === id);
+    if (found) {
+      // 没有工作副本时（例如构造后立即查询）返回一个临时可变视图
+      return toMutable(found);
+    }
+    return toMutable(this.state.combatants[0]!);
   }
 
+  /**
+   * 写入一个单位。
+   *
+   * 现在它只写**工作副本**，不再碰 `this.state` —— 于是
+   * "用过期快照覆盖新状态"这类 bug 结构上不可能发生。
+   */
   private replaceCombatant(updated: Combatant): void {
-    this.state = {
-      ...this.state,
-      combatants: this.state.combatants.map((c: Combatant) => (c.id === updated.id ? updated : c)),
-    };
+    if (!this.work) {
+      // 不在 tick 内（构造期 / 测试直接调用）：退化为直接改 state
+      this.state = {
+        ...this.state,
+        combatants: this.state.combatants.map((c: Combatant) =>
+          c.id === updated.id ? updated : c,
+        ),
+      };
+      return;
+    }
+    this.work.set(updated.id, toMutable(updated));
   }
 
   /** 消耗一个随机数（供 AI 与概率判定使用）。 */

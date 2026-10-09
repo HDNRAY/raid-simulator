@@ -404,6 +404,7 @@ function validateEntity(
       case 'deal':
       case 'trigger':
       case 'consume':
+      case 'resource':
         break;
     }
   }
@@ -453,6 +454,7 @@ function collectContribNamespaces(ability: Ability): readonly string[] {
       break;
     case 'grantSkill':
     case 'consume':
+    case 'resource':
       break;
   }
   return found;

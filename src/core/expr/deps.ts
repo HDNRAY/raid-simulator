@@ -144,6 +144,7 @@ export function collectDerivedSources(abilities: readonly Ability[]): readonly D
         case 'deal':
         case 'grantSkill':
         case 'consume':
+        case 'resource':
           break;
       }
     }
