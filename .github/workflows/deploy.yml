@@ -1,60 +1,42 @@
 name: Deploy to GitHub Pages
 
-# 线上地址：https://hdnray.github.io/raid/
-# 这个 workflow 保持该地址与发布机制不变。
+# 与 bdgame / colorGuess 一致的发布方式：
+#   在 raid-simulator 仓库里构建，然后把产物推到 HDNRAY.github.io 仓库的 raid/ 子目录。
+#   线上地址 https://hdnray.github.io/raid/ 保持不变。
 #
-# 过渡期行为（当前）：
-#   新项目还没有构建（src/main.ts 不存在）时，自动构建并发布 archive/ 里的
-#   旧版本。旧版本是 CRA 项目，hash 路由（#/battle），base 为 /raid/，
-#   所以线上表现与之前完全一致。
+# 需要的仓库 secret：SSH_DEPLOY_KEY（与 bdgame / colorGuess 用的是同一对部署密钥）
 #
-# 新项目就绪后（src/main.ts 出现）：
-#   自动切换到构建新项目，并把 archive/ 导出到 dist/archive/ 一起发布。
+# 过渡期：新项目还没有构建入口（src/main.ts）时，自动改为构建 archive/ 里的旧版本，
+# 保证推送不会让线上站点失效。src/main.ts 一出现就自动切换到构建新项目。
 
 on:
   push:
-    branches: [main]
+    branches: ['main']
+  pull_request:
+    branches: ['main']
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: true
 
 jobs:
   build:
-    name: Build
     runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [20.x]
+
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
 
-      # ---------- 旧版本（archive/）：始终构建，保证 /raid/ 不会白屏 ----------
-      - name: Build archive (legacy v1)
-        working-directory: archive
-        env:
-          PUBLIC_URL: /raid/
-        run: |
-          npm install --no-audit --no-fund
-          npm run build
-
-      - name: Stage artifact from archive
-        run: |
-          mkdir -p dist
-          cp -R archive/build/. dist/
-          # SPA 回退：hash 路由下未命中的路径回落到 index.html
-          cp dist/index.html dist/404.html
-          touch dist/.nojekyll
-
-      # ---------- 新项目：只有构建入口存在时才跑 ----------
-      - name: Detect new project
+      # 判断新项目是否已有构建入口；没有则退回构建 archive/
+      - name: Detect project
         id: detect
         run: |
           if [ -f src/main.ts ] || [ -f src/main.tsx ]; then
@@ -63,6 +45,25 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # ---------- 旧版本（archive/）：保证 /raid/ 在任何时候都有内容 ----------
+      # archive/package.json 里 homepage 是 "."，CRA 会产出相对路径（./static/...），
+      # 所以放在 /raid/ 下不需要任何 PUBLIC_URL 覆盖。
+      - name: Build archive (legacy v1)
+        if: steps.detect.outputs.ready == 'false'
+        working-directory: archive
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          cp build/index.html build/404.html
+          touch build/.nojekyll
+
+      - name: Point dist at archive output
+        if: steps.detect.outputs.ready == 'false'
+        run: |
+          rm -rf dist
+          mv archive/build dist
+
+      # ---------- 新项目 ----------
       - uses: pnpm/action-setup@v4
         if: steps.detect.outputs.ready == 'true'
         with:
@@ -71,7 +72,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: steps.detect.outputs.ready == 'true'
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
           cache: pnpm
 
       - name: Install
@@ -94,32 +95,21 @@ jobs:
         if: steps.detect.outputs.ready == 'true'
         run: pnpm run build
 
-      - name: Stage artifact from new project
+      - name: Add Pages extras
         if: steps.detect.outputs.ready == 'true'
         run: |
-          rm -rf dist-new
-          mv dist dist-new                                   # 新项目构建产物
-          cp dist-new/index.html dist-new/404.html           # SPA 回退
-          touch dist-new/.nojekyll
-          rm -rf dist-new/archive
-          mkdir -p dist-new/archive
-          cp -R archive/build/. dist-new/archive/            # 旧版挂到 /raid/archive/
-          rm -rf dist
-          mv dist-new dist
+          cp dist/index.html dist/404.html
+          touch dist/.nojekyll
 
-      - uses: actions/configure-pages@v5
-
-      - uses: actions/upload-pages-artifact@v3
+      - name: Push to github pages
+        if: github.event_name != 'pull_request'
+        uses: cpina/github-action-push-to-another-repository@v1.7.2
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
         with:
-          path: dist
-
-  deploy:
-    name: Deploy
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          source-directory: dist
+          destination-github-username: HDNRAY
+          destination-repository-name: HDNRAY.github.io
+          user-email: 110681032@qq.com
+          target-directory: raid
+          commit-message: Update from raid-simulator

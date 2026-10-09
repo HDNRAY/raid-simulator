@@ -215,6 +215,14 @@ raid-simulator/
 
 ## 6. UI 组件化与设计系统
 
+### 6.0 两条不可协商的约束
+
+1. **UI 全部走 canvas，不碰 DOM。** 目的不是"技术上更纯粹"，而是**可移植**：
+   canvas 是通用渲染接口，DOM 不是。以后要做小程序 / 原生小游戏 / Godot 之类，
+   canvas 那层能整体搬走，DOM 那层不能。
+   **所以连设置界面和改键界面也走 canvas**（§6.5 给出方案）。
+2. **UI 必须组件化、模块化**，不允许把绘制代码堆进一个大文件。
+
 ### 6.1 组件分层（不引第三方 UI 库）
 
 固定布局，所以**不需要布局引擎、不需要 CSS、不需要 Flexbox 实现**。
@@ -306,21 +314,96 @@ export const TYPE = { xs: 14, sm: 16, md: 18, lg: 22, xl: 30 } as const;
 
 ### 6.4 第三方库：需要吗？
 
-**明确结论：不需要。**
+**默认结论：不需要。** 但**不把话说死**——`PixiJS` 覆盖不到的地方，允许引入，
+且引入前要过下面这张表。
 
 | 需求 | 方案 | 第三方库？ |
 |---|---|---|
-| 2D 渲染 / 精灵 / 文本 | PixiJS | 已有（唯一必需） |
+| 2D 渲染 / 精灵 / 文本 | PixiJS | ✅ 需要（唯一必需） |
 | 布局 | 固定布局表（§6.2） | ❌ 不需要 |
-| 动画缓动 | 自写 40 行 `lerp` / `easeOutCubic` / `tween` | ❌ 不需要 |
+| 动画缓动 | 自写约 40 行 `lerp` / `easeOutCubic` / `tween` | ❌ 不需要 |
 | 状态管理 | snapshot 直接读 | ❌ 不需要 |
 | UI 组件库 | 自写三层组件（§6.1） | ❌ 不需要 |
 | 音效 | WebAudio 薄封装 | ❌ 不需要 |
 | 测试 | Vitest + fast-check | ✅ 需要（dev） |
-| 校验 schema | 手写校验器（§11），不引 zod | ❌ 不需要 |
+| schema 校验 | 手写校验器，不引 zod | ❌ 不需要 |
 
-**唯一可能后期要加的**：`pixi-viewport`（如果要相机移动）——但本作没有位移，
-所以不需要。**保持依赖最少是移植性的前提。**
+#### 6.4.1 什么时候允许换 / 加库
+
+需求说了"如果 PixiJS 不够用，可以用 KonvaJS、ThreeJS 之类的"。
+**我不打算提前换，但也不排斥。** 判定标准是这张表，而不是偏好：
+
+| 如果出现这种需求 | 该考虑的方向 | 说明 |
+|---|---|---|
+| 大量 GPU 特效、光照、法线、后处理、3D | **Three.js**（或 PixiJS v8 的 WebGPU + 自写 shader） | Pixi 是 2D 优先；真 3D 场景它不适合 |
+| 只有矢量图形 / 数据可视化类 UI，不需要精灵批处理 | KonvaJS | 但本项目是像素精灵驱动，Konva 的位图/精灵能力弱于 Pixi |
+| 物理模拟（碰撞、抛体） | 独立的 2D 物理库 | **本作没有位移，预计不需要** |
+| 需要相机移动 / 缩放 / 视口裁剪 | `pixi-viewport` | 本作无位移，预计不需要 |
+| 骨骼动画（Spine / DragonBones） | `@esotericsoftware/spine-pixi-v8` | **这是最可能真正需要的一个**：Boss 动画如果超出逐帧精灵的表现力 |
+
+#### 6.4.2 换库的代价控制
+
+**架构已经把代价压到最低**：`core/` 零依赖（C1 硬约束），
+渲染层全部藏在 `render/` 与 `ui/` 两棵子树里。所以：
+
+- **换渲染库 = 重写 `render/` + `ui/`，`core/` 一行不动。**
+  这正是"逻辑与 UI 分离"的真正回报——不是为了好看，是为了让这种替换变得可行。
+- **反过来，如果哪天 `core/` 里出现了 `pixi` 或 `three` 的 import，这次重构就失败了。**
+
+#### 6.4.3 一条重要的约束
+
+**上表里所有候选库（Konva / Three / pixi-viewport / Spine）都只允许出现在
+`render/` 和 `ui/` 里**，由同一套 ESLint 规则拦截（C1 的反向规则）。
+加库可以，越界不行。
+
+### 6.5 非战斗界面也走 canvas
+
+设置、改键、暂停菜单、结算界面**全部用 canvas 画**，不使用 DOM 覆盖层。
+因为 canvas 没有 DOM 的焦点系统，需要一个最小交互模型：
+
+```ts
+// ui/interaction.ts
+interface Focusable {
+  id: string;
+  next?: string;          // 上下（或 W/S）移动焦点
+  prev?: string;
+  nextH?: string;         // 左右移动（改键界面用）
+  prevH?: string;
+  onActivate?: () => void; // Enter / Space 触发
+  captureKeys?: boolean;   // 捕获原始按键（改键界面：等待玩家按任意键）
+}
+
+interface FocusState {
+  focusId: string;
+  owner: 'battle' | 'pause' | 'settings' | 'rebind' | 'result';
+}
+```
+
+规则：
+
+- **只用键盘**（与战斗一致，不引鼠标）。
+- 上下移动焦点，Enter 确认，Esc 返回。
+- 改键界面：焦点在某一行时按 Enter 进入**捕获态**，
+  下一次任意 `keydown` 就是新绑定（**在 canvas 里处理，不需要 DOM input**）。
+- 焦点用发光描边表现（复用 `PALETTE.proc`）。
+- 每个界面是 `screens/` 下的一个 `View`，与战斗 UI 用同一套 primitives。
+
+**代价评估**：比 DOM 方案多约 100~150 行（焦点遍历 + 列表滚动 + 捕获态）。
+**收益**：UI 层零 DOM、整层可移植；且战斗内外输入模型统一
+（都是 `keydown -> Action`），不存在"某些界面走 DOM 事件、某些走 canvas"的双轨制。
+
+### 6.6 canvas 里显示中文
+
+所有面向玩家的文字走 Pixi 的 `Text`。**中文渲染是像素风 / H5 小游戏最常见的翻车点**，
+所以提前定：
+
+- 中文没有能覆盖常用字的现成像素字体，**不要用点阵中文字体**（体积巨大）。
+- 方案：引入一个等宽无衬线中文字体，**裁剪成只含本项目用到的字符子集**
+  （`fontmin` / `subfont` 之类工具，通常能压到 100KB 以内），
+  配 `Pixi.Text` + 整数坐标。
+- **中文字号必须 >= 16 逻辑像素**，14px 的中文在 960x540 下不可读。
+  所以 `TYPE` 表里中文用 `sm`(16) 起步，`xs`(14) 只给数字和拉丁字母。
+
 
 ---
 
@@ -334,8 +417,7 @@ export const TYPE = { xs: 14, sm: 16, md: 18, lg: 22, xl: 30 } as const;
   松开键 → `releaseKey` Action。
 - **暂停**：`Esc` 打开暂停菜单（继续 / 重开 / 设置 / 退出）。
   暂停时 worker 停止推进 tick（不消耗战斗时间）。
-- **改键**：MVP 用 DOM 覆盖层实现（**唯一允许的 DOM**，因为它是低频非战斗界面）。
-  持久化到 `localStorage`。
+- **改键**：**走 canvas**（§6.5），不使用 DOM 覆盖层。持久化到 `localStorage`。
 - **快捷键提示画在技能格上**（见示意图），不依赖说明书。
 - **必须处理 `preventDefault`**：`Tab`（焦点切换）、空格（滚动）、
   `F1-F12`（浏览器功能）都要拦。
@@ -368,40 +450,75 @@ export const TYPE = { xs: 14, sm: 16, md: 18, lg: 22, xl: 30 } as const;
 
 ## 9. 发布流程
 
-### 9.1 现状调查（2026-10-09 实测）
+### 9.1 实际机制（2026-10-09 确认）
 
-线上地址：**https://hdnray.github.io/raid/**（注意路径是 `/raid/`，
-不是仓库同名的 `/raid-simulator/`）。
+**上一版本文档此处写错了**，更正如下。
 
-实测结果：
+发布方式与 `bdgame` / `colorGuess` **完全一致**：在各自的仓库里用 GitHub Actions
+构建，然后用 `cpina/github-action-push-to-another-repository` 把产物**推到
+`HDNRAY.github.io` 仓库的子目录**。
 
-| 检查项 | 结果 |
-|---|---|
-| `https://hdnray.github.io/raid/` | `200`，返回旧版 CRA 构建 |
-| `https://hdnray.github.io/raid-simulator/` | `404` |
-| 线上 `asset-manifest.json` | 与 `archive/build/asset-manifest.json` **逐字节一致** |
-| 线上 `main.afc504d1.js` | `207532` 字节 = 本地 `archive/build/static/js/main.afc504d1.js` |
-| 线上 `main.388d8cf3.css` | `8047` 字节 = 本地同名文件 |
-| `git ls-remote --heads origin` | **只有 `main` 一个分支** |
-| `.github/` 目录 | 当前不存在 |
-| `git log --all -- index.html` | **root 的 `index.html` 从未被提交过** |
-| `git log --all -- build/index.html` | **`build/` 从未被提交过** |
-| `git log --all --grep='deploy\|pages\|gh-pages'` | 无相关历史提交 |
+```
+raid-simulator 仓库                    HDNRAY.github.io 仓库（用户站点）
+  push main                              main 分支
+     |                                      |- index.html      <- 个人主页
+     v                                      |- bdgame/         <- bdgame 的产物
+  GitHub Actions                            |- colorguess/     <- colorGuess 的产物
+   build -> dist                            `- raid/           <- 本项目的产物
+     |                                          |- index.html
+     `-- push 到 HDNRAY.github.io/raid/ --------|  static/js/main.afc504d1.js
+                                                `- static/css/...
+```
 
-**结论**：线上站点**不可能**来自当前 `main` 的任何已提交内容——
-它既不来自 root，也不来自 `build/`，也不来自 `docs/`。
-唯一自洽的解释是 **Pages 发布源为 "GitHub Actions"，且 2022 年 1 月
-那次成功部署的 artifact 仍在被继续服务**（GitHub Pages 会保留最后一次成功部署的
-内容，即使产生它的 workflow 后来消失了）。这也解释了为什么仓库里没有 workflow、
-没有 `gh-pages` 分支、没有构建产物提交。
+**证据**（本地 `HDNRAY.github.io` 仓库）：
 
-> 我无法 100% 确认这一点：`api.github.com/repos/HDNRAY/raid-simulator/pages`
-> 需要认证，而当前环境的匿名请求被限流（403）。**请在仓库
-> Settings → Pages 里核对 "Build and deployment → Source" 的值。**
-> 如果是 `GitHub Actions`，下面的方案完全对齐；如果是 `Deploy from a branch`，
-> 请告诉我，我会改成对齐那个模式。
+- 存在 `raid/` 目录，其中 `index.html` 802 字节、与
+  `https://hdnray.github.io/raid/` 返回的内容**逐字节一致**
+- 该目录唯一一次提交是 `bf36b3c 2022-09-07 "try to update structure"`
+- 同级有 `bdgame/`、`colorguess/`，与 bdgame / colorGuess 的
+  `target-directory` 一一对应
 
-### 9.2 不改动的三件事
+**这解释了上一版本里所有"矛盾"的观察**：`raid-simulator` 仓库没有
+`gh-pages` 分支、没有 workflow、从未提交过 `index.html` —— 因为**发布产物
+本来就不在这个仓库里**，它在 `HDNRAY.github.io` 仓库。上一版本"Pages 源是
+GitHub Actions artifact"的推断是错的，作废。
+
+### 9.2 三个参照实现的关键参数
+
+| 项 | bdgame | colorGuess | **本项目** |
+|---|---|---|---|
+| 触发分支 | `master` | `main` | `main` |
+| Node | `20.x` | `20.x` | `20.x` |
+| 构建脚本 | `npm run build` | `npm run build:h5:pages` | `pnpm run build` |
+| 产物目录 | `bdgame/` | `dist-h5` | `dist` |
+| `target-directory` | `bdgame` | `colorguess` | **`raid`** |
+| 依赖 secret | `SSH_DEPLOY_KEY` | `SSH_DEPLOY_KEY` | **`SSH_DEPLOY_KEY`**（同一对密钥） |
+| 部署 action | `cpina/...@v1.7.2` | `cpina/...@v1.7.2` | `cpina/...@v1.7.2` |
+
+**子路径与 base 路径必须一致**，两个参照实现都遵守：
+
+```ts
+// bdgame/vite.config.ts
+base: command === 'serve' ? '/' : '/bdgame/'
+
+// colorGuess/package.json
+"build:h5:pages": "TARO_H5_PUBLIC_PATH=/colorguess/ npm run build:h5"
+```
+
+所以本项目：
+
+```ts
+// raid-simulator/vite.config.ts
+base: command === 'serve' ? '/' : '/raid/'
+```
+
+**唯一无法从本地确认的是 `SSH_DEPLOY_KEY` secret。** 它必须在
+`raid-simulator` 仓库的 Settings -> Secrets and variables -> Actions 里存在，
+且对应公钥在 `HDNRAY.github.io` 仓库有写权限。2022 年能发布成功说明它当时存在；
+**如果被清理过，需要在两个仓库里重新配置**（`HDNRAY.github.io` 目录下留有一对
+`id_github_pages_codelinez` / `.pub`，是 codelinez 用的同类密钥，可作参考）。
+
+### 9.3 不改动的三件事
 
 需求是"这块我不希望有任何变化"。所以以下三件事**一件都不改**：
 
@@ -411,42 +528,29 @@ export const TYPE = { xs: 14, sm: 16, md: 18, lg: 22, xl: 30 } as const;
 | 路由形式 | **hash 路由**（`#/battle`），不是 history 路由 |
 | 页面标题 | `Code:Raid` |
 
-于是新项目必须满足：
+路由**不引库**——只有 2 个状态，手写约 20 行 `hashchange` 监听即可。
 
-```ts
-// vite.config.ts
-export default defineConfig({
-  base: '/raid/',          // ← 必须，不能是 '/raid-simulator/'
-  build: { outDir: 'dist' },
-});
-```
+### 9.4 过渡期策略
 
-```ts
-// 路由必须是 hash 形式，才能保持 #/battle 这个 URL 不变
-// 不引路由库：路由表只有 2 个状态，手写 ~20 行
-type Route = '#/battle' | '#/archive' | '#/settings';
-```
-
-`index.html` 的 `<title>` 写 `Code:Raid`。
-
-**`/raid/archive/` 是新增路径**（不覆盖任何现有路径），
-用于从线上访问 2022 年的旧版本。这是"不改变现状"下的净增量。
-
-### 9.3 过渡期发布策略
-
-新项目尚未有构建入口时，workflow 自动构建并发布 `archive/`，
-保证 `/raid/` **始终有一个可用的站点**，不会白屏：
+新项目还没有构建入口时，workflow 自动改为构建 `archive/` 里的旧版本：
 
 ```
-src/main.ts 不存在  →  只构建 archive/，发布到 /
-src/main.ts 存在    →  构建新项目发布到 /，archive/ 构建后挂到 /archive/
+src/main.ts 不存在  ->  构建 archive/，推到 HDNRAY.github.io/raid/
+src/main.ts 存在    ->  构建新项目，推到 HDNRAY.github.io/raid/
 ```
 
-切换是自动的（靠检测构建入口文件），不需要改 workflow。
-**CI 以 typecheck / lint / test 为发布硬门槛**：任一失败则不发布，
-线上继续保留上一次成功部署的内容。
+切换靠检测构建入口文件，**不需要改 workflow**。
+`archive/package.json` 的 `homepage: "."` 让 CRA 产出相对路径（`./static/...`），
+所以放在 `/raid/` 下不需要任何 `PUBLIC_URL` 覆盖。
+
+**CI 以 typecheck / lint / test 为发布硬门槛**：任一失败则不推送，
+`HDNRAY.github.io/raid/` 继续保留上一次成功的内容。
 
 `.github/workflows/deploy.yml` 已按此写好。
+
+**注意**：`cpina` 这个 action 会同步 `source-directory` 到 `target-directory`，
+所以 `raid/` 下不属于构建产物的文件会被清掉（例如 2022 年那个 `Readme.md`
+在下次发布时会消失）。这是与 bdgame / colorGuess 相同的行为，属于预期。
 
 ---
 
@@ -556,13 +660,27 @@ ro.observe(stage);
 
 ---
 
-## 11. 待确认
+## 11. 决议记录
 
-1. 请在 **Settings → Pages** 核对发布源（§9.1 结论依赖它），告诉我实际值。
-2. **默认缩放模式 `fit`**（填满屏幕）、设置里可切 `integer`（绝对锐利 + 黑边）——
-   认可吗？还是默认就用 `integer`？
-3. `archive/` 旧版本**从线上可访问**（`/raid/archive/`），认可吗？
-   如果不想要，我加一行从 artifact 里剔除。
-4. 上一轮的四个待确认（counters 资源模型 / 不引 UI 库 / pnpm / CI 硬门槛）
-   已在 2026-10-09 全部确认：**1、2、4 认可，3 用 pnpm**。
+| # | 议题 | 结论 |
+|---|---|---|
+| 1 | 发布源 | ✅ 已确认：`cpina/github-action-push-to-another-repository` 推到 `HDNRAY.github.io/raid/`（§9.1）。上一版"GitHub Actions artifact"的推断**作废** |
+| 2 | 缩放模式 | 默认 `fit`（填满屏幕），设置可切 `integer`（§10.2） |
+| 3 | UI 层 | ✅ **全部走 canvas，零 DOM**，包括设置与改键（§6.0、§6.5） |
+| 4 | 第三方库 | ✅ **默认不引**；PixiJS 覆盖不到时允许引入（Konva / Three / Spine 等），但只允许出现在 `render/` 与 `ui/`（§6.4） |
+| 5 | 使用次数 / 消耗品 | ✅ 统一资源模型 `ResourcePool.counters`（数据模型 §2.2） |
+| 6 | UI 库 | ✅ 不引 |
+| 7 | 包管理器 | ✅ pnpm |
+| 8 | CI 硬门槛 | ✅ typecheck / lint / test 不通过则不发布 |
+| 9 | 主题系统 | ✅ 不做多主题；`data/palette.ts` 保留为 UI 与美术的唯一配色真相源（§6.3） |
 
+### 11.1 仍需你确认
+
+1. **`SSH_DEPLOY_KEY` secret 是否还在** `raid-simulator` 仓库里？
+   （bdgame / colorGuess 用的是同一对密钥，公钥需在 `HDNRAY.github.io` 有写权限。）
+   本地无法确认。若已清理，需要在两个仓库重新配置。
+2. **`archive/` 旧版本不再从线上可访问**（`cpina` 会同步 `target-directory`，
+   `raid/` 会被完全替换成新产物）。这是与 bdgame / colorGuess 一致的行为。
+   如果你希望保留旧版在线，我改成把旧版一并放进 `dist/archive/`。
+3. **中文字段**：项目里所有玩家可见文案保持中文（默认），还是需要 i18n 铺垫？
+   （影响 `data/` 里字符串的组织方式，早定便宜。）
