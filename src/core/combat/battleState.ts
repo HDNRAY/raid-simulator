@@ -60,6 +60,7 @@ import type {
   SkillDef,
   StatKey,
   StatModifier,
+  DamageSpec,
 } from '../types';
 
 /**
@@ -148,8 +149,18 @@ export class BattleEngine {
     };
   }
 
+  /**
+   * 当前战斗状态的只读快照。
+   *
+   * ⚠️ `rngSeed` 从**实时的 rng** 取，而不是直接用 `this.state.rngSeed`。
+   *
+   * 踩过的坑：这个字段长期是 Hardcode 的初始种子（构造时写进 state 之后再没更新），
+   * 于是"随机数状态在状态里、所以战斗可重放"这条设计约定**实际上是假的** ——
+   * 快照里读不到推进后的随机状态。虽然重放本身只依赖初始种子，
+   * 但任何"从快照恢复战斗"的用法（存档、断线续玩、分叉调试）都会静默错位。
+   */
   get snapshot(): BattleState {
-    return this.state;
+    return { ...this.state, rngSeed: this.rng.seed };
   }
 
   /**
@@ -844,12 +855,22 @@ export class BattleEngine {
       switch (effect.kind) {
         case 'damage': {
           if (!effect.damage) break;
-          // 判定：无敌 → 免伤；否则算减伤
+          /**
+           * 暴击判定。
+           *
+           * ⚠️ 这里长期是硬编码 `crit: false` —— 也就是说引擎**从未做过
+           * 暴击判定**，`critChance` 是个死属性，而熵之钟的
+           * "暴击后翻倍"触发因此永远不会发生。
+           *
+           * 抽成 `rollCrit` 而不是内联，是为了让"消耗随机数"这件事
+           * 只在一个地方发生 —— 重放的确定性完全取决于它。
+           */
+          const crit = this.rollCrit(casterStats, effect.damage);
           const result = computeDamage(
             effect.damage,
             casterStats,
             victimFlags,
-            { crit: false, multiplier: 1 },
+            { crit, multiplier: crit ? 1 + (casterStats.critDamage ?? 0) : 1 },
           );
           // 命中本身也会触发"授予 buff"类效果（例如 Boss 给自己挂前摇标记）
           this.applyHitEffects(actor, target, effect);
@@ -1082,6 +1103,39 @@ export class BattleEngine {
       return;
     }
     this.work.set(updated.id, toMutable(updated));
+  }
+
+  /**
+   * 本场战斗的**初始**种子。
+   *
+   * 与 `rngValue` 的区别：后者是"当前"的随机数状态（会随战斗推进变化），
+   * 而重放只需要初始种子 —— 它是整场战斗的完整随机输入。
+   */
+  get initialSeed(): number {
+    return this.options.seed;
+  }
+
+  /**
+   * 暴击判定。
+   *
+   * 规则：
+   *   - `canCrit: false` 的伤害**不消耗随机数** —— 否则"哪些攻击会暴击"
+   *     取决于有没有打过不可暴击的技能，重放会因此变得极难推理。
+   *   - 暴击率 <= 0 时同样不消耗（与 `rollChance` 的短路一致）。
+   *   - 暴击率 >= 1 时必定暴击，也不消耗。
+   *
+   * 于是随机数的消耗**只由内容决定**（哪些技能可暴击），
+   * 这让黄金重放的 diff 可解释。
+   */
+  private rollCrit(
+    stats: Readonly<Record<StatKey, number>>,
+    spec: DamageSpec,
+  ): boolean {
+    if (spec.canCrit === false) return false;
+    const chance = stats.critChance ?? 0;
+    if (chance <= 0) return false;
+    if (chance >= 1) return true;
+    return this.roll() < chance;
   }
 
   /** 消耗一个随机数（供 AI 与概率判定使用）。 */

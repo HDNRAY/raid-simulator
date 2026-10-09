@@ -443,6 +443,15 @@ export class BattleScene {
   private readonly statusLabel: Label;
   private readonly statusSub: Label;
 
+  /* 结算面板 */
+  private readonly resultLayer: Container;
+  private readonly resultDim: Graphics;
+  private readonly resultPanel: Panel;
+  private readonly resultTitle: Label;
+  private readonly resultReason: Label;
+  private readonly resultStats: Label;
+  private readonly resultHint: Label;
+
   private lastPlayerPose = 1;
 
   private readonly options: BattleSceneOptions;
@@ -665,6 +674,67 @@ export class BattleScene {
       strokeWidth: 3,
     });
     hud.addChild(this.statusLabel.root, this.statusSub.root);
+
+    /* ---------- 结算面板 ----------
+     * 单独一层，压在 HUD 之上。战斗进行中完全隐藏，
+     * 所以它不占用任何视觉注意力。 */
+    this.resultLayer = new pixi.Container();
+    this.resultLayer.visible = false;
+
+    this.resultDim = new pixi.Graphics();
+    this.resultDim.rect(0, 0, LOGICAL.width, LOGICAL.height).fill({ color: 0x000000, alpha: 0.62 });
+    this.resultLayer.addChild(this.resultDim);
+
+    const rw = LAYOUT.result.w;
+    const rh = LAYOUT.result.h;
+    const rx = Math.round((LOGICAL.width - rw) / 2);
+    const ry = Math.round((LOGICAL.height - rh) / 2) - 20;
+    this.resultPanel = new Panel(pixi, {
+      x: rx,
+      y: ry,
+      w: rw,
+      h: rh,
+      fill: 0x0e0e16,
+      line: 0x6a6c80,
+      fillAlpha: 0.97,
+      radius: 4,
+    });
+    this.resultTitle = new Label(pixi, {
+      x: LOGICAL.width / 2,
+      y: ry + 18,
+      size: FONT.big,
+      color: 0xffffff,
+      anchorX: 0.5,
+    });
+    this.resultReason = new Label(pixi, {
+      x: LOGICAL.width / 2,
+      y: ry + 54,
+      size: FONT.body,
+      color: 0xa0a0b4,
+      anchorX: 0.5,
+    });
+    this.resultStats = new Label(pixi, {
+      x: rx + 24,
+      y: ry + 84,
+      size: FONT.small,
+      color: 0xd0d0dc,
+    });
+    this.resultHint = new Label(pixi, {
+      x: LOGICAL.width / 2,
+      y: ry + rh - 26,
+      size: FONT.small,
+      color: 0x80d0a0,
+      anchorX: 0.5,
+    });
+    this.resultLayer.addChild(
+      this.resultPanel.root,
+      this.resultTitle.root,
+      this.resultReason.root,
+      this.resultStats.root,
+      this.resultHint.root,
+    );
+    // 加到 HUD 之后（同一父级），所以天然压在 HUD 之上
+    this.root.addChild(this.resultLayer);
   }
 
   /** 玩家背影。`pose`：1 = 站姿，0.85 = 下沉（闪避/格挡）。 */
@@ -787,6 +857,26 @@ export class BattleScene {
 
     /* ---------- 闪光 ---------- */
     this.flashOverlay.alpha = Math.min(0.3, view.playerFlash * 0.3);
+
+    /* ---------- 结算 ---------- */
+    const result = view.result;
+    this.resultLayer.visible = result !== undefined;
+    if (result) {
+      this.resultTitle.set(translate(result.titleKey));
+      this.resultTitle.setColor(result.victory ? 0xffd870 : PALETTE.danger.bright);
+      this.resultReason.set(translate(result.reasonKey));
+      this.resultHint.set(translate('screen.hintRestart'));
+
+      // 统计用等宽对齐的"标签  值"，比堆一串数字好读
+      const rows: Array<[string, string]> = [
+        [translate('screen.statTime'), `${result.seconds}s`],
+        [translate('screen.statRemainingHp'), `${result.remainingHp}/${result.remainingHpCap}`],
+        [translate('screen.statTotalDamage'), `${result.totalDamage}`],
+        [translate('screen.statDps'), `${result.dps}`],
+      ];
+      const width = Math.max(...rows.map(([k]) => k.length));
+      this.resultStats.set(rows.map(([k, v]) => `${k.padEnd(width, ' ')}   ${v}`).join('\n'));
+    }
   }
 }
 

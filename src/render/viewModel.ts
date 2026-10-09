@@ -98,6 +98,21 @@ export interface FloatingTextView {
   readonly life: number;
 }
 
+/** 战斗结算信息（战斗结束后才有）。 */
+export interface ResultView {
+  readonly victory: boolean;
+  /** 结果主文案的本地化 key */
+  readonly titleKey: string;
+  /** 副文案（说明为什么赢/输）的本地化 key */
+  readonly reasonKey: string;
+  /** 用时（秒，1 位小数） */
+  readonly seconds: string;
+  readonly remainingHp: number;
+  readonly remainingHpCap: number;
+  readonly totalDamage: number;
+  readonly dps: number;
+}
+
 export interface BattleSnapshotView {
   readonly tick: number;
   readonly status: 'idle' | 'running' | 'victory' | 'defeat';
@@ -120,6 +135,8 @@ export interface BattleSnapshotView {
   /** 玩家受击闪白强度 0..1 */
   readonly playerFlash: number;
   readonly bossFlash: number;
+  /** 战斗结束后的结算信息 */
+  readonly result?: ResultView;
 }
 
 /* ------------------------------------------------------------------ *

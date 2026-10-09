@@ -21,6 +21,7 @@ import type {
   BuffView,
   CombatantView,
   FloatingTextView,
+  ResultView,
   SkillSlotView,
 } from '../render/viewModel';
 
@@ -143,8 +144,12 @@ export class ViewAdapter {
   /** 每个技能上次使用的 tick，用于在引擎不暴露 CD 时估算冷却显示。 */
   private readonly lastUsed = new Map<string, number>();
   private readonly skillNameKeys = new Map<string, string>();
-  /** 状态提示的副标题（例如"龙破斩 · 公共冷却"） */
+  /** 状态提示的副标题（例如"贯击 · 公共冷却"） */
   private statusDetail = '';
+  /** 累计造成的总伤害（结算面板用） */
+  private damageDealt = 0;
+  /** 累计承受的总伤害 */
+  private damageTaken = 0;
 
   constructor(private readonly skills: ReadonlyMap<string, SkillDef>) {
     for (const [id, skill] of skills) this.skillNameKeys.set(id, skill.nameKey);
@@ -169,8 +174,13 @@ export class ViewAdapter {
             baseX,
             baseY,
           );
-          if (onBoss) this.bossFlash = 1;
-          else this.playerFlash = 1;
+          if (onBoss) {
+            this.bossFlash = 1;
+            this.damageDealt += event.amount;
+          } else {
+            this.playerFlash = 1;
+            this.damageTaken += event.amount;
+          }
           break;
         }
         case 'heal': {
@@ -282,10 +292,14 @@ export class ViewAdapter {
       .map((slot) => this.buildSlot(engine, slot, state.tick, playerStats.haste ?? 0, comboWindowOpen))
       .filter((s): s is SkillSlotView => s !== undefined);
 
+    const result =
+      state.status === 'running' ? undefined : this.buildResult(engine, state.tick);
+
     return {
       tick: state.tick,
       status: state.status,
       phase: state.phase,
+      ...(result === undefined ? {} : { result }),
       ...(remainingMs === undefined ? {} : { remainingMs }),
       enraged: boss.buffs.some((b) => b.id.startsWith('boss-enrage')),
       player,
@@ -297,6 +311,39 @@ export class ViewAdapter {
       telegraphing: boss.cast !== undefined,
       playerFlash: this.playerFlash,
       bossFlash: this.bossFlash,
+    };
+  }
+
+  /**
+   * 构建结算信息。
+   *
+   * "造成伤害"用**玩家对 Boss 的累计**（逐次命中累加），
+   * 而不是"Boss 掉的血" —— 后者在有护盾/治疗时会失真。
+   */
+  private buildResult(engine: BattleEngine, tick: number): ResultView {
+    const state = engine.snapshot;
+    const player = state.combatants.find((c) => c.side === 'ally');
+    const seconds = (tick - state.startedAtTick) * (1000 / 60) / 1000;
+    const victory = state.status === 'victory';
+
+    const reasonKey =
+      state.status === 'victory'
+        ? 'screen.wonByKill'
+        : state.endReason === 'timeout'
+          ? 'screen.defeatedByTimeout'
+          : state.endReason === 'enrage'
+            ? 'screen.defeatedByEnrage'
+            : 'screen.defeatedByDeath';
+
+    return {
+      victory,
+      titleKey: victory ? 'screen.victory' : 'screen.defeat',
+      reasonKey,
+      seconds: seconds.toFixed(1),
+      remainingHp: Math.ceil(player?.resources.hp ?? 0),
+      remainingHpCap: Math.ceil(player?.caps.hp ?? 1),
+      totalDamage: Math.round(this.damageDealt),
+      dps: seconds > 0 ? Math.round(this.damageDealt / seconds) : 0,
     };
   }
 
