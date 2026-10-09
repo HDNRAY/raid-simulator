@@ -35,11 +35,17 @@ export const SETTINGS_PANEL = {
    * 若以后技能变多，`KEY_ROW_MAX` 会自动减少（而不是重叠），
    * 那时再考虑给表格加滚动。
    *
-   * 演进 400 → **440**：格子从 44 加到 56（为了在技能名下放一行
-   * 提示标签），400 高的面板只剩 3 行、容量掉到 9。440 能放 4 行、
-   * 容量回到 12，与 `KEY_GRID_CAPACITY` 的下限一致。
+   * 演进 400 → 440 → **500**。
+   *   400 → 440：格子从 44 加到 56（为了在技能名下放一行提示标签），
+   *              400 高的面板只剩 3 行、容量掉到 9。
+   *   440 → 500：按键页底部要加一块**选中技能的详情**
+   *              （需求："除了显示标签，还显示一下技能说明和代价、
+   *              cd 等信息"）。440 时格阵底与提示行之间只剩 30px，
+   *              放不下一段中文说明。
+   *
+   * 500 在画布（540）内仍然放得下（居中后 y 20..520）。
    */
-  h: 440,
+  h: 500,
   /** 居中 */
   get x(): number {
     return Math.round((LOGICAL.width - this.w) / 2);
@@ -541,4 +547,46 @@ export function resolveActivate(
   if (focus.zone === 'slider') return { kind: 'none' };
   const skillId = rowSkillIds[focus.index];
   return skillId === undefined ? { kind: 'none' } : { kind: 'startCapture', skillId };
+}
+
+/**
+ * 按键页底部：**选中技能的详情**。
+ *
+ * 需求："按键设置里，除了显示标签，还显示一下技能说明和代价，cd 等信息
+ * 吧，要不然只显示选中的技能的信息（包括标签）也可以。"
+ *
+ * 选了后者：**只为当前焦点那一项**显示详情。
+ * 十几个格子每个塞一段中文说明会挤成一团 —— 而玩家一次只关心一个技能。
+ *
+ * 位置在格阵之下、提示行之上，四行：名字 / 说明 / 标签 / 代价·冷却。
+ */
+export const SKILL_DETAIL = {
+  x: 16,
+  /** 距弹窗顶部的距离（格阵底 336 之下） */
+  top: 344,
+  w: 608,
+  /**
+   * 四行：名字 / 标签 / 说明 / 代价·冷却，行距 **22px**。
+   *
+   * 22 不是随手取的：13px 的 `Label` 实测占高 **22px**
+   * （Pixi 的行高远大于字号）。我先试了 14 / 15 / 18，三次都叠字
+   * —— 这是量出来的，不是估出来的。
+   * 底边 344+80=424，提示行在 446。
+   */
+  h: 80,
+} as const;
+
+/** 详情区在弹窗坐标系里的矩形。 */
+export function skillDetailRect(): {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+} {
+  return {
+    x: SETTINGS_PANEL.x + SKILL_DETAIL.x,
+    y: SETTINGS_PANEL.y + SKILL_DETAIL.top,
+    w: SKILL_DETAIL.w,
+    h: SKILL_DETAIL.h,
+  };
 }

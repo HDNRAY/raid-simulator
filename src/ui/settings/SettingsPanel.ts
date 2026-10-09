@@ -38,6 +38,7 @@ import {
   keyLabel as formatKey,
   keyCellRect,
   resetButtonRect,
+  skillDetailRect,
   resolveKeyAction,
   tabRect,
   KEY_GRID_CAPACITY,
@@ -63,6 +64,12 @@ export interface KeyRow {
    * 给的是**标签 id**，文案在 i18n 里（渲染层不持有可显示文字）。
    */
   readonly hintTags?: readonly string[];
+  /** 技能说明的 i18n key（详情区用） */
+  readonly descKey?: string;
+  /** 代价文案（已格式化，如 `10 炁` / `2 炁/秒`）；没有代价则为空 */
+  readonly costText?: string;
+  /** 固有冷却文案（如 `5 秒`）；没有冷却则为空 */
+  readonly cdText?: string;
 }
 
 export interface SettingsPanelOptions {
@@ -106,6 +113,19 @@ export class SettingsPanel {
    * 于是滑块漏到了按键页。现在**显示/隐藏由组件自己拥有**。
    */
   private readonly scaleSlider: ScaleSlider;
+
+  /**
+   * 按键页底部的**选中技能详情**（四行）。
+   *
+   * 需求："除了显示标签，还显示一下技能说明和代价，cd 等信息"。
+   * 只为**当前焦点**那一项显示 —— 十几个格子各塞一段中文会挤成一团。
+   */
+  private readonly detail: {
+    readonly name: Label;
+    readonly tags: Label;
+    readonly desc: Label;
+    readonly stats: Label;
+  };
 
   private readonly tabButtons: Array<{
     tab: SettingsTab;
@@ -273,6 +293,30 @@ export class SettingsPanel {
     this.body.addChild(resetGfx, resetLabel.root);
 
     /* ---------- 通用页：UI 缩放滑块 ---------- */
+    /* ---------- 按键页：选中技能的详情 ---------- */
+    const dr = skillDetailRect();
+    /**
+     * 四行的行距 = **22px**，按 `Label` 的**实测占高**取。
+     *
+     * Pixi 的 `Label` 实际占高远大于字号：13px 的字量出来是 **22px**
+     * （行高 ≠ 字号）。我先用了 14、15、18，三次都叠字
+     * （"说明"与"代价"糊在一起）—— 这是量出来的，不是估出来的。
+     */
+    const detailLine = (row: number, size: number, color: number): Label =>
+      new Label(pixi, { x: dr.x, y: dr.y + row * 22, size, color });
+    this.detail = {
+      name: detailLine(0, FONT.body, PALETTE.text),
+      tags: detailLine(1, FONT.tiny, PALETTE.douqi.bright),
+      desc: detailLine(2, FONT.tiny, PALETTE.textDim),
+      stats: detailLine(3, FONT.tiny, PALETTE.textDim),
+    };
+    this.body.addChild(
+      this.detail.name.root,
+      this.detail.tags.root,
+      this.detail.desc.root,
+      this.detail.stats.root,
+    );
+
     this.scaleSlider = new ScaleSlider({
       pixi,
       translate: options.translate,
@@ -593,6 +637,57 @@ export class SettingsPanel {
     this.drawBody();
   }
 
+  /**
+   * 画选中技能的详情：名字 / 标签 / 说明 / 代价·冷却。
+   *
+   * ⚠️ 只在焦点落在技能格上时调用（见调用处的说明）。
+   */
+  private drawDetail(row: KeyRow): void {
+    const t = this.options.translate;
+    const tags = (row.hintTags ?? []).map((tag) => t(`settings.hintTags.${tag}`)).join(' · ');
+    /**
+     * 说明可能很长，而详情区是一行固定宽度 —— 超出就**截断加省略号**。
+     * 不做换行：换行会让下面三行的位置随内容浮动，焦点移动时文字
+     * 会上下跳，反而更难读。
+     */
+    /**
+     * ⚠️ 说明文案里可能带 **Markdown 的强调标记**（如"**无法被打断**"）——
+     * 那是给文档/提示看的，直接画到 canvas 上会原样显示星号。
+     * 这里统一剥掉（本作没有富文本渲染，所以标记没有意义）。
+     */
+    const desc =
+      row.descKey === undefined
+        ? ''
+        : truncate(t(row.descKey).replaceAll('**', ''), DETAIL_DESC_MAX_CHARS);
+    /**
+     * 代价与冷却都由上层**格式化好**（走 i18n 模板）——
+     * 面板只负责把两段拼起来，不自己造文案（否则又会出现硬编码中文）。
+     */
+    const stats = [row.costText, row.cdText]
+      .filter((x): x is string => x !== undefined && x !== '')
+      .join('   ');
+
+    /**
+     * **没有标签就收上来**（不留空档）。
+     *
+     * 标签行不是每个技能都有（目前只有「破」有「打断」）。
+     * 如果位置写死，四个位置里会有一个永远是空的 —— 看起来像漏画了。
+     * 所以按"实际有几行"重排 y。
+     */
+    const dr = skillDetailRect();
+    const rows: Label[] = [];
+    if (tags !== '') rows.push(this.detail.tags);
+    rows.push(this.detail.desc, this.detail.stats);
+    for (const [i, label] of rows.entries()) {
+      label.root.y = dr.y + (i + 1) * 22;
+    }
+
+    this.detail.name.set(t(row.nameKey));
+    this.detail.tags.set(tags);
+    this.detail.desc.set(desc);
+    this.detail.stats.set(stats);
+  }
+
   private drawFrame(): void {
     const { x, y } = this.origin;
     this.title.set(this.options.translate('settings.title'));
@@ -652,6 +747,11 @@ export class SettingsPanel {
      * 不会再出现"某个 tab 忘了清"的情况（第一版正是这样漏的）。
      */
     this.scaleSlider.setVisible(false);
+    /**
+     * 详情同样"只属于按键页" —— 与滑块一个道理：**只在这一处写隐藏**，
+     * 按键页分支只写显示。
+     */
+    for (const line of Object.values(this.detail)) line.set('');
 
     if (this.tab === 'general') {
       // 通用 tab 目前是空的 —— 明确写出来，而不是给一片空白
@@ -711,6 +811,14 @@ export class SettingsPanel {
        */
       slot.tags.setColor(tagColor(row.hintTags ?? []));
 
+      /**
+       * 详情只为**当前焦点**那一项显示。
+       *
+       * 焦点可能在 tabs / slider / reset 上，那时 `focus.zone !== 'grid'`，
+       * 就没有"选中项" —— 详情留空，而不是残留上一个技能的信息。
+       */
+      if (focused) this.drawDetail(row);
+
       const g = this.rowGfx;
       // 交替底色 + 捕获/键盘焦点的高亮
       g.rect(slot.rect.x, slot.rect.y, slot.rect.w, slot.rect.h).fill({
@@ -755,4 +863,12 @@ function tagColor(tags: readonly string[]): number {
   if (tags.includes('interruptImmune')) return 0xe4a840; // 金：打不断
   if (tags.includes('interrupt')) return 0x7cd480; // 绿：进攻性
   return 0x8c8c9e;
+}
+
+/** 详情里说明的最大字符数（超出截断加省略号）。 */
+const DETAIL_DESC_MAX_CHARS = 46;
+
+/** 截断一段文案，超出加省略号。 */
+function truncate(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }

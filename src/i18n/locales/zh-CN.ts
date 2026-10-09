@@ -300,6 +300,10 @@ export const zhCN = {
       highDamage: '高伤',
       interrupt: '打断',
     },
+    /** 详情区：代价（`{value}` + 资源名）与冷却（秒） */
+    detailCost: '{value} {resource}',
+    detailCostPerSecond: '{value} {resource}/秒',
+    detailCd: '冷却 {seconds} 秒',
     keysHint: '方向键选择，Enter 改键，Esc 返回',
     keysCapturingHint: '按下想用的键（Esc 取消）',
     keysCapturing: '请按键…',
