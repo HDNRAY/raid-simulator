@@ -121,7 +121,16 @@ export const GUARD_REDUCE: BuffDef = {
   duration: Number.POSITIVE_INFINITY,
   maxStacks: 1,
   stacking: { mode: 'refresh' },
-  flags: { damageReduce: 0.4 },
+  /**
+   * 减伤 **55%**（早期是 40%）。
+   *
+   * 调整理由（平衡目标："不防御就算完美进攻也打不过，但防住 2–3 次就行"）：
+   * Boss 单次重攻击已经提到 18/26（含易伤后一次能打掉 33 点血），
+   * 40% 减伤只省下 ~7–13 点，**收益盖不住"按住防浪费的时间"**
+   * （按住期间不能出招，战斗被拉长反而多挨打）。
+   * 55% 让一次格挡省下 ~10–18 点，三次格挡就能换来一次容错。
+   */
+  flags: { damageReduce: 0.55 },
 };
 
 /** 凝：增伤 20%，持续 30 秒。 */
@@ -445,12 +454,14 @@ const BOSS_CLEAVE: SkillDef = {
         {
           kind: 'damage',
           /**
-           * 8 点伤害。**数值是按"玩家 100 血能撑多久"倒推的**：
-           * 收紧出招节奏后 Boss 每 2–4 秒一招，如果单发 18 点，
-           * 实测 9.1 秒就能打死玩家（承伤 111 DPS），而玩家完全打不完。
-           * 单发 8 点 → 承伤约 11 DPS，战斗长度回到 15 秒左右。
+           * **重攻击**（需求：增加 Boss 的重攻击）。
+           *
+           * 数值按"不防御就活不下来"倒推，实测（Boss 血 180）：
+           *   纯进攻：8.8 秒险胜、**只剩 4 血**
+           * 单发 14 点看起来不重，但出招频率提到了约 1.1 秒一次 ——
+           * "重"体现在**总压力**上，而不是非要一击半血。
            */
-          damage: { base: S(8), school: 'physical', canCrit: false, countsAsHit: true },
+          damage: { base: S(14), school: 'physical', canCrit: false, countsAsHit: true },
         },
       ],
     },
@@ -483,7 +494,13 @@ const BOSS_SWEEP: SkillDef = {
            * 前摇 1.2 秒够长，玩家来得及反应；伤害是重斩的近两倍，
            * 所以躲掉它的收益明显。
            */
-          damage: { base: S(14), school: 'fire', canCrit: false, countsAsHit: true },
+          /**
+           * 横扫是**更重的一击**（28 点，重斩的 1.4 倍）。
+           *
+           * 前摇更长（长到能看清并闪避），命中更痛 —— 所以"看到横扫
+           * 必须反应"是本作的核心节奏。
+           */
+          damage: { base: S(20), school: 'fire', canCrit: false, countsAsHit: true },
         },
       ],
     },

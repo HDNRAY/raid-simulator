@@ -308,9 +308,9 @@ export const VERROT_BEHAVIORS: readonly Behavior[] = [
       {
         skillId: 'boss-sweep',
         when: { kind: 'hasBuff', who: 'self', buffId: 'boss-frenzy' },
-        gapMs: 7_000,
+        gapMs: 4_500,
       },
-      { skillId: 'boss-empower', gapMs: 16_000 },
+      { skillId: 'boss-empower', gapMs: 7_700 },
       /**
        * 霸体：**只在二阶段（有「狂怒」时）出现**。
        *
@@ -335,10 +335,10 @@ export const VERROT_BEHAVIORS: readonly Behavior[] = [
             { kind: 'hasBuff', who: 'self', buffId: 'boss-frenzy' },
           ],
         },
-        gapMs: 12_000,
+        gapMs: 7_700,
       },
-      { skillId: 'boss-sweep', gapMs: 9_000 },
-      { skillId: 'boss-cleave', gapMs: 2_500 },
+      { skillId: 'boss-sweep', gapMs: 4_300 },
+      { skillId: 'boss-cleave', gapMs: 1_200 },
     ],
   },
 ];

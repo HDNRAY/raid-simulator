@@ -124,25 +124,29 @@ export function makeEngine(seed = FIXED_SEED): BattleEngine {
  */
 export const GOLDEN_OUTCOME = {
   /**
-   * 当前平衡下"会闪 + 会轰"的玩家**险胜**。
+   * 当前平衡下"会闪避"的玩家**险胜**。
    *
    * 实测（不是估计）：
-   *   - 用时 896 tick ≈ 14.9 秒
-   *   - 玩家剩 **17 血**（满血 100）
-   *   - Boss 在 60% 血时授予「狂怒」（+25% 伤害、横扫更频繁），
-   *     所以后半场明显更凶
+   *   - 用时 657 tick ≈ 11.0 秒
+   *   - 玩家剩 **9 血**（满血 100）
+   *   - 而**不会闪避**的纯进攻打法：**败**（Boss 还剩 10 血）
    *
-   * 注意：**「攻」「轰」现在有读条**（0.5s / 0.9s），而且
-   * "读条中出招会打断自己"。所以策略的写法必须等读条结束再按
-   * 下一个 —— 无脑连按会一直自我打断，输出反而更低。
+   * 这两个结果共同落地了需求："不闪避或防御，就算完美进攻循环
+   * 也打不过；加一点容错 —— 闪避 1-2 次就行。"
    *
-   * 同一条策略如果**只按「攻」**也能赢，只是慢一些 ——
-   * 说明「轰」是效率工具而不是通关必需。真正的门槛是**别站着挨打**。
+   * 闪避的时机很关键：提前 300/500ms 都胜，提前 700ms 就败
+   * （无敌窗口 0.5 秒盖不住命中）。所以本作要求的不是"看到读条就闪"，
+   * 而是**在命中前一刻闪**。
+   *
+   * ⚠️ 闪避的收益是"从败到胜"，但剩血只从 0 抬到 9 —— 原因很实在：
+   * 闪避要**花 40 炁且打断自己的读条**，等于用输出换生存。
+   * 想继续拉大差距，应该调"单次命中伤害"或"玩家回炁速度"，
+   * 而不是继续加 Boss 血 —— 那只会让战斗更长、两边都更难受。
    */
   status: 'victory' as const,
   endReason: 'hpZero' as const,
   /** 通关用时（tick）。连续量，对数值改动敏感。 */
-  ticks: 897,
+  ticks: 657,
   /**
    * 当前内容没有暴击判定，所以随机数一次都不被消耗。
    *
@@ -152,7 +156,7 @@ export const GOLDEN_OUTCOME = {
    */
   finalRngSeed: 20261009,
   combatants: {
-    player: { alive: true, hp: 17, energy: 0, douqi: 25, damageDealt: 0, damageTaken: 0 },
+    player: { alive: true, hp: 9, energy: 0, douqi: 35, damageDealt: 0, damageTaken: 0 },
     verrot: { alive: false, hp: 0, energy: 0, douqi: 0, damageDealt: 0, damageTaken: 0 },
   },
 } satisfies Omit<RunOutcome, 'ticks'> & { readonly ticks: number };
@@ -211,9 +215,24 @@ export function planPriority(
       const boss = state.combatants.find((c) => c.side === 'enemy');
       const cast = boss?.casts[0];
       if (cast !== undefined) {
+        /**
+         * **只对"会造成伤害"的招式闪避。**
+         *
+         * 踩过的坑：早期只看"Boss 在读条"就闪，于是连不造成伤害的
+         * 「蓄能」也闪 —— 白白花掉 40 炁（= 4 次「攻」的代价）。
+         * 实测表现为 **"会闪"反而比"不闪"输得更惨**（190 血时：
+         * 会闪败、不闪胜剩 4 血），让人误以为闪避机制没用，
+         * 其实是**策略在乱闪**。
+         *
+         * 真人对"纯增益招式"不会闪，所以策略也不该闪。
+         */
+        const skillDef = registry.skills.get(cast.skillId);
+        const dealsDamage = (skillDef?.hits ?? []).some((h) =>
+          h.effects.some((e) => e.kind === 'damage'),
+        );
         const elapsedMs = (tick - cast.startedAtTick) * (1000 / 60);
         const remainingMs = cast.castTimeMs - elapsedMs;
-        if (remainingMs > 0 && remainingMs <= leadMs) {
+        if (dealsDamage && remainingMs > 0 && remainingMs <= leadMs) {
           const skill = registry.skills.get(options.dodgeSkillId);
           /**
            * **只在"这次攻击真的会打到我"时才闪。**

@@ -119,14 +119,16 @@ describe('真实内容：Boss 的机制都接线了', () => {
     expect(sawEnd).toBeDefined();
   });
 
-  it('只按「攻」也能打赢，但明显比用上「轰」慢', () => {
+  it('【需求】只按「攻」打不过 Boss —— 完美进攻也必须用上防御', () => {
     /**
-     * 早期这条测试断言"只按攻会输"。改成读条机制之后结论变了 ——
-     * 而且**旧写法本身就是错的**：`run` helper 每 30 tick 无脑发一次
-     * 「攻」，而读条正好也是 30 tick，于是它一直在自我打断，
-     * 测的不是"只按攻"，而是"不断打断自己的攻"。
+     * 这一条直接对应需求："不闪避或防御，就算完美进攻循环也打不过"。
      *
-     * 现在按真实打法来：**读条结束再按下一个**。
+     * 实测：纯「攻」循环结束时 **Boss 还剩 10 血**，而玩家已经先倒下。
+     * 也就是说"读条结束就立刻按下一个攻"这种最理想的输出手法也不够 ——
+     * 必须靠闪避/格挡省下血量才能赢（见黄金重放：会闪避则胜、剩 9 血）。
+     *
+     * 早期这条测试断言的是"只按攻也能赢，只是慢"。平衡调整后
+     * 结论反过来了 —— 这正是这次调整的目标。
      */
     const engine = makeEngine();
     let attacks = 0;
@@ -134,9 +136,10 @@ describe('真实内容：Boss 的机制都接线了', () => {
       const st = engine.snapshot;
       if (st.status !== 'running') break;
       const actor = st.combatants.find((c) => c.side === 'ally')!;
-      const busy = actor.casts.length > 0;
       engine.tick(
-        busy ? [] : [{ type: 'useSkill' as const, skillId: 'attack', atTick: st.tick }],
+        actor.casts.length > 0
+          ? []
+          : [{ type: 'useSkill' as const, skillId: 'attack', atTick: st.tick }],
       );
       for (const e of engine.drainEvents()) {
         if (e.kind === 'skillUsed' && e.skillId === 'attack' && e.sourceId === 'player') {
@@ -149,9 +152,9 @@ describe('真实内容：Boss 的机制都接线了', () => {
 
     // 确实一直在按（否则下面的结论没有意义）
     expect(attacks).toBeGreaterThan(10);
-    // 结论：单靠普攻也能赢，只是慢
-    expect(boss.resources.hp).toBe(0);
-    expect(player.alive).toBe(true);
+    // 结论：纯普攻打不死 Boss
+    expect(boss.resources.hp).toBeGreaterThan(0);
+    expect(player.alive).toBe(false);
   });
 
   it('3 分钟超时判负', () => {
