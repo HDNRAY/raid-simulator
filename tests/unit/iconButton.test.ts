@@ -23,7 +23,7 @@ describe('图标按钮：可点区域', () => {
     expect(box.y + box.h / 2).toBeCloseTo(100, 0);
   });
 
-  it('【关键】带快捷键提示时，盒子把提示一起框进去', () => {
+  it('【关键】同行提示（left/right）要把提示框进可点区域', () => {
     /**
      * 这是最容易错的一条：如果盒子只按图标算，键位提示就会
      * 落在可点区域之外 —— 玩家点"按键提示"没有反应。
@@ -32,11 +32,27 @@ describe('图标按钮：可点区域', () => {
     const withHint = computeContentBox({
       size: 20,
       shortcut: ',',
+      hintSide: 'right',
       anchor: { x: 100, y: 100 },
     });
     expect(withHint.w).toBeGreaterThan(iconOnly.w);
-    // 增量应当就是提示宽度 + 一个间隙
     expect(withHint.w - iconOnly.w).toBe(estimateMonoWidth(',', FONT.small) + 4);
+  });
+
+  it('角落提示（corner）**不占**布局宽度 —— 它是附注，不是同级元素', () => {
+    /**
+     * 需求："esc 应该比较小，然后再设置按钮的左上角"。
+     * 角落里的小字不该把按钮撑大（否则齿轮会被挤偏）。
+     */
+    const iconOnly = computeContentBox({ size: 20, anchor: { x: 100, y: 100 } });
+    const corner = computeContentBox({
+      size: 20,
+      shortcut: 'Esc',
+      hintSide: 'corner',
+      anchor: { x: 100, y: 100 },
+    });
+    expect(corner.w).toBe(iconOnly.w);
+    expect(corner.iconX).toBe(iconOnly.iconX);
   });
 
   it('提示在左时图标右移；提示在右时图标在左', () => {

@@ -49,15 +49,23 @@ export interface IconButtonOptions {
   /** 高亮时的颜色（悬停 / 键盘焦点） */
   readonly brightColor?: number;
   /**
-   * 快捷键提示（例如 `,`）。
+   * 快捷键提示（例如 `Esc`）。
    *
    * 传 `undefined` 就不画 —— 但也**强烈建议给**：本项目的硬需求是
    * "几乎全键盘可操作"，把键位写在按钮旁边是最直接的告知方式，
    * 比藏在设置里好。
    */
   readonly shortcut?: string;
-  /** 提示在图标哪一侧 */
-  readonly hintSide?: 'left' | 'right';
+  /**
+   * 提示的位置。
+   *
+   *   - `'corner'`（默认）：**图标左上角**，字号更小、带描边。
+   *     需求："esc 应该比较小，然后再设置按钮的左上角"。
+   *     左/右侧排布的问题是：键位和图标一样大，视觉上像同级元素，
+   *     而快捷键其实是**辅助信息**，应该明显小一圈并贴在角上。
+   *   - `'left'` / `'right'`：与图标同一行的左侧/右侧（旧行为）。
+   */
+  readonly hintSide?: 'corner' | 'left' | 'right';
   /** 可选文字标签（画在图标与提示之间） */
   readonly label?: string;
   /** 固定矩形（给 `rect` 时按它定位并命中） */
@@ -88,14 +96,22 @@ export function computeContentBox(options: {
   readonly size?: number;
   readonly shortcut?: string;
   readonly label?: string;
-  readonly hintSide?: 'left' | 'right';
+  readonly hintSide?: 'corner' | 'left' | 'right';
   readonly rect?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   readonly anchor?: { readonly x: number; readonly y: number };
 }): ContentBox {
   const size = options.size ?? ICON_BUTTON_DEFAULTS.size;
   const hintSide = options.hintSide ?? ICON_BUTTON_DEFAULTS.hintSide;
 
-  const hintW = options.shortcut === undefined ? 0 : estimateMonoWidth(options.shortcut, FONT.small);
+  /**
+   * `corner` 模式下提示**不占布局宽度** —— 它画在图标左上角的外侧，
+   * 属于"附注"而不是"同行元素"。这样按钮本体的尺寸仍然只由图标决定。
+   */
+  const corner = hintSide === 'corner';
+  const hintW =
+    options.shortcut === undefined || corner
+      ? 0
+      : estimateMonoWidth(options.shortcut, FONT.small);
   const labelW = options.label === undefined ? 0 : estimateMonoWidth(options.label, FONT.body);
   const parts = [size, hintW, labelW].filter((w) => w > 0).length;
   const contentW = size + hintW + labelW + Math.max(0, parts - 1) * ICON_BUTTON_DEFAULTS.gap;
@@ -114,8 +130,9 @@ export function computeContentBox(options: {
           };
         })();
 
-  // 图标在提示的**另一侧**；没有提示时排在最前
-  const iconX = box.x + (hintSide === 'left' ? hintW + (hintW > 0 ? ICON_BUTTON_DEFAULTS.gap : 0) : 0);
+  // 图标在提示的**另一侧**；`corner` 模式提示叠在角上，图标不位移
+  const iconX =
+    box.x + (hintSide === 'left' ? hintW + (hintW > 0 ? ICON_BUTTON_DEFAULTS.gap : 0) : 0);
   return {
     ...box,
     iconX,
@@ -140,9 +157,17 @@ export const ICON_BUTTON_DEFAULTS = {
   size: 20,
   color: 0xb0b0be,
   brightColor: PALETTE.douqi.bright,
-  hintSide: 'right' as const,
-  /** 提示与图标之间的间隙 */
+  hintSide: 'corner' as const,
+  /** 提示与图标之间的间隙（同一行排布时用） */
   gap: 4,
+  /**
+   * 角落提示的字号与描边。
+   *
+   * 比 `FONT.tiny`(11) 还小一号 —— 它是辅助信息，不能和图标抢注意力。
+   * 描边是为了在任意背景上都读得清（需求："esc 可以考虑加描边"）。
+   */
+  cornerSize: 9,
+  cornerStroke: 2,
 } as const;
 
 export class IconButton {
@@ -163,6 +188,7 @@ export class IconButton {
     const size = options.size ?? ICON_BUTTON_DEFAULTS.size;
     const color = options.color ?? ICON_BUTTON_DEFAULTS.color;
     const hintSide = options.hintSide ?? ICON_BUTTON_DEFAULTS.hintSide;
+    const corner = hintSide === 'corner';
 
     this.root = new pixi.Container();
 
@@ -177,11 +203,21 @@ export class IconButton {
       this.text.set(options.label);
     }
     if (options.shortcut !== undefined) {
+      /**
+       * 角落提示：**比 tiny 还小一号 + 描边**。
+       *
+       * 需求："esc 应该比较小……esc 可以考虑加描边"。
+       * 描边保证它在任意背景上都读得清（齿轮本身是浅色，
+       * 没有描边时 Esc 会和它糊在一起）。
+       */
       this.hint = new Label(pixi, {
         x: 0,
         y: 0,
-        size: FONT.small,
+        size: corner ? ICON_BUTTON_DEFAULTS.cornerSize : FONT.small,
         color: PALETTE.textDim,
+        ...(corner
+          ? { stroke: 0x000000, strokeWidth: ICON_BUTTON_DEFAULTS.cornerStroke }
+          : {}),
       });
       this.hint.set(options.shortcut);
     }
@@ -221,7 +257,21 @@ export class IconButton {
 
     this.root.addChild(this.icon.root);
     if (this.text) this.root.addChild(this.text.root);
-    if (this.hint) this.root.addChild(this.hint.root);
+    if (this.hint) {
+      if (corner) {
+        /**
+         * 需求："esc 应该比较小，然后再设置按钮的左上角"。
+         *
+         * 画在图标**左上角的外侧**（右对齐到图标左缘 + 2px），
+         * 这样它不占按钮本体的布局、也不会和图标重叠。
+         */
+        this.hint.root.x = box.iconX + 2;
+        this.hint.root.y = box.iconY + 1;
+        this.hint.root.anchor.x = 1;
+        this.hint.root.anchor.y = 1;
+      }
+      this.root.addChild(this.hint.root);
+    }
   }
 
   /** 命中测试（逻辑像素）。命中会触发 `onClick`。 */

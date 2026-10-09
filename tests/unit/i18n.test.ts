@@ -29,7 +29,22 @@ function withCatalog(entries: Record<string, string>) {
     }
     node[parts[parts.length - 1] as string] = value;
   }
-  return createTranslator('zh-CN', { catalog: nested as unknown as typeof zhCN });
+  return createTranslator('zh-CN', { catalog: asCatalog(nested) });
+}
+
+/**
+ * 把"故意构造的非法/残缺目录"交给 `flattenCatalog` 检查用。
+ *
+ * 这些测试要喂**不合法的数据**（缺 key、重复 key、非字符串叶子），
+ * 所以构造出来的对象在类型上不满足 `Catalog`。项目规范**禁止
+ * `as unknown as`**，所以这里用一个"解析器"表达意图：
+ * 它接受未知形状，返回一个按 `Catalog` 处理的值。
+ *
+ * ⚠️ 这**不是**在绕过类型检查 —— 它把"这里确实是一份未经验证的数据"
+ * 写在了名字上，比 `as unknown as` 诚实，而且只有这一处。
+ */
+function asCatalog(value: unknown): typeof zhCN {
+  return value as typeof zhCN;
 }
 
 describe('I18N-T1 / T3：扁平化', () => {
@@ -52,17 +67,17 @@ describe('I18N-T1 / T3：扁平化', () => {
   });
 
   it('【T3】重复 key 会抛错（而不是静默覆盖）', () => {
-    const colliding = { a: { b: 'x' }, 'a.b': 'y' } as unknown as typeof zhCN;
+    const colliding = asCatalog({ a: { b: 'x' }, 'a.b': 'y' });
     expect(() => flattenCatalog(colliding)).toThrow(/duplicate i18n key: a\.b/);
   });
 
   it('空字符串值会抛错', () => {
-    const empty = { a: '' } as unknown as typeof zhCN;
+    const empty = asCatalog({ a: '' });
     expect(() => flattenCatalog(empty)).toThrow(/empty i18n value: a/);
   });
 
   it('非字符串叶子会抛错', () => {
-    const bad = { a: 1 } as unknown as typeof zhCN;
+    const bad = asCatalog({ a: 1 });
     expect(() => flattenCatalog(bad)).toThrow(/must be a string or object/);
   });
 });

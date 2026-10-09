@@ -193,12 +193,20 @@ describe('读条组件（CastBar）：两处读条共用同一个实现', () => 
     expect(order).toEqual(['bg', 'this.fillGfx', 'this.border', 'this.nameText', 'this.timeText']);
   });
 
-  it('填充区域左右各让 1px —— 否则会压住左右边框', async () => {
+  it('填充四周内缩 INSET，且描边路径落在半像素上', async () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync(new URL('../../src/ui/CastBar.ts', import.meta.url), 'utf8');
-    // 填充从 x+1 开始、宽 w-2、高 h-2
-    expect(src).toMatch(/rect\(x \+ 1, y \+ 1, filled, h - 2\)/);
-    expect(src).toMatch(/const innerW = Math\.max\(0, w - 2\)/);
+    /**
+     * 这两条都是**像素级 bug 的根因**，实测出来的：
+     *
+     * 1. 填充内缩必须是 2 —— 1px 的描边以路径线为中心向两侧各铺 0.5px，
+     *    填充从 +1 开始就会盖住它（"看不到上 border"）。
+     * 2. 描边路径必须落在 `x+0.5 / y+0.5` —— 画在整数坐标上时
+     *    1px 的线跨越两个半行像素，各混一次，上下两边被稀释到几乎看不见。
+     */
+    expect(src).toMatch(/const INSET = 2;/);
+    expect(src).toMatch(/rect\(x \+ INSET, y \+ INSET, filled, innerH\)/);
+    expect(src).toMatch(/roundRect\(x \+ 0\.5, y \+ 0\.5, w - 1, h - 1, RADIUS\)/);
   });
 
   it('两处读条都够高，且都不与所属面板重叠', () => {

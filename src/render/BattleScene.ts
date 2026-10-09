@@ -942,7 +942,12 @@ export class BattleScene {
        */
       this.castBar.setNameColor(cast.interruptible ? PALETTE.interrupt.bright : 0x30c8d0);
       this.castBar.update(cast.progress);
-      // 越接近命中，边框越亮 —— 把"快到了"变成视觉压力
+      /**
+       * **边框高亮 = "快命中了"**（需求问过这个是干啥用的）。
+       *
+       * 进度过 70% 后边框转亮金 —— 因为这时候玩家已经没有多少时间
+       * 反应了，用亮度制造视觉压力。平时是普通的危险红。
+       */
       this.castBar.setBorderColor(cast.progress > 0.7 ? 0xffd060 : PALETTE.danger.base);
     }
 

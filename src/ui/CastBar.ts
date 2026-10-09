@@ -54,6 +54,15 @@ export interface CastBarOptions {
 /** 圆角半径：4px 的面板配 2px 已经够圆。 */
 const RADIUS = 2;
 
+/**
+ * 填充相对面板内缩的像素数。
+ *
+ * **必须是 2 而不是 1** —— 1px 的描边以路径线为中心、向两侧各铺 0.5px，
+ * 所以描边实际占用的是"第一行 1px"。填充若从 `+1` 开始就会盖住它。
+ * 详见 `update()` 的说明（这是"看不到上 border"的根因）。
+ */
+const INSET = 2;
+
 export class CastBar {
   readonly root: Container;
 
@@ -62,6 +71,8 @@ export class CastBar {
   private readonly nameText: Text;
   private readonly timeText: Text;
   private lastProgress = -1;
+  /** 记住当前描边色，`update()` 重画时用 */
+  private currentLine: number;
 
   constructor(private readonly options: CastBarOptions) {
     const { pixi, rect } = options;
@@ -76,6 +87,7 @@ export class CastBar {
 
     // ── 描边 ──
     this.border = new pixi.Graphics();
+    this.currentLine = options.line;
     this.drawBorder(options.line);
 
     // ── 文字：垂直居中（用 anchor，不猜偏移） ──
@@ -133,22 +145,58 @@ export class CastBar {
     this.timeText.style.fill = css(color);
   }
 
-  /** 描边颜色（"快命中"时提亮）。 */
+  /**
+   * 描边颜色。
+   *
+   * 需求问过"进度条快完的时候边框有个高亮，是干啥用的？" ——
+   * 那是"快命中了"的视觉压力（越接近命中越亮）。
+   * 保留这个提示，但把颜色说明清楚：见 `BattleScene` 里的调用处。
+   */
   setBorderColor(color: number): void {
+    this.currentLine = color;
     this.drawBorder(color);
   }
 
+  /**
+   * 画描边。
+   *
+   * ⚠️ **路径内移 0.5px** —— 这是"上下边框看不见"的另一个原因。
+   *
+   * 1px 的描边是**以路径线为中心**向两侧各铺 0.5px。路径画在整数坐标
+   * （如 `y=74`）上时，这条线跨越 73.5..74.5 两个半行像素 ——
+   * 两个半行各自混合一次，最终上下两条边框都被稀释成接近底槽的颜色。
+   * （左右没事是因为「横」字那一笔恰好落在整数列上，视觉上确实看得到。）
+   *
+   * 把路径移到 `x+0.5 / y+0.5`、宽高各减 1 之后，1px 的线正好覆盖
+   * 一个整行/整列像素，边缘干净且颜色是满的。
+   *
+   * 这是像素级的经验：**奇数宽度的线要落在半像素上**。
+   */
   private drawBorder(color: number): void {
     const { x, y, w, h } = this.options.rect;
     this.border.clear();
-    this.border.roundRect(x, y, w, h, RADIUS).stroke({ color, width: 1 });
+    this.border
+      .roundRect(x + 0.5, y + 0.5, w - 1, h - 1, RADIUS)
+      .stroke({ color, width: 1 });
   }
 
   /**
    * 进度 0..1 → **纯色方块从左往右长**。
    *
-   * 填充区域左右各让 1px：否则它会压住左右两条边框
-   * （就是"看不到上 border"那个 bug 的同源问题）。
+   * ⚠️ **四周各让 `INSET`(2) px**，这是"看不到上 border"的根因修复。
+   *
+   * 像素实测（修复前，Boss 读条竖直扫描 @x=400）：
+   *   y=74 → `#2a0c0e`（底槽色）
+   *   y=75 → `#e8542c`（**填充色**）← 上边框那一行被填充盖住了
+   *
+   * 原因：填充原先画在 `y+1`、高 `h-2`，而 1px 的描边是**以路径线
+   * 为中心**向两侧各铺 0.5px —— 于是 `y+1` 那一行同时属于描边和填充，
+   * 填充后画就把它整个盖掉。上下两条边框都被盖，只剩左右可见。
+   *
+   * 玩家读条看起来只是"有缝隙"，是因为它的填充很短（只占左边一段），
+   * 所以上边框在那一段之外还是露出来的 —— 同一个 bug 的两种表现。
+   *
+   * 让 2px 之后，描边那一行永远属于描边，填充退到它内侧。
    */
   update(progress: number): void {
     const safe = Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : 0;
@@ -156,12 +204,23 @@ export class CastBar {
     this.lastProgress = safe;
 
     const { x, y, w, h } = this.options.rect;
-    const innerW = Math.max(0, w - 2);
+    const innerW = Math.max(0, w - INSET * 2);
+    const innerH = Math.max(0, h - INSET * 2);
     const filled = Math.round(innerW * safe);
     this.fillGfx.clear();
-    if (filled > 0) {
-      this.fillGfx.rect(x + 1, y + 1, filled, h - 2).fill({ color: this.options.fill, alpha: 1 });
+    if (filled > 0 && innerH > 0) {
+      this.fillGfx
+        .rect(x + INSET, y + INSET, filled, innerH)
+        .fill({ color: this.options.fill, alpha: 1 });
     }
+    /**
+     * 每次改完填充**重画一遍描边**。
+     *
+     * 让 `INSET` 应该是够的，但"上下两条边被盖"这个问题反复出现，
+     * 所以再加一道保险：无论填充怎么变，描边永远是最后画上去的
+     * （`this.border` 也在 `addChild` 顺序里排在填充之后）。
+     */
+    this.drawBorder(this.currentLine);
   }
 
   set visible(v: boolean) {

@@ -45,8 +45,15 @@ export class SettingsButton {
         x: LOGICAL.width - MARGIN - SIZE / 2,
         y: LOGICAL.height - MARGIN - SIZE - 62,
       },
+      /**
+       * 需求："设置按钮，Esc 在 icon 的左边……这个设计不对，
+       * esc 应该比较小，然后再设置按钮的左上角。"
+       *
+       * 所以用 `corner` 模式：提示缩小到 9px、带黑色描边、
+       * 贴在齿轮的**左上角**（不占按钮本体的布局）。
+       */
       shortcut: options.translate('settings.openKey'),
-      hintSide: 'left',
+      hintSide: 'corner',
       onClick: options.onClick,
     });
     this.root = this.button.root;

@@ -140,3 +140,93 @@ describe('架构约束的反向用例（lint 规则真的生效）', () => {
     });
   });
 });
+
+/**
+ * AGENTS.md §1：禁止 `as any` 与 `as unknown as`。
+ *
+ * ------------------------------------------------------------------
+ * 为什么用源码扫描而不是 ESLint 规则
+ * ------------------------------------------------------------------
+ *
+ * 这两条是**纯语法**层面的禁令，不需要类型信息，所以正则在语义上
+ * 就够准了（`as any` / `as unknown as` 都是固定字面串）。
+ * 走 ESLint 反而要多写一条自定义规则 + fixture，收益不划算。
+ *
+ * ⚠️ 扫描范围必须包含 `tests/` 和 `tools/` —— 违规最常出现在测试里
+ * （"构造一个非法输入"），只扫 `src/` 会漏掉大多数。
+ */
+describe('AGENTS.md 硬规则：禁止类型断言逃生舱', () => {
+  /** 扫描的源码根目录 */
+  const ROOTS = ['src', 'tests', 'tools'];
+
+  /**
+   * 匹配真实的断言用法，**不匹配注释里的提及**。
+   *
+   * 做法：逐行先剥掉注释（`//` 之后、`/* … *\/` 之内），再匹配。
+   * 这样本文件与 `i18n.test.ts` 里"说明为什么不用它"的文字不会误报。
+   */
+  const BANNED: ReadonlyArray<{ name: string; re: RegExp }> = [
+    { name: 'as any', re: /\bas\s+any\b/ },
+    { name: 'as unknown as', re: /\bas\s+unknown\s+as\b/ },
+  ];
+
+  /**
+   * 剥掉注释**和字符串字面量**。
+   *
+   * 两个都必须剥，否则会误报：
+   *   - 注释：本文件与 `i18n.test.ts` 里会**提到**这两个写法（说明为什么禁用）
+   *   - 字符串：上面 `BANNED` 的正则字面量、以及测试名里都有这两个词
+   *
+   * 保留换行，这样行号仍然对得上。
+   */
+  function stripCommentsAndStrings(source: string): string {
+    const blank = (m: string): string => m.replace(/[^\n]/g, ' ');
+    return source
+      .replace(/\/\*[\s\S]*?\*\//g, blank)
+      .replace(/\/\/[^\n]*/g, blank)
+      // 单引号 / 双引号 / 模板串（不处理嵌套模板，本仓库用不到）
+      .replace(/'(?:[^'\\\n]|\\.)*'/g, blank)
+      .replace(/"(?:[^"\\\n]|\\.)*"/g, blank)
+      .replace(/`(?:[^`\\]|\\.)*`/g, blank);
+  }
+
+  it('src/、tests/、tools/ 里没有 as any / as unknown as', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { globSync } = await import('node:fs');
+    const offenders: string[] = [];
+
+    for (const root of ROOTS) {
+      let files: string[] = [];
+      try {
+        files = globSync(`${root}/**/*.{ts,tsx,mts,cts}`);
+      } catch {
+        continue;
+      }
+      for (const file of files) {
+        const raw = readFileSync(file, 'utf8');
+        // 跳过本文件：它自己的正则/测试名就是那两个字符串
+        if (file.endsWith('lintRules.test.ts')) continue;
+        const code = stripCommentsAndStrings(raw);
+        const lines = code.split('\n');
+        lines.forEach((line, i) => {
+          for (const { name, re } of BANNED) {
+            if (re.test(line)) {
+              // 找到原始行号（剥注释不改行数，所以 i 就是行号-1）
+              offenders.push(`${file}:${i + 1} 用了 ${name} → ${line.trim().slice(0, 80)}`);
+            }
+          }
+        });
+      }
+    }
+
+    expect(offenders, `发现 ${offenders.length} 处违规：\n${offenders.join('\n')}`).toEqual([]);
+  });
+
+  it('扫描范围不是空的（防止路径写错导致假通过）', async () => {
+    const { globSync } = await import('node:fs');
+    let total = 0;
+    for (const root of ROOTS) total += globSync(`${root}/**/*.ts`).length;
+    // 本仓库现在有 100+ 个 ts 文件；给一个宽松但有意义的下限
+    expect(total).toBeGreaterThan(50);
+  });
+});

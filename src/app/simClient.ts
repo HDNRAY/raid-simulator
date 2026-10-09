@@ -193,8 +193,23 @@ export class SimClient {
       });
       return {
         postMessage: (m) => worker.postMessage(m),
+        /**
+         * 事件监听转发。
+         *
+         * `WorkerLike` 的回调签名是 `(event: { data: FromWorker }) => void`
+         * （为了测试时能注入假 worker），而真实 `Worker` 抛的是完整
+         * `MessageEvent` —— 类型对不上。
+         *
+         * **不用 `as` 强转**（项目规范禁止），而是**写一个适配器**：
+         * 它显式声明自己收 `MessageEvent`，再把 `message.data` 转交出去。
+         * 这样"两边的事件形状不同"这件事就写在代码里了，
+         * 而不是被一个 cast 掩盖掉。
+         */
         addEventListener: (type, listener) =>
-          worker.addEventListener(type, listener as unknown as EventListener),
+          worker.addEventListener(type, (message: MessageEvent<FromWorker>) => {
+            listener({ data: message.data });
+            return undefined;
+          }),
         terminate: () => worker.terminate(),
       };
     } catch (error) {
