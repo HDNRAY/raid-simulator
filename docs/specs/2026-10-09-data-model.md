@@ -408,33 +408,92 @@ interface StatModifier {
 }
 ```
 
-### 5.2 每个 stat 的聚合规则（数据，不是代码分支）
+### 5.2 stat 的两种语义（**这是实现时踩过的坑**）
 
-| stat | 聚合 | 上限 |
-|---|---|---|
-| `strength` / `agility` / `intelligence` / `spirit` | 加法层求和 | — |
-| `maxHp` / `maxMp` / `maxEnergy` / `maxFury` | 加法层求和 | — |
-| `critChance` | 加法层求和 | 1.0 |
-| `critDamage` | 加法层求和 | — |
-| `critDamageBoost` | **乘法层相乘** | — |
-| `haste` | 加法层求和 | 0.5 |
-| `castSpeed` / `cooldownRate` | 乘法层相乘 | — |
-| `armor` | 加法层求和 | — |
-| `damageBoost` | **百分比层相加**（`Σ`） | — |
-| `damageMult` | **乘法层相乘**（`∏`） | — |
-| `physicalBoost` / `spellBoost` | 百分比层相加 | — |
-| `dotBoost` / `directBoost` | 百分比层相加 | — |
-| `vulnerability`（目标） | 百分比层相加 | — |
-| `damageTakenMult` | 乘法层相乘 | — |
-| `armorPen` | 加法层求和 | 1.0 |
+最初我把所有 stat 都按一个公式算：
 
-**为什么 `damageBoost` 必须相加而不是相乘**：两个 `+10%` 相乘是 `+21%`，
-玩家永远算不清自己的伤害，数值也会失控。相加是 `+20%`，直觉正确、可加、可预测。
+```
+value = (base + Σadd) × (1 + Σpercent) × ∏mult
+```
+
+结果 `damageBoost`（累加器型）的 `+10%` 被算成 `0 × 1.1 = 0`
+—— **百分比乘在了 0 上**。
+
+根因是**两种语义被混在了一起**。所以每个 stat 必须显式声明它属于哪一类：
+
+| `kind` | 语义 | 公式 | 典型 stat |
+|---|---|---|---|
+| **`accumulator`** | 值本身就是"那个数"，由使用方在别处套用 | `base + Σadd + Σpercent`，再 `× ∏mult` | `damageBoost` `haste` `critChance` `armorPen` `vulnerability` |
+| **`multiplier`** | 值就是"最终要乘上去的数"，基值是 1 | `(base \|\| 1 + Σadd) × (1 + Σpercent) × ∏mult` | `damageMult` `damageTakenMult` `critDamageBoost` |
+| **`value`** | 覆盖 / 最大值主导 | `base + Σadd`，再叠 `percent`，最后覆盖与钳制 | `critChance`（配合 `setOverride`） |
+
+关键区别：`damageBoost = 10` 表示 **"+10% 增伤"**，
+伤害公式里用它做 `× (1 + damageBoost / 100)`。
+而 `damageMult = 1.5` 表示 **"最终伤害 ×1.5"**，直接乘。
+
+**两种语义都由数据选择，引擎不猜** —— 这是数据模型规范 §9.4 那条
+"翻倍可以是本条来源翻倍，也可以是全局翻倍"的落地基础。
+
+### 5.2.1 为什么 `damageBoost` 必须相加
+
+两个 `+10%`：
+- 相加 → `+20%`。玩家能心算，数值可预期、可加。
+- 相乘 → `+21%`。玩家永远算不清自己的伤害，数值也会失控。
 
 **但 `damageMult` 故意做成相乘**，因为有些机制表达的就是"最终伤害 ×2"。
-两种语义**都由数据选择**，引擎不猜。
 
-**聚合必须用 Kahan 补偿求和**（`core/numeric.ts`），不能写裸的 `reduce`：
+### 5.2.2 每个 stat 的完整规则表
+
+见 `src/core/stats/aggregate.ts` 的 `STAT_RULES`。
+它是 `Record<StatKey, StatRule>`，所以**新增一个 StatKey 而不给规则，
+编译就不过** —— 这是"加机制要写数据、不会漏"的保障。
+
+| stat | kind | 钳制 |
+|---|---|---|
+| `strength` / `agility` / `intelligence` / `spirit` | accumulator | — |
+| `maxHp` / `maxMp` / `maxEnergy` / `maxFury` | accumulator | `[0, ∞)` |
+| `hpRegen` / `mpRegen` / `energyRegen` / `furyRegen` | accumulator | — |
+| `critChance` | value | `[0, 1]` |
+| `critDamage` | accumulator | `[0, ∞)` |
+| `haste` | accumulator | `[0, 0.5]` |
+| `armor` | accumulator | `[0, ∞)` |
+| `tenacity` | accumulator | `[0, 1]` |
+| `castSpeed` / `cooldownRate` | accumulator | — |
+| `damageBoost` | accumulator | — |
+| `damageMult` | multiplier | — |
+| `physicalBoost` / `spellBoost` / `dotBoost` / `directBoost` | accumulator | — |
+| `critDamageBoost` | multiplier | — |
+| `armorPen` | accumulator | `[0, 1]` |
+| `vulnerability` | accumulator | — |
+| `damageTakenMult` | multiplier | — |
+| `healingBoost` / `shieldBoost` | accumulator | — |
+
+**急速上限 50%**：再高会让读条趋近于 0，破坏时间轴的语义。
+**暴击率上限 100%**：超过没有意义，且会让"必定暴击"的判定变得含糊。
+
+### 5.3 结算算法
+
+```
+阶段 0  base       从 ContentDef 的基础值出发
+阶段 1  加法层     Σ (op: add | perStackAdd)
+阶段 2  派生层     按 kind 与 stat 依赖递归求解（被引用时惰性求值）
+阶段 3  百分比层   累加器型：直接加进总值；乘子型：(1 + Σ)
+阶段 4  乘法层     ∏ (op: mult)
+阶段 5  覆盖层     op: setOverride
+阶段 6  最大值层   op: max
+阶段 7  钳制       clamp 到 §5.2.2 的范围
+```
+
+**顺序是不变量**，写进测试（`tests/unit/stats.test.ts`）。
+任何阶段顺序变化都会让战斗结果变化，黄金测试会立刻红。
+
+**派生值的求值是"惰性 + 记忆 + 递归"**，不是预先拓扑排序。
+因为 `contrib` 可能引用另一个 stat 的派生值，递归天然支持这种互相引用；
+环由 M1-2 的 `assertNoCycles` 在加载期挡住，运行时有 `resolving` 集合兜底。
+
+### 5.3.1 聚合必须用 Kahan 补偿求和
+
+不能写裸的 `reduce`：
    - 误差从 O(N·ε) 降到 O(1)；
    - 更重要的是**结果对修正数组的顺序不敏感** —— 否则黄金重放测试
      会因为"同一批修正换个顺序"而随机通过。
@@ -443,24 +502,6 @@ interface StatModifier {
 **生命与资源是整数**，公式内部按 float 算、只在写回状态时取整，
 且只能通过 `roundStat` / `roundDamage`。理由与完整数值纪律见
 [架构规范 §12](2026-10-09-architecture.md)。
-
-### 5.3 结算算法
-
-```
-computeStats(state, combatant) -> { stats, breakdown }
-
-阶段 0  base       从 ContentDef 的基础值出发
-阶段 1  加法层      Σ (op: add | perStackAdd)   →  力量 10 + 2 + 3 = 15
-阶段 2  派生层      按 statTier 升序求值 op: addPercent 的 Expr
-                    求值时若引用其他 stat，读的是"已完成阶段 0-2 的当前值"
-阶段 3  百分比层    (1 + Σ op: addPercent)
-阶段 4  乘法层      ∏ (op: mult)
-阶段 5  覆盖层      最后应用 op: setOverride
-阶段 6  最大值层    op: max 取最大值
-阶段 7  钳制        clamp 到 §5.2 的合法范围
-```
-
-**顺序是不变量**，写进测试。任何阶段顺序变化都会让战斗结果变化，golden test 会立刻红。
 
 ### 5.4 溯源（G6）
 
@@ -910,6 +951,7 @@ export const ENTROPY_CLOCK: EquipmentEntity = {
                   sourceKey: 'entity.entropyClock.sources.potential',
                   namespace: 'entropy-clock.potential',
                   tier: 'item' },
+      // 每点智力 +10%（若想要"每点 +0.1%"，把系数改成 0.001）
       value: { e: 'mul', of: [
         { e: 'const', value: 0.10 },
         { e: 'stat', who: 'self', stat: 'intelligence' },
@@ -954,16 +996,21 @@ export const ENTROPY_CLOCK: EquipmentEntity = {
 | 阶段 | 计算 | 结果 |
 |---|---|---|
 | 智力 | `100 (base) + 2 (熵之钟) = 102` | **102** |
-| 势能 `entropy-clock.potential` | `0.10 × 102` | **+10.2%** |
-| 总 `damageBoost` | `10.2%`（只有势能） | **+10.2%** |
-| 伤害 | `1000 × (1 + 0.102) = 1102` | **1102** |
+| 势能 `entropy-clock.potential` | `0.10 × 102` | **+10.2** |
+| 总 `damageBoost`（累加器语义） | `10.2`（只有势能） | **+10.2** |
+| 伤害 | `1000 × (1 + 10.2/100) = 1102` | **1102** |
+
+> **注意单位**：`damageBoost` 是**累加器**，值就是"增伤百分数的数值"。
+> 所以 `0.10 × 智力` 在智力 102 时给出 10.2（即 +10.2%），
+> 而不是 0.102。如果内容作者想要"每点智力 +0.1%"，系数应写 `0.001`。
+> 这一点在规范早期版本里写混了，实现时才暴露出来。
 
 暴击触发后，`entropy-surge` 生效：
 
 | 阶段 | 计算 | 结果 |
 |---|---|---|
-| `entropy-surge` 的 modifier | `contrib('entropy-clock.potential') = 0.102` | **+10.2%** |
-| 总 `damageBoost` | `10.2% (势能) + 10.2% (涌动)` | **+20.4%** |
+| `entropy-surge` 的 modifier | `contrib('entropy-clock.potential') = 10.2` | **+10.2** |
+| 总 `damageBoost` | `10.2 (势能) + 10.2 (涌动)` | **+20.4** |
 | 伤害 | `1000 × 1.204 = 1204` | **1204** |
 
 ### 9.3 动态重算验证（G3）
@@ -973,29 +1020,29 @@ export const ENTROPY_CLOCK: EquipmentEntity = {
 | 项 | 变化前 | 变化后 |
 |---|---|---|
 | 智力 | 102 | **152** |
-| 势能 | 10.2% | `0.10 × 152` = **15.2%** |
-| 涌动（`contrib`） | 10.2% | **15.2%** ← 自动跟随，因为它是引用不是快照 |
-| 总 `damageBoost` | 20.4% | **30.4%** |
+| 势能 | 10.2 | `0.10 × 152` = **15.2** |
+| 涌动（`contrib`） | 10.2 | **15.2** ← 自动跟随，因为它是引用不是快照 |
+| 总 `damageBoost` | 20.4 | **30.4** |
 | 伤害 | 1204 | **1304** |
 
 **这就是"动态重算"的可测试定义**：`intelligence` 变了，涌动的贡献必须在
-**同一次伤害结算内**反映出来。测试用例 §13 T3 直接断言这个数。
+**同一次伤害结算内**反映出来。测试用例 `T3` / `T3b` / `T3c` 直接断言这些数
+（见 `tests/unit/stats.test.ts`）。
 
-如果当初把涌动写成 `value: 0.102` 的常量，这里会停在 1204，测试立刻红。
+如果当初把涌动写成 `value: 10.2` 的常量，这里会停在 1204，测试立刻红。
 
 ### 9.4 "翻倍"的两种语义都被支持
 
-你原话是"增伤效果翻倍"。有两种合理理解，**都在同一 schema 内**：
+需求原文是"增伤效果翻倍"。有两种合理理解，**都在同一 schema 内**：
 
 | 语义 | 写法 | 智力 152 时的总增伤 |
 |---|---|---|
-| **本条来源翻倍**（推荐） | 上面 §9.1 的 `contrib` 写法 | `15.2% + 15.2% = 30.4%` |
-| **全局伤害翻倍** | `modifier: { stat: 'damageMult', op: 'mult', value: 2 }` | `(1 + 0.152) × 2 = 2.304 → +130.4%` |
+| **本条来源翻倍**（推荐） | 上面 §9.1 的 `contrib` 写法（势能 + 涌动） | `15.2 + 15.2 = 30.4` |
+| **全局伤害翻倍** | `modifier: { stat: 'damageMult', op: 'mult', value: 2 }` | `1.152 × 2 = 2.304`（即 ×2.304 倍伤害） |
 
-内容作者选哪一种，**由数据决定，引擎不猜**。这正是"结构化修正"相对
-"硬编码公式"的价值。
-
----
+内容作者选哪一种，**由数据决定，引擎不猜**。
+这正是"结构化修正"相对"硬编码公式"的价值，
+也是 §5.2 那个"两种 stat 语义"存在的理由。
 
 ## 10. 可扩展性验证（G2）
 
