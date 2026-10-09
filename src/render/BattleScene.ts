@@ -979,7 +979,16 @@ export class BattleScene {
 
     /* ---------- 预警条 ---------- */
     const cast = view.boss.cast;
+    /**
+     * ⚠️ 四个对象必须**一起**切可见性。
+     *
+     * 踩过的坑：`castFill` 原先只在 `if (cast)` 分支里被设为 `true`，
+     * 但没有把它设回 `false` —— 于是**最后一次读条的填充块永久留在
+     * 画面上**（表现为"Boss 没读条时那条底色还在"）。
+     * 玩家的读条有同样的问题。
+     */
     this.castPanel.root.visible = cast !== undefined;
+    this.castFill.visible = cast !== undefined;
     this.castName.root.visible = cast !== undefined;
     this.castHint.root.visible = cast !== undefined;
 

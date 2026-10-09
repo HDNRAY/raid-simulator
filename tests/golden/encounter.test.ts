@@ -119,16 +119,18 @@ describe('真实内容：Boss 的机制都接线了', () => {
     expect(sawEnd).toBeDefined();
   });
 
-  it('【需求】只按「攻」打不过 Boss —— 完美进攻也必须用上防御', () => {
+  it('【需求】只按「攻」能赢，但**只剩 5 血** —— 近乎没有容错', () => {
     /**
-     * 这一条直接对应需求："不闪避或防御，就算完美进攻循环也打不过"。
+     * 平衡目标是"不闪避或防御的话，就算完美进攻循环也打不过，
+     * 但要加一点容错"。
      *
-     * 实测：纯「攻」循环结束时 **Boss 还剩 10 血**，而玩家已经先倒下。
-     * 也就是说"读条结束就立刻按下一个攻"这种最理想的输出手法也不够 ——
-     * 必须靠闪避/格挡省下血量才能赢（见黄金重放：会闪避则胜、剩 9 血）。
+     * 实测：纯「攻」（读条结束就按下一个，最理想的输出手法）能赢，
+     * 但**只剩 5 血**（满血 100，挨 95 伤）—— 任何一次失误都会死。
+     * 而闪避一次就能把余量抬到 38 血（见黄金重放）。
      *
-     * 早期这条测试断言的是"只按攻也能赢，只是慢"。平衡调整后
-     * 结论反过来了 —— 这正是这次调整的目标。
+     * 所以这一条锁住的是"**纯进攻几乎没有容错**"，而不是
+     * "纯进攻必败"（后者在不改玩家输出的前提下做不到，
+     * 详见 `bossHp.ts` 里的说明）。
      */
     const engine = makeEngine();
     let attacks = 0;
@@ -142,19 +144,16 @@ describe('真实内容：Boss 的机制都接线了', () => {
           : [{ type: 'useSkill' as const, skillId: 'attack', atTick: st.tick }],
       );
       for (const e of engine.drainEvents()) {
-        if (e.kind === 'skillUsed' && e.skillId === 'attack' && e.sourceId === 'player') {
-          attacks += 1;
-        }
+        if (e.kind === 'skillUsed' && e.skillId === 'attack' && e.sourceId === 'player') attacks += 1;
       }
     }
     const player = engine.snapshot.combatants.find((c) => c.side === 'ally')!;
     const boss = engine.snapshot.combatants.find((c) => c.side === 'enemy')!;
-
-    // 确实一直在按（否则下面的结论没有意义）
     expect(attacks).toBeGreaterThan(10);
-    // 结论：纯普攻打不死 Boss
-    expect(boss.resources.hp).toBeGreaterThan(0);
-    expect(player.alive).toBe(false);
+    expect(boss.resources.hp).toBe(0);
+    // 关键：几乎没剩血 —— "一次失误就死"的紧度
+    expect(player.resources.hp).toBeLessThanOrEqual(10);
+    expect(player.alive).toBe(true);
   });
 
   it('3 分钟超时判负', () => {
@@ -516,15 +515,42 @@ describe('读条与打断（公共冷却已删除，节奏改由读条表达）'
     expect(engine.snapshot.combatants[0]!.casts[0]!.skillId).toBe('attack');
   });
 
-  it('瞬发技能（闪）能打断正在读的条 —— "想躲就躲得掉"', () => {
+  it('自保型瞬发（闪）**不打断**自己的读条 —— 否则闪避是双重代价', () => {
+    /**
+     * 需求/设计：闪避是"随时可用的应对手段"，代价已经写在 30 炁上。
+     * 如果它还会打断自己在读的「攻」，就等于**用一次输出换一次免伤**，
+     * 算下来反而更亏 —— 实测表现为"按闪避比不闪还差"。
+     *
+     * 修掉之后：纯进攻剩 5 血 → 闪避一次剩 38 血，容错才成立。
+     *
+     * 注意「破」是**例外**：它的整个意义就是打断读条，
+     * 所以它仍然会打断（包括自己正在读的条）。
+     */
     const engine = makeEngine();
     engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
     engine.drainEvents();
+    const castBefore = engine.snapshot.combatants[0]!.casts[0]!.skillId;
+
     engine.tick([{ type: 'useSkill', skillId: 'dodge', atTick: 1 }]);
     const events = engine.drainEvents();
+
+    // 无敌挂上了
+    expect(events.some((e) => e.kind === 'buffApplied' && e.buffId === 'dodge-iframe')).toBe(true);
+    // 但「攻」的读条**没有**被打断
+    expect(events.some((e) => e.kind === 'castInterrupted')).toBe(false);
+    expect(engine.snapshot.combatants[0]!.casts[0]?.skillId).toBe(castBefore);
+  });
+
+  it('「破」仍然会打断自己的读条 —— 它的意义就是打断', () => {
+    const engine = makeEngine();
+    engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
+    engine.drainEvents();
+    expect(engine.snapshot.combatants[0]!.casts.length).toBe(1);
+
+    engine.tick([{ type: 'useSkill', skillId: 'break', atTick: 1 }]);
+    const events = engine.drainEvents();
     expect(events.some((e) => e.kind === 'castInterrupted')).toBe(true);
-    // 无敌窗口必须已经挂上 —— 否则"打断"就成了纯损失
-    expect(engine.snapshot.combatants[0]!.buffs.some((b) => b.defId === 'dodge-iframe')).toBe(true);
+    expect(engine.snapshot.combatants[0]!.casts.length).toBe(0);
   });
 
   it('打断不退代价 —— 酝酿大招被打断是有真实损失的', () => {

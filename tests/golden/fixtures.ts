@@ -127,27 +127,23 @@ export const GOLDEN_OUTCOME = {
    * 当前平衡下"会闪避"的玩家**险胜**。
    *
    * 实测（不是估计）：
-   *   - 用时 777 tick ≈ 13.0 秒
-   *   - 玩家剩 **10 血**（满血 100）
-   *   - 而**不会闪避**的纯进攻打法：胜，但只剩 **4 血**
-   *   - **只按「攻」**（最理想的输出循环）：**败**，Boss 还剩 10 血
+   *   - 用时 477 tick ≈ 8.0 秒
+   *   - 玩家剩 **38 血**（满血 100）
+   *   - 而**不会闪避**的纯进攻打法：胜，但只剩 **5 血**（挨 95 伤）
    *
-   * 这两个结果共同落地了需求："不闪避或防御，就算完美进攻循环
-   * 也打不过；加一点容错 —— 闪避 1-2 次就行。"
+   * 这两个数字就是需求要的"容错"：
+   *   "不防御也算完美进攻也打不过" → 纯进攻只剩 5 血，**一次失误就死**
+   *   "闪避 1-2 次就行"           → 闪避一次就把 5 血变成 38 血
    *
-   * 闪避的时机很关键：提前 300/500ms 都胜，提前 700ms 就败
-   * （无敌窗口 0.5 秒盖不住命中）。所以本作要求的不是"看到读条就闪"，
-   * 而是**在命中前一刻闪**。
-   *
-   * 闪避的收益是"从 4 血到 10 血"——幅度不大，原因很实在：
-   * 闪避要**花 30 炁且打断自己的读条**，等于用输出换生存。
-   * 想继续拉大差距，应该调"单次命中伤害"或"玩家回炁速度"，
-   * 而不是继续加 Boss 血 —— 那只会让战斗更长、两边都更难受。
+   * 关键前置改动：**「闪」不再打断自己的读条**（见 battleState 里
+   * `isDefensiveReaction` 的说明）。之前闪避会打断正在读的「攻」，
+   * 等于"用一次输出换一次免伤" —— 算下来反而更亏，所以怎么调都
+   * 是"会闪比不闪更差"。修掉之后闪避才真正是"容错"。
    */
   status: 'victory' as const,
   endReason: 'hpZero' as const,
   /** 通关用时（tick）。连续量，对数值改动敏感。 */
-  ticks: 777,
+  ticks: 477,
   /**
    * 当前内容没有暴击判定，所以随机数一次都不被消耗。
    *
@@ -157,7 +153,7 @@ export const GOLDEN_OUTCOME = {
    */
   finalRngSeed: 20261009,
   combatants: {
-    player: { alive: true, hp: 10, energy: 0, douqi: 34, damageDealt: 0, damageTaken: 0 },
+    player: { alive: true, hp: 38, energy: 0, douqi: 32, damageDealt: 0, damageTaken: 0 },
     meiichiro: { alive: false, hp: 0, energy: 0, douqi: 0, damageDealt: 0, damageTaken: 0 },
   },
 } satisfies Omit<RunOutcome, 'ticks'> & { readonly ticks: number };
@@ -200,7 +196,7 @@ export function planPriority(
     readonly dodgeLeadMs?: number;
   } = {},
 ): (tick: number, state: BattleState) => readonly Action[] {
-  const leadMs = options.dodgeLeadMs ?? 600;
+  const leadMs = options.dodgeLeadMs ?? 500;
   return (tick, state) => {
     /**
      * 会躲的玩家：**在命中前一点点闪避**，而不是一看到读条就闪。

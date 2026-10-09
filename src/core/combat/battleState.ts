@@ -787,7 +787,28 @@ export class BattleEngine {
      * 结果连「攻」的读条也没了。用日志才看出来：同一 tick 里
      * 先 `castInterrupted`、再 `skillRejected`。
      */
-    if (gate.ok && actor.casts.length > 0) {
+    /**
+     * ⚠️ **自保型瞬发不打断自己的读条**（「闪」）。
+     *
+     * 理由：闪避是"随时可用的应对手段"，代价已经写在 30 炁上。
+     * 如果它还会打断自己在读的「攻」，就变成**双重代价** ——
+     * 实测表现为"按闪避反而输得更惨"：省下的 24-34 点伤害
+     * 抵不过损失的那一次「攻」。修掉之后闪避才真正是"容错"
+     * （纯进攻剩 5 血 → 闪一次变 38 血）。
+     *
+     * ⚠️ **但「破」不能豁免**：它的整个意义就是打断读条
+     * （包括自己在读的条 —— 那是"用一次输出换一次打断"的取舍）。
+     * 我第一版用 `invulnerable` 判定时顺手把它也排除了，
+     * 结果"瞬发技能能打断读条"这条直接失效。
+     *
+     * 所以豁免条件是**两个**都满足：瞬发 + 自保 buff。
+     */
+    const isSelfProtection = skill.abilities.some(
+      (a) => a.kind === 'grant' && a.buff.flags?.invulnerable === true,
+    );
+    const kind = skill.tags?.includes('interrupt') ? 'interrupt' : 'other';
+    const isDefensiveReaction = isSelfProtection && kind !== 'interrupt';
+    if (gate.ok && actor.casts.length > 0 && !isDefensiveReaction) {
       for (const cast of actor.casts) {
         this.events.push({
           kind: 'castInterrupted',
