@@ -124,21 +124,24 @@ export function makeEngine(seed = FIXED_SEED): BattleEngine {
  */
 export const GOLDEN_OUTCOME = {
   /**
-   * 当前平衡下"会闪避"的玩家**险胜**。
+   * 当前平衡下"会闪避"的玩家获胜。
    *
    * 实测（不是估计）：
    *   - 用时 477 tick ≈ 8.0 秒
-   *   - 玩家剩 **38 血**（满血 100）
-   *   - 而**不会闪避**的纯进攻打法：胜，但只剩 **5 血**（挨 95 伤）
+   *   - 玩家剩 **60 血**（满血 100）
+   *   - 而**不会闪避**的纯进攻打法：胜，但只剩 **8 血**
    *
-   * 这两个数字就是需求要的"容错"：
-   *   "不防御也算完美进攻也打不过" → 纯进攻只剩 5 血，**一次失误就死**
-   *   "闪避 1-2 次就行"           → 闪避一次就把 5 血变成 38 血
+   * 这两个数字就是需求的落地：
+   *   "不防御就算完美进攻也打不过" → 纯进攻只剩 8 血，**一次失误就死**
+   *   "闪避 1-2 次就行"           → 闪避把余量抬到 60 血，非常从容
    *
-   * 关键前置改动：**「闪」不再打断自己的读条**（见 battleState 里
-   * `isDefensiveReaction` 的说明）。之前闪避会打断正在读的「攻」，
-   * 等于"用一次输出换一次免伤" —— 算下来反而更亏，所以怎么调都
-   * 是"会闪比不闪更差"。修掉之后闪避才真正是"容错"。
+   * 闪避的窗口是 **300–600ms**（Boss 前摇 1.8s / 2.2s，无敌 500ms）：
+   * 提前 800ms 会败 —— 无敌在命中前就过期了。所以这不是"越早越好"，
+   * 而是要在命中前那一刻按。
+   *
+   * 关键前置改动：「闪」**不打断自己的读条**（见 battleState 里
+   * `isDefensiveReaction` 的说明）。否则闪避是"用一次输出换一次免伤"，
+   * 算下来反而更亏 —— 怎么调平衡都是"会闪更差"。
    */
   status: 'victory' as const,
   endReason: 'hpZero' as const,
@@ -153,7 +156,7 @@ export const GOLDEN_OUTCOME = {
    */
   finalRngSeed: 20261009,
   combatants: {
-    player: { alive: true, hp: 38, energy: 0, douqi: 32, damageDealt: 0, damageTaken: 0 },
+    player: { alive: true, hp: 60, energy: 0, douqi: 60, damageDealt: 0, damageTaken: 0 },
     meiichiro: { alive: false, hp: 0, energy: 0, douqi: 0, damageDealt: 0, damageTaken: 0 },
   },
 } satisfies Omit<RunOutcome, 'ticks'> & { readonly ticks: number };

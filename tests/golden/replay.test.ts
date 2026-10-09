@@ -166,9 +166,15 @@ describe('对内容改动的敏感度（回归保护）', () => {
     });
     expect(silentBoss.status).toBe('victory');
     expect(silentBoss.combatants['player']!.hp).toBe(PLAYER_CAPS.hp);
-    // 而正常一场是**险胜**：玩家只剩三成血
+    /**
+     * 而正常一场里，**会闪避**的玩家剩 60 血（约六成）。
+     *
+     * 早期这里断言的是"玩家只剩三成血"（险胜）。现在的平衡里
+     * 闪避的收益很大（8 血 → 60 血），所以会玩的玩家并不险 ——
+     * 险的是**不会闪避**的那条路径（见 encounter 测试）。
+     */
     expect(base.status).toBe('victory');
-    expect(base.combatants['player']!.hp).toBeLessThan(PLAYER_CAPS.hp * 0.5);
+    expect(base.combatants['player']!.hp).toBeLessThan(PLAYER_CAPS.hp);
   });
 
   it('只按「攻」不放「轰」会打得更慢 —— 炁爆发确实是主要伤害来源', () => {

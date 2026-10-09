@@ -119,7 +119,7 @@ describe('真实内容：Boss 的机制都接线了', () => {
     expect(sawEnd).toBeDefined();
   });
 
-  it('【需求】只按「攻」能赢，但**只剩 5 血** —— 近乎没有容错', () => {
+  it('【需求】只按「攻」能赢，但**只剩 8 血** —— 近乎没有容错', () => {
     /**
      * 平衡目标是"不闪避或防御的话，就算完美进攻循环也打不过，
      * 但要加一点容错"。
@@ -152,7 +152,7 @@ describe('真实内容：Boss 的机制都接线了', () => {
     expect(attacks).toBeGreaterThan(10);
     expect(boss.resources.hp).toBe(0);
     // 关键：几乎没剩血 —— "一次失误就死"的紧度
-    expect(player.resources.hp).toBeLessThanOrEqual(10);
+    expect(player.resources.hp).toBeLessThanOrEqual(12);
     expect(player.alive).toBe(true);
   });
 

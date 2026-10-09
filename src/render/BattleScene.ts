@@ -613,13 +613,28 @@ export class BattleScene {
       fillAlpha: 0.9,
       radius: 2,
     });
-    this.castName = new Label(pixi, { x: cb.x + 12, y: cb.y + 6, size: FONT.warn, color: 0xffe0d0 });
+    /**
+     * 文字位置：**垂直居中**在面板里（用 anchorY 而不是猜偏移）。
+     *
+     * 踩过的坑：之前写的是固定 `y + 6` / `y + 9`，而面板只有 28px 高 ——
+     * 剩余秒数的字底（约 y+28）正好压到底边，看起来"被边框挤住"。
+     * 现在面板加高到 32 并把两者按中线对齐。
+     */
+    const castMidY = cb.y + cb.h / 2;
+    this.castName = new Label(pixi, {
+      x: cb.x + 12,
+      y: castMidY,
+      size: FONT.warn,
+      color: 0xffe0d0,
+      anchorY: 0.5,
+    });
     this.castHint = new Label(pixi, {
       x: cb.x + cb.w - 10,
-      y: cb.y + 9,
+      y: castMidY,
       size: FONT.body,
       color: 0xffd0b0,
       anchorX: 1,
+      anchorY: 0.5,
     });
     /**
     /**
@@ -646,8 +661,14 @@ export class BattleScene {
     this.castFill.visible = false;
     this.castName.root.visible = false;
     this.castHint.root.visible = false;
-    // 顺序即层叠：底 → 填充 → 文字
-    hud.addChild(this.castPanel.root, this.castFill, this.castName.root, this.castHint.root);
+    /**
+     * 层叠顺序：**填充 → 面板（底+描边）→ 文字**。
+     *
+     * ⚠️ 踩过的坑：早期是"面板 → 填充 → 文字"，于是填充块**把描边
+     * 盖住了** —— 而且只盖住中间一段，看起来像"上边框缺失/不完整"。
+     * 把描边画在填充之上，边框才始终完整。
+     */
+    hud.addChild(this.castFill, this.castPanel.root, this.castName.root, this.castHint.root);
 
     /* 玩家读条（面板顶部） */
     const pcb = LAYOUT.playerCastBar;
@@ -710,9 +731,10 @@ export class BattleScene {
     this.playerCastFill.visible = false;
     this.playerCastName.root.visible = false;
     this.playerCastTime.root.visible = false;
+    // 同 Boss：填充在下、面板（含描边）在上
     hud.addChild(
-      this.playerCastPanel.root,
       this.playerCastFill,
+      this.playerCastPanel.root,
       this.playerCastName.root,
       this.playerCastTime.root,
     );

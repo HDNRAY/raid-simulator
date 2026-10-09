@@ -443,7 +443,7 @@ const BOSS_CLEAVE: SkillDef = {
   descKey: 'boss.cleave.desc',
   icon: 'boss_cleave',
   abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: BOSS_TELEGRAPH }],
-  castTime: logicMs(14),
+  castTime: logicMs(18),
   cooldown: logicMs(30),
   cost: [],
   targeting: { mode: 'primaryEnemy' },
@@ -452,7 +452,7 @@ const BOSS_CLEAVE: SkillDef = {
       // ⚠️ `at` 必须与 `castTime` 一致：读条走完才命中。
       // 早期 `at` 比 `castTime` 短，于是伤害在读条**结束前**就结算 ——
       // 表现为"读条条还在走，血已经掉了"。
-      at: logicMs(14),
+      at: logicMs(18),
       effects: [
         {
           kind: 'damage',
@@ -464,7 +464,7 @@ const BOSS_CLEAVE: SkillDef = {
            * 单发 14 点看起来不重，但出招频率提到了约 1.1 秒一次 ——
            * "重"体现在**总压力**上，而不是非要一击半血。
            */
-          damage: { base: S(20), school: 'physical', canCrit: false, countsAsHit: true },
+          damage: { base: S(26), school: 'physical', canCrit: false, countsAsHit: true },
         },
       ],
     },
@@ -482,14 +482,15 @@ const BOSS_SWEEP: SkillDef = {
   descKey: 'boss.sweep.desc',
   icon: 'boss_sweep',
   abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: BOSS_TELEGRAPH }],
-  castTime: logicMs(18),
+  // 比重斩（1.8s）更长：它是"必须躲"的那一招
+  castTime: logicMs(22),
   cooldown: logicMs(60),
   cost: [],
   targeting: { mode: 'primaryEnemy' },
   hits: [
     {
       // 同重斩：命中时刻 = 读条结束
-      at: logicMs(18),
+      at: logicMs(22),
       effects: [
         {
           kind: 'damage',
@@ -504,7 +505,7 @@ const BOSS_SWEEP: SkillDef = {
            * 前摇更长（长到能看清并闪避），命中更痛 —— 所以"看到横扫
            * 必须反应"是本作的核心节奏。
            */
-          damage: { base: S(26), school: 'fire', canCrit: false, countsAsHit: true },
+          damage: { base: S(34), school: 'fire', canCrit: false, countsAsHit: true },
         },
       ],
     },

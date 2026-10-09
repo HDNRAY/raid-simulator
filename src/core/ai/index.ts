@@ -308,7 +308,7 @@ export const VERROT_BEHAVIORS: readonly Behavior[] = [
       {
         skillId: 'boss-sweep',
         when: { kind: 'hasBuff', who: 'self', buffId: 'boss-frenzy' },
-        gapMs: 4_500,
+        gapMs: 2_700,
       },
       { skillId: 'boss-empower', gapMs: 7_700 },
       /**
@@ -335,7 +335,7 @@ export const VERROT_BEHAVIORS: readonly Behavior[] = [
             { kind: 'hasBuff', who: 'self', buffId: 'boss-frenzy' },
           ],
         },
-        gapMs: 7_700,
+        gapMs: 4_600,
       },
       { skillId: 'boss-sweep', gapMs: 4_300 },
       { skillId: 'boss-cleave', gapMs: 1_200 },

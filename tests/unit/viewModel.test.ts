@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { translator } from '../../src/i18n/translator';
+import { ALL_SKILLS } from '../../src/data/content';
 import {
   formatClock,
   isTightWindow,
@@ -131,5 +132,40 @@ describe('本地化 key 契约（i18n 规范 I1）', () => {
     for (const key of required) {
       expect(() => translator.t(key as never)).not.toThrow();
     }
+  });
+});
+
+describe('数据一致性：命中时刻必须等于读条时长', () => {
+  /**
+   * Boss 招式的 `hits[].at` 表示"命中在读条的第几毫秒"。
+   * 它必须**等于** `castTime`（读条走完才命中）。
+   *
+   * ⚠️ 这个坑我踩了三次：
+   *   - `at` < `castTime` → 伤害在读条**结束前**就结算，
+   *     表现为"读条条还在走、血已经掉了"
+   *   - `at` > `castTime` → 读条条已经消失、伤害才掉
+   *
+   * 而且两次都是**改了 `castTime` 忘了同步 `at`**。
+   * 它不会让任何功能测试失败（战斗照常进行），所以必须专门守住。
+   */
+  it('Boss 读条技能的 at 与 castTime 一致', () => {
+    /**
+     * ⚠️ 这条规则**只适用于 Boss 招式**。
+     *
+     * 玩家技能（「攻」「轰」）的 `at` 是 0 —— 它们的命中在**读条结束时**
+     * 结算，而不是按 `at` 计时。所以不能用同一套规则去卡它们
+     * （第一版我就那么写了，结果把「攻」也报成违规）。
+     */
+    const bossSkills = ALL_SKILLS.filter((s) => s.id.startsWith('boss-') && s.castTime > 0);
+    expect(bossSkills.length).toBeGreaterThan(0);
+    const offenders: string[] = [];
+    for (const skill of bossSkills) {
+      for (const hit of skill.hits) {
+        if (hit.at !== skill.castTime) {
+          offenders.push(`${skill.id}: at=${hit.at} castTime=${skill.castTime}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });
