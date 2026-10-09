@@ -374,8 +374,18 @@ async function bootstrap(): Promise<void> {
    *   - 按 `↑` 把焦点提到按钮上，再 Enter
    */
   let settingsFocused = false;
+  /**
+   * 打开设置前是否**本来就**处于暂停。
+   *
+   * 关闭设置时要恢复原状，而不是无脑 `setPaused(false)` ——
+   * 否则"暂停中打开设置、关掉设置"会把玩家的暂停状态吞掉。
+   */
+  let pausedBeforeSettings = false;
+
   const openSettings = (tab: 'general' | 'keys' = 'keys'): void => {
+    if (settingsOpen) return;
     settingsOpen = true;
+    pausedBeforeSettings = loop.isPaused;
     // 打开设置必须暂停战斗 —— 否则玩家改键时会被 Boss 打死
     loop.setPaused(true);
     settings.open(tab);
@@ -383,7 +393,8 @@ async function bootstrap(): Promise<void> {
   const closeSettings = (): void => {
     settingsOpen = false;
     settings.close();
-    loop.setPaused(false);
+    // 恢复打开前的暂停状态
+    loop.setPaused(pausedBeforeSettings);
   };
   const toggleSettings = (): void => {
     if (settingsOpen) closeSettings();
@@ -430,7 +441,19 @@ async function bootstrap(): Promise<void> {
         event.preventDefault();
         return;
       }
-      if (key === 'arrowdown' || key === 'escape') {
+      /**
+       * **Esc 直接打开设置**（需求）。
+       *
+       * 顺带暂停 —— `openSettings` 里会 `setPaused(true)`。
+       * 旧行为是"Esc 切换暂停"，但那让玩家要先暂停、再按 `,`
+       * 才能进设置，多一次操作；而且常见游戏习惯就是 Esc 进设置。
+       */
+      if (key === 'escape') {
+        openSettings('keys');
+        event.preventDefault();
+        return;
+      }
+      if (key === 'arrowdown') {
         if (settingsFocused) {
           settingsFocused = false;
           settingsButton.setFocused(false);

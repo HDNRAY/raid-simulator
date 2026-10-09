@@ -88,9 +88,15 @@ export class BattleLoop {
       bindings: this.bindings,
       currentTick: () => this.engine.snapshot.tick,
       isHoldSkill: (skillId) => this.engine.skillOf(skillId)?.holdDrain !== undefined,
-      onUiKey: (key) => {
-        if (key === 'escape') this.paused = !this.paused;
-      },
+      /**
+       * 界面按键不再由这里处理。
+       *
+       * 需求：**Esc 直接打开设置弹窗**（顺带暂停），而不是切换暂停。
+       * 所以 Esc 交给 `main.ts` 的捕获阶段监听器统一处理；
+       * 这里保留 `onUiKey` 只是为了"界面键不作为技能"这个语义
+       * （输入层会把 Esc/Enter 从技能处理里摘出来）。
+       */
+      onUiKey: () => {},
     });
     this.ownedInput = true;
   }

@@ -265,9 +265,9 @@ export const zhCN = {
      * 为什么选 `,`：Esc 已经有"暂停 / 返回"的语义；`,` 紧挨技能键区、
      * 单键、不与任何技能位冲突。
      */
-    openKey: ',',
+    openKey: 'Esc',
     /** 完整说明（用在帮助文本里，不画在按钮旁） */
-    openKeyHint: '按 , 或 ↑ 选中设置，Enter 打开',
+    openKeyHint: '按 Esc 或 , 打开设置；也可以 ↑ 选中后 Enter',
     close: '关闭',
     tabGeneral: '通用',
     tabKeys: '按键',
