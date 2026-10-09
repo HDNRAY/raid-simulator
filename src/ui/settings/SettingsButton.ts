@@ -27,7 +27,7 @@ export interface SettingsButtonOptions {
 }
 
 /** 按钮几何：右下角，压在技能栏上方一点。 */
-const SIZE = 26;
+const SIZE = 18;
 const MARGIN = 8;
 
 export class SettingsButton {
@@ -43,7 +43,8 @@ export class SettingsButton {
       // 图标 + 快捷键提示，整体居中在"压在技能栏上方"的位置
       anchor: {
         x: LOGICAL.width - MARGIN - SIZE / 2,
-        y: LOGICAL.height - MARGIN - SIZE - 62,
+        // 技能栏顶部在 492，再往上留一点
+        y: LOGICAL.height - MARGIN - SIZE - 66,
       },
       /**
        * 需求："设置按钮，Esc 在 icon 的左边……这个设计不对，

@@ -279,7 +279,7 @@ class SkillBarView {
       const glyph = new Label(this.pixi, {
         x: pos.glyph.x,
         y: pos.glyph.y,
-        size: FONT.body,
+        size: FONT.small,
         color: 0xffffff,
         // 双向居中 —— 需求指出技能字原先"位置也不是居中的"
         anchorX: 0.5,
@@ -316,15 +316,16 @@ class SkillBarView {
       /**
        * 冷却秒数：**居中盖在技能字上**。
        *
-       * - 字号 `FONT.big`(26px) > 技能字 `FONT.body`(15px)，
-       *   这样"谁盖谁"在视觉上是明确的
+       * - 字号 `FONT.cd`(18px) > 技能字 `FONT.small`(13px)，
+       *   这样"谁盖谁"在视觉上是明确的。
+       *   （40px 的格子放不下原来的 26px，所以两个都缩小了）
        * - 双向居中（anchor 0.5/0.5），所以 `pos.cooldown` 是中心点
        * - 描边保证在任何底色上都读得清（白色遮罩 / 深色格子都行）
        */
       const cd = new Label(this.pixi, {
         x: pos.cooldown.x,
         y: pos.cooldown.y,
-        size: FONT.big,
+        size: FONT.cd,
         color: 0xffffff,
         anchorX: 0.5,
         anchorY: 0.5,

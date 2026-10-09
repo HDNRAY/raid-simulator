@@ -128,12 +128,12 @@ describe('技能格内三个标签都不越界、互不重叠', () => {
      *
      * 仍然必须互不重叠的是**按键提示**：它是小字，被压住就读不出来。
      *
-     * 尺寸来自浏览器实测（探针读 `getBounds()`）：
-     *   技能字 15px 楷体 → 15x17
-     *   冷却秒数 26px     → 22x34（含描边）
+     * 尺寸按当前字号折算（格子从 52 收到 40 之后三者都缩了）：
+     *   技能字 13px 楷体 → 13x15
+     *   冷却秒数 18px     → 17x23（含描边）
      *   按键提示 11px     → 7x13
      */
-    const sizes = { glyph: { w: 15, h: 17 }, cooldown: { w: 22, h: 34 }, key: { w: 7, h: 13 } };
+    const sizes = { glyph: { w: 13, h: 15 }, cooldown: { w: 17, h: 23 }, key: { w: 7, h: 13 } };
     const total = 6;
     for (let i = 0; i < total; i += 1) {
       const rect = skillSlotRect(i, total);
@@ -169,10 +169,21 @@ describe('技能格内三个标签都不越界、互不重叠', () => {
     }
   });
 
-  it('格子够大：26px 数字 + 15px 技能字都在格内且彼此留有余量', () => {
+  it('格子尺寸与需求一致：40×40', () => {
+    /**
+     * 需求明确指定："技能按钮改成 40px*40px，所有元素相应调整，
+     * 包括按钮间距。"
+     *
+     * 40 是**硬约束**（不是算出来的），所以这里直接钉死；
+     * 格子里的元素（数字 18px、技能字 13px）是**为它让步**的。
+     */
     const rect = skillSlotRect(0, 6);
-    // 数字（26px）约 34px 高，必须放得进 52px 的格子
-    expect(rect.h).toBeGreaterThanOrEqual(34 + 8);
+    expect(rect.w).toBe(40);
+    expect(rect.h).toBe(40);
+    // 间距也从 6 收到 4
+    expect(LAYOUT.skillBar.gap).toBe(4);
+    // 冷却数字必须仍放得进格子（18px 字约 23px 高）
+    expect(rect.h).toBeGreaterThanOrEqual(23 + 4);
   });
 
   it('槽位右对齐：最后一格的右边缘贴合安全边距', () => {
