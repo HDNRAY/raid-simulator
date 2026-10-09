@@ -345,18 +345,27 @@ const rules = {
   },
 
   /**
-   * C5 的辅助：core/ 的状态里不许有 Map / Set / 类实例。
+   * C5：**状态定义**里不许出现 Map / Set / 类实例 / 函数。
    *
-   * 这条规则只能拦字面量构造（`new Map()`），拦不住"从别处传进来的 Map"，
-   * 所以它只是第一道防线；真正的保证是 tests/unit 里的 structuredClone 测试。
+   * 规则的设计过程值得记录（它一开始是错的）：
+   *
+   * 最初的版本禁止整个 `core/` 使用 `Map`/`Set`。写 M1-2 的依赖图时
+   * 被拦下了 —— 但那是**加载期的瞬态分析结构**（成员关系图），
+   * 不是战斗状态。语法层无法区分"持久状态"与"临时结构"，
+   * 所以那条规则是个过宽的近似：它拦不住真正的违规
+   * （`Map` 从别处传进状态），却挡了合理用法。
+   *
+   * 现在改成**按文件精确管辖**：只检查状态定义所在的文件。
+   * 这比"全 core 禁 Map"更严（它真的盯着状态），也更实用。
+   * 运行时的保证仍然由 structuredClone 测试兜底。
    */
   'core/no-non-cloneable': {
     meta: {
       type: 'problem',
-      docs: { description: 'core/ 状态必须是可结构化克隆的 plain object' },
+      docs: { description: '状态定义必须是可结构化克隆的 plain object' },
       schema: [],
       messages: {
-        bad: 'core/ 不许使用 {{name}}（架构规范 C5）。状态必须可结构化克隆且可哈希——用 plain object 与数组。',
+        bad: '状态里不许使用 {{name}}（架构规范 C5）。BattleState 必须可结构化克隆且可哈希——用 plain object 与数组。',
       },
     },
     create(context) {
@@ -365,6 +374,13 @@ const rules = {
         NewExpression(node) {
           if (node.callee.type === 'Identifier' && banned.has(node.callee.name)) {
             context.report({ node, messageId: 'bad', data: { name: node.callee.name } });
+          }
+        },
+        // 类型注解同样算（`buffs: Map<...>` 这种）
+        TSTypeReference(node) {
+          const name = node.typeName.type === 'Identifier' ? node.typeName.name : undefined;
+          if (name && banned.has(name)) {
+            context.report({ node, messageId: 'bad', data: { name } });
           }
         },
       };

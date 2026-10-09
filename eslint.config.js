@@ -82,6 +82,18 @@ export default [
       'raid/core/no-nondeterminism': 'error',
       'raid/core/no-dom-globals': 'error',
       'raid/core/no-async': 'error',
+    },
+  },
+
+  /*
+   * C5 精确管辖：只有"定义持久状态"的文件不许出现 Map/Set。
+   *
+   * 比"全 core 禁 Map"更严（它真的盯着状态），也更实用 ——
+   * 加载期的瞬态分析结构（依赖图、成员关系表）用 Map 是合理的。
+   */
+  {
+    files: ['src/core/types.ts', 'src/core/battleState.ts'],
+    rules: {
       'raid/core/no-non-cloneable': 'error',
     },
   },
@@ -94,6 +106,8 @@ export default [
       'raid/core/no-nondeterminism': 'error',
       'raid/core/no-dom-globals': 'error',
       'raid/core/no-async': 'error',
+      // C5 现在按文件精确管辖，所以 fixture 要显式开启它，
+      // 否则 tests/unit/lintRules.test.ts 里那条断言会失去意义
       'raid/core/no-non-cloneable': 'error',
     },
   },
