@@ -132,6 +132,30 @@ export interface GateResult {
 }
 
 /**
+ * 是否处于公共冷却中。
+ *
+ * **这是 GCD 的唯一判据** —— 引擎门禁与输入层的"预测可用性"都调用它。
+ *
+ * 为什么要抽出来（踩过的坑）：输入层原本自己写了一份
+ * `gcd.expiresAtTick > tick + 1`（我按经验猜的余量），而引擎用的是
+ * `> tick`。差的那一个 tick 让**每个公共冷却周期都漏出 1–2 次
+ * 「公共冷却中」的误报** —— 玩家按住普攻时每隔 0.5 秒就看到一次，
+ * 而技能其实马上就要放出来了。
+ *
+ * 修法不是再去调那个余量数字（那只是在猜另一个数字），
+ * 而是让两侧**共用同一个判据**，从结构上不可能不一致。
+ *
+ * 注意 `flags.blocksGcd` 这条路：它由 buff 的 flag 提供，
+ * 是"不占 GCD"之外的另一种表达方式，同样要认。
+ */
+export function isOnGcd(combatant: Combatant, skill: { readonly gcd: boolean }): boolean {
+  if (!skill.gcd) return false;
+  const flags = aggregateFlags(combatant);
+  if (flags.blocksGcd) return true;
+  return combatant.buffs.some((b) => b.defId === 'gcd');
+}
+
+/**
  * 施法门禁检查。**顺序是确定的**，因为它决定了"同时多个原因时报告哪个"。
  *
  * 顺序：locked → casting → gcd → cooldown → cost → condition
@@ -220,7 +244,7 @@ export function checkGate(
   const tick = ctx.currentTick();
 
   // 3. GCD（由 buff 实现，不占 GCD 的技能不看它）
-  if (skill.gcd && (flags.blocksGcd || combatant.buffs.some((b) => b.defId === 'gcd'))) {
+  if (isOnGcd(combatant, skill)) {
     return { ok: false, reason: 'gcd' };
   }
 

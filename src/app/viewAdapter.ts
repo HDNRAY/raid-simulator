@@ -158,6 +158,17 @@ export class ViewAdapter {
   private damageDealt = 0;
   /** 累计承受的总伤害 */
   private damageTaken = 0;
+  /**
+   * 最近一次被拒的「技能 + 原因」与它的 tick。
+   *
+   * 用途：**不让同一件事重复刷屏**。
+   *
+   * 输入层已经用"与引擎共用的 GCD 判据"把绝大部分误报消掉了，
+   * 但预测毕竟是在动作生效**之前**做的 —— 状态在那一瞬间变化时
+   * 仍可能漏一次。这层去重保证即使漏了，玩家也不会看到
+   * 同一行提示连续闪动。
+   */
+  private lastReject: { readonly key: string; readonly tick: number } | undefined;
 
   constructor(private readonly skills: ReadonlyMap<string, SkillDef>) {
     for (const [id, skill] of skills) this.skillNameKeys.set(id, skill.nameKey);
@@ -206,9 +217,20 @@ export class ViewAdapter {
           /**
            * 技能被拒时把「技能名 + 原因」放进状态区。
            *
-           * 为什么不写在技能格上：七个格子各挂一行小字会糊成一片，
-           * 而且格子只有 48px。集中一行反而读得更快。
+           * 为什么不写在技能格上：格子只有 44px，七个格子各挂一行
+           * 小字会糊成一片。集中一行反而读得更快。
+           *
+           * 同一个「技能 + 原因」在 1 秒内只提示一次 ——
+           * 见 `lastReject` 的说明。
            */
+          const key = `${event.skillId}:${event.reason}`;
+          const suppressed =
+            this.lastReject !== undefined &&
+            this.lastReject.key === key &&
+            tick - this.lastReject.tick < 60;
+          this.lastReject = { key, tick };
+          if (suppressed) break;
+
           const skillName = this.skillNameKeys.get(event.skillId) ?? event.skillId;
           this.setStatus(`block.${blockKeyOf(event.reason)}`, 55, skillName);
           break;

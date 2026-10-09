@@ -6,6 +6,7 @@ import {
   makeGoldenEngineOptions,
   planPriority,
 } from './fixtures';
+import { roughlyUsable } from '../../src/core/run';
 
 /**
  * 真实内容的集成测试。
@@ -300,5 +301,57 @@ describe('斗炁按伤害换算', () => {
     run(engine, 60 * 120, { skillId: 'attack', everyTicks: 30 });
     const player = engine.snapshot.combatants.find((c) => c.side === 'ally')!;
     expect(player.resources.douqi).toBeLessThanOrEqual(PLAYER_CAPS.douqi);
+  });
+});
+
+describe('公共冷却不应产生误报（用户报过的 bug）', () => {
+  /**
+   * 症状：按住「攻」时会周期性地看到「攻 · 公共冷却中」，
+   * 而技能其实马上就要放出来了。
+   *
+   * 根因：输入层的"预测可用性"与引擎门禁**各写了一份 GCD 判据**，
+   * 输入层那份多了 1 个 tick 的"余量"，于是每个公共冷却周期
+   * 都漏出 1–2 次误报。
+   *
+   * 修法：两侧共用 `isOnGcd`。这条测试锁住"共用"这个事实 ——
+   * 如果以后有人再复制一份判据，它会失败。
+   */
+  it('预测门禁与引擎判据一致：按住「攻」不会产生被拒', () => {
+    const options = makeGoldenEngineOptions();
+    const engine = new BattleEngine(options);
+    const attack = options.skills.get('attack')!;
+    let attacks = 0;
+    let rejects = 0;
+
+    for (let t = 0; t < 200; t += 1) {
+      const st = engine.snapshot;
+      const actor = st.combatants.find((c) => c.side === 'ally')!;
+      // 模拟"玩家按住不放"：只在预测可用时入队
+      const usable = roughlyUsable('attack', st, attack, actor.id);
+      engine.tick(
+        usable ? [{ type: 'useSkill' as const, skillId: 'attack', atTick: st.tick }] : [],
+      );
+      for (const e of engine.drainEvents()) {
+        if (e.kind === 'skillUsed' && e.skillId === 'attack') attacks += 1;
+        if (e.kind === 'skillRejected' && e.skillId === 'attack') rejects += 1;
+      }
+    }
+
+    expect(attacks).toBeGreaterThan(0);
+    expect(rejects).toBe(0);
+  });
+
+  it('不做预测地硬按会被大量拒绝 —— 说明预测门禁确实在起作用', () => {
+    const options = makeGoldenEngineOptions();
+    const engine = new BattleEngine(options);
+    let rejects = 0;
+    for (let t = 0; t < 200; t += 1) {
+      // 每个 tick 都硬按，违反公共冷却
+      engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: engine.snapshot.tick }]);
+      for (const e of engine.drainEvents()) {
+        if (e.kind === 'skillRejected' && e.skillId === 'attack') rejects += 1;
+      }
+    }
+    expect(rejects).toBeGreaterThan(100);
   });
 });
