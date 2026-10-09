@@ -29,7 +29,9 @@ PixiJS 像素渲染。
 |---|---|
 | [数据模型规范](docs/specs/2026-10-09-data-model.md) | `GameEntity` / `Skill` / `Effect` / `Buff` / `Modifier` / `Expr` / `Condition` / `Trigger`，修正树结算算法，14 条验收测试 |
 | [架构与 UI 规范](docs/specs/2026-10-09-architecture.md) | 技术选型、分层架构、硬约束、目录结构、测试策略、UI 组件化与设计系统、里程碑、发布流程 |
+| [M0–M2 实施计划](docs/plans/2026-10-09-m0-m2.md) | 工程骨架 + 纯确定性核心 + 判定层的任务分解、依赖顺序、每步验证命令 |
 | [画面示意图](docs/mockups/2026-10-09-battle-scene.png) | 960×540 逻辑分辨率下的战斗界面布局（Boss 144×192） |
+| [发布密钥配置](docs/setup-deploy-key.md) | `SSH_DEPLOY_KEY` 配置步骤（当前未配置） |
 
 **新读者建议顺序**：先看画面示意图 → 再看数据模型规范的 §9「熵之钟走查」
 （一个完整的被动装备例子）→ 再看架构规范的 §2 分层。
