@@ -26,7 +26,8 @@
  * 见架构规范 §12。
  */
 
-import { aggregateFlags, applyBuff, expireBuffs } from '../buffs';
+import { aggregateFlags, applyBuff, expireBuffs,
+} from '../buffs';
 import {
   applyDamage,
   applyHeal,
@@ -42,7 +43,7 @@ import {
   type CombatContext,
   syncResourceGateBuff,
 } from './index';
-import { computeStats } from '../stats/pipeline';
+import { computeStats, type StatBreakdown } from '../stats/pipeline';
 import { createAiState, decide, type AiState, type AiView } from '../ai';
 import { nextRandom, type RngState } from '../rng';
 import type {
@@ -161,6 +162,20 @@ export class BattleEngine {
    */
   get snapshot(): BattleState {
     return { ...this.state, rngSeed: this.rng.seed };
+  }
+
+  /**
+   * 属性溯源：某个 stat 的当前值由哪些来源构成。
+   *
+   * 为什么必须有对外接口（数据模型规范 §5.4）：数值问题一旦出现，
+   * "为什么是 3.2 而不是 2.5"是最高频的问题。没有溯源就只能靠猜。
+   *
+   * **与 `statsOf` 共用同一份计算**（只是多要一个 breakdown）。
+   * 早期版本我另写了一份修正收集逻辑，结果是两份实现会各自漂移 ——
+   * 而溯源的全部价值就是"它和真实计算一致"。
+   */
+  statsBreakdownOf(id: string): Readonly<Partial<Record<StatKey, StatBreakdown>>> | undefined {
+    return this.computeStatsFor(id, true).breakdown;
   }
 
   /**
@@ -307,8 +322,21 @@ export class BattleEngine {
    * 实测性能足够：一次结算在几十微秒量级。
    */
   statsOf(combatantId: string): Readonly<Record<StatKey, number>> {
+    return this.computeStatsFor(combatantId, false).values;
+  }
+
+  /**
+   * 属性结算的**唯一实现**。
+   *
+   * `statsOf` 与 `statsBreakdownOf` 都走它 —— 溯源数据必须与真实计算
+   * 出自同一次求值，否则"面板上写的"和"实际用的"会不一致。
+   */
+  private computeStatsFor(
+    combatantId: string,
+    wantBreakdown: boolean,
+  ): { values: Readonly<Record<StatKey, number>>; breakdown?: Readonly<Partial<Record<StatKey, StatBreakdown>>> } {
     const combatant = this.state.combatants.find((c: Combatant) => c.id === combatantId);
-    if (!combatant) return EMPTY_STATS;
+    if (!combatant) return { values: EMPTY_STATS };
 
     const modifiers: StatModifier[] = [
       ...(this.options.passiveModifiers.get(combatantId) ?? []),
@@ -336,6 +364,7 @@ export class BattleEngine {
     return computeStats({
       base: this.options.baseStats.get(combatantId) ?? {},
       modifiers,
+      wantBreakdown,
       stackCount: stackLookup,
       evaluateCondition: () => true,
       resourceAccess: {
@@ -349,7 +378,18 @@ export class BattleEngine {
             .reduce((sum: number, b: BuffInstance) => sum + b.stacks, 0),
         getCounter: () => 0,
       },
-    }).values;
+    });
+  }
+
+  /**
+   * 直接写入一个单位的状态。
+   *
+   * ⚠️ **只给测试与开发者工具用**，正常玩法路径不该调用它 ——
+   * 那会绕过门禁与结算。存在的理由是：有些状态（例如"某个 buff 还剩 1 tick"）
+   * 靠正常流程构造代价很高，而测试需要精确控制它。
+   */
+  replaceCombatantForTest(updated: Combatant): void {
+    this.replaceCombatant(updated);
   }
 
   /** 把 `who` 解析成实际的 combatant（单挑场景下 target 就是对手）。 */
