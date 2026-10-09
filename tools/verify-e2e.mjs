@@ -21,6 +21,11 @@ await send('Page.navigate',{url:'http://localhost:5273/'});
 await sleep(3500);
 const probe = async () => { const r = await send('Runtime.evaluate',{expression:'JSON.stringify(window.__raidBattle?.probe() ?? null)',returnByValue:true});
   return r.result?.value ? JSON.parse(r.result.value) : null; };
+/** 在页面里求值并取回字符串结果（端到端脚本读游戏状态用）。 */
+const evalPage = async (expr) => {
+  const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true });
+  return r.result?.value;
+};
 // 按键：用 Input.dispatchKeyEvent 模拟真实键盘
 async function press(key, code, keyCode) {
   await send('Input.dispatchKeyEvent',{type:'keyDown',key,code,windowsVirtualKeyCode:keyCode,nativeVirtualKeyCode:keyCode});
@@ -30,16 +35,33 @@ async function press(key, code, keyCode) {
 const a = await probe();
 if (!a) { console.log('✗ 探针不可用'); process.exit(1); }
 console.log('初始:', JSON.stringify(a));
-// 打一轮：1(斩击) → 1 → 4(弧光) → Q(闪避) → 3(割裂)
-for (const [k,c,kc] of [['1','Digit1',49],['4','Digit4',52],['1','Digit1',49]]) {
-  await press(k,c,kc); await sleep(700);
-}
+/**
+ * 键位从默认表里取，**不要在这里写死**。
+ *
+ * 踩过的坑：这段原先硬编码 `1` / `4`，而默认键位改成 QWER/ASDF 之后
+ * 它就悄悄失效了 —— 端到端脚本报"Boss 受到伤害 ✗"，看起来像战斗坏了，
+ * 其实只是脚本还在按旧键。
+ */
+const KEYS = await evalPage(`JSON.stringify(window.__raidBattle.bindings())`);
+const bind = JSON.parse(KEYS);
+const keyOf = (skillId) => bind.find((b) => b.skillId === skillId);
+/** 字母键的 `code` 是 `KeyX`，keyCode 是大写字母的 ASCII。 */
+const pressSkill = async (skillId, ms = 600) => {
+  const b = keyOf(skillId);
+  if (!b || !b.key) return;
+  const upper = b.key.toUpperCase();
+  await press(b.key, `Key${upper}`, upper.charCodeAt(0));
+  await sleep(ms);
+};
+
+// 打一轮：攻 → 轰 → 攻
+for (const id of ['attack', 'blast', 'attack']) await pressSkill(id, 700);
 const b = await probe();
 console.log('按键后:', JSON.stringify(b));
 // 打 8 秒，看伤害是否累计
 for (let i=0;i<10;i++){
-  await press('1','Digit1',49); await sleep(500);
-  await press('4','Digit4',52); await sleep(500);
+  await pressSkill('attack', 450);
+  await pressSkill('blast', 450);
 }
 const c = await probe();
 console.log('持续输出后:', JSON.stringify(c));

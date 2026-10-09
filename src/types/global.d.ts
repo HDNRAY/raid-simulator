@@ -10,6 +10,12 @@ declare global {
     __raidBattle?: {
       /** 注入一个技能动作（调试用，让验证脚本能精确控制状态） */
       act(skillId: string, actorId?: string): void;
+      /**
+       * 当前键位表（顶层探针）。
+       *
+       * 端到端脚本用它来"按某个技能"，而不是把键位写死在脚本里。
+       */
+      bindings(): readonly { readonly key: string; readonly skillId: string }[];
       /** Pixi 根容器（调试用：读取渲染层实际写入的文本） */
       stage: unknown;
       /** 设置界面（调试用：headless 下模拟点击不可靠） */

@@ -244,6 +244,14 @@ async function bootstrap(): Promise<void> {
       loop.engineState.drainEvents();
     },
     /**
+     * 当前键位表（顶层探针）。
+     *
+     * 端到端脚本用它来"按某个技能" —— 而不是把键位写死在脚本里。
+     * 踩过的坑：脚本原先硬编码 `1` / `4`，默认键位改成 QWER/ASDF 之后
+     * 它就悄悄失效，报出来像是"战斗坏了"。
+     */
+    bindings: () => bindings.map((b) => ({ ...b })),
+    /**
      * 把 Pixi stage 暴露出来。
      *
      * 用途：让验证脚本能读取**渲染层实际写进去的文本** ——
