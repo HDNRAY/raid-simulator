@@ -402,19 +402,38 @@ const encounter: EncounterDef = {
     behaviors: [
       { kind: 'timeLimit', ms: 180_000 },
       { kind: 'enrage', atMs: 180_000, dmgMult: 2 },
-      { kind: 'phases', at: [0.6, 0.3] },
       { kind: 'opener', skillId: crimsonArcSkill.id, delayMs: 4000 },
       {
         kind: 'rotation',
         steps: [
-          { skillId: crimsonArcSkill.id, when: { kind: 'phase', phase: 1 }, gapMs: 9000 },
+          // 换招用 `when: hasBuff(...)` —— 阶段是内容 buff，不是引擎概念
+          {
+            skillId: crimsonArcSkill.id,
+            when: { kind: 'hasBuff', who: 'self', buffId: 'boss-frenzy' },
+            gapMs: 9000,
+          },
           { skillId: heavySkill.id, when: { kind: 'hpBelow', who: 'self', ratio: 0.5 } },
         ],
       },
       {
+        // 血量降到 30% 时授予一个阶段 buff（用能力实现，而非引擎机制）
         kind: 'onHpBelow',
         ratio: 0.3,
-        then: [{ kind: 'enrage', atMs: 0, dmgMult: 1.5 }],
+        then: [
+          {
+            kind: 'grant',
+            target: { mode: 'self' },
+            buff: {
+              id: 'boss-frenzy',
+              nameKey: 'event.enrage',
+              icon: 'enrage',
+              polarity: 'debuff',
+              duration: Number.POSITIVE_INFINITY,
+              maxStacks: 1,
+              stacking: { mode: 'refresh' },
+            },
+          },
+        ],
       },
     ],
   },
@@ -428,7 +447,6 @@ const initialState: BattleState = {
   tick: 0,
   rngSeed: 20261009,
   status: 'idle',
-  phase: 1,
   startedAtTick: 0,
   charges: {},
   combatants: [
@@ -515,8 +533,23 @@ describe('类型层能表达规范承诺的内容', () => {
   it('【C5】BattleState 可结构化克隆且往返无损', () => {
     const cloned = structuredClone(initialState);
     expect(cloned).toEqual(initialState);
-    // 不允许出现 Map / Set / 函数（结构化克隆会抛错或丢失）
-    expect(JSON.parse(JSON.stringify(initialState))).toEqual(initialState);
+  });
+
+  it('【C5】没有 Map / Set / 函数 —— 否则结构化克隆会抛错', () => {
+    // 结构化克隆本身就覆盖了这条：遇到 Map/Set 会保留（不报错），
+    // 遇到函数会直接抛 DataCloneError。所以"能克隆"是有效的守卫。
+    expect(() => structuredClone(initialState)).not.toThrow();
+
+    /**
+     * 注意**不要**用 `JSON.parse(JSON.stringify(x))` 做往返断言。
+     *
+     * 早期这里就是这么写的，而 buff 的 `duration` 可以合法地是
+     * `Number.POSITIVE_INFINITY`（"永不过期"）—— JSON 会把它变成 `null`，
+     * 于是这条断言在"用 JSON 当序列化格式"这个错误前提下失败。
+     * 本项目的状态契约是**结构化克隆**（C5），不是 JSON。
+     */
+    const jsonRoundTrip = JSON.parse(JSON.stringify(initialState)) as typeof initialState;
+    expect(jsonRoundTrip).not.toEqual(initialState);
   });
 
   it('stat key 的联合类型覆盖规范列出的全部属性', () => {

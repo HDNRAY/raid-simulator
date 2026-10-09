@@ -108,13 +108,42 @@ describe('真实内容：Boss 的机制都接线了', () => {
     expect(end?.kind).toBe('encounterEnd');
   });
 
-  it('打完 Boss 的一半血会触发阶段转换', () => {
+  it('血量降到 60% 时授予阶段 buff（阶段是用能力实现的，不是引擎机制）', () => {
     const engine = makeEngine();
-    let phase = 1;
+    let granted = false;
+    let bossBuffed = false;
     for (const e of run(engine, 60 * 200, { skillId: 'attack', everyTicks: 30 })) {
-      if (e.kind === 'phaseChanged') phase = e.phase;
+      if (e.kind === 'behaviorTriggered') granted = true;
+      if (e.kind === 'buffApplied' && e.buffId === 'boss-frenzy') bossBuffed = true;
     }
-    expect(phase).toBeGreaterThan(1);
+    expect(granted).toBe(true);
+    expect(bossBuffed).toBe(true);
+  });
+
+  it('换个 Boss 可以完全没有阶段 —— 引擎不需要它', () => {
+    // 一个只有轮转、没有任何 onHpBelow 的 Boss 应当完全正常工作
+    const options = makeGoldenEngineOptions();
+    const boss = options.combatants[1]!;
+    const engine = new BattleEngine({
+      ...options,
+      combatants: [
+        options.combatants[0]!,
+        {
+          ...boss,
+          behaviors: [{ kind: 'rotation', steps: [{ skillId: 'boss-cleave', gapMs: 2000 }] }],
+        },
+      ],
+    });
+    const used = new Set<string>();
+    for (let t = 0; t < 60 * 20; t += 1) {
+      engine.tick();
+      for (const e of engine.drainEvents()) {
+        if (e.kind === 'skillUsed' && e.sourceId === 'verrot') used.add(e.skillId);
+        // 绝不该出现任何"阶段"类事件
+        expect(e.kind).not.toBe('phaseChanged' as never);
+      }
+    }
+    expect(used.has('boss-cleave')).toBe(true);
   });
 });
 

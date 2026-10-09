@@ -812,7 +812,15 @@ export class BattleScene {
     this.bossName.set(translate(view.boss.nameKey));
     // 阶段紧跟名字，用实际宽度定位（不硬编码偏移，换语言也不会重叠）
     this.bossPhase.root.x = bb.x + 2 + this.bossName.root.width + 10;
-    this.bossPhase.set(`${translate('hud.phase')} ${view.phase}`);
+    /**
+     * 不再显示"阶段 N"。
+     *
+     * 阶段是**内容概念**（一层 buff），引擎不知道它是什么，
+     * 所以这里也没有数字可显示 —— 阶段由 Boss buff 条上那个图标表达，
+     * 玩家看到「狂怒」就知道进二阶段了。
+     * 名字后面保留的那格用来显示**非阶段类**的状态（目前是空的）。
+     */
+    this.bossPhase.set('');
     this.bossPhase.setColor(view.enraged ? PALETTE.danger.bright : PALETTE.textDim);
     this.timerLabel.set(view.remainingMs === undefined ? '' : formatClockSafe(view.remainingMs));
     this.timerLabel.setColor(

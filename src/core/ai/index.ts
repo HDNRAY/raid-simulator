@@ -20,7 +20,7 @@
  * **不需要为每个 Boss 写代码**。
  */
 
-import type { Action, Behavior, Combatant, RotationStep, SkillDef } from '../types';
+import type { Ability, Action, Behavior, Combatant, RotationStep, SkillDef } from '../types';
 
 /** AI 做决策时能看到的全部信息（只读快照）。 */
 export interface AiView {
@@ -30,7 +30,6 @@ export interface AiView {
   readonly tick: number;
   /** 自战斗开始经过的毫秒 */
   readonly elapsedMs: number;
-  readonly phase: number;
   /** 解析技能定义 */
   readonly skillOf: (skillId: string) => SkillDef | undefined;
   /** 某个技能的冷却是否已好 */
@@ -45,13 +44,18 @@ export interface AiState {
   readonly openedSkills: readonly string[];
   /** 每个技能上次施放的 tick（用于 rotation 的 gapMs） */
   readonly lastUsedAt: Readonly<Record<string, number>>;
-  /** 已触发的阶段阈值（避免重复触发） */
-  readonly triggeredPhases: readonly number[];
+  /**
+   * 已触发的 `onHpBelow` 阈值下标。
+   *
+   * 只记下标而不记"阶段号" —— 引擎不再有阶段的概念，
+   * 它只知道"这条 onHpBelow 已经执行过了，不要重复执行"。
+   */
+  readonly triggeredThresholds: readonly number[];
   readonly enraged: boolean;
 }
 
 export function createAiState(): AiState {
-  return { openedSkills: [], lastUsedAt: {}, triggeredPhases: [], enraged: false };
+  return { openedSkills: [], lastUsedAt: {}, triggeredThresholds: [], enraged: false };
 }
 
 /**
@@ -68,17 +72,25 @@ export interface AiDecision {
 }
 
 export type AiEvent =
-  | { readonly kind: 'phaseChanged'; readonly phase: number }
-  | { readonly kind: 'enrageStarted' };
+  | { readonly kind: 'enrageStarted' }
+  /**
+   * 一条 `onHpBelow` 首次满足。引擎据此执行它的 `then` 能力。
+   *
+   * 用 `index` 标识是哪一条（内容里的顺序），不引入"阶段号"。
+   */
+  | { readonly kind: 'thresholdReached'; readonly index: number; readonly abilities: readonly Ability[] };
 
 /**
  * 决策主入口。
  *
  * 优先级（从高到低）：
  *   1. 未触发的 opener（开场动作）
- *   2. 阶段阈值刚被跨过 → 只发事件，不施法（给玩家一个视觉提示的节拍）
+ *   2. `onHpBelow` 阈值刚被跨过 → 发事件让引擎执行它的能力
+ *      （例如"授予二阶段 buff"）
  *   3. 狂暴阈值
- *   4. rotation：按顺序找第一个"条件满足 + 冷却好 + 间隔够"的技能
+ *   4. rotation：按顺序找第一个"条件满足 + 冷却好 + 间隔够"的技能。
+ *      **换招就靠这里的 `when`** —— 例如
+ *      `{ skillId: 'x', when: { kind: 'hasBuff', buffId: 'phase2' } }`。
  */
 export function decide(view: AiView, behaviors: readonly Behavior[], state: AiState): AiDecision {
   const actions: Action[] = [];
@@ -101,17 +113,14 @@ export function decide(view: AiView, behaviors: readonly Behavior[], state: AiSt
   }
   if (actions.length > 0) return { actions, nextState: next, events };
 
-  // ---- 2. 阶段阈值（只发事件） ----
+  // ---- 2. onHpBelow 阈值 ----
   const hpRatio = view.self.caps.hp > 0 ? view.self.resources.hp / view.self.caps.hp : 1;
-  for (const behavior of behaviors) {
-    if (behavior.kind !== 'phases') continue;
-    for (const [index, threshold] of behavior.at.entries()) {
-      if (hpRatio > threshold) continue;
-      if (next.triggeredPhases.includes(index)) continue;
-      const phase = index + 2; // 阶段 1 是初始
-      next = { ...next, triggeredPhases: [...next.triggeredPhases, index] };
-      events.push({ kind: 'phaseChanged', phase });
-    }
+  for (const [index, behavior] of behaviors.entries()) {
+    if (behavior.kind !== 'onHpBelow') continue;
+    if (hpRatio > behavior.ratio) continue;
+    if (next.triggeredThresholds.includes(index)) continue;
+    next = { ...next, triggeredThresholds: [...next.triggeredThresholds, index] };
+    events.push({ kind: 'thresholdReached', index, abilities: behavior.then });
   }
 
   // ---- 3. 狂暴 ----
@@ -185,8 +194,6 @@ function evalAiCondition(condition: import('../types').Condition, view: AiView):
       return who().buffs.some((b) => b.defId === condition.buffId);
     case 'notHasBuff':
       return !who().buffs.some((b) => b.defId === condition.buffId);
-    case 'phase':
-      return view.phase === condition.phase;
     case 'isCasting':
       return view.self.casts.length > 0;
     case 'resourceAbove':
@@ -200,7 +207,7 @@ function evalAiCondition(condition: import('../types').Condition, view: AiView):
     case 'not':
       return !evalAiCondition(condition.of, view);
     // 以下条件需要引擎上下文（stat / buff 剩余时间 / 计数），
-    // AI 侧保守返回 false —— 内容作者应优先用 hpBelow / phase 这类。
+    // AI 侧保守返回 false —— 内容作者应优先用 hpBelow / hasBuff 这类。
     case 'buffExpiring':
     case 'statAbove':
     case 'targetCount':
@@ -242,7 +249,47 @@ function ratioOf(combatant: Combatant): number {
 export const VERROT_BEHAVIORS: readonly Behavior[] = [
   { kind: 'timeLimit', ms: 180_000 },
   { kind: 'enrage', atMs: 120_000, dmgMult: 2 },
-  { kind: 'phases', at: [0.6, 0.3] },
+
+  /**
+   * **阶段转换用「血量阈值 + 授予 buff」表达，引擎不知道"阶段"是什么。**
+   *
+   * 血量降到 60% 时授予「狂怒」—— 它让横扫的冷却缩短、伤害提高。
+   * 轮转里再用 `when: hasBuff('boss-frenzy')` 挑出二阶段的招式。
+   *
+   * 想加第三阶段就是再写一条 `onHpBelow` + 一个新 buff，
+   * **不需要动引擎**。
+   */
+  {
+    kind: 'onHpBelow',
+    ratio: 0.6,
+    then: [
+      {
+        kind: 'grant',
+        target: { mode: 'self' },
+        buff: {
+          id: 'boss-frenzy',
+          nameKey: 'buffShort.enrage',
+          icon: 'enrage',
+          polarity: 'debuff',
+          color: 0xd04040,
+          duration: Number.POSITIVE_INFINITY,
+          maxStacks: 1,
+          stacking: { mode: 'refresh' },
+          modifiers: [
+            {
+              stat: 'damageBoost',
+              op: 'addPercent',
+              value: 25,
+              sourceKey: 'buffShort.enrage',
+              namespace: 'boss-frenzy',
+              tier: 'buff',
+            },
+          ],
+        },
+      },
+    ],
+  },
+
   // 开场 1.2 秒后先来一发重斩：让玩家第一次看到前摇就该反应
   { kind: 'opener', skillId: 'boss-cleave', delayMs: 1200 },
   {
@@ -253,11 +300,16 @@ export const VERROT_BEHAVIORS: readonly Behavior[] = [
        *
        * 踩过的坑：早期把 gap 写成 6–22 秒，而轮转的逻辑是
        * "按顺序取第一个「冷却已好 且 距上次使用超过 gap」的技能" ——
-       * 于是高优先级的技能（蓄能 22 秒 gap）会长时间把低优先级的顶掉，
+       * 于是高优先级的技能会长时间把低优先级的顶掉，
        * 表现为 **Boss 大部分时间站着不动**（用户直接问"Boss 咋不攻击了"）。
        *
-       * 现在的节奏：每 2–4 秒出一招，招式之间几乎不留空档。
+       * 二阶段的步骤放在前面：`when` 不满足就跳到下一条。
        */
+      {
+        skillId: 'boss-sweep',
+        when: { kind: 'hasBuff', who: 'self', buffId: 'boss-frenzy' },
+        gapMs: 7_000,
+      },
       { skillId: 'boss-empower', gapMs: 16_000 },
       { skillId: 'boss-sweep', gapMs: 9_000 },
       { skillId: 'boss-cleave', gapMs: 2_500 },

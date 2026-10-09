@@ -61,7 +61,6 @@ export interface RunOutcome {
   readonly status: EncounterStatus;
   readonly endReason: EndReason | undefined;
   readonly ticks: number;
-  readonly phase: number;
   readonly finalRngSeed: number;
   /** `id → 最终状态`。数值取整，避免浮点尾差让 diff 变噪。 */
   readonly combatants: Readonly<Record<string, CombatantSummary>>;
@@ -185,7 +184,6 @@ function summarize(engine: BattleEngine): RunOutcome {
     status: state.status,
     endReason: state.endReason,
     ticks: state.tick,
-    phase: state.phase,
     finalRngSeed: state.rngSeed,
     combatants,
   };

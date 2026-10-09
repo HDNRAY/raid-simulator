@@ -243,8 +243,15 @@ export class ViewAdapter {
           this.setStatus('event.enrage', 300);
           break;
         }
-        case 'phaseChanged': {
-          this.setStatus('event.phaseChange', 240);
+        case 'behaviorTriggered': {
+          /**
+           * Boss 的行为阈值被跨过（例如进入二形态）。
+           *
+           * 引擎不知道"阶段"是什么 —— 它只知道"某条 onHpBelow 触发了"。
+           * 所以这里的提示也只是"形态变化"，具体变成了什么由
+           * buff 条上的图标告诉玩家。
+           */
+          this.setStatus('event.phaseChange', 120);
           break;
         }
         case 'skillUsed': {
@@ -328,7 +335,6 @@ export class ViewAdapter {
     return {
       tick: state.tick,
       status: state.status,
-      phase: state.phase,
       ...(result === undefined ? {} : { result }),
       ...(remainingMs === undefined ? {} : { remainingMs }),
       enraged: boss.buffs.some((b) => b.id.startsWith('boss-enrage')),
@@ -521,7 +527,6 @@ function emptyView(tick: number): BattleSnapshotView {
   return {
     tick,
     status: 'idle',
-    phase: 1,
     enraged: false,
     player: emptyCombatant('player'),
     boss: { ...emptyCombatant('verrot'), side: 'enemy' },

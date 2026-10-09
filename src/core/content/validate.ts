@@ -17,6 +17,7 @@ import type {
   GameEntity,
   SkillDef,
   StatKey,
+  Behavior,
 } from '../types';
 import { STAT_RULES } from '../stats/aggregate';
 
@@ -465,7 +466,7 @@ function collectContribNamespaces(ability: Ability): readonly string[] {
   return found;
 }
 
-function behaviorSkillRefs(behavior: import('../types').Behavior): readonly string[] {
+function behaviorSkillRefs(behavior: Behavior): readonly string[] {
   switch (behavior.kind) {
     case 'opener':
       return [behavior.skillId];
@@ -474,8 +475,11 @@ function behaviorSkillRefs(behavior: import('../types').Behavior): readonly stri
     case 'interruptible':
       return behavior.skillIds;
     case 'onHpBelow':
-      return behavior.then.flatMap(behaviorSkillRefs);
-    case 'phases':
+      // `then` 现在是能力数组：grant 引用的 buff 需要校验存在性，
+      // 所以这里只关心 skillId 引用（grantSkill）
+      return behavior.then.flatMap((a) =>
+        a.kind === 'grantSkill' ? [a.skillId] : [],
+      );
     case 'timeLimit':
     case 'enrage':
       return [];

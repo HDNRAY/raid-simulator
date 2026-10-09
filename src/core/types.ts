@@ -200,7 +200,6 @@ export type Condition =
   | { readonly kind: 'resourceBelow'; readonly who?: Who; readonly resource: ResourceKey; readonly value: number }
   | { readonly kind: 'statAbove'; readonly who?: Who; readonly stat: StatKey; readonly value: number }
   | { readonly kind: 'isCasting'; readonly who?: Who }
-  | { readonly kind: 'phase'; readonly phase: number }
   | { readonly kind: 'targetCount'; readonly side: Side; readonly op: CompareOp; readonly value: number }
   | { readonly kind: 'lastHitWasCrit' }
   | { readonly kind: 'all'; readonly of: readonly Condition[] }
@@ -760,13 +759,55 @@ export interface RotationStep {
   readonly gapMs?: number;
 }
 
+/**
+ * Boss 行为。**"每一招怎么打"由行为数组决定，"遇到什么条件换招"由
+ * `when` + `onHpBelow` 表达** —— 引擎里没有"阶段"这个概念。
+ *
+ * ------------------------------------------------------------------
+ * 为什么删掉了 `phases`
+ * ------------------------------------------------------------------
+ *
+ * 早期有一个 `{ kind: 'phases', at: [0.6, 0.3] }`，引擎会维护
+ * `BattleState.phase` 计数器、发 `phaseChanged` 事件、UI 显示"阶段 N"。
+ * 那是**把一个内容概念做成了引擎机制**，带来三个问题：
+ *
+ *   1. 不是每个 Boss 都有阶段。没有阶段的 Boss 也得带着一个恒为 1 的字段。
+ *   2. "阶段"的表达力很弱。它只能表示"血量降到某比例"，
+ *      而"打掉护盾后换招""被破后换招"这类条件表达不了。
+ *   3. 换招这件事本身**已经有更好的机制** —— `when: hasBuff(...)`。
+ *      一个两阶段的 Boss 就是：
+ *        - 血量降到 60% 时授予一个 buff（用 `onHpBelow` + `grant`）
+ *        - 轮转里写两条带 `when` 的步骤，各自检查有没有那个 buff
+ *
+ * 所以阶段的**内容表达**完全落在既有的能力系统上，
+ * 引擎不需要知道"阶段"是什么。
+ */
 export type Behavior =
-  | { readonly kind: 'phases'; readonly at: readonly number[] }
   | { readonly kind: 'timeLimit'; readonly ms: number }
+  /** 超时狂暴的**便利写法**（等价于"到点授予一个增伤 buff"） */
   | { readonly kind: 'enrage'; readonly atMs: number; readonly dmgMult: number }
   | { readonly kind: 'opener'; readonly skillId: SkillId; readonly delayMs: number }
-  | { readonly kind: 'rotation'; readonly steps: readonly RotationStep[] }
-  | { readonly kind: 'onHpBelow'; readonly ratio: number; readonly then: readonly Behavior[] }
+  | {
+      readonly kind: 'rotation';
+      /**
+       * 步骤按顺序尝试，第一个 `when` 满足且冷却好的被执行。
+       * **换招就是在这个数组里写不同 `when` 的步骤。**
+       */
+      readonly steps: readonly RotationStep[];
+    }
+  /**
+   * 血量降到阈值以下时执行一串**能力**。
+   *
+   * `then` 用 `Ability` 而不是嵌套 `Behavior`：这样"授予 buff"
+   * "改属性""给资源"全部复用既有能力系统，不必为每种嵌套再写一遍执行代码。
+   * 阶段转换就是这里 `grant` 一个阶段 buff。
+   */
+  | {
+      readonly kind: 'onHpBelow';
+      readonly ratio: number;
+      readonly who?: Who;
+      readonly then: readonly Ability[];
+    }
   | { readonly kind: 'interruptible'; readonly skillIds: readonly SkillId[] };
 
 /* ================================================================== *
@@ -840,8 +881,6 @@ export interface BattleState {
   readonly rngSeed: number;
   readonly status: EncounterStatus;
   readonly combatants: readonly Combatant[];
-  /** Boss 行为用到的阶段计数 */
-  readonly phase: number;
   /** 战斗开始 tick */
   readonly startedAtTick: number;
   /** 普通攻击 / 技能的充能记录：技能 → 已恢复的充能数 */
@@ -936,7 +975,8 @@ export type EventDef =
       readonly skillId: SkillId;
       readonly reason: SkillRejectReason;
     }
-  | { readonly kind: 'phaseChanged'; readonly tick: number; readonly phase: number; readonly bossId: CombatantId }
+  /** 某个 Boss 行为（含 `onHpBelow` 触发的能力）生效了 */
+  | { readonly kind: 'behaviorTriggered'; readonly tick: number; readonly bossId: CombatantId; readonly kindName: string }
   | { readonly kind: 'enrageStarted'; readonly tick: number; readonly bossId: CombatantId }
   | { readonly kind: 'death'; readonly tick: number; readonly targetId: CombatantId }
   | {

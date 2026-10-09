@@ -48,8 +48,8 @@ import { DOUQI_PER_INTERNAL_DAMAGE } from '../../data/balance';
 import { TICKS_PER_LOGIC_TICK } from '../loopConstants';
 import { createAiState, decide, type AiState, type AiView } from '../ai';
 import { nextRandom, type RngState } from '../rng';
-import type {
-  Action,
+import type {  Ability,
+Action,
   BattleState,
   BuffDef,
   BuffInstance,
@@ -147,7 +147,6 @@ export class BattleEngine {
         ...c,
         resources: clampStart(c),
       })),
-      phase: 1,
       startedAtTick: 0,
       charges: {},
     };
@@ -232,7 +231,6 @@ export class BattleEngine {
       opponent,
       tick: this.state.tick,
       elapsedMs: (this.state.tick - this.state.startedAtTick) * (1000 / 60),
-      phase: this.state.phase,
       skillOf: (id: string) => this.options.skills.get(id),
       isReady: (id: string) => (self.cooldowns[id] ?? 0) <= this.state.tick,
       canAct: self.casts.length === 0,
@@ -241,17 +239,22 @@ export class BattleEngine {
     const decision = decide(view, self.behaviors, this.aiState);
     this.aiState = decision.nextState;
 
-    // AI 层面的事件（阶段 / 狂暴）记进事件流，并施加对应效果
+    /**
+     * AI 层事件 → 实际效果。
+     *
+     * 只有两种，都是"执行一串能力/挂一个 buff"，
+     * **没有"阶段"这类引擎概念**。
+     */
     for (const event of decision.events) {
-      if (event.kind === 'phaseChanged') {
-        this.state = { ...this.state, phase: event.phase };
+      if (event.kind === 'thresholdReached') {
+        // 血量阈值被跨过：执行内容声明的能力（通常是授予阶段 buff）
+        this.runAbilities(bossId, event.abilities);
         this.events.push({
-          kind: 'phaseChanged',
+          kind: 'behaviorTriggered',
           tick: this.state.tick,
-          phase: event.phase,
           bossId,
+          kindName: `onHpBelow#${event.index}`,
         });
-        this.applyPhaseBehaviors(self);
       } else {
         this.applyEnrage(self);
       }
@@ -260,22 +263,55 @@ export class BattleEngine {
     if (decision.actions.length > 0) this.applyActions(decision.actions, bossId);
   }
 
-  /** 阶段转换时把 `onHpBelow` 里声明的行为也执行掉（行为数组可嵌套）。 */
-  private applyPhaseBehaviors(boss: Combatant): void {
-    const hpRatio = boss.caps.hp > 0 ? boss.resources.hp / boss.caps.hp : 1;
-    for (const behavior of boss.behaviors) {
-      if (behavior.kind !== 'onHpBelow') continue;
-      if (hpRatio > behavior.ratio) continue;
-      for (const nested of behavior.then) {
-        if (nested.kind === 'enrage') {
-          const applied = applyBuff(
-            this.current(boss.id),
-            this.enrageBuff(nested.dmgMult),
-            boss.id,
+  /**
+   * 执行一串能力（`onHpBelow.then` 用）。
+   *
+   * 这是"内容组合能力"的入口：`grant` / `modifier` / `resource` 全部走
+   * 既有实现，所以**新增一种阶段效果不需要改引擎**。
+   */
+  private runAbilities(actorId: string, abilities: readonly Ability[]): void {
+    for (const ability of abilities) {
+      const actor = this.work?.get(actorId);
+      if (!actor) return;
+      const opponent = this.opponentOf(actorId);
+      const targetIdOf = (mode: string): string =>
+        mode === 'self' ? actorId : (opponent?.id ?? actorId);
+
+      if (ability.kind === 'grant') {
+        const targetId = targetIdOf(ability.target.mode);
+        const target = this.current(targetId);
+        const applied = applyBuff(target, ability.buff, actorId, this.state.tick);
+        this.replaceCombatant({ ...target, buffs: applied.buffs });
+        this.events.push({
+          kind: 'buffApplied',
+          tick: this.state.tick,
+          targetId,
+          buffId: ability.buff.id,
+          stacks: applied.stacks,
+          sourceId: actorId,
+        });
+        continue;
+      }
+
+      if (ability.kind === 'resource') {
+        const delta = typeof ability.delta === 'number' ? ability.delta : 0;
+        if (delta !== 0) {
+          const targetId = targetIdOf(ability.target.mode);
+          const result = changeResource(
+            this.current(targetId),
+            ability.resource,
+            delta,
             this.state.tick,
           );
-          this.replaceCombatant({ ...this.current(boss.id), buffs: applied.buffs });
+          this.replaceCombatant(result.combatant);
+          this.events.push(...result.events);
         }
+        continue;
+      }
+
+      if (ability.kind === 'trigger') {
+        // onHpBelow 里嵌 trigger 没有明确语义，直接执行它的 then
+        for (const then of ability.trigger.then) this.runAbilities(actorId, [then]);
       }
     }
   }

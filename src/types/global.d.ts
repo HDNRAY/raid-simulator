@@ -15,7 +15,6 @@ declare global {
       probe(): {
         tick: number;
         status: string;
-        phase: number;
         playerHp: number;
         playerHpCap: number;
         playerDouqi: number;

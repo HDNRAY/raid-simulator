@@ -232,7 +232,6 @@ async function bootstrap(): Promise<void> {
       return {
         tick: state.tick,
         status: state.status,
-        phase: state.phase,
         playerHp: player?.resources.hp ?? -1,
         playerHpCap: player?.caps.hp ?? -1,
         playerDouqi: player?.resources.douqi ?? -1,

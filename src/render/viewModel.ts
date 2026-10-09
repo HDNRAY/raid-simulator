@@ -116,7 +116,6 @@ export interface ResultView {
 export interface BattleSnapshotView {
   readonly tick: number;
   readonly status: 'idle' | 'running' | 'victory' | 'defeat';
-  readonly phase: number;
   /** 战斗剩余时间（ms）；无限制为 undefined */
   readonly remainingMs?: number;
   /** 是否已狂暴 */
@@ -164,7 +163,6 @@ export const EMPTY_COMBATANT: CombatantView = {
 export const EMPTY_SNAPSHOT: BattleSnapshotView = {
   tick: 0,
   status: 'idle',
-  phase: 1,
   enraged: false,
   player: EMPTY_COMBATANT,
   boss: { ...EMPTY_COMBATANT, side: 'enemy' },

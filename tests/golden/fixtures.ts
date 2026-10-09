@@ -127,9 +127,10 @@ export const GOLDEN_OUTCOME = {
    * 当前平衡下"会闪 + 会轰"的玩家**险胜**。
    *
    * 实测（不是估计）：
-   *   - 用时 898 tick ≈ 15.0 秒
-   *   - 玩家剩 **30 血**（满血 100）
-   *   - Boss 承伤约 4.9 DPS，所以玩家约能撑 20 秒
+   *   - 用时 896 tick ≈ 14.9 秒
+   *   - 玩家剩 **17 血**（满血 100）
+   *   - Boss 在 60% 血时授予「狂怒」（+25% 伤害、横扫更频繁），
+   *     所以后半场明显更凶 —— 剩血比"无阶段版"更少
    *
    * 同一条策略如果**只按「攻」**也能赢，但要多花 3 秒（17.9s）——
    * 说明「轰」是效率工具而不是通关必需。真正的门槛是**别站着挨打**：
@@ -138,12 +139,17 @@ export const GOLDEN_OUTCOME = {
   status: 'victory' as const,
   endReason: 'hpZero' as const,
   /** 通关用时（tick）。连续量，对数值改动敏感。 */
-  ticks: 898,
-  phase: 3,
-  /** 当前内容没有暴击判定，所以随机数一次都不被消耗。 */
+  ticks: 896,
+  /**
+   * 当前内容没有暴击判定，所以随机数一次都不被消耗。
+   *
+   * 注意这里**没有 `phase`** —— 引擎已经没有"阶段"这个概念了：
+   * Boss 的阶段是一层内容 buff（`boss-frenzy`），由 `onHpBelow` 授予，
+   * 轮转用 `when: hasBuff(...)` 换招。
+   */
   finalRngSeed: 20261009,
   combatants: {
-    player: { alive: true, hp: 30, energy: 0, douqi: 12, damageDealt: 0, damageTaken: 0 },
+    player: { alive: true, hp: 17, energy: 0, douqi: 25, damageDealt: 0, damageTaken: 0 },
     verrot: { alive: false, hp: 0, energy: 0, douqi: 0, damageDealt: 0, damageTaken: 0 },
   },
 } satisfies Omit<RunOutcome, 'ticks'> & { readonly ticks: number };

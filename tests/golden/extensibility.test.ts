@@ -263,14 +263,43 @@ describe('可扩展性：新增一个 Boss 只需要写数据', () => {
     interruptible: false,
   };
 
+  /**
+   * 行为数组里**没有任何"阶段"声明** —— 但阶段效果照样能表达：
+   * 血量降到 50% 时授予一个 buff，轮转里用 `when` 挑招式。
+   * 这就是"阶段用能力实现"的意思。
+   */
   const behaviors: readonly Behavior[] = [
     { kind: 'timeLimit', ms: 120_000 },
     { kind: 'enrage', atMs: 60_000, dmgMult: 3 },
-    { kind: 'phases', at: [0.5] },
     { kind: 'opener', skillId: 'test-boss-beam', delayMs: 1000 },
+    {
+      kind: 'onHpBelow',
+      ratio: 0.5,
+      then: [
+        {
+          kind: 'grant',
+          target: { mode: 'self' },
+          buff: {
+            id: 'test-boss-phase2',
+            nameKey: 'boss.empower.name',
+            icon: 'enrage',
+            polarity: 'debuff',
+            duration: Number.POSITIVE_INFINITY,
+            maxStacks: 1,
+            stacking: { mode: 'refresh' },
+          },
+        },
+      ],
+    },
     {
       kind: 'rotation',
       steps: [
+        // 二阶段才会用的招式
+        {
+          skillId: 'test-boss-heal',
+          when: { kind: 'hasBuff', who: 'self', buffId: 'test-boss-phase2' },
+          gapMs: 3000,
+        },
         { skillId: 'test-boss-heal', gapMs: 5000 },
         { skillId: 'test-boss-beam', gapMs: 2000 },
       ],
@@ -307,7 +336,7 @@ describe('可扩展性：新增一个 Boss 只需要写数据', () => {
     expect(used.has('test-boss-heal')).toBe(true);
   });
 
-  it('新 Boss 的阶段阈值按自己的配置触发（50% 而不是 60%/30%）', () => {
+  it('新 Boss 的"阶段"用能力实现：血量阈值授予 buff', () => {
     // 一个能快速打掉 Boss 一半血的高伤技能
     const heavy: SkillDef = {
       id: 'test-heavy',
@@ -354,18 +383,17 @@ describe('可扩展性：新增一个 Boss 只需要写数据', () => {
       passiveModifiers: new Map(),
     });
 
-    let phase = 1;
+    let granted = false;
     for (let t = 0; t < 60 * 20; t += 1) {
       // 每 2 秒打一发，几发之后就会跨过 50%
       const actions = t % 120 === 0 ? [{ type: 'useSkill' as const, skillId: 'test-heavy', atTick: t }] : [];
       engine.tick(actions);
       for (const e of engine.drainEvents()) {
-        if (e.kind === 'phaseChanged') phase = e.phase;
+        if (e.kind === 'buffApplied' && e.buffId === 'test-boss-phase2') granted = true;
       }
-      if (phase > 1) break;
+      if (granted) break;
     }
-    // 阈值是 0.5 → 只配了一个阈值，所以阶段变成 2
-    expect(phase).toBe(2);
+    expect(granted).toBe(true);
   });
 
   it('新 Boss 的狂暴按自己的时间点触发', () => {

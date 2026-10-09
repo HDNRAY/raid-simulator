@@ -61,7 +61,6 @@ describe('黄金重放：固定种子 + 固定策略 → 固定结果', () => {
       status: outcome.status,
       endReason: outcome.endReason,
       ticks: outcome.ticks,
-      phase: outcome.phase,
       finalRngSeed: outcome.finalRngSeed,
       combatants: outcome.combatants,
     }).toEqual(GOLDEN_OUTCOME);

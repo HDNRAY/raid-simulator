@@ -338,10 +338,6 @@ export function evaluateCondition(
     case 'isCasting':
       return pick(condition.who).casts.length > 0;
 
-    case 'phase':
-      // 阶段由 EncounterState 维护，这里通过 ctx 暴露
-      return ctxPhase(ctx) === condition.phase;
-
     case 'targetCount':
       // 单 Boss 战斗里这个条件几乎不用，实现为恒假以避免误导
       return false;
@@ -362,15 +358,7 @@ export function evaluateCondition(
 }
 
 /** 阶段读取的钩子（由引擎注入，避免这里依赖 EncounterState）。 */
-let phaseReader: (ctx: CombatContext) => number = () => 1;
 
-export function setPhaseReader(reader: (ctx: CombatContext) => number): void {
-  phaseReader = reader;
-}
-
-function ctxPhase(ctx: CombatContext): number {
-  return phaseReader(ctx);
-}
 
 /* ------------------------------------------------------------------ *
  * 4. hit frame 判定（M2 的核心）
