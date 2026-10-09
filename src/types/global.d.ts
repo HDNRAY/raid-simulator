@@ -74,3 +74,16 @@ declare global {
 }
 
 export {};
+
+/**
+ * Vite 的 `?raw` 后缀：把文件内容作为字符串导入。
+ *
+ * ⚠️ 运行时仍会做一次归一（见 `icons.ts` 的 `sourceOf`）——
+ * 不同 Vite 版本对 `?raw` 的导出形态不一致（`string` 或
+ * `{ default: string }`），所以类型声明只做到"可能是二者之一"，
+ * 由代码里的类型守卫收窄，而不是用 `as` 断言（AGENTS.md §1）。
+ */
+declare module '*.svg?raw' {
+  const content: string | { readonly default: string };
+  export default content;
+}

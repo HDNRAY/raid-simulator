@@ -17,10 +17,9 @@ import { LOGICAL_H, LOGICAL_W, type ScalingMode } from './render/scaling';
 import { observeStage } from './render/sizes';
 import { BattleScene } from './render/BattleScene';
 import type { Combatant, StatKey } from './core/types';
-import type { Texture } from 'pixi.js';
 import { SettingsButton } from './ui/settings/SettingsButton';
 import { SettingsPanel } from './ui/settings/SettingsPanel';
-import { setIconDecoder } from './render/icons';
+import { createAssetsDecoder, setIconDecoder } from './render/icons';
 import './styles.css';
 
 /**
@@ -114,19 +113,22 @@ async function bootstrap(): Promise<void> {
   const stage = document.querySelector<HTMLElement>('#stage');
   if (!stage) throw new Error('index.html is missing the #stage container');
 
-  const { Application, Assets, Container, Graphics, Sprite, Text } = await import('pixi.js');
+  const { Application, Container, Graphics, Sprite, Text } = await import('pixi.js');
 
   /**
    * 注册 SVG 图标解码器。
    *
-   * ⚠️ 必须用 `Assets.load`：Pixi v8 的 `Texture.from(svgDataUri)`
+   * 图标源是 `src/render/icons/*.svg` 独立文件（Vite `?raw` 构建时内联），
+   * 解码走 Pixi 的 `Assets`。
+   *
+   * ⚠️ 必须用 `Assets.load`：Pixi v8 的 `Texture.from(svg)`
    * 会返回 1×1 的 EMPTY 纹理（并警告"不在 Assets 缓存里"），
    * 因为 SVG 要先经资源系统光栅化。
    *
    * 必须在创建任何 `Icon` 之前注册 —— `SettingsButton` 在 bootstrap
    * 中构造，所以这行要放在它前面。
    */
-  setIconDecoder((uri: string) => Assets.load<Texture>(uri) as Promise<Texture>);
+  setIconDecoder(createAssetsDecoder());
 
   const app = new Application();
   await app.init({
