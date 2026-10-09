@@ -49,6 +49,9 @@ jobs:
         run: |
           mkdir -p dist
           cp -R archive/build/. dist/
+          # SPA 回退：hash 路由下未命中的路径回落到 index.html
+          cp dist/index.html dist/404.html
+          touch dist/.nojekyll
 
       # ---------- 新项目：只有构建入口存在时才跑 ----------
       - name: Detect new project
@@ -96,6 +99,8 @@ jobs:
         run: |
           rm -rf dist-new
           mv dist dist-new                                   # 新项目构建产物
+          cp dist-new/index.html dist-new/404.html           # SPA 回退
+          touch dist-new/.nojekyll
           rm -rf dist-new/archive
           mkdir -p dist-new/archive
           cp -R archive/build/. dist-new/archive/            # 旧版挂到 /raid/archive/
