@@ -30,8 +30,8 @@ function makeCtx(overrides: Partial<EvalContext> = {}): EvalContext {
     haste: 0.2,
     damageBoost: 0.3,
   };
-  const resources: Record<string, number> = { hp: 4000, mp: 5000, energy: 60, fury: 30 };
-  const caps: Record<string, number> = { hp: 10000, mp: 10000, energy: 120, fury: 100 };
+  const resources: Record<string, number> = { hp: 4000, energy: 60, douqi: 30 };
+  const caps: Record<string, number> = { hp: 10000, energy: 120, douqi: 100 };
   const buffs: Record<string, number> = { 'killing-intent': 3, haste: 1 };
   const counters: Record<string, number> = { 'ent_1:uses': 2 };
   const contribs: Record<string, number> = { 'entropy-clock.potential': 0.102 };

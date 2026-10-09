@@ -180,7 +180,7 @@ const ABILITY_HANDLERS: Record<Ability['kind'], AbilityHandler> = {
 ```ts
 /** 任何实例都可以有自己的资源池 */
 interface ResourcePool {
-  hp?: number; mp?: number; energy?: number; fury?: number;
+  hp?: number; energy?: number; douqi?: number;
   /** 自定义离散资源：使用次数、充能、弹药、封印数…… 全部走这里 */
   counters: Record<string, { current: number; max: number }>;
 }
@@ -204,7 +204,7 @@ interface GameEntityInstance {
 | 3 次使用次数的奇物 | `counters: { uses: { current: 3, max: 3 } }` |
 | 每 30 秒回 1 次使用次数 | buff `triggers: [{ on:'onTick', cooldownMs:30000, then:[{ kind:'resource', pool:..., resource:'uses', delta:+1 }] }]` |
 | 多充能技能（2 层充能） | `ResourcePool.counters.charges` + `SkillDef.charges.rechargeMs` |
-| 法力/怒气消耗 | `pool: { kind:'combatant', combatantId:'player' }, resource:'mp'` |
+| 精力消耗 | `pool: { kind:'combatant', combatantId:'player' }, resource:'energy'` |
 
 **收益**：`Cost` 类型、资源条 UI、资源回复、`resourceChanged` 事件——全部复用，
 零新机制。"使用次数用完了"和"法力不够"在 UI 上是同一个组件。
@@ -371,7 +371,7 @@ type StatKey =
   // 资源上限
   | 'maxHp' | 'maxMp' | 'maxEnergy' | 'maxFury'
   // 资源回复（每秒）
-  | 'hpRegen' | 'mpRegen' | 'energyRegen' | 'furyRegen'
+  | 'hpRegen' | 'energyRegen' | 'douqiRegen'
   // 次级属性
   | 'critChance' | 'critDamage' | 'haste' | 'armor' | 'tenacity'
   | 'castSpeed' | 'cooldownRate'
@@ -452,7 +452,7 @@ value = (base + Σadd) × (1 + Σpercent) × ∏mult
 |---|---|---|
 | `strength` / `agility` / `intelligence` / `spirit` | accumulator | — |
 | `maxHp` / `maxMp` / `maxEnergy` / `maxFury` | accumulator | `[0, ∞)` |
-| `hpRegen` / `mpRegen` / `energyRegen` / `furyRegen` | accumulator | — |
+| `hpRegen` / `energyRegen` / `douqiRegen` | accumulator | — |
 | `critChance` | value | `[0, 1]` |
 | `critDamage` | accumulator | `[0, ∞)` |
 | `haste` | accumulator | `[0, 0.5]` |
@@ -1349,6 +1349,8 @@ src/
 | 5 | 预留字段（`channel` / `charges`） | ✅ 仅保留这两个。`distance` **删除**（本作无位移，见 §3.5）；`affixes` 下沉到 `GameEntityInstance` |
 | 6 | `AbilitySource` → `GameEntity` | ✅ **改名**。新增 `EntityKind`、消耗品、使用次数（§2.2、§7.3） |
 | 7 | 属性溯源（`StatBreakdown`） | ✅ **必须有**。buff 消失后重算全部受影响派生属性（§5.4、§7.2 规则 6） |
+| 8 | 资源种类：是否需要"魔法值" | ❌ **删除 `mp`**（2026-10-09）。只留两种资源：**精力**（短循环、回复快、常规技能消耗）与**斗炁**（积攒型、高威力技能消耗）。理由：多一种资源只会让 UI 与循环都更啰嗦，而它没有带来任何新的决策 |
+| 9 | `fury` 命名 | ✅ **改名 `douqi`**，显示名「斗炁」。`furyRegen` → `douqiRegen`、`maxFury` → `maxDouqi` |
 
 ### 7.2 规则 4（修订版）
 

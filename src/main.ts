@@ -36,7 +36,7 @@ const PLAYER_BASE: Partial<Record<StatKey, number>> = {
 };
 
 /** 玩家资源上限。 */
-const PLAYER_CAPS = { hp: 12_000, mp: 8_000, energy: 120, fury: 100 };
+const PLAYER_CAPS = { hp: 12_000, energy: 120, douqi: 100 };
 
 /**
  * Boss 资源上限。
@@ -44,7 +44,7 @@ const PLAYER_CAPS = { hp: 12_000, mp: 8_000, energy: 120, fury: 100 };
  * 15 万血配玩家约 1000 DPS → 一场约 2.5 分钟的战斗，
  * 正好压在 3 分钟时限内、且在狂暴之前。
  */
-const BOSS_CAPS = { hp: 150_000, mp: 0, energy: 0, fury: 0 };
+const BOSS_CAPS = { hp: 150_000, energy: 0, douqi: 0 };
 
 function makePlayer(): Combatant {
   return {
@@ -52,7 +52,7 @@ function makePlayer(): Combatant {
     nameKey: 'hud.you',
     side: 'ally',
     caps: { ...PLAYER_CAPS },
-    resources: { hp: PLAYER_CAPS.hp, mp: PLAYER_CAPS.mp, energy: PLAYER_CAPS.energy, fury: 0 },
+    resources: { hp: PLAYER_CAPS.hp, energy: PLAYER_CAPS.energy, douqi: 0 },
     counters: {},
     basePrimary: { strength: 120, agility: 100, intelligence: 110, spirit: 100 },
     buffs: [],
@@ -70,7 +70,7 @@ function makeBoss(): Combatant {
     nameKey: 'boss.name',
     side: 'enemy',
     caps: { ...BOSS_CAPS },
-    resources: { hp: BOSS_CAPS.hp, mp: 0, energy: 0, fury: 0 },
+    resources: { hp: BOSS_CAPS.hp, energy: 0, douqi: 0 },
     counters: {},
     basePrimary: { strength: 400, agility: 200, intelligence: 300, spirit: 200 },
     buffs: [],
@@ -201,7 +201,7 @@ async function bootstrap(): Promise<void> {
         phase: state.phase,
         playerHp: player?.resources.hp ?? -1,
         playerHpCap: player?.caps.hp ?? -1,
-        playerFury: player?.resources.fury ?? -1,
+        playerDouqi: player?.resources.douqi ?? -1,
         playerCooldowns: player?.cooldowns ?? {},
         playerCasts: player?.casts.length ?? -1,
         bossHp: boss?.resources.hp ?? -1,

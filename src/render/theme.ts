@@ -31,9 +31,10 @@ export const PALETTE = {
 
   /* ---- 语义色（三档明暗） ---- */
   hp: { base: 0xd23a34, dark: 0x7c1b1f, bright: 0xf0605a },
-  mp: { base: 0x3a7ad2, dark: 0x1b3a76, bright: 0x5a9ef0 },
+  /** 精力：短循环资源，绿色（"还能继续打"） */
   energy: { base: 0x5cb460, dark: 0x1f4e29, bright: 0x7cd480 },
-  fury: { base: 0xe4a840, dark: 0x624215, bright: 0xffc860 },
+  /** 斗炁：积攒型资源，金色（"攒满了就放大招"） */
+  douqi: { base: 0xe4a840, dark: 0x624215, bright: 0xffc860 },
   /** 判定窗口专用：必须最醒目 */
   iframe: { base: 0xff6648, dark: 0x5a0d0b, bright: 0xffb8a0 },
   /** 预警：物理（红） */

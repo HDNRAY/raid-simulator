@@ -14,7 +14,7 @@ declare global {
         phase: number;
         playerHp: number;
         playerHpCap: number;
-        playerFury: number;
+        playerDouqi: number;
         playerCooldowns: Record<string, number>;
         playerCasts: number;
         bossHp: number;

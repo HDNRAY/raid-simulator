@@ -570,7 +570,7 @@ export class BattleEngine {
   private advanceCasts(): void {
     // ⚠️ 遍历 **id 列表**而不是 `this.state.combatants` 的元素快照。
     //
-    // 原因：`applyActions` 会用新对象替换 combatant（例如扣了储能）。
+    // 原因：`applyActions` 会用新对象替换 combatant（例如扣了斗炁）。
     // 如果这里持有循环开始时的旧引用，读到的是**过期状态**，
     // 随后的写回会把 applyActions 刚做的改动覆盖掉。
     // （症状：`resourceChanged` 事件发了，但资源回到原值。）
@@ -666,7 +666,7 @@ export class BattleEngine {
      * **每改一次 state，就立刻把 working 同步成最新版本。**
      *
      * 违反它会怎样：working 是方法开头捕获的旧对象，
-     * 方法末尾又用它写回 —— 中间所有改动（挂 buff、加储能）全被抹掉。
+     * 方法末尾又用它写回 —— 中间所有改动（挂 buff、加斗炁）全被抹掉。
      * 症状是"`resourceChanged` / `buffApplied` 事件都发了，但状态没变"，
      * 极难从事件流上看出来。
      */
@@ -709,8 +709,8 @@ export class BattleEngine {
       }
 
       if (ability.kind === 'resource') {
-        // 一次性资源变动（"斩击产生 20 点储能"）。
-        // 与 `furyRegen` 修正的区别：那是持续速率，这是一次性。
+        // 一次性资源变动（"斩击产生 20 点斗炁"）。
+        // 与 `douqiRegen` 修正的区别：那是持续速率，这是一次性。
         const delta = typeof ability.delta === 'number' ? ability.delta : 0;
         grantResource(ability.resource, delta, targetIdOf(ability.target.mode));
         continue;
@@ -984,7 +984,7 @@ const EMPTY_STATS = {} as Readonly<Record<StatKey, number>>;
 
 function clampStart(combatant: Combatant): Combatant['resources'] {
   const out = { ...combatant.resources };
-  for (const key of ['hp', 'mp', 'energy', 'fury'] as const) {
+  for (const key of ['hp', 'energy', 'douqi'] as const) {
     out[key] = Math.max(0, Math.min(capOf(combatant, key), Math.round(out[key])));
   }
   return out;

@@ -308,9 +308,8 @@ function toCombatantView(engine: BattleEngine, id: string, tick: number): Combat
     side: raw.side,
     alive: raw.alive,
     hp: { current: raw.resources.hp, cap: raw.caps.hp },
-    mp: { current: raw.resources.mp, cap: raw.caps.mp },
     energy: { current: raw.resources.energy, cap: raw.caps.energy },
-    fury: { current: raw.resources.fury, cap: raw.caps.fury },
+    douqi: { current: raw.resources.douqi, cap: raw.caps.douqi },
     buffs,
     ...(castView ? { cast: castView } : {}),
   } satisfies CombatantView & { _stats?: typeof stats };
@@ -323,9 +322,8 @@ function emptyCombatant(id: string): CombatantView {
     side: 'ally',
     alive: true,
     hp: { current: 0, cap: 1 },
-    mp: { current: 0, cap: 1 },
     energy: { current: 0, cap: 1 },
-    fury: { current: 0, cap: 1 },
+    douqi: { current: 0, cap: 1 },
     buffs: [],
   };
 }

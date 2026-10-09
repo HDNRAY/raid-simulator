@@ -38,9 +38,8 @@ export interface CombatantView {
   readonly side: 'ally' | 'enemy';
   readonly alive: boolean;
   readonly hp: ResourceView;
-  readonly mp: ResourceView;
   readonly energy: ResourceView;
-  readonly fury: ResourceView;
+  readonly douqi: ResourceView;
   readonly buffs: readonly BuffView[];
   /** 正在读条：技能 id 与进度 0..1。没有则为 undefined */
   readonly cast?: {
@@ -123,9 +122,8 @@ export const EMPTY_COMBATANT: CombatantView = {
   side: 'ally',
   alive: true,
   hp: { current: 0, cap: 1 },
-  mp: { current: 0, cap: 1 },
   energy: { current: 0, cap: 1 },
-  fury: { current: 0, cap: 1 },
+  douqi: { current: 0, cap: 1 },
   buffs: [],
 };
 

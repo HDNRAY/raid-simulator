@@ -50,7 +50,7 @@ const HEAVY = makeSkillDef({
   cooldown: 5000,
   gcd: true,
   interruptible: true,
-  cost: [{ resource: 'mp', value: 100 }],
+  cost: [{ resource: 'energy', value: 40 }],
   hits: [
     {
       at: 1000,
@@ -124,8 +124,8 @@ function makeEngine(options: {
   const boss: Combatant = makeCombatant({
     id: 'boss',
     side: 'enemy',
-    caps: { hp: 100_000, mp: 0, energy: 0, fury: 0 },
-    resources: { hp: 100_000, mp: 0, energy: 0, fury: 0 },
+    caps: { hp: 100_000, energy: 0, douqi: 0 },
+    resources: { hp: 100_000, energy: 0, douqi: 0 },
   });
 
   return new BattleEngine({
@@ -220,7 +220,7 @@ describe('引擎：技能施放与门禁', () => {
       castTime: 0,
       cooldown: 0,
       gcd: false,
-      cost: [{ resource: 'mp', value: 999_999 }],
+      cost: [{ resource: 'energy', value: 999_999 }],
       hits: [],
     });
     const engine = new BattleEngine({
@@ -340,8 +340,8 @@ describe('引擎：判定层（M2 的核心）', () => {
         makeCombatant({
           id: 'boss',
           side: 'enemy',
-          caps: { hp: 100_000, mp: 0, energy: 0, fury: 0 },
-          resources: { hp: 100_000, mp: 0, energy: 0, fury: 0 },
+          caps: { hp: 100_000, energy: 0, douqi: 0 },
+          resources: { hp: 100_000, energy: 0, douqi: 0 },
         }),
       ],
       seed: 1,
@@ -414,8 +414,8 @@ describe('引擎：判定层（M2 的核心）', () => {
         makeCombatant({
           id: 'boss',
           side: 'enemy',
-          caps: { hp: 100_000, mp: 0, energy: 0, fury: 0 },
-          resources: { hp: 100_000, mp: 0, energy: 0, fury: 0 },
+          caps: { hp: 100_000, energy: 0, douqi: 0 },
+          resources: { hp: 100_000, energy: 0, douqi: 0 },
         }),
       ],
       seed: 1,
@@ -505,8 +505,8 @@ describe('引擎：时间限制与胜负', () => {
         makeCombatant({
           id: 'boss',
           side: 'enemy',
-          caps: { hp: 100, mp: 0, energy: 0, fury: 0 },
-          resources: { hp: 100, mp: 0, energy: 0, fury: 0 },
+          caps: { hp: 100, energy: 0, douqi: 0 },
+          resources: { hp: 100, energy: 0, douqi: 0 },
         }),
       ],
       seed: 1,

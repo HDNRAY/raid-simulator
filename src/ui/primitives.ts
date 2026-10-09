@@ -126,6 +126,12 @@ export interface LabelProps {
   readonly anchorX?: number;
   readonly anchorY?: number;
   readonly bold?: boolean;
+  /**
+   * 描边色。**压在亮色条上的数字必须描边** ——
+   * 纯白字压亮绿/亮金会糊成一片，实测读不出来。
+   */
+  readonly stroke?: number;
+  readonly strokeWidth?: number;
 }
 
 export class Label {
@@ -140,6 +146,9 @@ export class Label {
         fontSize: props.size ?? TYPE.sm,
         fill: css(props.color ?? 0xf0f0f6),
         fontWeight: props.bold ? '700' : '400',
+        ...(props.stroke === undefined
+          ? {}
+          : { stroke: { color: css(props.stroke), width: props.strokeWidth ?? 3 } }),
       },
     });
     this.root.x = props.x;

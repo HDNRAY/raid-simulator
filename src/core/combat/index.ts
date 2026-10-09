@@ -59,7 +59,7 @@ export function capOf(combatant: Combatant, key: keyof Combatant['resources']): 
 /** 把资源钳到 [0, cap]。**整数**。 */
 export function clampResources(combatant: Combatant): Combatant['resources'] {
   const out = { ...combatant.resources };
-  for (const key of ['hp', 'mp', 'energy', 'fury'] as const) {
+  for (const key of ['hp', 'energy', 'douqi'] as const) {
     const cap = capOf(combatant, key);
     const value = out[key];
     out[key] = Math.max(0, Math.min(cap, Number.isFinite(value) ? Math.round(value) : 0));
@@ -529,21 +529,15 @@ export function regenerate(
   combatant: Combatant,
   stats: Readonly<Record<StatKey, number>>,
   tick: number,
-  perTickMp = 0.1,
+  perTickEnergy = 0.1,
 ): { readonly combatant: Combatant; readonly events: readonly EventDef[] } {
   // 用"每 tick 累积"而不是"每 100ms 跳一次"会让整数化吃掉小数，
   // 所以按 60 tick 为一秒聚合：每秒回复量 × (1/60)
   const events: EventDef[] = [];
   let current = combatant;
 
-  const mpPerSecond = (stats.mpRegen ?? 0) + (stats.spirit ?? 0) * perTickMp * 10;
-  if (mpPerSecond > 0 && tick % 60 === 0) {
-    const result = changeResource(current, 'mp', mpPerSecond, tick);
-    current = result.combatant;
-    events.push(...result.events);
-  }
-
-  const energyPerSecond = stats.energyRegen ?? 0;
+  // 精力回复：基础回复 + 精神提供的加成
+  const energyPerSecond = (stats.energyRegen ?? 0) + (stats.spirit ?? 0) * perTickEnergy * 10;
   if (energyPerSecond > 0 && tick % 60 === 0) {
     const result = changeResource(current, 'energy', energyPerSecond, tick);
     current = result.combatant;

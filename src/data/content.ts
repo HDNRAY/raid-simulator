@@ -63,27 +63,27 @@ export const GUARD_PERFECT: BuffDef = {
 };
 
 /**
- * 斩击产生的储能。
+ * 斩击产生的斗炁。
  *
  * 这里刻意**用 `modifier` 而不是新增一个 ability 类型** ——
  * "技能给资源"这种需求可以完全由"给一条资源回复修正"表达，
  * 不需要动引擎（这正是可扩展性的验证方式）。
  */
 export const SLASH_FURY: BuffDef = {
-  id: 'slash-fury',
-  nameKey: 'resource.fury',
-  icon: 'buff_fury',
+  id: 'slash-douqi',
+  nameKey: 'resource.douqi',
+  icon: 'buff_douqi',
   polarity: 'buff',
   duration: 1000,
   maxStacks: 1,
   stacking: { mode: 'refresh' },
   modifiers: [
     {
-      stat: 'furyRegen',
+      stat: 'douqiRegen',
       op: 'add',
       value: 12,
-      sourceKey: 'resource.fury',
-      namespace: 'slash-fury',
+      sourceKey: 'resource.douqi',
+      namespace: 'slash-douqi',
       tier: 'buff',
     },
   ],
@@ -177,7 +177,7 @@ export const BOSS_ENRAGE: BuffDef = {
  * ================================================================== */
 
 /**
- * 斩击：**循环的基石**。瞬发、CD 0、耗能 8、产生 12 储能。
+ * 斩击：**循环的基石**。瞬发、CD 0、耗精力 8、产生 20 斗炁。
  *
  * 数值设计：GCD 是 300ms（18 tick），所以循环里任意两个技能之间
  * 至少隔 18 tick —— 这是"循环节奏"的硬约束。
@@ -196,8 +196,8 @@ const SLASH: SkillDef = {
         then: [
           { kind: 'grant', target: { mode: 'self' }, buff: GCD_BUFF },
           { kind: 'grant', target: { mode: 'self' }, buff: COMBO_WINDOW },
-          // 一次性产生储能（不是"每秒回复"—— 后者语义不同）
-          { kind: 'resource', target: { mode: 'self' }, resource: 'fury', delta: 20 },
+          // 一次性产生斗炁（不是"每秒回复"—— 后者语义不同）
+          { kind: 'resource', target: { mode: 'self' }, resource: 'douqi', delta: 20 },
           // 少量回能：让斩击可以接近 GCD 节奏持续输出，
           // 而不是被能量卡死（那样循环会变得毫无选择余地）
           { kind: 'resource', target: { mode: 'self' }, resource: 'energy', delta: 6 },
@@ -252,7 +252,7 @@ const HEAVY: SkillDef = {
   castTime: 2000,
   cooldown: 8000,
   gcd: true,
-  cost: [{ resource: 'mp', value: 1200 }],
+  cost: [{ resource: 'energy', value: 55 }],
   targeting: { mode: 'primaryEnemy' },
   hits: [
     {
@@ -295,7 +295,7 @@ const REND: SkillDef = {
   castTime: 0,
   cooldown: 0,
   gcd: true,
-  cost: [{ resource: 'fury', value: 35 }],
+  cost: [{ resource: 'douqi', value: 35 }],
   targeting: { mode: 'primaryEnemy' },
   hits: [
     {
@@ -340,7 +340,7 @@ const ARC: SkillDef = {
   castTime: 0,
   cooldown: 0,
   gcd: true,
-  cost: [{ resource: 'fury', value: 25 }],
+  cost: [{ resource: 'douqi', value: 25 }],
   targeting: { mode: 'primaryEnemy' },
   hits: [
     {
@@ -420,7 +420,7 @@ const HASTE_SKILL: SkillDef = {
   castTime: 0,
   cooldown: 20_000,
   gcd: true,
-  cost: [{ resource: 'mp', value: 600 }],
+  cost: [{ resource: 'energy', value: 30 }],
   targeting: { mode: 'self' },
   hits: [],
   tags: ['spell'],

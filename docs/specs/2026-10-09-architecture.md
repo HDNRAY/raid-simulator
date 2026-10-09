@@ -296,9 +296,9 @@ export const PALETTE = {
 
   // 语义色（每个都有 base/dark/bright 三档，对应 32 色调色板的明暗梯度）
   hp:      { base: 0xd23a34, dark: 0x7c1b1f, bright: 0xf0605a },
-  mp:      { base: 0x3a7ad2, dark: 0x1b3a76, bright: 0x5a9ef0 },
+  // 刻意不做"魔法值"：两种资源已经够表达循环与爆发
   energy:  { base: 0x5cb460, dark: 0x1f4e29, bright: 0x7cd480 },
-  fury:    { base: 0xe4a840, dark: 0x624215, bright: 0xffc860 },
+  douqi:   { base: 0xe4a840, dark: 0x624215, bright: 0xffc860 },
   // 判定窗口专用：必须最醒目
   iframe:  { base: 0xff6648, dark: 0x5a0d0b, bright: 0xffb8a0 },
   // 预警三色：清晰度就是难度
@@ -759,7 +759,7 @@ DoT/HoT、buff 过期、CD、狂暴计时**全部**用截止 tick。这是引擎
 
 ### 12.3 生命与离散资源：整数
 
-`hp` / `mp` / 层数 / 使用次数一律整数。公式内部按 float 算，
+`hp` / 精力 / 斗炁 / 层数 / 使用次数一律整数。公式内部按 float 算，
 **只在写回状态时取整**，且只允许通过 `roundStat` / `roundDamage`。
 
 - 伤害**向下取整**（`roundDamage`）：向上取整会让"每次 0.5 伤害"变成 1 点，

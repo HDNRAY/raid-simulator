@@ -440,13 +440,13 @@ export class BattleScene {
   private readonly playerPanel: Panel;
   private readonly playerName: Label;
   private readonly hpBar: Bar;
-  private readonly mpBar: Bar;
   private readonly energyBar: Bar;
-  private readonly furyBar: Bar;
+  private readonly douqiBar: Bar;
   private readonly hpText: Label;
-  private readonly mpLabel: Label;
-  private readonly furyLabel: Label;
   private readonly energyLabel: Label;
+  private readonly douqiLabel: Label;
+  private readonly energyText: Label;
+  private readonly douqiText: Label;
 
   private readonly skillBar: SkillBarView;
   private readonly buffStrip: BuffStripView;
@@ -556,31 +556,35 @@ export class BattleScene {
     this.hpBar = new Bar(pixi, { x: pf.x + 8, y: pf.y + 24, w: pf.w - 16, h: 14, color: PALETTE.hp.base, darkColor: PALETTE.hp.dark, brightColor: PALETTE.hp.bright });
     this.hpText = new Label(pixi, {
       x: pf.x + pf.w - 10,
-      y: pf.y + 25,
-      size: TYPE.xs,
+      y: pf.y + 24,
+      size: TYPE.sm,
       color: 0xffffff,
       anchorX: 1,
+      stroke: 0x2a0808,
+      strokeWidth: 3,
     });
-    // 下排两个：魔力 / 储能。能量单独一行（它与 GCD 节奏直接相关，值得独立）
+    // 只有两种资源：精力（短循环）与斗炁（积攒），正好并排一行
     const halfW = Math.round((pf.w - 20) / 2);
-    this.mpBar = new Bar(pixi, { x: pf.x + 8, y: pf.y + 44, w: halfW, h: 12, color: PALETTE.mp.base, darkColor: PALETTE.mp.dark, brightColor: PALETTE.mp.bright });
-    this.furyBar = new Bar(pixi, { x: pf.x + 12 + halfW, y: pf.y + 44, w: halfW, h: 12, color: PALETTE.fury.base, darkColor: PALETTE.fury.dark, brightColor: PALETTE.fury.bright });
-    this.energyBar = new Bar(pixi, { x: pf.x + 8, y: pf.y + 64, w: pf.w - 16, h: 12, color: PALETTE.energy.base, darkColor: PALETTE.energy.dark, brightColor: PALETTE.energy.bright });
+    this.energyBar = new Bar(pixi, { x: pf.x + 8, y: pf.y + 46, w: halfW, h: 16, color: PALETTE.energy.base, darkColor: PALETTE.energy.dark, brightColor: PALETTE.energy.bright });
+    this.douqiBar = new Bar(pixi, { x: pf.x + 12 + halfW, y: pf.y + 46, w: halfW, h: 16, color: PALETTE.douqi.base, darkColor: PALETTE.douqi.dark, brightColor: PALETTE.douqi.bright });
+    this.energyLabel = new Label(pixi, { x: pf.x + 12, y: pf.y + 46, size: TYPE.sm, color: 0x0d1a0d });
+    this.douqiLabel = new Label(pixi, { x: pf.x + 16 + halfW, y: pf.y + 46, size: TYPE.sm, color: 0x2a1c06 });
+    // 数值压在亮色条上，必须描边才读得清
+    this.energyText = new Label(pixi, { x: pf.x + halfW + 2, y: pf.y + 47, size: TYPE.sm, color: 0xffffff, anchorX: 1, stroke: 0x0a1408, strokeWidth: 3 });
+    this.douqiText = new Label(pixi, { x: pf.x + pf.w - 10, y: pf.y + 47, size: TYPE.sm, color: 0xffffff, anchorX: 1, stroke: 0x2a1a04, strokeWidth: 3 });
 
-    // 资源条上的小标签（中文 >= 16，所以用 sm）
-    this.mpLabel = new Label(pixi, { x: pf.x + 12, y: pf.y + 44, size: TYPE.sm, color: 0xffffff });
-    this.furyLabel = new Label(pixi, { x: pf.x + 16 + halfW, y: pf.y + 44, size: TYPE.sm, color: 0xffffff });
-    this.energyLabel = new Label(pixi, { x: pf.x + 12, y: pf.y + 64, size: TYPE.sm, color: 0xffffff });
     this.hud.addChild(
       this.playerPanel.root,
       this.playerName.root,
       this.hpBar.root,
       this.hpText.root,
-      this.mpBar.root,
-      this.furyBar.root,
       this.energyBar.root,
-      this.mpLabel.root,
-      this.furyLabel.root,
+      this.douqiBar.root,
+      this.energyBar.root,
+      this.energyLabel.root,
+      this.douqiLabel.root,
+      this.energyText.root,
+      this.douqiText.root,
       this.energyLabel.root,
     );
 
@@ -727,11 +731,13 @@ export class BattleScene {
     this.playerName.set(translate(view.player.nameKey));
     this.hpBar.update(ratioOf(view.player.hp));
     this.hpText.set(`${Math.round(view.player.hp.current)}/${Math.round(view.player.hp.cap)}`);
-    this.mpBar.update(ratioOf(view.player.mp));
-    this.furyBar.update(ratioOf(view.player.fury));
     this.energyBar.update(ratioOf(view.player.energy));
-    this.mpLabel.set(translate('resource.mp'));
-    this.furyLabel.set(translate('resource.fury'));
+    this.douqiBar.update(ratioOf(view.player.douqi));
+    this.energyBar.update(ratioOf(view.player.energy));
+    this.energyLabel.set(translate('resource.energy'));
+    this.douqiLabel.set(translate('resource.douqi'));
+    this.energyText.set(`${Math.round(view.player.energy.current)}`);
+    this.douqiText.set(`${Math.round(view.player.douqi.current)}`);
     this.energyLabel.set(translate('resource.energy'));
 
     /* ---- 技能栏与 buff ---- */

@@ -87,15 +87,13 @@ export const STAT_RULES: Record<StatKey, StatRule> = {
 
   /* ---- 资源上限：加法 ---- */
   maxHp: { combine: 'sum', kind: 'accumulator', clamp: [0, Number.POSITIVE_INFINITY] },
-  maxMp: { combine: 'sum', kind: 'accumulator', clamp: [0, Number.POSITIVE_INFINITY] },
   maxEnergy: { combine: 'sum', kind: 'accumulator', clamp: [0, Number.POSITIVE_INFINITY] },
-  maxFury: { combine: 'sum', kind: 'accumulator', clamp: [0, Number.POSITIVE_INFINITY] },
+  maxDouqi: { combine: 'sum', kind: 'accumulator', clamp: [0, Number.POSITIVE_INFINITY] },
 
   /* ---- 资源回复（每秒）：加法 ---- */
   hpRegen: { combine: 'sum', kind: 'accumulator' },
-  mpRegen: { combine: 'sum', kind: 'accumulator' },
   energyRegen: { combine: 'sum', kind: 'accumulator' },
-  furyRegen: { combine: 'sum', kind: 'accumulator' },
+  douqiRegen: { combine: 'sum', kind: 'accumulator' },
 
   /* ---- 次级属性 ---- */
   /** 暴击率上限 100% —— 超过没有意义，且会让"必定暴击"的判定变得含糊 */

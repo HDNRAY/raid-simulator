@@ -43,7 +43,14 @@ export type Side = 'ally' | 'enemy';
  * ================================================================== */
 
 /** 具名资源。有上限、会回复的那几种。 */
-export type ResourceKey = 'hp' | 'mp' | 'energy' | 'fury';
+/**
+ * 具名资源。
+ *
+ * 只有两种玩家资源：**精力**（短循环、衰减快，用于常规技能）
+ * 与**斗炁**（积攒型，用于高威力技能）。
+ * 刻意不做"魔法值"——多一种资源只会让 UI 与循环都更啰嗦。
+ */
+export type ResourceKey = 'hp' | 'energy' | 'douqi';
 
 /**
  * 离散计数器（使用次数、充能、弹药……）。
@@ -60,9 +67,8 @@ export interface Counter {
 /** 任何实例都可以有自己的资源池。 */
 export interface ResourcePool {
   readonly hp?: number;
-  readonly mp?: number;
   readonly energy?: number;
-  readonly fury?: number;
+  readonly douqi?: number;
   /** 自定义离散资源，键名由内容作者定义（'uses' / 'charges' / 'ammo' …） */
   readonly counters?: Readonly<Record<string, Counter>>;
 }
@@ -85,13 +91,11 @@ export type StatKey =
   | PrimaryStat
   // 资源上限 / 回复
   | 'maxHp'
-  | 'maxMp'
   | 'maxEnergy'
-  | 'maxFury'
+  | 'maxDouqi'
   | 'hpRegen'
-  | 'mpRegen'
   | 'energyRegen'
-  | 'furyRegen'
+  | 'douqiRegen'
   // 次级属性
   | 'critChance'
   | 'critDamage'
@@ -503,8 +507,8 @@ export interface GrantSkillAbility {
 /**
  * 增减资源。
  *
- * 为什么需要它（而不是用 modifier 加 `furyRegen`）：
- * "产生 12 点储能"是**一次性**的资源变动，而 `furyRegen` 修正表达的是
+ * 为什么需要它（而不是用 modifier 加 `douqiRegen`）：
+ * "产生 12 点斗炁"是**一次性**的资源变动，而 `douqiRegen` 修正表达的是
  * **持续回复速率**。两者语义不同 —— 用后者表达前者会变成"每秒 12 点"
  * 而不是"这一次 12 点"。
  *

@@ -44,8 +44,8 @@ function makeEncounter(): BattleEngine {
     id: 'player',
     nameKey: 'hud.level',
     side: 'ally',
-    caps: { hp: 12_000, mp: 8_000, energy: 120, fury: 100 },
-    resources: { hp: 12_000, mp: 8_000, energy: 120, fury: 0 },
+    caps: { hp: 12_000, energy: 120, douqi: 100 },
+    resources: { hp: 12_000, energy: 120, douqi: 0 },
     counters: {},
     basePrimary: { strength: 120, agility: 100, intelligence: 110, spirit: 100 },
     buffs: [],
@@ -60,8 +60,8 @@ function makeEncounter(): BattleEngine {
     id: 'verrot',
     nameKey: 'boss.name',
     side: 'enemy',
-    caps: { hp: 150_000, mp: 0, energy: 0, fury: 0 },
-    resources: { hp: 150_000, mp: 0, energy: 0, fury: 0 },
+    caps: { hp: 150_000, energy: 0, douqi: 0 },
+    resources: { hp: 150_000, energy: 0, douqi: 0 },
     counters: {},
     basePrimary: { strength: 400, agility: 200, intelligence: 300, spirit: 200 },
     buffs: [],
@@ -98,7 +98,7 @@ function makeEncounter(): BattleEngine {
  * 一个"合格玩家"的循环。
  *
  * 约束：GCD 是 300ms（18 tick），所以任意两次施放之间必须 >= 18 tick；
- * 储能由斩击产生（每次 20），弧光/割裂各消耗 25/35。
+ * 斗炁由斩击产生（每次 20），弧光/割裂各消耗 25/35。
  *
  * 节奏：斩击(0) → 斩击(20) → 弧光(40) → 斩击(52)
  */
@@ -281,8 +281,8 @@ describe('内容注册表：扩展内容不需要改引擎', () => {
       id: 'player',
       nameKey: 'hud.level',
       side: 'ally',
-      caps: { hp: 1000, mp: 0, energy: 0, fury: 0 },
-      resources: { hp: 1000, mp: 0, energy: 0, fury: 0 },
+      caps: { hp: 1000, energy: 0, douqi: 0 },
+      resources: { hp: 1000, energy: 0, douqi: 0 },
       counters: {},
       basePrimary: { strength: 1, agility: 1, intelligence: 1, spirit: 1 },
       buffs: [],
@@ -296,8 +296,8 @@ describe('内容注册表：扩展内容不需要改引擎', () => {
       ...player,
       id: 'dummy',
       side: 'enemy',
-      caps: { hp: 100, mp: 0, energy: 0, fury: 0 },
-      resources: { hp: 100, mp: 0, energy: 0, fury: 0 },
+      caps: { hp: 100, energy: 0, douqi: 0 },
+      resources: { hp: 100, energy: 0, douqi: 0 },
     };
 
     const engine = new BattleEngine({

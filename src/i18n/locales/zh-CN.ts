@@ -19,12 +19,16 @@ export const zhCN = {
     no: '否',
   },
 
-  /** 资源名 */
+  /**
+   * 资源名。
+   *
+   * 只有两种：**精力**是短循环资源（常规技能消耗、回复快），
+   * **斗炁**是积攒型资源（高威力技能消耗、靠战斗动作积攒）。
+   */
   resource: {
     hp: '生命',
-    mp: '魔力',
-    energy: '体力',
-    fury: '储能',
+    energy: '精力',
+    douqi: '斗炁',
   },
 
   /** 主属性与次级属性 */
@@ -53,13 +57,11 @@ export const zhCN = {
     healingBoost: '治疗加成',
     shieldBoost: '护盾加成',
     maxHp: '生命上限',
-    maxMp: '魔力上限',
-    maxEnergy: '体力上限',
-    maxFury: '储能上限',
+    maxEnergy: '精力上限',
+    maxDouqi: '斗炁上限',
     hpRegen: '生命回复',
-    mpRegen: '魔力回复',
-    energyRegen: '体力回复',
-    furyRegen: '储能回复',
+    energyRegen: '精力回复',
+    douqiRegen: '斗炁回复',
   },
 
   /** 预警提示：告诉玩家"现在该做什么" */
@@ -138,7 +140,7 @@ export const zhCN = {
 
   /** 玩家技能 */
   skill: {
-    slash: { name: '斩击', desc: '快速近战攻击，少量储能。可开启派生窗口。' },
+    slash: { name: '斩击', desc: '快速近战攻击，少量积攒斗炁。可开启派生窗口。' },
     heavy: { name: '龙破斩', desc: '2 秒读条，高额法术伤害。读条期间可被打断。' },
     rend: { name: '割裂', desc: '造成流血，每层提高目标承受的物理伤害。' },
     arc: { name: '弧光斩', desc: '派生技。只能在斩击后的派生窗口内使用。' },
