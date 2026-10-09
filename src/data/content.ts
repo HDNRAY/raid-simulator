@@ -476,7 +476,7 @@ const BOSS_CLEAVE: SkillDef = {
            * 单发 14 点看起来不重，但出招频率提到了约 1.1 秒一次 ——
            * "重"体现在**总压力**上，而不是非要一击半血。
            */
-          damage: { base: S(30), school: 'physical', canCrit: false, countsAsHit: true },
+          damage: { base: S(28), school: 'physical', canCrit: false, countsAsHit: true },
         },
       ],
     },
@@ -518,7 +518,7 @@ const BOSS_SWEEP: SkillDef = {
            * 前摇更长（长到能看清并闪避），命中更痛 —— 所以"看到横扫
            * 必须反应"是本作的核心节奏。
            */
-          damage: { base: S(38), school: 'fire', canCrit: false, countsAsHit: true },
+          damage: { base: S(36), school: 'fire', canCrit: false, countsAsHit: true },
         },
       ],
     },

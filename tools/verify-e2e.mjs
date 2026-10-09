@@ -19,6 +19,15 @@ const send=(m,p={})=>new Promise(r=>{const i=id++;pend.set(i,r);ws.send(JSON.str
 await send('Runtime.enable'); await send('Page.enable');
 await send('Page.navigate',{url:'http://localhost:5273/'});
 await sleep(3500);
+/**
+ * ⚠️ **必须把页面拉到前台**，否则下面的合成按键会让页面失焦。
+ *
+ * 踩过的坑：`Input.dispatchKeyEvent` 之后 headless Chrome 把页面判定为
+ * "不可见/失焦"，于是**暂停 requestAnimationFrame** —— Pixi 的 ticker
+ * 跟着停，`tick` 永久不再推进。表现看起来像"游戏死循环/读条卡死"，
+ * 实际上是浏览器不给帧。加上这一行之后 tick 恢复正常（+60/秒）。
+ */
+await send('Page.bringToFront').catch(() => {});
 const probe = async () => { const r = await send('Runtime.evaluate',{expression:'JSON.stringify(window.__raidBattle?.probe() ?? null)',returnByValue:true});
   return r.result?.value ? JSON.parse(r.result.value) : null; };
 /** 在页面里求值并取回字符串结果（端到端脚本读游戏状态用）。 */
@@ -59,9 +68,17 @@ for (const id of ['attack', 'blast', 'attack']) await pressSkill(id, 700);
 const b = await probe();
 console.log('按键后:', JSON.stringify(b));
 // 打 8 秒，看伤害是否累计
-for (let i=0;i<10;i++){
-  await pressSkill('attack', 450);
-  await pressSkill('blast', 450);
+/**
+ * ⚠️ 每步的等待时间必须**长于技能的读条时长**。
+ *
+ * 「攻」读条 500ms、「轰」900ms，而伤害现在只在**读条走完之后**结算
+ * （需求："所有技能的效果，如果要读条，都应该在读条之后"）。
+ * 之前每步等 450ms —— 读条还没走完就按下一个，伤害自然打不出来，
+ * 脚本会误报"Boss 受到伤害 ✗"。
+ */
+for (let i=0;i<8;i++){
+  await pressSkill('attack', 700);
+  await pressSkill('blast', 1100);
 }
 const c = await probe();
 console.log('持续输出后:', JSON.stringify(c));

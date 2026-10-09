@@ -930,18 +930,46 @@ export class BattleEngine {
         }
 
         const elapsedMs = (this.state.tick - cast.startedAtTick) * (1000 / 60);
+
+        /**
+         * ⚠️ **读条没走完，任何 hit 都不许结算。**
+         *
+         * 这是需求"所有技能的效果，如果要读条，都应该在读条之后"的
+         * 技术落地，也是踩出来的 bug：
+         *
+         * 原先的条件只有 `hit.at <= elapsedMs`。而**玩家技能的 `at` 是 0**
+         * （「攻」「轰」都写 `at: 0`）—— 于是读条创建后的**下一 tick**
+         * 就满足 `0 <= 16.67`，伤害当场结算，读条形同虚设。
+         *
+         * 观感上就是"读条还在走、血已经掉了"（Boss 与玩家两边都有，
+         * 玩家的最明显：按下「攻」血就掉）。
+         *
+         * 现在多一个 `elapsedMs >= cast.castTimeMs` 的前提：
+         *   - 读条技能的 `at` 语义变成"读条走完之后的第几毫秒"
+         *     （Boss 技能本来就写 `at === castTime`，行为不变）
+         *   - 瞬发技能（`castTime === 0`）不走这里，仍由
+         *     `resolveSkillHits` 立即结算
+         *
+         * 注意 `castTimeMs` 是**已经算过急速**的值，所以这条判断
+         * 对急速同样成立。
+         */
+        const castDone = elapsedMs >= cast.castTimeMs;
         const dueHits = skill.hits.filter(
-          (hit: HitDef, index: number) => index >= cast.resolvedHits && hit.at <= elapsedMs,
+          (hit: HitDef, index: number) =>
+            index >= cast.resolvedHits && castDone && hit.at <= elapsedMs,
         );
 
-        // CastInstance 是 readonly（状态设计如此），所以用新对象推进计数
-        let resolved = cast.resolvedHits;
-        for (const hit of dueHits) {
-          this.resolveHit(actor, skill, hit);
-          resolved += 1;
-        }
-
-        const finished = elapsedMs >= cast.castTimeMs && resolved >= skill.hits.length;
+        /**
+         * ⚠️ **顺序很重要：先发 `castFinished`，再结算伤害。**
+         *
+         * 需求："所有技能的效果，如果要读条，都应该在读条之后。"
+         *
+         * 事件顺序是这句话最直接的证据 —— 消费者（渲染层的飘字、
+         * 测试里的断言、未来的日志）都按事件顺序理解发生了什么。
+         * 原先伤害先发、`castFinished` 后发，于是时间线上看起来
+         * 仍然是"伤害在读条结束之前"。
+         */
+        const finished = elapsedMs >= cast.castTimeMs;
         if (finished) {
           this.events.push({
             kind: 'castFinished',
@@ -950,7 +978,16 @@ export class BattleEngine {
             skillId: cast.skillId,
           });
           this.fireCastFinishTriggers(actor, skill);
-        } else {
+        }
+
+        // CastInstance 是 readonly（状态设计如此），所以用新对象推进计数
+        let resolved = cast.resolvedHits;
+        for (const hit of dueHits) {
+          this.resolveHit(actor, skill, hit);
+          resolved += 1;
+        }
+
+        if (!finished) {
           stillCasting.push({ ...cast, resolvedHits: resolved });
         }
       }

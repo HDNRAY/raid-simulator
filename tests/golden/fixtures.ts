@@ -127,30 +127,29 @@ export const GOLDEN_OUTCOME = {
    * 当前平衡下"会闪避"的玩家获胜。
    *
    * 实测（规范策略）：
-   *   - 用时 477 tick ≈ 8.0 秒
-   *   - 玩家剩 **54 血**（满血 100）
-   *   - **不闪避**：**败**，Boss 还剩 50 血（5.0 秒被打死）
-   *   - **只按「攻」**：**败**，Boss 还剩 60 血
+   *   - 用时 746 tick ≈ 12.4 秒
+   *   - 玩家剩 **22 血**
+   *   - **只按「攻」（完美进攻、零防御）：败**，Boss 还剩 10 血
    *
-   * 也就是需求要的"不防御就算完美进攻也打不过"：
-   * 纯进攻路线 5 秒就崩，而用上闪避/格挡就能赢。
+   * 也就是需求要的"不防御就算完美进攻也打不过"。
    *
-   * Boss 数值（2026-10-09 末次调整）：
-   *   重斩 前摇 1.8s / 伤害 30 / **冷却 6s** / 轮转间隔 2.2s
-   *   横扫 前摇 2.2s / 伤害 38 / **冷却 10s** / 轮转间隔 6.4s
-   *   （改前 26/34、冷却 3s/6s、间隔 1.2s/4.3s）
+   * Boss 数值（2026-10-09 末次）：
+   *   重斩 前摇 1.8s / 伤害 28 / 冷却 6s / 轮转间隔 2.2s
+   *   横扫 前摇 2.2s / 伤害 36 / 冷却 10s / 轮转间隔 6.4s
+   *   血量 210
    *
-   * ⚠️ 冷却与轮转 `gapMs` **要一起调**：真正决定出招间隔的是两者中
-   * 更长的那个。之前冷却存在但 `gapMs` 更短，所以观感像"重斩没有 CD"。
+   * ⚠️ **Boss 血量随"读条结算时机"的修复上调过**：
+   * 修好"读条没走完就结算伤害"之后，玩家伤害要等读条走完才生效
+   * （晚 500ms），整体输出变低，于是纯进攻反而能险胜。
+   * 血量 160 → 210 把这条差值补回来。
    *
-   * ⚠️ 注意 Boss 的两个增伤是**叠乘**的：
-   *   `boss-empowered`（凝练，+30%）× `boss-frenzy`（狂怒，+25%）
-   *   → 一次横扫能达到 1.3×1.25×38 ≈ 62。所以基础伤害不能只看纸面。
+   * ⚠️ 两个增伤是**叠乘**的：`boss-empowered`(+30%) × `boss-frenzy`(+25%)，
+   * 所以纸面 28/36 实际能打到 40+。
    */
   status: 'victory' as const,
   endReason: 'hpZero' as const,
   /** 通关用时（tick）。连续量，对数值改动敏感。 */
-  ticks: 477,
+  ticks: 746,
   /**
    * 当前内容没有暴击判定，所以随机数一次都不被消耗。
    *
@@ -160,7 +159,7 @@ export const GOLDEN_OUTCOME = {
    */
   finalRngSeed: 20261009,
   combatants: {
-    player: { alive: true, hp: 54, energy: 0, douqi: 60, damageDealt: 0, damageTaken: 0 },
+    player: { alive: true, hp: 22, energy: 5, douqi: 43, damageDealt: 0, damageTaken: 0 },
     meiichiro: { alive: false, hp: 0, energy: 0, douqi: 0, damageDealt: 0, damageTaken: 0 },
   },
 } satisfies Omit<RunOutcome, 'ticks'> & { readonly ticks: number };

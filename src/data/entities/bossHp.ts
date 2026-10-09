@@ -29,4 +29,4 @@
  * 自动化验证，目前的数值是按**纯进攻的血线余量**定的。
  */
 
-export const BOSS_HP_DISPLAY = 160;
+export const BOSS_HP_DISPLAY = 210;
