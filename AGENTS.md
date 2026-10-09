@@ -151,3 +151,36 @@ pnpm run typecheck   →   npx eslint .   →   pnpm run test:run
 `verify-e2e.mjs` 需要开发服务器在 <http://localhost:5273/>。
 若脚本挂住，先 `pkill -f "Google Chrome.*headless"`（残留的 headless
 Chrome 会让它一直等）。
+
+### ⚠️ e2e 不必每次改动都跑
+
+**e2e 固定要 ~22 秒**（Chrome 启动 + 游戏跑 8 秒）。前四条
+（typecheck / eslint / test / build，合计约 3 秒）**每次都要跑**，
+e2e 按下面的规则降频。
+
+> **⚠️ AI 无法可靠判断"用户是否还有排队消息"。**
+> 不要把这当成可以自动执行的判据 —— 试过一次，判断错了，
+> 在用户明明还有消息时跳过了 e2e。
+>
+> 实际做法：**每次回复末尾**主动说明"这次没跑 e2e（因为…）"，
+> 让用户能纠正。宁可多问一句，不要静默跳过。
+
+降频依据（按可靠性排序）：
+
+1. **改动是否触及浏览器边界** —— 动了 `src/render/`、`src/ui/`、
+   `src/input/`、`src/main.ts`、`index.html`、vite 配置，就跑；
+   纯 `src/core/` + 测试的改动，单测已经覆盖，可以跳。
+2. **距上次跑 e2e 过了几轮** —— 连续几轮小改后补一次。
+
+**无论跳不跳，都要在回复里写出来**，不要静默。
+
+### 清理 headless Chrome 时**必须**带限定
+
+```
+pkill -9 -f "Google Chrome.*headless"     # ✓
+pkill -9 -f "Google Chrome"               # ✗ 会把用户自己的浏览器也杀掉
+```
+
+后者匹配的是完整命令行，而用户的浏览器路径就是
+`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` ——
+**完全匹配**，`-9` 还让它来不及保存会话。这个错误犯过一次，不要再犯。

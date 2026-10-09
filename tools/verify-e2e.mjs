@@ -1,3 +1,30 @@
+/**
+ * 端到端验证：真开一个 headless Chrome，把游戏跑起来，按真实键盘，
+ * 断言"战斗确实在推进"。
+ *
+ * ==================================================================
+ * 什么时候跑（AGENTS.md §4）
+ * ==================================================================
+ *
+ * ⚠️ **不必每次改动都跑**，也**不要在有排队消息时跑** ——
+ * 它固定要 ~22 秒（Chrome 启动 + 游戏跑 8 秒），用户在连续提需求时
+ * 跑它就是让他干等。**队列空了、要收尾时跑一遍即可。**
+ *
+ * 快的那些（typecheck / eslint / test / build，合计约 3 秒）每次都要跑。
+ *
+ * ==================================================================
+ * 性能笔记（曾经慢到 192s）
+ * ==================================================================
+ *
+ * 三个 `--disable-*-backgrounding/throttling` flag 是**性能关键**：
+ * headless 会把"没有真实焦点的页"判定为不可见，把 rAF 节流到 ~2.5fps
+ * —— 逻辑全对但跑得极慢。另外 `Page.bringToFront` 也不能省
+ * （合成按键会让页面失焦，同样暂停 rAF）。
+ *
+ * ⚠️ 清理残留进程时**必须**带 `.*headless` 限定，否则会杀掉用户
+ * 自己的浏览器（见 AGENTS.md §4）。
+ */
+
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -18,7 +45,6 @@ ws.addEventListener('message',e=>{const m=JSON.parse(e.data); if(m.id&&pend.has(
 const send=(m,p={})=>new Promise(r=>{const i=id++;pend.set(i,r);ws.send(JSON.stringify({id:i,method:m,params:p}));});
 await send('Runtime.enable'); await send('Page.enable');
 await send('Page.navigate',{url:'http://localhost:5273/'});
-await sleep(3500);
 /**
  * ⚠️ **必须把页面拉到前台**，否则下面的合成按键会让页面失焦。
  *
@@ -28,6 +54,29 @@ await sleep(3500);
  * 实际上是浏览器不给帧。加上这一行之后 tick 恢复正常（+60/秒）。
  */
 await send('Page.bringToFront').catch(() => {});
+/**
+ * 等"可测量"为止，而不是死等 3.5s。
+ *
+ * ⚠️ 必须放在 `bringToFront` **之后**：页面还在后台态时 rAF 被节流，
+ * tick 不推进，轮询只会等到超时。
+ */
+const waitReady = async (timeoutMs = 15000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = await send('Runtime.evaluate', {
+      expression: 'JSON.stringify((window.__raidBattle?.probe?.()?.tick ?? 0) > 0)',
+      returnByValue: true,
+    });
+    if (r.result?.value === 'true') return true;
+    await sleep(100);
+  }
+  return false;
+};
+if (!(await waitReady())) {
+  console.log('✗ 游戏未在 15s 内进入可测量状态');
+  child.kill('SIGKILL');
+  process.exit(1);
+}
 const probe = async () => { const r = await send('Runtime.evaluate',{expression:'JSON.stringify(window.__raidBattle?.probe() ?? null)',returnByValue:true});
   return r.result?.value ? JSON.parse(r.result.value) : null; };
 /** 在页面里求值并取回字符串结果（端到端脚本读游戏状态用）。 */
@@ -76,10 +125,26 @@ console.log('按键后:', JSON.stringify(b));
  * 之前每步等 450ms —— 读条还没走完就按下一个，伤害自然打不出来，
  * 脚本会误报"Boss 受到伤害 ✗"。
  */
-for (let i=0;i<8;i++){
-  // ⚠️ 只需略长于读条：「攻」500ms、「轰」900ms
+/**
+ * 持续输出：**跑到伤害收敛就停**，而不是固定打 8 轮。
+ *
+ * 原先固定 8 轮 × (600+1000)ms = 12.8s 的纯等待。改成轮询之后，
+ * 机器快时提前结束、机器慢时自动多打几轮（有上限兜底）——
+ * 既不靠拍脑袋的时长，也不会无限等。
+ *
+ * 收敛判据：Boss 掉血量连续两轮不再明显增加（说明已经打满，
+ * 或者战斗已结束）。
+ */
+let lastBossHp = Infinity;
+let stagnant = 0;
+for (let i = 0; i < 10 && stagnant < 2; i += 1) {
   await pressSkill('attack', 600);
   await pressSkill('blast', 1000);
+  const mid = await probe();
+  if (mid && mid.status !== 'running') break;
+  if (mid && lastBossHp - mid.bossHp < 10) stagnant += 1;
+  else stagnant = 0;
+  if (mid) lastBossHp = mid.bossHp;
 }
 const c = await probe();
 console.log('持续输出后:', JSON.stringify(c));
