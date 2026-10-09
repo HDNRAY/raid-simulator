@@ -192,10 +192,16 @@ export class BattleEngine {
    * 主循环
    * ---------------------------------------------------------------- */
 
-  /** 应用一批动作。对应管线第 1 步。 */
-  applyActions(actions: readonly Action[]): void {
+  /**
+   * 应用一批动作。对应管线第 1 步。
+   *
+   * `actorId` 决定"谁在执行这些动作" —— 这让**玩家与 Boss 走完全同一条
+   * 施法路径**（数据模型规范：两边只差输入来源）。
+   * 不给则默认玩家。
+   */
+  applyActions(actions: readonly Action[], actorId = 'player'): void {
     for (const action of actions) {
-      if (action.type === 'useSkill') this.tryUseSkill(action.skillId);
+      if (action.type === 'useSkill') this.tryUseSkill(action.skillId, actorId);
     }
   }
 
@@ -205,12 +211,16 @@ export class BattleEngine {
    * @param actions 本 tick 要应用的玩家 / AI 动作
    * @param aiActions AI 产出的动作（M4 会填充；现在可以为空）
    */
-  tick(actions: readonly Action[] = [], aiActions: readonly Action[] = []): void {
+  tick(
+    actions: readonly Action[] = [],
+    aiActions: readonly Action[] = [],
+    aiActorId = 'boss',
+  ): void {
     if (this.state.status !== 'running') return;
 
-    // 1. 动作生效
-    this.applyActions(actions);
-    this.applyActions(aiActions);
+    // 1. 动作生效（两边走同一条路径，只是 actor 不同）
+    this.applyActions(actions, 'player');
+    this.applyActions(aiActions, aiActorId);
 
     // 2. 读条推进
     this.advanceCasts();
@@ -236,8 +246,8 @@ export class BattleEngine {
    * 技能施放
    * ---------------------------------------------------------------- */
 
-  private tryUseSkill(skillId: string): void {
-    const actor = this.state.combatants.find((c: Combatant) => c.id === 'player');
+  private tryUseSkill(skillId: string, actorId: string): void {
+    const actor = this.state.combatants.find((c: Combatant) => c.id === actorId);
     if (!actor) return;
 
     const skill = this.options.skills.get(skillId);
@@ -279,10 +289,18 @@ export class BattleEngine {
     // 记使用次数
     next = { ...next, uses: { ...next.uses, [skillId]: (next.uses[skillId] ?? 0) + 1 } };
 
-    // 读条 or 立刻结算
+    // 读条 or 立刻结算。
+    //
+    // ⚠️ 状态写回只有两处，且**互斥**。这个方法是踩坑最密集的地方，
+    // 记录一下根因：早先的版本在方法末尾统一写回 `next`，而
+    // `resolveSkillHits` 也会通过 replaceCombatant 改 state，
+    // 于是最后那次写回把刚挂上的 buff / 刚扣的血全部覆盖掉
+    // ——表现为"事件发了但状态没变"。教训：**一个方法里只在一个地方
+    // 写回同一个对象**，或者干脆让下游函数自己写。
     const castTimeMs = hastedCastTime(skill.castTime, stats);
     if (castTimeMs > 0) {
-      next = {
+      // 读条：把 cast 写回 state 即可，hit 由 advanceCasts 逐段结算
+      this.replaceCombatant({
         ...next,
         casts: [
           ...next.casts,
@@ -294,18 +312,19 @@ export class BattleEngine {
             interruptible: skill.interruptible,
           },
         ],
-      };
+      });
       this.events.push({
         kind: 'castStarted',
         tick: this.state.tick,
-        sourceId: next.id,
+        sourceId: actor.id,
         skillId,
       });
     } else {
-      this.resolveSkillHits(next, skill, 0);
+      // 瞬发：先同步 GCD / 冷却，再结算 —— 之后**不再写回**
+      this.replaceCombatant(next);
+      this.resolveSkillHits(next, skill);
     }
 
-    this.replaceCombatant(next);
     this.events.push({
       kind: 'skillUsed',
       tick: this.state.tick,
@@ -322,7 +341,6 @@ export class BattleEngine {
     for (const actor of this.state.combatants) {
       if (actor.casts.length === 0) continue;
 
-      let next = actor;
       const stillCasting: typeof actor.casts[number][] = [];
 
       for (const cast of actor.casts) {
@@ -347,7 +365,7 @@ export class BattleEngine {
         // CastInstance 是 readonly（状态设计如此），所以用新对象推进计数
         let resolved = cast.resolvedHits;
         for (const hit of dueHits) {
-          this.resolveHit(next, skill, hit);
+          this.resolveHit(actor, skill, hit);
           resolved += 1;
         }
 
@@ -359,47 +377,90 @@ export class BattleEngine {
             sourceId: actor.id,
             skillId: cast.skillId,
           });
-          this.fireCastFinishTriggers(next, skill);
+          this.fireCastFinishTriggers(actor, skill);
         } else {
           stillCasting.push({ ...cast, resolvedHits: resolved });
         }
       }
 
-      next = { ...next, casts: stillCasting };
-      this.replaceCombatant(next);
+      // ⚠️ 用**当前 state** 而不是循环开头缓存的 `next`：
+      // resolveHit 会在循环中间修改双方状态（扣血、挂 buff），
+      // 写回旧快照会把那些改动覆盖掉。
+      this.replaceCombatant({ ...this.current(actor.id), casts: stillCasting });
     }
   }
 
-  /** 瞬发技能：立刻结算前 N 段。 */
-  private resolveSkillHits(actor: Combatant, skill: SkillDef, _atMs: number): void {
+  /** 瞬发技能：立刻结算全部 hit 段。 */
+  private resolveSkillHits(actor: Combatant, skill: SkillDef): void {
     for (const hit of skill.hits) {
       this.resolveHit(actor, skill, hit);
     }
     this.fireCastFinishTriggers(actor, skill);
   }
 
-  /** 技能完成时触发它自己的 `onCastFinish` 触发器（GCD / 派生窗口就是这么挂上的）。 */
+  /**
+   * 技能完成时结算它自己的 abilities。
+   *
+   * 两种形态都要处理，**不能只处理 trigger**：
+   *
+   *   1. **直接 grant**：`{ kind:'grant', buff: dodgeBuff }`
+   *      —— 闪避 / 格挡这类"用了就给自己挂 buff"的技能走这条。
+   *      （踩过的坑：一开始只实现了 trigger 形态，于是 dodge 施放成功
+   *        但 buff 从未挂上，表现为"闪避没效果"。）
+   *   2. **trigger onCastFinish**：GCD / 派生窗口走这条。
+   */
+  /**
+   * 结算技能自带的 abilities。
+   *
+   * ⚠️ 这里**必须操作传入的累积对象 `actor`，不能回读 `this.current()`**。
+   *
+   * 踩过的坑：回读会拿到 state 里的旧版本（此时 GCD / 冷却还没写回），
+   * 于是挂上 buff 后用旧的 buffs 数组整条覆盖回去 ——
+   * 表现为"dodge 施放成功、buffApplied 事件也发了，但 buff 立刻消失"。
+   *
+   * 所以：改动累积对象 → 同步到 state → 继续改。
+   */
   private fireCastFinishTriggers(actor: Combatant, skill: SkillDef): void {
-    for (const ability of skill.abilities) {
-      if (ability.kind !== 'trigger') continue;
-      if (ability.trigger.on !== 'onCastFinish') continue;
+    let working = actor;
 
-      for (const then of ability.trigger.then) {
-        if (then.kind === 'grant') {
-          const applied = applyBuff(actor, then.buff, actor.id, this.state.tick);
-          actor = { ...actor, buffs: applied.buffs };
-          this.events.push({
-            kind: 'buffApplied',
-            tick: this.state.tick,
-            targetId: actor.id,
-            buffId: then.buff.id,
-            stacks: applied.stacks,
-            sourceId: actor.id,
-          });
+    const grantTo = (buff: BuffDef, targetId: string): void => {
+      const target = working.id === targetId ? working : this.current(targetId);
+      const applied = applyBuff(target, buff, working.id, this.state.tick);
+      working =
+        target.id === working.id ? { ...working, buffs: applied.buffs } : working;
+      if (target.id !== working.id) {
+        this.replaceCombatant({ ...target, buffs: applied.buffs });
+      }
+      this.events.push({
+        kind: 'buffApplied',
+        tick: this.state.tick,
+        targetId: target.id,
+        buffId: buff.id,
+        stacks: applied.stacks,
+        sourceId: working.id,
+      });
+    };
+
+    for (const ability of skill.abilities) {
+      const targetIdOf = (mode: string): string => {
+        if (mode === 'self') return working.id;
+        return this.opponentOf(working.id)?.id ?? working.id;
+      };
+
+      if (ability.kind === 'grant') {
+        grantTo(ability.buff, targetIdOf(ability.target.mode));
+        continue;
+      }
+
+      if (ability.kind === 'trigger') {
+        if (ability.trigger.on !== 'onCastFinish') continue;
+        for (const then of ability.trigger.then) {
+          if (then.kind === 'grant') grantTo(then.buff, targetIdOf(then.target.mode));
         }
       }
     }
-    this.replaceCombatant(actor);
+
+    this.replaceCombatant(working);
   }
 
   /* ---------------------------------------------------------------- *

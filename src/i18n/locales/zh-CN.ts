@@ -98,6 +98,23 @@ export const zhCN = {
     timeout: '时间耗尽',
   },
 
+  /** 内容：装备 / 奇物 */
+  entity: {
+    entropyClock: {
+      name: '熵之钟',
+      desc: '根据智力提升伤害；暴击后使该效果翻倍，持续 10 秒。',
+      sources: {
+        potential: '熵之钟·势能',
+        surge: '熵之钟·涌动',
+      },
+    },
+  },
+
+  /** 内容：buff */
+  buff: {
+    entropySurge: { name: '势能涌动' },
+  },
+
   /** 界面文案 */
   screen: {
     pause: '暂停',

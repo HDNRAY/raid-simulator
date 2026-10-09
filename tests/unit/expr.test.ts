@@ -398,19 +398,11 @@ describe('buildDependencyGraph —— 环检测', () => {
     expect(() => assertNoCycles(abilities)).not.toThrow();
   });
 
-  it('自引用（stat 引用自己）判为环', () => {
-    const abilities: readonly Ability[] = [
-      {
-        kind: 'derived',
-        modifier: { stat: 'damageBoost', op: 'addPercent', sourceKey: 'x' },
-        value: mulExpr(statExpr('damageBoost'), { e: 'const', value: 2 }),
-      },
-    ];
-    expect(buildDependencyGraph(abilities).cycles.length).toBeGreaterThan(0);
-  });
-
-  it('【关键】contrib 引用命名空间会展开成产出者的 stat，因此能检测环', () => {
-    // ns.a 由 damageBoost 产出；而 damageBoost 又 contrib 了 ns.a → 环
+  it('【有意为之】自引用（stat 引用自己）**不**判为环', () => {
+    // 自环是 `x = f(x)` 无解 → 危险；但下面这种是
+    // `x = ns + h(base)` 而 ns 由 x 产出 —— 完全合法的内容写法
+    // （熵之钟的势能就是这种形状：产出命名空间，同时被涌动引用）。
+    // 运行时由 resolving 集合兜住，不会栈溢出。
     const abilities: readonly Ability[] = [
       {
         kind: 'derived',
@@ -418,8 +410,30 @@ describe('buildDependencyGraph —— 环检测', () => {
         value: addExpr(contribExpr('ns.a'), { e: 'const', value: 0.1 }),
       },
     ];
-    const graph = buildDependencyGraph(abilities);
-    expect(graph.cycles.length).toBeGreaterThan(0);
+    expect(buildDependencyGraph(abilities).cycles).toHaveLength(0);
+  });
+
+  it('【关键】contrib 展开后能检测到"经由他人绕回自己"的真环', () => {
+    // ns.a 由 haste 产出；damageBoost contrib ns.a；haste 又引用 damageBoost
+    // → damageBoost → haste → damageBoost，这是真环
+    const abilities: readonly Ability[] = [
+      {
+        kind: 'derived',
+        modifier: { stat: 'haste', op: 'add', sourceKey: 'x', namespace: 'ns.a' },
+        value: { e: 'const', value: 0.1 },
+      },
+      {
+        kind: 'derived',
+        modifier: { stat: 'damageBoost', op: 'addPercent', sourceKey: 'y' },
+        value: contribExpr('ns.a'),
+      },
+      {
+        kind: 'derived',
+        modifier: { stat: 'haste', op: 'add', sourceKey: 'z' },
+        value: statExpr('damageBoost'),
+      },
+    ];
+    expect(buildDependencyGraph(abilities).cycles.length).toBeGreaterThan(0);
   });
 
   it('contrib 引用的命名空间不存在时不产生依赖边（由校验器另行报错）', () => {

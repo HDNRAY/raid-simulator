@@ -232,6 +232,20 @@ export function buildDependencyGraph(
  * 返回完整路径而不是只返回"有环" —— 报错信息里指明
  * `damageBoost → intelligence → damageBoost` 比
  * "检测到循环依赖"有用得多。
+ *
+ * ------------------------------------------------------------------
+ * **自环不算环**（这是实现时修正过的一个判断）
+ * ------------------------------------------------------------------
+ *
+ * `damageBoost` 的派生修正自己产出命名空间 `ns`，
+ * 而它消费的表达式里又 `contrib(ns)` —— 这形成 `ns → damageBoost → ns`
+ * 的自环。但它**完全合法**：contrib 读的是"势能当前值"，
+ * 而势能的计算不依赖 contrib 的结果。
+ *
+ * 表现为：`x = f(x)` 无解 → 危险；`ns = g(base)`、`x = ns + h(base)` 没问题。
+ *
+ * 所以这里只报告**长度 ≥ 2 的环**（能绕回起点的路径）。
+ * 自环在运行时由 `resolving` 集合兜住（返回基础值，不递归爆栈）。
  */
 export function findCycles(
   edges: ReadonlyMap<StatKey, ReadonlySet<StatKey>>,
@@ -244,9 +258,13 @@ export function findCycles(
     const current = state.get(node);
     if (current === 'done') return;
     if (current === 'visiting') {
-      // 从栈里截出环
+      // 从栈里截出环。**只保留长度 ≥ 2 的环**：`[...path, node]`
+      // 长度为 2 时就是自环（node 直接引用自己），那不算错误。
       const start = stack.indexOf(node);
-      if (start >= 0) cycles.push([...stack.slice(start), node]);
+      if (start >= 0) {
+        const cycle = [...stack.slice(start), node];
+        if (cycle.length > 2) cycles.push(cycle);
+      }
       return;
     }
 
