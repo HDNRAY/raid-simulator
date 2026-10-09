@@ -281,7 +281,9 @@ class SkillBarView {
         y: pos.glyph.y,
         size: FONT.body,
         color: 0xffffff,
+        // 双向居中 —— 需求指出技能字原先"位置也不是居中的"
         anchorX: 0.5,
+        anchorY: 0.5,
         kai: true,
       });
       /**

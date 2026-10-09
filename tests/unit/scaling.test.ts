@@ -120,55 +120,59 @@ describe('技能格内三个标签都不越界、互不重叠', () => {
     }
   });
 
-  it('三个标签的**实际文字矩形**互不重叠', () => {
+  it('按键提示与技能字/数字**不**重叠（这两个必须让开）', () => {
     /**
-     * 用实测尺寸做矩形重叠检测，而不是靠"y 坐标谁大谁小"。
+     * 需求演进："数字应该盖在按键 icon 上" ——
+     * 所以 **技能字与冷却数字是故意重叠的**（同心叠放），
+     * 旧版这条断言"三者互不重叠"已经和需求冲突，删掉了。
      *
-     * 早先我写的是"数字的 y 必须 ≥ 技能字底部"，那条断言假设了两个
-     * 标签**左右对齐**；但数字是居中的、技能字也在中间，两者本来就
-     * 在垂直方向交叠 —— 真正避免重叠的是**水平错开**（数字居中、
-     * 按键右对齐）与**垂直错开**（字在上、数字在中下）。
-     * 只有矩形相交检测能同时覆盖这两种情况。
+     * 仍然必须互不重叠的是**按键提示**：它是小字，被压住就读不出来。
      *
-     * 尺寸来自浏览器实测（探针读 `getBounds()`）：
-     *   技能字 26x28、冷却数字 11x18、按键提示 7x13
-     */
-    /**
      * 尺寸来自浏览器实测（探针读 `getBounds()`）：
      *   技能字 15px 楷体 → 15x17
-     *   冷却秒数 13px     → 9x18（含描边）
+     *   冷却秒数 26px     → 22x34（含描边）
      *   按键提示 11px     → 7x13
      */
-    const sizes = { glyph: { w: 15, h: 17 }, cooldown: { w: 11, h: 18 }, key: { w: 7, h: 13 } };
+    const sizes = { glyph: { w: 15, h: 17 }, cooldown: { w: 22, h: 34 }, key: { w: 7, h: 13 } };
     const total = 6;
     for (let i = 0; i < total; i += 1) {
       const rect = skillSlotRect(i, total);
       const pos = skillSlotLabels(rect);
-      // 把 anchor 折算成左上角
-      const boxes = [
-        { name: 'glyph', x: pos.glyph.x - sizes.glyph.w / 2, y: pos.glyph.y, ...sizes.glyph },
-        {
-          name: 'cooldown',
-          x: pos.cooldown.x - sizes.cooldown.w / 2,
-          y: pos.cooldown.y,
-          ...sizes.cooldown,
-        },
-        // 按键提示现在是**左对齐**（左上角）
-        { name: 'key', x: pos.key.x, y: pos.key.y, ...sizes.key },
-      ];
+      /** 把 anchor 折算成左上角 */
+      const box = (c: { x: number; y: number }, s: { w: number; h: number }, ax = 0.5, ay = 0) => ({
+        x: c.x - s.w * ax,
+        y: c.y - s.h * ay,
+        w: s.w,
+        h: s.h,
+      });
+      const overlap = (a: ReturnType<typeof box>, b: ReturnType<typeof box>): boolean =>
+        a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
-      for (let a = 0; a < boxes.length; a += 1) {
-        for (let b = a + 1; b < boxes.length; b += 1) {
-          const A = boxes[a]!;
-          const B = boxes[b]!;
-          const ox = Math.min(A.x + A.w, B.x + B.w) - Math.max(A.x, B.x);
-          const oy = Math.min(A.y + A.h, B.y + B.h) - Math.max(A.y, B.y);
-          // 允许 1px 的抗锯齿交叠
-          const overlapping = ox > 1 && oy > 1;
-          expect(overlapping, `${A.name} 与 ${B.name} 重叠（槽位 ${i}）`).toBe(false);
-        }
-      }
+      const key = box(pos.key, sizes.key, 0, 0);
+      const glyph = box(pos.glyph, sizes.glyph);
+      const cd = box(pos.cooldown, sizes.cooldown);
+
+      expect(overlap(key, glyph), `按键与技能字重叠（槽位 ${i}）`).toBe(false);
+      expect(overlap(key, cd), `按键与冷却数字重叠（槽位 ${i}）`).toBe(false);
     }
+  });
+
+  it('技能字与冷却数字**同心** —— 数字要盖在 icon 上', () => {
+    /**
+     * 需求："数字应该盖在按键 icon 上"。
+     * 两者中心点必须一致，否则数字会偏向一侧。
+     */
+    for (let i = 0; i < 6; i += 1) {
+      const pos = skillSlotLabels(skillSlotRect(i, 6));
+      expect(pos.glyph.x).toBeCloseTo(pos.cooldown.x, 5);
+      expect(pos.glyph.y).toBeCloseTo(pos.cooldown.y, 5);
+    }
+  });
+
+  it('格子够大：26px 数字 + 15px 技能字都在格内且彼此留有余量', () => {
+    const rect = skillSlotRect(0, 6);
+    // 数字（26px）约 34px 高，必须放得进 52px 的格子
+    expect(rect.h).toBeGreaterThanOrEqual(34 + 8);
   });
 
   it('槽位右对齐：最后一格的右边缘贴合安全边距', () => {
