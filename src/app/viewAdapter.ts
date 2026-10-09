@@ -242,6 +242,15 @@ export class ViewAdapter {
           this.setStatus('event.enrage', 300);
           break;
         }
+        case 'interruptImmune': {
+          /**
+           * 打断被霸体挡下 —— 必须给玩家明确反馈。
+           *
+           * 否则玩家按了「破」、什么都没发生，会以为是 bug。
+           */
+          this.setStatus('hint.armored', 120);
+          break;
+        }
         case 'behaviorTriggered': {
           /**
            * Boss 的行为阈值被跨过（例如进入二形态）。
@@ -344,6 +353,15 @@ export class ViewAdapter {
       ...(this.statusLine === '' ? {} : { statusLine: this.statusLine }),
       ...(this.statusDetail === '' ? {} : { statusDetail: this.statusDetail }),
       telegraphing: boss.cast !== undefined,
+      /**
+       * 霸体：由 boss 身上的 `interruptImmune` buff 决定。
+       *
+       * 与 `castView.interruptible` 读的是同一个 flag —— 两处结论必须
+       * 一致，否则会出现"读条说不可打断、但人物没描边"这种自相矛盾。
+       */
+      armored: boss.buffs.some(
+        (b) => engine.buffDef(b.id)?.flags?.interruptImmune === true,
+      ),
       playerFlash: this.playerFlash,
       bossFlash: this.bossFlash,
     };
@@ -456,11 +474,22 @@ function toCombatantView(engine: BattleEngine, id: string, tick: number): Combat
     const progress = cast.castTimeMs > 0 ? Math.min(1, elapsedMs / cast.castTimeMs) : 0;
     const nextHit =
       skill?.hits.find((h: { at: number }) => h.at > elapsedMs)?.at ?? cast.castTimeMs;
+    /**
+     * `interruptible` 在这里被**重新解释**为"现在能不能被打断"。
+     *
+     * 引擎里它是技能自身的静态标记；而**霸体是状态**，会临时推翻它。
+     * 视图层给出合并后的结论，UI 才不必同时了解两套规则。
+     * （引擎侧真正拦截打断的地方在 `interrupt` effect 里，
+     * 同样读 `interruptImmune` —— 两边结论一致。）
+     */
+    const armored = raw.buffs.some(
+      (b) => engine.buffDef(b.defId)?.flags?.interruptImmune === true,
+    );
     castView = {
       skillId: cast.skillId,
       nameKey: skill?.nameKey ?? 'hud.casting',
       progress,
-      interruptible: cast.interruptible,
+      interruptible: cast.interruptible && !armored,
       remainingMs: Math.max(0, nextHit - elapsedMs),
     };
   }
@@ -525,6 +554,7 @@ function emptyView(tick: number): BattleSnapshotView {
     skills: [],
     floatingText: [],
     telegraphing: false,
+    armored: false,
     playerFlash: 0,
     bossFlash: 0,
   };

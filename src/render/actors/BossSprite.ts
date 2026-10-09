@@ -37,8 +37,13 @@ export class BossSprite {
   readonly root: Container;
   private readonly body: Graphics;
   private readonly telegraphOverlay: Graphics;
+  /** 霸体光晕：多层放大的单色形体叠加，营造柔和的彩色外发光。 */
+  private readonly armorLayers: readonly Graphics[] = [];
   private lastTelegraph = false;
   private lastFlash = 0;
+  private lastArmored = false;
+  /** 描边色相的推进量 —— 让彩边**流动**起来而不是静止的彩虹 */
+  private armorPhase = 0;
 
   constructor(pixi: PixiCtor, options: BossViewOptions) {
     this.root = new pixi.Container();
@@ -52,14 +57,73 @@ export class BossSprite {
 
     this.body = new pixi.Graphics();
     this.telegraphOverlay = new pixi.Graphics();
-    this.root.addChild(this.body, this.telegraphOverlay);
+    /**
+     * 霸体描边层：**同一组形体再画一遍、整体放大一圈、涂成单色**，
+     * 垫在 `body` 底下 —— 于是露出来的那一圈就是描边。
+     *
+     * 为什么不用手写轮廓路径（我试过，两次都错）：
+     *   1. 直接抄前摇描边那几条 `poly` → 它们是**开口折线**、
+     *      内部还穿过形体，描边横穿身体。
+     *   2. 手写一条闭合轮廓 → 顶点顺序不对外加**自交**，画出个大 X。
+     *
+     * 这个做法是**零维护**的：`drawBody` 画什么，描边就是什么的轮廓。
+     */
+    /**
+     * 霸体外观：**多层放大的单色形体，从大到小、从透明到不透明**，
+     * 叠在 `body` 底下 —— 于是形体四周浮出一圈彩色光晕。
+     *
+     * ------------------------------------------------------------------
+     * 为什么是"光晕"而不是"等宽描边"
+     * ------------------------------------------------------------------
+     *
+     * 我先试了"画一遍放大一圈的形体当描边"，结果**一圈宽窄不一**：
+     * 形体的外轮廓**有凹陷**（披风的凹边、两腿之间的空隙、剑与手臂的夹角），
+     * 围绕一个中心做均匀缩放时，每个顶点外移的距离正比于它到中心的
+     * 距离 —— 凸出的角外移最多，凹陷处几乎不动。所以看起来像
+     * "只有一半有彩边"。
+     *
+     * 真正等宽的描边需要按**法线**偏移多边形外框，那是另一个量级的
+     * 工作量（还要处理自交）。而"由大到小叠几层半透明"既避开了这个问题，
+     * 视觉上也更像"能量外溢"而不是"描了个边"。
+     *
+     * 缩放支点必须放在**形体视觉中心**：`scale` 默认绕原点（脚底）
+     * 缩放，那样只往右上方扩。
+     */
+    const armorLayers: Graphics[] = [];
+    for (const spec of ARMOR_GLOW_LAYERS) {
+      const layer = new pixi.Graphics();
+      /**
+       * 光晕椭圆**以躯干为中心**，不是以整个形体的包围盒为中心。
+       *
+       * 踩过的坑：用包围盒中心（含向左伸出的剑）会让椭圆整体偏左下，
+       * 光晕跑到人物脚边去。所以单独用 `AURA_CX/CY` 定位 ——
+       * 那是躯干 + 头盔的视觉中心。
+       */
+      layer.pivot.set(0, 0);
+      layer.position.set(AURA_CX, AURA_CY);
+      layer.scale.set(spec.scale);
+      layer.alpha = spec.alpha;
+      layer.visible = false;
+      layer.ellipse(0, 0, AURA_RX, AURA_RY).fill(0xffffff);
+      armorLayers.push(layer);
+    }
+    this.armorLayers = armorLayers;
+    this.root.addChild(...armorLayers, this.body, this.telegraphOverlay);
 
     this.drawBody();
   }
 
-  private drawBody(): void {
-    const g = this.body;
-    const P = PALETTE;
+  /**
+   * 画 Boss 的形体。
+   *
+   * @param target 画到哪个 Graphics（霸体描边层复用同一组形态）
+   * @param flatColor 传了就**整体涂成这个颜色**（做放大一圈的描边层）。
+   *   实现方式是替换调色板 —— 比给十几个形体各写一遍颜色分支简单得多，
+   *   而且以后改形体时**描边会自动跟上**，不会漏。
+   */
+  private drawBody(target: Graphics = this.body, flatColor?: number): void {
+    const g = target;
+    const P = flatColor === undefined ? PALETTE : flatPalette(flatColor);
     g.clear();
 
     // ---- 披风（最底层，形成外轮廓） ----
@@ -132,8 +196,9 @@ export class BossSprite {
    *
    * @param telegraphing 是否在前摇（读条）
    * @param flash 受击闪白强度 0..1（0 = 不闪）
+   * @param armored 是否处于霸体（彩色流动描边）
    */
-  update(telegraphing: boolean, flash = 0): void {
+  update(telegraphing: boolean, flash = 0, armored = false): void {
     // 前摇：白描边 + 红边光（不是整体染红 —— 那样会把形体糊成一坨）
     if (telegraphing !== this.lastTelegraph) {
       this.lastTelegraph = telegraphing;
@@ -150,10 +215,47 @@ export class BossSprite {
       }
     }
 
+    /**
+     * 霸体：**彩色描边**。
+     *
+     * 需求：Boss 释放霸体招式时人物有彩色描边。
+     *
+     * 色相每帧缓慢推进（`armorPhase`），于是描边是**流动的彩虹**
+     * 而不是一圈静止的彩色 —— 静止的彩边容易被误读为"美术风格"，
+     * 流动的才像"某个状态正在生效"。
+     *
+     * 只在 `armored` 切换或色相变化到可见程度时重绘：
+     * 每帧重绘 3 条 `poly` + `stroke` 是明显的开销，而描边本身
+     * 只有几十个顶点。
+     */
+    if (armored) this.armorPhase = (this.armorPhase + 0.02) % 1;
+    const hueMoved = armored && Math.abs((this.armorPhase % 0.05) - 0.025) < 0.011;
+    if (armored !== this.lastArmored || hueMoved) {
+      this.lastArmored = armored;
+      this.drawArmorOverlay(armored);
+    }
+
     // 受击闪白：整体提亮（用 tint 比重绘便宜）
     if (Math.abs(flash - this.lastFlash) > 0.02) {
       this.lastFlash = flash;
       this.body.tint = flash > 0 ? mixWhite(flash) : 0xffffff;
+    }
+  }
+
+  /**
+   * 霸体描边：只做**开关 + 换色**。
+   *
+   * 形态本身在构造时就由 `drawBody(this.armorOverlay, ...)` 画好并放大一圈，
+   * 垫在 `body` 下面。所以这里一个顶点都不用碰。
+   *
+   * 色相每帧缓慢推进 —— 描边是**流动的彩虹**而不是静止的一圈彩色：
+   * 静止的彩边容易被读成"美术风格"，流动的才像"某个状态正在生效"。
+   */
+  private drawArmorOverlay(armored: boolean): void {
+    const color = hueToRgb(this.armorPhase);
+    for (const layer of this.armorLayers) {
+      layer.visible = armored;
+      if (armored) layer.tint = color;
     }
   }
 }
@@ -168,4 +270,86 @@ function mixWhite(amount: number): number {
   const g = Math.round(v * (1 - t * 0.1));
   const b = Math.round(v * (1 + t * 0.0));
   return (r << 16) | (g << 8) | Math.min(255, b);
+}
+
+
+/**
+ * HSL 色相 → RGB（固定高饱和、亮度 0.6）。
+ *
+ * 只做"彩虹描边"这一个用途，所以不实现完整的 HSL 转换 ——
+ * 把饱和度与亮度写死，代码只有几行，也不会有人误用成通用工具。
+ */
+function hueToRgb(h: number): number {
+  const s = 0.85;
+  const l = 0.62;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const hp = h * 6;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  const m = l - c / 2;
+  const [r, g, b] =
+    hp < 1
+      ? [c, x, 0]
+      : hp < 2
+        ? [x, c, 0]
+        : hp < 3
+          ? [0, c, x]
+          : hp < 4
+            ? [0, x, c]
+            : hp < 5
+              ? [x, 0, c]
+              : [c, 0, x];
+  const to255 = (v: number): number => Math.round((v + m) * 255) & 0xff;
+  return (to255(r) << 16) | (to255(g) << 8) | to255(b);
+}
+
+
+/**
+ * 霸体光晕的层次：由内向外，越来越大 → 越来越透明。
+ *
+ * ------------------------------------------------------------------
+ * 为什么是椭圆光晕，而不是"放大一圈的描边"
+ * ------------------------------------------------------------------
+ *
+ * 需求原文是"人物有彩色描边"。我试了四种做法，前三种都不成立：
+ *
+ *   1. **手写轮廓路径**（抄前摇描边那几条 `poly`）→ 它们是开口折线、
+ *      内部还穿过形体，描边**横穿身体**。
+ *   2. **手写闭合轮廓** → 顶点顺序不对外加自交，画出**一个大 X**。
+ *   3. **放大重画形体** → 形体是十几个多边形拼的、彼此**有空隙**
+ *      （披风凹边、腿间缝、剑与臂的夹角），放大的部分只能从缝里
+ *      透出来，**左侧几乎没有光晕**；补一条闭合剪影又出现大三角缺口。
+ *
+ * 真正等宽的描边需要按**法线**偏移多边形外框（还要处理自交），
+ * 那是另一个量级的工作量。而"由内向外叠几层半透明椭圆"：
+ *   - 几何上**不可能出错**（椭圆没有自交，也没有空隙）
+ *   - 观感上更像"能量场正在生效"，而不是"描了个边"
+ *
+ * 椭圆大小按形体的包围盒取（x −108..46、y −190..0），
+ * 中心即 `BODY_CENTER`。
+ */
+const ARMOR_GLOW_LAYERS = [
+  { scale: 1.0, alpha: 0.34 },
+  { scale: 1.12, alpha: 0.22 },
+  { scale: 1.26, alpha: 0.12 },
+] as const;
+
+/**
+ * 光晕椭圆：**以躯干 + 头盔的视觉中心定位**，半轴贴着身形。
+ *
+ * 不包含向左伸出的剑 —— 否则椭圆会被拉偏，光晕跑到人物脚边。
+ */
+const AURA_CX = -2;
+const AURA_CY = -86;
+const AURA_RX = 54;
+const AURA_RY = 90;
+
+/**
+ * 把调色板整体替换成同一个颜色。
+ *
+ * 用 `Proxy` 而不是手写一份含全部字段的对象：后者在 `PALETTE`
+ * 增加字段时会**静默漏掉**，表现为"描边缺了一块"，很难查。
+ * `Proxy` 天然覆盖所有键，包括将来新增的。
+ */
+function flatPalette(color: number): typeof PALETTE {
+  return new Proxy({} as typeof PALETTE, { get: () => color, has: () => true });
 }

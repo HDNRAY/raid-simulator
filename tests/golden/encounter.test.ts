@@ -7,6 +7,7 @@ import {
   planPriority,
 } from './fixtures';
 import { roughlyUsable } from '../../src/core/run';
+import { VERROT_BEHAVIORS } from '../../src/core/ai';
 import { registry } from './fixtures';
 
 /**
@@ -547,5 +548,79 @@ describe('读条与打断（公共冷却已删除，节奏改由读条表达）'
     // 如果它们也读条，这两个核心玩法就废了。
     expect(registry.skills.get('dodge')!.castTime).toBe(0);
     expect(registry.skills.get('break')!.castTime).toBe(0);
+  });
+});
+
+describe('Boss 霸体：唯一挡得住打断的东西', () => {
+  it('【核心】霸体期间「破」打不断 Boss —— 连强制打断也挡', () => {
+    const options = makeGoldenEngineOptions();
+    // 霸体 buff 的 flag 必须真的是 interruptImmune（接线的前提）
+    expect(options.buffs.get('boss-armor')!.flags?.interruptImmune).toBe(true);
+
+    /**
+     * 真实路径：让 Boss 释放霸体招式，等读条结束挂上 buff，
+     * 然后中途再放一个读条招式、用「破」去打断它。
+     */
+    const e2 = new BattleEngine(makeGoldenEngineOptions());
+    e2.tick([], 'verrot');
+    e2.drainEvents();
+    // Boss 放霸体招式：castTime 0.4 秒 = 24 tick，所以要跑够
+    e2.tick([{ type: 'useSkill', skillId: 'boss-armor', atTick: e2.snapshot.tick }], 'verrot');
+    e2.drainEvents();
+    for (let i = 0; i < 30; i += 1) {
+      e2.tick();
+      e2.drainEvents();
+    }
+    const armored = e2.snapshot.combatants.find((c) => c.side === 'enemy')!;
+    expect(armored.buffs.some((b) => b.defId === 'boss-armor')).toBe(true);
+
+    // 现在让 Boss 起一个读条（用普攻招式）
+    e2.tick([{ type: 'useSkill', skillId: 'boss-cleave', atTick: e2.snapshot.tick }], 'verrot');
+    e2.drainEvents();
+    const casting = e2.snapshot.combatants.find((c) => c.side === 'enemy')!;
+    expect(casting.casts.length).toBe(1);
+
+    // 玩家用「破」打断 → 必须被霸体挡下
+    e2.tick([{ type: 'useSkill', skillId: 'break', atTick: e2.snapshot.tick }]);
+    const events = e2.drainEvents();
+
+    expect(events.some((e) => e.kind === 'interruptImmune')).toBe(true);
+    expect(events.some((e) => e.kind === 'interruptSuccess')).toBe(false);
+    // 读条必须还在
+    expect(e2.snapshot.combatants.find((c) => c.side === 'enemy')!.casts.length).toBe(1);
+  });
+
+  it('没有霸体时「破」能打断 Boss 的任意招式', () => {
+    const e = new BattleEngine(makeGoldenEngineOptions());
+    e.tick([], 'verrot');
+    e.drainEvents();
+    e.tick([{ type: 'useSkill', skillId: 'boss-cleave', atTick: e.snapshot.tick }], 'verrot');
+    e.drainEvents();
+    expect(e.snapshot.combatants.find((c) => c.side === 'enemy')!.casts.length).toBe(1);
+
+    e.tick([{ type: 'useSkill', skillId: 'break', atTick: e.snapshot.tick }]);
+    const events = e.drainEvents();
+    expect(events.some((e2) => e2.kind === 'interruptSuccess')).toBe(true);
+    expect(events.some((e2) => e2.kind === 'interruptImmune')).toBe(false);
+  });
+
+  it('霸体招式只在二阶段出现 —— 出现在前半场会把节奏拖垮', () => {
+    /**
+     * 实测记录：把霸体放进前半场的轮转后，即使它一次都没挡下打断，
+     * **占掉的那一格也会把 Boss 出招挤后** —— 战斗从 897 tick 拉长到
+     * 1094 tick，玩家多挨 18 点伤害，直接变成"玩家先死、Boss 剩 8 血"。
+     * 所以它被限制在二阶段（有 `boss-frenzy` 时）。
+     */
+    const armorStep = VERROT_BEHAVIORS.filter((b) => b.kind === 'rotation').flatMap((b) =>
+      b.kind === 'rotation' ? b.steps.filter((s) => s.skillId === 'boss-armor') : [],
+    );
+    expect(armorStep.length).toBe(1);
+    expect(JSON.stringify(armorStep[0]!.when)).toContain('boss-frenzy');
+  });
+
+  it('霸体 buff 有明确时长（不是永久的）', () => {
+    const armor = makeGoldenEngineOptions().buffs.get('boss-armor')!;
+    expect(Number.isFinite(armor.duration)).toBe(true);
+    expect(armor.duration).toBeGreaterThan(0);
   });
 });

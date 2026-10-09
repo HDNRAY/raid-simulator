@@ -52,7 +52,15 @@ describe('formatClock', () => {
 });
 
 describe('telegraphHint —— 预警必须告诉玩家该做什么', () => {
-  it('可打断的技能给出"可打断"的 key 与剩余秒数', () => {
+  /**
+   * 提示文案的**语义变过**：
+   *
+   * 早期是"可打断 → 显示可打断 / 不可打断 → 显示闪避或格挡"。
+   * 后来需求改成"所有 Boss 招式默认都能打断"，于是"可打断"那行字
+   * 在绝大多数时候都是噪声，删掉了。现在只在**真的打不断**时提示
+   * （即施法者处于霸体），其余情况给永远适用的"闪避或格挡"。
+   */
+  it('能打断的技能给出"闪避或格挡"（默认情况，不再显示"可打断"）', () => {
     const hint = telegraphHint({
       skillId: 'corruption',
       nameKey: 'boss.cleave.name',
@@ -60,11 +68,11 @@ describe('telegraphHint —— 预警必须告诉玩家该做什么', () => {
       interruptible: true,
       remainingMs: 1500,
     });
-    expect(hint?.key).toBe('hint.interruptible');
+    expect(hint?.key).toBe('hint.dodgeOrGuard');
     expect(hint?.seconds).toBe('1.5');
   });
 
-  it('不可打断的技能给出"闪避或格挡"的 key', () => {
+  it('打不断的（霸体）给出"霸体"提示', () => {
     const hint = telegraphHint({
       skillId: 'crimson-arc',
       nameKey: 'boss.crimsonArc.name',
@@ -72,7 +80,7 @@ describe('telegraphHint —— 预警必须告诉玩家该做什么', () => {
       interruptible: false,
       remainingMs: 800,
     });
-    expect(hint?.key).toBe('hint.dodgeOrGuard');
+    expect(hint?.key).toBe('hint.armored');
     expect(hint?.seconds).toBe('0.8');
   });
 
@@ -131,7 +139,7 @@ describe('本地化 key 契约（i18n 规范 I1）', () => {
       'block.cooldown',
       'block.casting',
       'hint.dodgeOrGuard',
-      'hint.interruptible',
+      'hint.armored',
     ];
     for (const key of required) {
       expect(() => translator.t(key as never)).not.toThrow();

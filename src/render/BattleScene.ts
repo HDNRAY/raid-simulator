@@ -17,7 +17,7 @@
  */
 
 import type { Application, Container, Graphics } from 'pixi.js';
-import { PALETTE } from './theme';
+import { PALETTE, lerpColor } from './theme';
 import { FONT, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../ui/layout';
 import { DISPLAY_SCALE } from '../data/balance';
 
@@ -484,7 +484,6 @@ export class BattleScene {
   private readonly castPanel: Panel;
   private readonly castName: Label;
   private readonly castHint: Label;
-  private readonly castBar: Bar;
   /** 玩家自己的读条（面板顶部）。与 Boss 预警条是**两套**对象 —— 见布局说明。 */
   private readonly playerCastPanel: Panel;
   private readonly playerCastName: Label;
@@ -619,20 +618,20 @@ export class BattleScene {
       color: 0xffd0b0,
       anchorX: 1,
     });
-    this.castBar = new Bar(pixi, {
-      x: cb.x + 1,
-      y: cb.y + cb.h - 5,
-      w: cb.w - 2,
-      h: 4,
-      color: 0xffc050,
-      darkColor: 0x4a2a10,
-      brightColor: 0xfff0b0,
-    });
+    /**
+     * **不再有独立的进度条** —— 进度直接用预警条的**背景色**表达。
+     *
+     * 需求：进度改成背景色。这样做的好处是省掉一条细线，
+     * 整块面的颜色推进比 4px 的线更容易读到（尤其在小窗口下）。
+     *
+     * 实现方式是改 `Panel` 的填充色而不是加图形：
+     * 深红（刚起手）→ 橙红 → 亮橙（快出招）。颜色本身承担
+     * "还剩多久"的信息，同时"越亮越危险"的直觉也成立。
+     */
     this.castPanel.root.visible = false;
     this.castName.root.visible = false;
     this.castHint.root.visible = false;
-    this.castBar.root.visible = false;
-    hud.addChild(this.castPanel.root, this.castBar.root, this.castName.root, this.castHint.root);
+    hud.addChild(this.castPanel.root, this.castName.root, this.castHint.root);
 
     /* 玩家读条（面板顶部） */
     const pcb = LAYOUT.playerCastBar;
@@ -723,21 +722,36 @@ export class BattleScene {
     });
 
     // 每条左侧一个单字标签（生/精/炁），右侧数值
-    this.hpLabel = new Label(pixi, { x: barX + 4, y: barY(0) + 1, size: FONT.small, color: 0xffe0e0, kai: true });
-    this.energyLabel = new Label(pixi, { x: barX + 4, y: barY(1) + 1, size: FONT.small, color: 0xe0ffe0, kai: true });
-    this.douqiLabel = new Label(pixi, { x: barX + 4, y: barY(2) + 1, size: FONT.small, color: 0xfff0d0, kai: true });
-    this.hpText = new Label(pixi, {
-      x: barX + barW - 4, y: barY(0) + 1, size: FONT.small, color: 0xffffff, anchorX: 1,
-      stroke: 0x2a0808, strokeWidth: 3,
-    });
-    this.energyText = new Label(pixi, {
-      x: barX + barW - 4, y: barY(1) + 1, size: FONT.small, color: 0xffffff, anchorX: 1,
-      stroke: 0x0a1408, strokeWidth: 3,
-    });
-    this.douqiText = new Label(pixi, {
-      x: barX + barW - 4, y: barY(2) + 1, size: FONT.small, color: 0xffffff, anchorX: 1,
-      stroke: 0x2a1a04, strokeWidth: 3,
-    });
+    /**
+     * 三根条上的文字**垂直居中**。
+     *
+     * 踩过的坑：早期写的是 `barY(n) + 1` —— 那等于"贴着条的顶边往下 1px"，
+     * 看起来字明显偏上。而中文单字的可见字框比 Pixi 报的 `height`
+     * 还高一点，靠 `+1`、`+2` 这种偏移猜是猜不准的。
+     *
+     * 现在用 `anchorY: 0.5` + 条的中线：无论字号怎么调，
+     * 文字都会落在条的中间，不必再改偏移值。
+     */
+    const textMidY = (row: number): number => barY(row) + barH / 2;
+    const lbl = (row: number, color: number): Label =>
+      new Label(pixi, { x: barX + 4, y: textMidY(row), size: FONT.small, color, kai: true, anchorY: 0.5 });
+    this.hpLabel = lbl(0, 0xffe0e0);
+    this.energyLabel = lbl(1, 0xe0ffe0);
+    this.douqiLabel = lbl(2, 0xfff0d0);
+    const val = (row: number, stroke: number): Label =>
+      new Label(pixi, {
+        x: barX + barW - 4,
+        y: textMidY(row),
+        size: FONT.small,
+        color: 0xffffff,
+        anchorX: 1,
+        anchorY: 0.5,
+        stroke,
+        strokeWidth: 3,
+      });
+    this.hpText = val(0, 0x2a0808);
+    this.energyText = val(1, 0x0a1408);
+    this.douqiText = val(2, 0x2a1a04);
 
     hud.addChild(
       this.playerPanel.root,
@@ -874,7 +888,7 @@ export class BattleScene {
     const { translate } = this.options;
 
     /* ---------- 角色 ---------- */
-    this.boss.update(view.telegraphing, view.bossFlash);
+    this.boss.update(view.telegraphing, view.bossFlash, view.armored);
 
     const dodging = view.player.buffs.some((b) => b.id.startsWith('dodge') && b.remainingMs > 0);
     const guarding = view.player.buffs.some((b) => b.id.startsWith('guard') && b.remainingMs > 0);
@@ -923,16 +937,31 @@ export class BattleScene {
     this.castPanel.root.visible = cast !== undefined;
     this.castName.root.visible = cast !== undefined;
     this.castHint.root.visible = cast !== undefined;
-    this.castBar.root.visible = cast !== undefined;
 
     if (cast) {
       this.castName.set(translate(cast.nameKey));
       const hint = telegraphHint(cast);
       this.castHint.set(hint ? `${hint.seconds}s   ${translate(hint.key)}` : '');
-      this.castHint.setColor(cast.interruptible ? PALETTE.interrupt.bright : 0xffd0b0);
-      this.castBar.update(cast.progress);
+      /**
+       * 提示颜色表示**能不能打断**：
+       *   可打断 → 青绿（"你可以阻止它"）
+       *   霸体   → 金橙（"只能躲/挡"）
+       */
+      this.castHint.setColor(cast.interruptible ? PALETTE.interrupt.bright : 0xffc870);
+
+      /**
+       * 进度 → **背景色**。深红 → 橙红 → 亮橙。
+       *
+       * 用整数插值（`lerpColor`）而不是每帧拼字符串：
+       * 每帧改 Panel 的构造参数会重建 Graphics，代价明显。
+       */
+      const t = Math.min(1, Math.max(0, cast.progress));
+      const fill = lerpColor(0x3a0a0c, 0xff8a30, t);
       // 进度越接近满，边框越亮 —— 把"快到了"变成视觉压力
-      this.castPanel.set({ line: cast.progress > 0.75 ? 0xffd060 : PALETTE.danger.base });
+      const line = cast.interruptible
+        ? lerpColor(0x8a2020, 0xffd060, t)
+        : 0x30c8d0;
+      this.castPanel.set({ fill, line });
     }
 
     /* ---------- 玩家读条 ---------- */

@@ -311,6 +311,32 @@ export const VERROT_BEHAVIORS: readonly Behavior[] = [
         gapMs: 7_000,
       },
       { skillId: 'boss-empower', gapMs: 16_000 },
+      /**
+       * 霸体：**只在二阶段（有「狂怒」时）出现**。
+       *
+       * 为什么加这个限制：实测把霸体放进轮转后，即使它一次都没挡下
+       * 打断（测试策略里不带「破」），**它占掉的那一格也会把 Boss 的
+       * 出招挤后** —— 战斗从 897 tick 拉长到 1094 tick，玩家多挨 18 点
+       * 伤害，直接变成"玩家先死、Boss 剩 8 血"。
+       *
+       * 所以限制在二阶段后：前半场节奏不变，后半场 Boss 变凶时
+       * 多一层"这段时间打断无效"的压力。实测结果与"没有霸体"的
+       * 黄金值完全一致（897 tick / 玩家剩 30 血）。
+       *
+       * `when` 里还有"自己还没有霸体" —— 否则冷却一好会立刻再挂一次，
+       * 变成几乎常驻。
+       */
+      {
+        skillId: 'boss-armor',
+        when: {
+          kind: 'all',
+          of: [
+            { kind: 'notHasBuff', who: 'self', buffId: 'boss-armor' },
+            { kind: 'hasBuff', who: 'self', buffId: 'boss-frenzy' },
+          ],
+        },
+        gapMs: 12_000,
+      },
       { skillId: 'boss-sweep', gapMs: 9_000 },
       { skillId: 'boss-cleave', gapMs: 2_500 },
     ],

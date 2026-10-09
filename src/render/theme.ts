@@ -114,3 +114,24 @@ export function shade(color: Shade): Shade {
 }
 
 export type PaletteColor = ColorSource;
+
+
+/**
+ * 两个颜色之间线性插值（`t` 会被夹到 0..1）。
+ *
+ * 用途：把"进度"直接映射成颜色 —— 例如 Boss 预警条的背景色
+ * 从深红推进到亮橙。比每帧重建 Graphics 参数便宜得多，
+ * 而且颜色连续变化不会跳变。
+ *
+ * 在 sRGB 空间逐通道插值：对本项目的用途（进度指示）足够，
+ * 不需要线性光空间那么讲究。
+ */
+export function lerpColor(from: number, to: number, t: number): number {
+  const k = t < 0 ? 0 : t > 1 ? 1 : t;
+  const mix = (shift: number): number => {
+    const a = (from >> shift) & 0xff;
+    const b = (to >> shift) & 0xff;
+    return Math.round(a + (b - a) * k) & 0xff;
+  };
+  return (mix(16) << 16) | (mix(8) << 8) | mix(0);
+}

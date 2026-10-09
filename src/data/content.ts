@@ -177,6 +177,32 @@ export const BOSS_ENRAGE: BuffDef = {
 };
 
 /**
+ * Boss 的**霸体**。
+ *
+ * 需求：Boss 的所有招式默认都能被打断 / 闪避 / 格挡，
+ * **除非它不是霸体** —— 霸体由一个带 CD 的招式给自己挂上。
+ *
+ * 用 `flags.interruptImmune` 实现而不是新造机制：这个 flag 在数据模型里
+ * 早就定义了、`aggregateFlags` 也一直在算它，但**没有任何地方读它** ——
+ * 一个"看起来支持、实际不生效"的字段。把它接上比新增一个字段更好。
+ *
+ * 持续时间 3 秒：够覆盖一轮出招（Boss 每 1.5–3 秒一动），
+ * 又短到玩家可以"等它过去"而不是被迫硬吃。
+ * 颜色用青蓝，与 Boss 的红色系区分开 —— 它表达的是"防守"而不是"危险"。
+ */
+export const BOSS_ARMOR: BuffDef = {
+  id: 'boss-armor',
+  nameKey: 'boss.armor.name',
+  icon: 'boss_armor',
+  polarity: 'buff',
+  color: 0x30c8d0,
+  duration: logicMs(30),
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+  flags: { interruptImmune: true },
+};
+
+/**
  * 玩家给 Boss 挂的易伤。
  *
  * 为什么需要它：玩家只有 6 招，如果全是"直接伤害"，循环会没有层次。
@@ -516,7 +542,38 @@ const BOSS_EMPOWER: SkillDef = {
 
 export const PLAYER_SKILLS: readonly SkillDef[] = [ATTACK, DODGE, GUARD, BREAK, BLAST, FOCUS];
 
-export const BOSS_SKILLS: readonly SkillDef[] = [BOSS_CLEAVE, BOSS_SWEEP, BOSS_EMPOWER];
+/**
+ * 霸体招式：给自己挂霸体，前摇很短。
+ *
+ * 设计意图：它是一个**抢节奏**的招式 —— 玩家看到它就该停手，
+ * 之后再继续输出。如果玩家照打不误，「破」会失效并给出
+ * 「霸体」提示，从而学会这个规则。
+ *
+ * 冷却 12 秒：一场 15 秒的战斗里大概出现一次，不至于让人烦躁。
+ */
+const BOSS_ARMOR_SKILL: SkillDef = {
+  id: 'boss-armor',
+  kind: 'activeSkill',
+  nameKey: 'boss.armor.name',
+  descKey: 'boss.armor.desc',
+  icon: 'boss_armor',
+  abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: BOSS_ARMOR }],
+  castTime: logicMs(4),
+  cooldown: logicMs(120),
+  cost: [],
+  targeting: { mode: 'self' },
+  hits: [],
+  tags: ['defensive'],
+  school: 'arcane',
+  interruptible: true,
+};
+
+export const BOSS_SKILLS: readonly SkillDef[] = [
+  BOSS_CLEAVE,
+  BOSS_SWEEP,
+  BOSS_EMPOWER,
+  BOSS_ARMOR_SKILL,
+];
 
 export const ALL_SKILLS: readonly SkillDef[] = [...PLAYER_SKILLS, ...BOSS_SKILLS];
 
@@ -527,6 +584,7 @@ export const ALL_BUFFS: readonly BuffDef[] = [
   SUNDER_DEBUFF,
   BOSS_TELEGRAPH,
   BOSS_ENRAGE,
+  BOSS_ARMOR,
 ];
 
 void logicTicks;

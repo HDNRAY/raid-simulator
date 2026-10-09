@@ -9,7 +9,7 @@ declare global {
     /** 战斗探针：验证"战斗真的在推进" */
     __raidBattle?: {
       /** 注入一个技能动作（调试用，让验证脚本能精确控制状态） */
-      act(skillId: string): void;
+      act(skillId: string, actorId?: string): void;
       /** Pixi 根容器（调试用：读取渲染层实际写入的文本） */
       stage: unknown;
       /** 设置界面（调试用：headless 下模拟点击不可靠） */

@@ -947,6 +947,18 @@ export type EventDef =
  */
 readonly reason?: 'interrupted' | 'sourceLost' | 'death' | 'replaced';
     }
+  /**
+   * 打断被**霸体**挡下。
+   *
+   * 单独一个事件（而不是复用 `skillRejected`）：被打断方是"状态生效"，
+   * 打断方是"技能放出来了但没生效" —— 两边的反馈不同。
+   */
+  | {
+      readonly kind: 'interruptImmune';
+      readonly tick: number;
+      readonly targetId: CombatantId;
+      readonly skillId: SkillId;
+    }
   | {
       readonly kind: 'interruptSuccess';
       readonly tick: number;

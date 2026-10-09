@@ -678,14 +678,21 @@ export class BattleEngine {
    * `applyActions` 路径，只是 actor 不同。这样"Boss 与玩家共用引擎"
    * 才是真的，而不是两套代码碰巧产生相似结果。
    */
-  tick(actions: readonly Action[] = []): void {
+  /**
+   * 推进一 tick。
+   *
+   * @param actions 本 tick 要应用的动作
+   * @param actorId 动作的施放者。不传时按"单人一侧"推断 ——
+   *   调试入口需要能给 Boss 也发动作（例如手动触发霸体招式来看表现）。
+   */
+  tick(actions: readonly Action[] = [], actorId?: string): void {
     if (this.state.status !== 'running') return;
 
     // 开一个 tick 的工作副本；结束时一次提交（见 work 的说明）
     this.beginWork();
 
     // 1. 动作生效
-    this.applyActions(actions, 'player');
+    this.applyActions(actions, actorId ?? 'player');
     this.runAi();
 
     // 2. 读条推进
@@ -1228,6 +1235,32 @@ export class BattleEngine {
     }
 
     if (effect.kind === 'interrupt') {
+      /**
+       * **霸体（`interruptImmune`）拦截一切打断，包括「破」的强制打断。**
+       *
+       * 需求：所有 Boss 招式默认都能被打断 / 闪避 / 格挡，
+       * 除非 Boss 处于霸体状态 —— 霸体由一个有 CD 的招式给自己挂上。
+       *
+       * 这里刻意**不看 `effect.force`**：`force` 的语义是"无视技能的
+       * 可打断标记"，但霸体是**更上层的状态**，它必须连强制打断也挡住，
+       * 否则霸体招式就没有意义了。
+       *
+       * 踩过的坑：`BuffFlags.interruptImmune` 早就定义了、`aggregateFlags`
+       * 也一直在算它，但**没有任何地方读它** —— 一个"看起来支持但实际
+       * 不生效"的字段。接上它比新造一个 flag 好：语义更准，
+       * 而且不用动数据模型。
+       */
+      if (aggregateFlags(target).interruptImmune) {
+        this.events.push({
+          kind: 'interruptImmune',
+          tick: this.state.tick,
+          targetId: target.id,
+          // 记录"本来会被打断的那个读条"，供 UI 提示用
+          skillId: target.casts[0]?.skillId ?? '',
+        });
+        return;
+      }
+
       if (target.casts.length > 0) {
         /**
          * `force: true` 时**不看可打断性** —— 这是「破」的语义

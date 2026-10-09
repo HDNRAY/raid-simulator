@@ -129,6 +129,8 @@ export interface BattleSnapshotView {
   readonly statusDetail?: string;
   /** Boss 正在前摇 —— 驱动全屏预警表现 */
   readonly telegraphing: boolean;
+  /** Boss 处于霸体：人物加彩色描边，读条背景偏青。 */
+  readonly armored: boolean;
   /** 玩家受击闪白强度 0..1 */
   readonly playerFlash: number;
   readonly bossFlash: number;
@@ -167,6 +169,7 @@ export const EMPTY_SNAPSHOT: BattleSnapshotView = {
   skills: [],
   floatingText: [],
   telegraphing: false,
+  armored: false,
   playerFlash: 0,
   bossFlash: 0,
 };
@@ -207,10 +210,17 @@ export interface TelegraphHint {
   readonly seconds: string;
 }
 
+/**
+ * 预警条右侧的提示。
+ *
+ * **不再显示"可打断"** —— 需求明确"都可以打断"，所以那行字
+ * 在绝大多数时候都是噪声。现在只在**真的打不断**时给出提示：
+ * 施法者处于霸体状态。其余情况给"闪避或格挡"（永远适用的应对）。
+ */
 export function telegraphHint(cast: CombatantView['cast']): TelegraphHint | undefined {
   if (!cast) return undefined;
   return {
-    key: cast.interruptible ? 'hint.interruptible' : 'hint.dodgeOrGuard',
+    key: cast.interruptible ? 'hint.dodgeOrGuard' : 'hint.armored',
     seconds: (cast.remainingMs / 1000).toFixed(1),
   };
 }

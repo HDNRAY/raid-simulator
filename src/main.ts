@@ -237,10 +237,10 @@ async function bootstrap(): Promise<void> {
      * 这条路在自动验证里不可靠。这个入口让验证脚本能精确地
      * 把游戏推到某个状态（例如"某个技能正在冷却"）再截图。
      */
-    act: (skillId: string) => {
+    act: (skillId: string, actorId?: string) => {
       loop.engineState.tick([
         { type: 'useSkill', skillId, atTick: loop.engineState.snapshot.tick },
-      ]);
+      ], actorId);
       loop.engineState.drainEvents();
     },
     /**
