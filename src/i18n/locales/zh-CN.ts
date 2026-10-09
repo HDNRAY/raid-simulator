@@ -227,6 +227,35 @@ export const zhCN = {
   },
 
   /** 界面文案 */
+  /**
+   * 设置界面。
+   *
+   * 分 tab 组织；`tabGeneral` 目前是空的（占位），
+   * 后续放音量、画面缩放、伤害数字开关之类。
+   */
+  settings: {
+    title: '设置',
+    open: '设置',
+    close: '关闭',
+    tabGeneral: '通用',
+    tabKeys: '按键',
+    /** 通用 tab 暂时没有可调项 */
+    generalEmpty: '暂时还没有可调项',
+    generalEmptyHint: '音量、画面与体验相关的选项之后加在这里',
+
+    /** 按键设置 */
+    keysHint: '点击某一项，然后按下你想用的键',
+    keysCapturing: '请按键…',
+    keysConflict: '该键已被占用',
+    keysReset: '恢复默认',
+    keysResetDone: '已恢复默认键位',
+    /** 键位表的两列标题 */
+    keyColumnAction: '技能',
+    keyColumnKey: '按键',
+    /** 键名显示：没绑定的键 */
+    keyUnbound: '未绑定',
+  },
+
   screen: {
     pause: '暂停',
     resume: '继续',

@@ -12,6 +12,14 @@ declare global {
       act(skillId: string): void;
       /** Pixi 根容器（调试用：读取渲染层实际写入的文本） */
       stage: unknown;
+      /** 设置界面（调试用：headless 下模拟点击不可靠） */
+      settings: {
+        open(tab?: 'general' | 'keys'): void;
+        close(): void;
+        /** 用逻辑坐标点一下（验证命中测试与布局一致） */
+        openIn(px: number, py: number): void;
+        isOpen(): boolean;
+      };
       probe(): {
         tick: number;
         status: string;

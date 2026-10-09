@@ -50,9 +50,12 @@ export class BattleLoop {
   private view: BattleSnapshotView | undefined;
   private paused = false;
   private restartRequested = false;
+  /** 键位表可变（按键设置会改它） */
+  private bindings: readonly KeyBinding[];
 
   constructor(options: BattleLoopOptions) {
     this.options = options;
+    this.bindings = options.bindings;
     this.engine = new BattleEngine(options.engineOptions);
     this.adapter = new ViewAdapter(options.engineOptions.skills);
     this.attachInput(options.input);
@@ -83,7 +86,7 @@ export class BattleLoop {
       return;
     }
     this.input = createKeyboardInput(window, {
-      bindings: this.options.bindings,
+      bindings: this.bindings,
       currentTick: () => this.engine.snapshot.tick,
       isHoldSkill: (skillId) => this.engine.skillOf(skillId)?.holdDrain !== undefined,
       onUiKey: (key) => {
@@ -146,7 +149,7 @@ export class BattleLoop {
     const held = this.input
       ? repeatHeld(
           this.input,
-          this.options.bindings,
+          this.bindings,
           state.tick,
           (skillId) => this.isUsable(skillId),
           (skillId) => this.engine.skillOf(skillId)?.holdDrain !== undefined,
@@ -187,6 +190,22 @@ export class BattleLoop {
       if (cond.kind === 'hasBuff' && !actor.buffs.some((b) => b.defId === cond.buffId)) return false;
     }
     return true;
+  }
+
+  /** 当前键位表。 */
+  currentBindings(): readonly KeyBinding[] {
+    return this.bindings;
+  }
+
+  /** 替换键位表（按键设置用）。会同步到输入层。 */
+  setBindings(next: readonly KeyBinding[]): void {
+    this.bindings = next;
+    this.input?.setBindings(next);
+  }
+
+  /** 输入层（设置界面要独占输入做改键捕获）。 */
+  get inputSource(): InputSource | undefined {
+    return this.input;
   }
 
   /** 请求重开（下一帧生效）。 */

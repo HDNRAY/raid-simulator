@@ -95,6 +95,23 @@ export interface InputSource {
   isHeld(key: string): boolean;
   /** 该键绑定的技能 id */
   skillForKey(key: string): string | undefined;
+  /** 当前的键位表（只读） */
+  bindings(): readonly KeyBinding[];
+  /**
+   * 运行时替换键位表（按键设置用）。
+   *
+   * 会顺带清掉"按住中"的状态 —— 改键那一刻，旧键上的按住语义已经失效，
+   * 不清掉会导致引擎继续按新键的代价扣资源。
+   */
+  setBindings(bindings: readonly KeyBinding[]): void;
+  /**
+   * 进入/退出**捕获模式**：捕获期间所有按键不产生 Action，
+   * 而是交给 `onCapture` 回调。
+   *
+   * 按键设置必须这样独占输入，否则玩家按 `Esc` 想取消改键，
+   * 结果技能真的放出去了。
+   */
+  capture(onCapture: ((key: string) => void) | undefined): void;
   /** 销毁监听 */
   dispose(): void;
 }
@@ -126,9 +143,17 @@ export function createKeyboardInput(
   target: { addEventListener: EventTarget['addEventListener']; removeEventListener: EventTarget['removeEventListener'] },
   options: InputOptions,
 ): InputSource {
-  const bindings = options.bindings ?? DEFAULT_BINDINGS;
-  const keyToSkill = new Map<string, string>();
-  for (const binding of bindings) keyToSkill.set(binding.key, binding.skillId);
+  /** 键位表**可变** —— 按键设置会在运行时替换它。 */
+  let keyToSkill = new Map<string, string>();
+  let currentBindings: readonly KeyBinding[] = options.bindings ?? DEFAULT_BINDINGS;
+  const applyBindings = (next: readonly KeyBinding[]): void => {
+    currentBindings = next;
+    keyToSkill = new Map(next.map((b) => [b.key, b.skillId]));
+  };
+  applyBindings(currentBindings);
+
+  /** 捕获模式：非空时所有按键都交给它，不产生 Action */
+  let captureHandler: ((key: string) => void) | undefined;
 
   const held = new Set<string>();
   /** 当前被按住的"按住型"技能：键 → 技能 id */
@@ -140,6 +165,16 @@ export function createKeyboardInput(
     const key = normalizeKey(event);
 
     if (PREVENT_DEFAULT.has(key)) event.preventDefault?.();
+
+    /**
+     * 捕获模式优先于一切：正在改键时，这个按键属于"设置界面"，
+     * 不该被当成技能（否则按 Esc 取消会真的把技能放出去）。
+     */
+    if (captureHandler) {
+      event.preventDefault?.();
+      if (!event.repeat) captureHandler(key);
+      return;
+    }
 
     // 界面按键（暂停等）交给上层，不作为技能处理
     if (options.onUiKey && (key === 'escape' || key === 'enter')) {
@@ -204,6 +239,22 @@ export function createKeyboardInput(
     },
     skillForKey(key: string): string | undefined {
       return keyToSkill.get(key);
+    },
+    bindings(): readonly KeyBinding[] {
+      return currentBindings;
+    },
+    setBindings(next: readonly KeyBinding[]): void {
+      applyBindings(next);
+      // 改键那一刻旧的"按住"语义已失效，必须清掉 ——
+      // 否则引擎会继续按新键的代价扣资源
+      for (const [key, skillId] of heldSkills) {
+        queue.push({ type: 'releaseSkill', skillId, atTick: options.currentTick() });
+        heldSkills.delete(key);
+      }
+      held.clear();
+    },
+    capture(onCapture: ((key: string) => void) | undefined): void {
+      captureHandler = onCapture;
     },
     dispose(): void {
       target.removeEventListener('keydown', onKeyDown);

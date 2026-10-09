@@ -10,13 +10,15 @@ import {
   HP_MAX,
 } from './data/content';
 import { BOSS_HP_DISPLAY } from './data/entities/bossHp';
-import { DEFAULT_BINDINGS } from './input/keyboard';
+import { DEFAULT_BINDINGS, type KeyBinding } from './input/keyboard';
 import { flattenCatalog, translator } from './i18n/translator';
 import { zhCN } from './i18n/locales/zh-CN';
 import { LOGICAL_H, LOGICAL_W, type ScalingMode } from './render/scaling';
 import { observeStage } from './render/sizes';
 import { BattleScene } from './render/BattleScene';
 import type { Combatant, StatKey } from './core/types';
+import { SettingsButton } from './ui/settings/SettingsButton';
+import { SettingsPanel } from './ui/settings/SettingsPanel';
 import './styles.css';
 
 /**
@@ -160,11 +162,19 @@ async function bootstrap(): Promise<void> {
         ]),
         passiveModifiers: new Map(),
       },
-      bindings: DEFAULT_BINDINGS_LOCAL,
+      bindings: bindings,
       slots: DEFAULT_SLOTS,
       timeLimitMs: TIME_LIMIT_MS,
       stopOnEnd: true,
     });
+
+  /**
+   * 键位表是**可变状态**，由设置界面修改。
+   *
+   * 放在这里而不是塞进 loop：`startBattle()` 每次重开都会重建 loop，
+   * 而玩家的改键不该因为重开一局就被重置。
+   */
+  let bindings: readonly KeyBinding[] = DEFAULT_BINDINGS;
 
   let loop = startBattle();
 
@@ -175,6 +185,8 @@ async function bootstrap(): Promise<void> {
     frameCount += 1;
     loop.frame(performance.now());
     scene.update(loop.snapshot);
+    settingsButton.update();
+    settings.update();
   });
 
   /* ---------- 重开 ----------
@@ -224,6 +236,19 @@ async function bootstrap(): Promise<void> {
      * 只看截图无法区分"没画"和"画了但看不见"。
      */
     stage: app.stage,
+    /**
+     * 设置界面的调试入口。
+     *
+     * 存在的理由：headless 环境下模拟鼠标点击不可靠（rAF 会被降频，
+     * 而且 CSS 缩放 → 逻辑坐标的换算依赖真实布局）。这个入口让验证
+     * 脚本能直接把界面推到某个状态再截图。
+     */
+    settings: {
+      open: (tab: 'general' | 'keys' = 'keys') => openSettings(tab),
+      close: () => closeSettings(),
+      openIn: (px: number, py: number) => settings.hitTest(px, py),
+      isOpen: () => settingsOpen,
+    },
     probe: () => {
       const state = loop.engineState.snapshot;
       const player = state.combatants.find((c) => c.side === 'ally');
@@ -248,15 +273,93 @@ async function bootstrap(): Promise<void> {
     },
   };
 
+  /* ---------- 设置界面 ---------- */
+  const settings = new SettingsPanel({
+    pixi: { Container, Graphics, Text },
+    translate: (key) => translateSafe(key),
+    getRows: () =>
+      bindings.map((b) => ({
+        skillId: b.skillId,
+        nameKey: registry.skill(b.skillId).nameKey,
+        key: b.key,
+      })),
+    onRebind: (skillId, key) => {
+      // 同一个键只能绑一个技能：先把旧占用者解绑，再绑新的
+      bindings = bindings.map((b) =>
+        b.skillId === skillId ? { ...b, key } : b.key === key ? { ...b, key: '' } : b,
+      );
+      loop.setBindings(bindings);
+    },
+    onResetKeys: () => {
+      bindings = DEFAULT_BINDINGS;
+      loop.setBindings(bindings);
+    },
+    onCapture: (handler) => loop.inputSource?.capture(handler),
+    onClose: () => closeSettings(),
+  });
+  app.stage.addChild(settings.root);
+
+  const settingsButton = new SettingsButton({
+    pixi: { Container, Graphics, Text },
+    translate: (key) => translateSafe(key),
+    onClick: () => toggleSettings(),
+  });
+  app.stage.addChild(settingsButton.root);
+
+  let settingsOpen = false;
+  const openSettings = (tab: 'general' | 'keys' = 'keys'): void => {
+    settingsOpen = true;
+    // 打开设置必须暂停战斗 —— 否则玩家改键时会被 Boss 打死
+    loop.setPaused(true);
+    settings.open(tab);
+  };
+  const closeSettings = (): void => {
+    settingsOpen = false;
+    settings.close();
+    loop.setPaused(false);
+  };
+  const toggleSettings = (): void => {
+    if (settingsOpen) closeSettings();
+    else openSettings();
+  };
+
+  /* 鼠标：canvas 里自己算坐标（不做逐对象事件绑定，便于测试驱动） */
+  app.canvas.addEventListener('pointerdown', (event) => {
+    const rect = app.canvas.getBoundingClientRect();
+    // CSS 尺寸 → 逻辑坐标（canvas 内部分辨率固定，靠 CSS 缩放）
+    const px = ((event.clientX - rect.left) / rect.width) * LOGICAL_W;
+    const py = ((event.clientY - rect.top) / rect.height) * LOGICAL_H;
+    if (settingsOpen) settings.hitTest(px, py);
+    else if (settingsButton.hitTest(px, py)) openSettings();
+  });
+
+  /* 设置打开时，键盘先给弹窗处理（改键捕获已经在输入层独占） */
+  window.addEventListener(
+    'keydown',
+    (event) => {
+      if (!settingsOpen) return;
+      settings.handleKey(event.key.toLowerCase());
+    },
+    true,
+  );
+
+  /** 统一的翻译入口（缺 key 时回退到 key 本身，而不是抛错）。 */
+  function translateSafe(key: string): string {
+    try {
+      return translator.t(key as Parameters<typeof translator.t>[0]);
+    } catch {
+      return key;
+    }
+  }
+
   stage.classList.add('ready');
 
   window.addEventListener('pagehide', () => {
     disposeStageObserver();
     loop.dispose();
   });
-}
 
-/** 键位（与 DEFAULT_SLOTS 对应）。 */
-const DEFAULT_BINDINGS_LOCAL = DEFAULT_BINDINGS;
+  void settings;
+}
 
 void bootstrap();
