@@ -743,17 +743,25 @@ export class BattleEngine {
     const opponent = this.opponentOf(actor.id);
 
     /**
-     * 按住型技能（有 `holdDrain`）在读条中**允许放行**，其它技能不行。
+     * 谁能打断读条：**只有瞬发技能**。
      *
-     * 理由见 `checkGate` 的 `allowedWhileCasting` 说明：按住型每个逻辑步
-     * 都重复请求一次，若让它在读条中放行，按住「防」就能把自己的
-     * 「攻」无限打断 —— 那不是玩家想要的。
+     * ------------------------------------------------------------------
+     * 规则（需求明确）
+     * ------------------------------------------------------------------
      *
-     * ⚠️ 方向：**只有按住型在读条中放行**（`allowedWhileCasting: true`），
-     * 其它技能用默认的 `false`，于是在读条中会被 `casting` 拒绝 ——
-     * 但我们已经在上面主动打断了旧读条，所以实际上会成功施放。
+     *   - **瞬发**（`castTime === 0`）：读条中放行 → 打断当前读条。
+     *     包括「闪」「破」「凝」，以及**「防」这种按住型**。
+     *   - **有读条的**（攻 / 轰）：读条中被 `casting` 拒绝，
+     *     所以**不会**打断自己，必须等当前读条结束。
+     *
+     * 这条规则很自然：读条技能之间互相打断会让"读条"失去意义
+     * （永远在被打断，永远读不完）；而瞬发技能本来就是"零耗时"的
+     * 应对手段（闪避、打断、增益），随时可用才合理。
+     *
+     * 踩过的坑：早期这里写的是 `!isHold`，方向正好取反 —— 变成
+     * "只有按住型被拒绝、其它全部放行"，与需求完全相反。
      */
-    const isHold = skill.holdDrain !== undefined;
+    const isInstant = skill.castTime === 0;
 
     /* ------------------------------------------------------------------ *
      * 读条中施放**其它**技能 → 打断当前读条。
@@ -768,7 +776,7 @@ export class BattleEngine {
     // 先做门禁检查（含资源、冷却）
     const gate = checkGate(actor, skill, this.ctx, {
       hasTarget: opponent !== undefined,
-      allowedWhileCasting: !isHold,
+      allowedWhileCasting: isInstant,
     });
 
     /**

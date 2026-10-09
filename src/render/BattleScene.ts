@@ -635,38 +635,63 @@ export class BattleScene {
 
     /* 玩家读条（面板顶部） */
     const pcb = LAYOUT.playerCastBar;
+    /**
+     * 玩家读条：**背景色推进 + 亮金文字**。
+     *
+     * ------------------------------------------------------------------
+     * 为什么改（用户反馈"太不清晰了，颜色太暗"）
+     * ------------------------------------------------------------------
+     *
+     * 早期是"深灰底 + 一条 3px 的暗金细线"，两个问题：
+     *   1. 底色 `0x14100c` 几乎是黑的，与面板分不开；
+     *   2. 文字 `0xffe8c0` 在中文字形下偏暗，而且细线只有 3px，
+     *      斜眼看根本读不出进度。
+     *
+     * 现在改成与 **Boss 预警条同一套表达**（进度 = 背景色推进）：
+     * 底色从暗金推进到亮金，文字更亮、秒数更大。两处读条用同一套
+     * 视觉语言，玩家不必学两次。
+     */
     this.playerCastPanel = new Panel(pixi, {
       x: pcb.x,
       y: pcb.y,
       w: pcb.w,
       h: pcb.h,
-      fill: 0x14100c,
-      line: 0x6a5a3a,
-      fillAlpha: 0.92,
+      fill: 0x4a3410,
+      line: 0xffc040,
+      fillAlpha: 1,
       radius: 2,
     });
+    /**
+     * 读条文字：**不加描边**。
+     *
+     * 踩过的坑：我先给它们加了深色描边（那是"数字压在亮条上"的标准做法），
+     * 结果在**亮金底**上深描边把白字包成一圈暗边，整块看起来反而更暗 ——
+     * 用户反馈的"颜色太暗"有一部分就来自这里。
+     *
+     * 底色已经是饱和金（亮度足够），纯白字直接压上去对比度最高。
+     */
     this.playerCastName = new Label(pixi, {
       x: pcb.x + 8,
-      y: pcb.y + 3,
-      size: FONT.small,
-      color: 0xffe8c0,
+      y: pcb.y + 2,
+      size: FONT.body,
+      color: 0xffffff,
       kai: true,
     });
     this.playerCastTime = new Label(pixi, {
       x: pcb.x + pcb.w - 8,
-      y: pcb.y + 4,
-      size: FONT.small,
-      color: 0xffd090,
+      y: pcb.y + 2,
+      size: FONT.body,
+      color: 0xffffff,
       anchorX: 1,
     });
     this.playerCastBar = new Bar(pixi, {
       x: pcb.x + 1,
-      y: pcb.y + pcb.h - 4,
+      y: pcb.y + pcb.h - 3,
       w: pcb.w - 2,
-      h: 3,
-      color: 0xffb050,
-      darkColor: 0x40301c,
-      brightColor: 0xfff0c0,
+      h: 2,
+      color: 0xfff0b0,
+      darkColor: 0x604818,
+      brightColor: 0xffffff,
     });
     this.playerCastPanel.root.visible = false;
     this.playerCastName.root.visible = false;
@@ -700,13 +725,20 @@ export class BattleScene {
     this.playerName.root.visible = false;
 
     // 三根条的几何：等距垂直排列，每根 16 高（够画出内阴影与文字）
+    /**
+     * 三根资源条的位置**全部来自布局表**（`LAYOUT.playerBars`）。
+     *
+     * 踩过的坑：这些数字原先写死在这里（条高 16、间距 12、起始 +32），
+     * 于是"面板加高到 140 之后底部空出 36px"这种问题**既看不见也算不出来**
+     * —— 只能靠截图肉眼发现（用户就是这么发现的）。
+     *
+     * 现在 `stride = 20`、最后一根条距底部 `bottom = 14`，
+     * 所以浪费的纵向空间是固定且**可断言的**（见布局测试）。
+     */
+    const { h: barH, top: barsTop, stride } = LAYOUT.playerBars;
     const barX = pf.x + 8;
     const barW = pf.w - 16;
-    const barH = 16;
-    const gapY = 12;
-    // 顶部让给玩家读条（h=20 + 8 间距），所以三根条从 +32 开始
-    const topY = pf.y + 32;
-    const barY = (row: number): number => topY + row * (barH + gapY);
+    const barY = (row: number): number => pf.y + barsTop + row * stride;
 
     this.hpBar = new Bar(pixi, {
       x: barX, y: barY(0), w: barW, h: barH,
@@ -984,8 +1016,44 @@ export class BattleScene {
       this.playerCastName.set(translate(playerCast.nameKey));
       this.playerCastTime.set(`${(playerCast.remainingMs / 1000).toFixed(1)}s`);
       this.playerCastBar.update(playerCast.progress);
-      // 进度越接近满边框越亮 —— 与 Boss 预警条一致的手感
-      this.playerCastPanel.set({ line: playerCast.progress > 0.75 ? 0xffd060 : 0x6a5a3a });
+      /**
+       * 进度 → **背景色**（与 Boss 预警条同一套表达，但冷色换成暖金）。
+       *
+       * 用整数插值而不是每帧拼参数：`Panel.set` 会重建 Graphics，
+       * 每帧改颜色是明显开销，而颜色只有 256 级。
+       */
+      /**
+       * ⚠️ 区间要比"看起来够"更亮。
+       *
+       * 第一次改成背景色时我用了 `0x3d2a08 → 0xe0a020`，结果用户仍然
+       * 觉得暗 —— 因为暗端几乎与面板同色，而亮端也只是一个中等饱和的
+       * 橙。中文字形在低对比度下尤其难读。
+       *
+       * 现在暗端提到深金 `0x5a3c08`（明显比面板亮），
+       * 亮端到 `0xffc040`（高饱和金），边框到 `0xfff0a0`。
+       */
+      const t = Math.min(1, Math.max(0, playerCast.progress));
+      /**
+       * 第二次调亮把暗端提到 `0x5a3c08` 之后**仍然偏暗** ——
+       * 因为"读条刚开始"恰恰是最需要被看到的一刻（玩家要知道
+       * 自己正在酝酿），而那时进度接近 0，颜色也最暗。
+       *
+       * 所以暗端直接取**饱和金** `0x8a5c10`，整条读条从头到尾都
+       * 明显亮于面板底色；进度只负责"更亮"而不是"从黑到亮"。
+       */
+      /**
+       * ⚠️ 必须一起传 `fillAlpha: 1`。
+       *
+       * 踩过的坑：`Panel.set()` 是**累积 props** 后整块重绘，而
+       * `fillAlpha` 的默认值是 0.82（给普通半透明面板用的）。
+       * 我只传 `fill`/`line` 时，alpha 落到 0.82 —— 饱和金被压成
+       * 深橄榄色，"提亮"完全没生效（实测底色像素是 RGB(40,34,25)）。
+       */
+      this.playerCastPanel.set({
+        fill: lerpColor(0x8a5c10, 0xffd050, t),
+        line: lerpColor(0xe0b050, 0xfff4c0, t),
+        fillAlpha: 1,
+      });
     }
 
     /* ---------- 玩家面板 ---------- */

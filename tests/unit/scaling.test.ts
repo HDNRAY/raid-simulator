@@ -187,11 +187,12 @@ describe('玩家面板：读条在顶部、三根条不越界', () => {
   const pf = LAYOUT.player;
   const pcb = LAYOUT.playerCastBar;
 
-  it('读条在面板顶部、且完整落在面板内', () => {
-    expect(pcb.y).toBeGreaterThanOrEqual(pf.y);
-    expect(pcb.x).toBeGreaterThanOrEqual(pf.x);
-    expect(pcb.x + pcb.w).toBeLessThanOrEqual(pf.x + pf.w);
-    expect(pcb.y + pcb.h).toBeLessThanOrEqual(pf.y + pf.h);
+  it('读条在面板上方、与面板同宽同左边界', () => {
+    // 早期这条断言写的是"读条落在面板**内**" —— 而那正是导致
+    // "面板盖住读条"的布局。现在它必须在面板**上方**（见下一条）。
+    expect(pcb.x).toBe(pf.x);
+    expect(pcb.w).toBe(pf.w);
+    expect(pcb.y).toBeLessThan(pf.y);
   });
 
   it('读条比 Boss 预警条矮 —— 它不是威胁提示', () => {
@@ -199,15 +200,31 @@ describe('玩家面板：读条在顶部、三根条不越界', () => {
     expect(pcb.h).toBeLessThan(LAYOUT.castBar.h);
   });
 
-  it('三根状态条都在读条下方、且都在面板内', () => {
-    const topY = pf.y + 32;
-    const barH = 16;
-    const gapY = 12;
-    const lastBottom = topY + 2 * (barH + gapY) + barH;
-    // 第一根条不能与读条重叠
-    expect(topY).toBeGreaterThanOrEqual(pcb.y + pcb.h);
+  it('【关键】读条不与玩家面板重叠 —— 面板是后绘制的，会盖住读条', () => {
+    /**
+     * 这是一次真实踩坑：读条原先和面板**重叠**，而面板在
+     * `hud.addChild` 里排在读条之后，于是深色面板填充直接把读条盖住。
+     * 表现为"读条一片暗"，用户报了两次，而我改了好几轮颜色都不见效 ——
+     * 因为根本不是颜色问题。
+     *
+     * 绘制顺序是"后加的在上面"，所以这条几何约束必须成立。
+     */
+    expect(pcb.y + pcb.h).toBeLessThanOrEqual(pf.y);
+  });
+
+  it('三根状态条都在面板内、且纵向分布均匀', () => {
+    const { h: barH, top, stride, bottom } = LAYOUT.playerBars;
+    const firstTop = pf.y + top - pf.y; // 相对面板顶部
+    const lastBottom = top + 2 * stride + barH;
+    // 第一根条不能与面板顶部打架
+    expect(firstTop).toBeGreaterThan(0);
     // 最后一根条不能超出面板
-    expect(lastBottom).toBeLessThanOrEqual(pf.y + pf.h);
+    expect(lastBottom).toBeLessThanOrEqual(pf.h);
+    // 底部留白不能超过面板高度的 40% —— 否则就是"空了一大截"（用户报过）
+    expect(pf.h - lastBottom).toBeLessThanOrEqual(pf.h * 0.4);
+    // 顶部与底部留白应当接近（不然视觉重心偏移）
+    expect(Math.abs(bottom - top)).toBeLessThanOrEqual(20);
+    void bottom;
   });
 
   it('面板不越出画布底边', () => {

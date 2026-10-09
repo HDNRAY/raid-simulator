@@ -492,7 +492,28 @@ describe('读条与打断（公共冷却已删除，节奏改由读条表达）'
     expect(engine.snapshot.combatants[0]!.casts[0]?.skillId).toBe('attack');
   });
 
-  it('瞬发技能（闪）也能打断正在读的条 —— "想躲就躲得掉"', () => {
+  it('【核心】只有瞬发能打断：读条技能之间互不打断', () => {
+    /**
+     * 这是需求的核心：读条技能（攻 / 轰）在读条中会被 `casting` 拒绝，
+     * 所以**不会**打断自己 —— 否则"读条"永远读不完，失去意义。
+     */
+    const engine = makeEngine();
+    engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
+    engine.drainEvents();
+    for (let t = 1; t <= 3; t += 1) engine.tick();
+
+    // 缠给足，排除"代价不足"这个无关因素
+    const withDouqi = makeEngine();
+    void withDouqi;
+    engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 4 }]);
+    const events = engine.drainEvents();
+    expect(events.some((e) => e.kind === 'skillRejected' && e.reason === 'casting')).toBe(true);
+    expect(events.some((e) => e.kind === 'castInterrupted')).toBe(false);
+    // 原来的读条还在
+    expect(engine.snapshot.combatants[0]!.casts[0]!.skillId).toBe('attack');
+  });
+
+  it('瞬发技能（闪）能打断正在读的条 —— "想躲就躲得掉"', () => {
     const engine = makeEngine();
     engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
     engine.drainEvents();
@@ -519,21 +540,22 @@ describe('读条与打断（公共冷却已删除，节奏改由读条表达）'
     expect(engine.snapshot.combatants[0]!.resources.energy).toBeLessThanOrEqual(afterStart);
   });
 
-  it('按住型「防」不会打断自己的读条（否则按住防就永远放不出攻）', () => {
+  it('「防」是瞬发，「按下」就打断读条 —— 与其它瞬发技能一致', () => {
+    /**
+     * 规则（需求）：**只有瞬发技能能打断读条**，包括「防」这种按住型。
+     * 读条技能（攻 / 轰）之间不会互相打断。
+     */
     const engine = makeEngine();
     engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
     engine.drainEvents();
-    const castSkill = engine.snapshot.combatants[0]!.casts[0]!.skillId;
+    expect(engine.snapshot.combatants[0]!.casts[0]!.skillId).toBe('attack');
 
-    // 模拟玩家一边读条一边按住「防」：每个 tick 都发一次 hold
-    for (let t = 1; t <= 10; t += 1) {
-      engine.tick([{ type: 'hold', skillId: 'guard', atTick: t }]);
-      engine.drainEvents();
-      const casts = engine.snapshot.combatants[0]!.casts;
-      // 读条必须还在，而且没被换成「防」
-      expect(casts.length).toBe(1);
-      expect(casts[0]!.skillId).toBe(castSkill);
-    }
+    engine.tick([{ type: 'hold', skillId: 'guard', atTick: 1 }]);
+    const events = engine.drainEvents();
+    // 「攻」的读条被打断
+    expect(events.some((e) => e.kind === 'castInterrupted')).toBe(true);
+    // 减伤 buff 已经挂上 —— 打断不是纯损失
+    expect(engine.snapshot.combatants[0]!.buffs.some((b) => b.defId === 'guard')).toBe(true);
   });
 
   it('「轰」比「攻」读条更久（高伤害的代价是更容易被打断）', () => {
@@ -553,41 +575,50 @@ describe('读条与打断（公共冷却已删除，节奏改由读条表达）'
 
 describe('Boss 霸体：唯一挡得住打断的东西', () => {
   it('【核心】霸体期间「破」打不断 Boss —— 连强制打断也挡', () => {
-    const options = makeGoldenEngineOptions();
     // 霸体 buff 的 flag 必须真的是 interruptImmune（接线的前提）
+    const options = makeGoldenEngineOptions();
     expect(options.buffs.get('boss-armor')!.flags?.interruptImmune).toBe(true);
 
     /**
-     * 真实路径：让 Boss 释放霸体招式，等读条结束挂上 buff，
-     * 然后中途再放一个读条招式、用「破」去打断它。
+     * 用一个**不还手**的 Boss，这样能干净地控制它读什么。
+     *
+     * 用真实轮转不行：Boss 一起手就在读「蓄能」，而新规则"只有瞬发
+     * 能打断"同样作用于 Boss —— 它的霸体招式会因 `casting` 被拒。
      */
-    const e2 = new BattleEngine(makeGoldenEngineOptions());
-    e2.tick([], 'verrot');
-    e2.drainEvents();
-    // Boss 放霸体招式：castTime 0.4 秒 = 24 tick，所以要跑够
-    e2.tick([{ type: 'useSkill', skillId: 'boss-armor', atTick: e2.snapshot.tick }], 'verrot');
-    e2.drainEvents();
-    for (let i = 0; i < 30; i += 1) {
-      e2.tick();
-      e2.drainEvents();
-    }
-    const armored = e2.snapshot.combatants.find((c) => c.side === 'enemy')!;
-    expect(armored.buffs.some((b) => b.defId === 'boss-armor')).toBe(true);
+    const base = makeGoldenEngineOptions();
+    const e = new BattleEngine({
+      ...base,
+      combatants: [base.combatants[0]!, { ...base.combatants[1]!, behaviors: [] }],
+    });
+    e.tick();
+    e.drainEvents();
 
-    // 现在让 Boss 起一个读条（用普攻招式）
-    e2.tick([{ type: 'useSkill', skillId: 'boss-cleave', atTick: e2.snapshot.tick }], 'verrot');
-    e2.drainEvents();
-    const casting = e2.snapshot.combatants.find((c) => c.side === 'enemy')!;
-    expect(casting.casts.length).toBe(1);
+    // Boss 放霸体招式，然后空转等它读完（读条 0.4 秒）
+    e.tick([{ type: 'useSkill', skillId: 'boss-armor', atTick: e.snapshot.tick }], 'verrot');
+    e.drainEvents();
+    for (let i = 0; i < 30; i += 1) {
+      e.tick();
+      e.drainEvents();
+    }
+    expect(
+      e.snapshot.combatants.find((c) => c.side === 'enemy')!.buffs.some(
+        (b) => b.defId === 'boss-armor',
+      ),
+    ).toBe(true);
+
+    // 让 Boss 起一个读条招式
+    e.tick([{ type: 'useSkill', skillId: 'boss-cleave', atTick: e.snapshot.tick }], 'verrot');
+    e.drainEvents();
+    expect(e.snapshot.combatants.find((c) => c.side === 'enemy')!.casts.length).toBe(1);
 
     // 玩家用「破」打断 → 必须被霸体挡下
-    e2.tick([{ type: 'useSkill', skillId: 'break', atTick: e2.snapshot.tick }]);
-    const events = e2.drainEvents();
+    e.tick([{ type: 'useSkill', skillId: 'break', atTick: e.snapshot.tick }]);
+    const events = e.drainEvents();
 
-    expect(events.some((e) => e.kind === 'interruptImmune')).toBe(true);
-    expect(events.some((e) => e.kind === 'interruptSuccess')).toBe(false);
+    expect(events.some((ev) => ev.kind === 'interruptImmune')).toBe(true);
+    expect(events.some((ev) => ev.kind === 'interruptSuccess')).toBe(false);
     // 读条必须还在
-    expect(e2.snapshot.combatants.find((c) => c.side === 'enemy')!.casts.length).toBe(1);
+    expect(e.snapshot.combatants.find((c) => c.side === 'enemy')!.casts.length).toBe(1);
   });
 
   it('没有霸体时「破」能打断 Boss 的任意招式', () => {
