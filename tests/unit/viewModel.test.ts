@@ -208,3 +208,46 @@ describe('读条组件（CastBar）：两处读条共用同一个实现', () => 
     expect(LAYOUT.playerCastBar.y + LAYOUT.playerCastBar.h).toBeLessThanOrEqual(LAYOUT.player.y);
   });
 });
+
+describe('技能格：冷却遮罩（白）与数字的层叠', () => {
+  /**
+   * 需求："按键的 cd，数字应该盖在按键 icon 上，背景是暗色，
+   * cd 的半透明遮罩就应该用白色。"
+   *
+   * 这条来回改过很多次（弧形 → 红弧 → 黑色矮条 → 白色铺满），
+   * 而且每一版都能"看起来差不多能用" —— 所以必须用断言锁住
+   * 三件容易改坏的事。
+   */
+  const read = async (rel: string): Promise<string> =>
+    (await import('node:fs')).readFileSync(new URL(rel, import.meta.url), 'utf8');
+
+  it('遮罩是**白色**半透明，而不是黑色', async () => {
+    const src = await read('../../src/render/BattleScene.ts');
+    // 冷却遮罩那次 fill 必须是白色
+    const m = /SLOT_COOLDOWN_BAR_H \* view\.cooldownRatio\)\);\s*\n\s*g\.rect\([^)]*\)\.fill\(\{ color: (0x[0-9a-f]+), alpha: ([\d.]+) \}\)/.exec(src);
+    expect(m, '未找到冷却遮罩的 fill 调用').not.toBeNull();
+    expect(m![1]).toBe('0xffffff');
+    // 半透明：既压住技能字，又不糊成死白
+    const alpha = Number(m![2]);
+    expect(alpha).toBeGreaterThan(0.3);
+    expect(alpha).toBeLessThan(1);
+  });
+
+  it('遮罩最大高度 = 整格（不是一条矮条）', () => {
+    expect(LAYOUT.skillBar.cooldownBarHeight).toBe(LAYOUT.skillBar.slot);
+  });
+
+  it('【关键】数字在技能字**之后**绘制 —— 否则盖不住 icon', async () => {
+    const src = await read('../../src/render/BattleScene.ts');
+    // 技能格那一次 addChild 的参数里有 cd.root（其它 addChild 没有）
+    const m = /this\.root\.addChild\((gfx,[^)]*cd\.root[^)]*)\)/.exec(src);
+    expect(m, '未找到技能格的 addChild').not.toBeNull();
+    const order = m![1]!.split(',').map((x) => x.trim());
+    // 顺序：格子底 → 技能字 → 按键 → **冷却数字（最后 = 最上层）**
+    expect(order).toEqual(['gfx', 'glyph.root', 'key.root', 'cd.root']);
+  });
+
+  it('数字字号大于技能字 —— 冷却时它才是关键信息', () => {
+    expect(FONT.big).toBeGreaterThan(FONT.body);
+  });
+});

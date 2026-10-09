@@ -311,14 +311,24 @@ class SkillBarView {
        * 放正中会与技能字完全重叠；放底部居中会与按键提示挤在一起。
        * 现在放**右下角压在弧线上**，技能字完整保留（字与数字不重叠）。
        */
+      /**
+       * 冷却秒数：**居中盖在技能字上**。
+       *
+       * - 字号 `FONT.big`(26px) > 技能字 `FONT.body`(15px)，
+       *   这样"谁盖谁"在视觉上是明确的
+       * - 双向居中（anchor 0.5/0.5），所以 `pos.cooldown` 是中心点
+       * - 描边保证在任何底色上都读得清（白色遮罩 / 深色格子都行）
+       */
       const cd = new Label(this.pixi, {
         x: pos.cooldown.x,
         y: pos.cooldown.y,
-        size: FONT.small,
+        size: FONT.big,
         color: 0xffffff,
         anchorX: 0.5,
+        anchorY: 0.5,
         stroke: 0x000000,
         strokeWidth: 3,
+        bold: true,
       });
       this.root.addChild(gfx, glyph.root, key.root, cd.root);
       this.slots.push({ gfx, glyph, key, cd, rect });
@@ -359,7 +369,7 @@ class SkillBarView {
         continue;
       }
 
-      const { x, y, w } = s.rect;
+      const { x, y, w, h } = s.rect;
       const g = s.gfx;
       g.clear();
 
@@ -375,22 +385,26 @@ class SkillBarView {
        */
       if (view.cooldownRatio > 0.001) {
         /**
-         * 冷却遮罩：格子**顶部**一块**半透明黑色矮条**。
+         * 冷却遮罩：**白色半透明，铺满整格**（底边对齐，向满高生长）。
          *
-         * 换过三次，每次都是被具体问题逼的：
+         * 需求："cd 的半透明遮罩就应该用白色"、"背景是暗色"、
+         * "数字应该盖在按键 icon 上"。
          *
-         *   1. **扇形/圆环填充** —— 把技能字盖住了。
-         *   2. **一条红色弧线** —— 虽然不挡字，但（a）红色在这套
-         *      青/金/绿的配色里非常跳；（b）**会抖动**：弧的起止角
-         *      每帧重算，抗锯齿边缘在 1px 之间来回跳。
-         *   3. 现在：**半透明黑 + 固定高度 + 只有高度变化**。
-         *      高度是整数像素，所以不会抖；黑色不参与配色。
+         * 演进（这条来回改过很多次，记下来）：
+         *   1. **扇形/圆环** —— 把技能字盖住
+         *   2. **红色弧线** —— 配色里太跳，而且逐帧重算起止角**会抖动**
+         *   3. **半透明黑色矮条（18px）** —— 太暗，且"还剩多少"读不出来
+         *   4. **白色铺满整格**（当前）—— 亮色在暗底格子上对比度高，
+         *      剩余高度一眼可读；高度取整所以不抖
          *
-         * 高度只改（不变色、不换形状），读取起来也更直接：
-         * 黑条越长 = 冷却越久。
+         * 白色用**半透明**（0.55）：既压住技能字让数字跳出来，
+         * 又不会糊成一块死白（还能看见底下的格子边界）。
+         *
+         * 数字（`s.cd`）在这个遮罩**之后** addChild，所以盖在最上面 ——
+         * 这正是需求要的"数字盖在 icon 上"。
          */
         const barH = Math.max(1, Math.round(SLOT_COOLDOWN_BAR_H * view.cooldownRatio));
-        g.rect(x, y, w, barH).fill({ color: 0x000000, alpha: 0.62 });
+        g.rect(x, y + h - barH, w, barH).fill({ color: 0xffffff, alpha: 0.55 });
       }
       /**
        * 不可用（资源不足 / 条件不满足）**不画任何方框**。
@@ -426,6 +440,12 @@ class SkillBarView {
        *
        * 早期显示到 0.1 秒（`toFixed(1)`）：一是"还剩 4.3 秒"对玩家没有
        * 额外信息量，二是那个宽度会把技能字挤掉。取整后一位数字放得下。
+       */
+      /**
+       * 冷却秒数：**盖在技能字上**，字号用 `FONT.big`(26px) 压过它。
+       *
+       * 需求："按键的 cd，数字应该盖在按键 icon 上。"
+       * 加描边是为了在任何底色上都读得清（白色遮罩 / 深色格子都行）。
        */
       s.cd.set(view.cooldownRatio > 0.001 ? Math.ceil(view.cooldownSec).toString() : '');
     }
