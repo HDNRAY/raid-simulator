@@ -14,6 +14,7 @@
  */
 
 import type { Container, Graphics } from 'pixi.js';
+import { Icon } from '../../render/icons';
 import { PALETTE } from '../../render/theme';
 import { LOGICAL } from '../layout';
 import type { PixiCtor } from '../primitives';
@@ -27,11 +28,15 @@ export interface SettingsButtonOptions {
 /** 按钮几何：右下角，压在技能栏上方一点。 */
 const SIZE = 26;
 const MARGIN = 8;
+/** 图标边长与颜色（比按钮小一圈，留出内边距）。 */
+const ICON_SIZE = 18;
+const ICON_COLOR = 0xb0b0be;
 
 export class SettingsButton {
   readonly root: Container;
 
   private readonly gfx: Graphics;
+  private readonly icon: Icon;
   private readonly rect: { x: number; y: number; w: number; h: number };
   private hovered = false;
   private lastDrawnHover = false;
@@ -48,7 +53,21 @@ export class SettingsButton {
 
     this.root = new pixi.Container();
     this.gfx = new pixi.Graphics();
-    this.root.addChild(this.gfx);
+    /**
+     * 图标用 SVG（`render/icons.ts`）。
+     *
+     * 这里换过三种做法：字符「设」→ 命令式绘制的齿轮 → SVG。
+     * SVG 胜出的理由是**美术能参与**：它就是一个标准的图形文件，
+     * 而前两种都要改代码。
+     */
+    this.icon = new Icon({
+      pixi,
+      name: 'gear',
+      size: ICON_SIZE,
+      color: ICON_COLOR,
+    });
+    this.root.addChild(this.gfx, this.icon.root);
+    this.placeIcon();
     this.draw();
   }
 
@@ -89,7 +108,19 @@ export class SettingsButton {
       width: 1,
     });
 
-    drawGear(g, x + w / 2, y + h / 2, this.hovered ? PALETTE.douqi.bright : 0xb0b0be);
+  }
+
+  /**
+   * 图标居中。
+   *
+   * 图标是 16px 的正方形，`Icon` 的原点在左上角，所以手动偏移
+   * 半个尺寸 —— 这也解释了为什么不用 `root.width`：SVG 纹理的
+   * 尺寸要到渲染时才确定，而这里是布局期。
+   */
+  private placeIcon(): void {
+    const { x, y, w, h } = this.rect;
+    this.icon.root.x = x + (w - ICON_SIZE) / 2;
+    this.icon.root.y = y + (h - ICON_SIZE) / 2;
   }
 
   /** 无障碍/调试用：按钮的语义名称。 */
@@ -98,49 +129,3 @@ export class SettingsButton {
   }
 }
 
-
-/**
- * 画一个齿轮图标。
- *
- * ------------------------------------------------------------------
- * 为什么是"画出来的"而不是一个字符
- * ------------------------------------------------------------------
- *
- * 早期用「设」字当图标。问题有两个：
- *   1. 字必须**显式 set()** —— 我漏了这一步，按钮渲染成空方块，
- *      看起来像"图标没加载"（截图区分不了"空"和"被遮住"）。
- *   2. 「设」是个抽象字，不像图标那样一眼认得出是"设置"。
- *
- * 齿轮用 8 齿 + 中心孔构造，是设置图标最通用的形态。
- * 全部是几何计算，所以**不依赖字体**，也不会有字形缺失的风险。
- *
- * 接入正式美术素材时，只需要把这一次调用换成贴图。
- */
-function drawGear(g: Graphics, cx: number, cy: number, color: number): void {
-  const teeth = 8;
-  const rOuter = 8;
-  const rInner = 5.5;
-  const halfTooth = Math.PI / teeth / 2.2;
-
-  g.moveTo(cx + rInner * Math.cos(-halfTooth), cy + rInner * Math.sin(-halfTooth));
-  for (let i = 0; i < teeth; i += 1) {
-    const mid = (i * 2 * Math.PI) / teeth;
-    const a0 = mid - halfTooth;
-    const a1 = mid + halfTooth;
-    const b0 = mid + (2 * Math.PI) / teeth / 2 - halfTooth;
-    const b1 = mid + (2 * Math.PI) / teeth / 2 + halfTooth;
-
-    g.lineTo(cx + rInner * Math.cos(a0), cy + rInner * Math.sin(a0));
-    g.lineTo(cx + rOuter * Math.cos(a0), cy + rOuter * Math.sin(a0));
-    g.lineTo(cx + rOuter * Math.cos(a1), cy + rOuter * Math.sin(a1));
-    g.lineTo(cx + rInner * Math.cos(a1), cy + rInner * Math.sin(a1));
-    // 回到内圈，走到下一个齿的起点
-    g.lineTo(cx + rInner * Math.cos(b0), cy + rInner * Math.sin(b0));
-    g.lineTo(cx + rInner * Math.cos(b1), cy + rInner * Math.sin(b1));
-  }
-  g.closePath();
-  // 齿轮本体：用描边而不是填充 —— 26px 的按钮里，实心齿轮会糊成一坨
-  g.stroke({ color, width: 1.4 });
-  // 中心孔
-  g.circle(cx, cy, 2.2).stroke({ color, width: 1.4 });
-}

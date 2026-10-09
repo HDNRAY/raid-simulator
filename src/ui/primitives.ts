@@ -13,13 +13,22 @@
  * 静态与动态导入，动态 import 失去意义、分包也失效。
  */
 
-import type { Container, Graphics, Text } from 'pixi.js';
+import type { Container, Graphics, Sprite, Text } from 'pixi.js';
 import { FONT_FAMILY, FONT_FAMILY_MONO, TYPE, css } from '../render/theme';
 
+/**
+ * Pixi 类的**依赖注入缝**。
+ *
+ * 组件不直接 `import { Container } from 'pixi.js'`，而是经由这个接口
+ * 拿构造函数 —— 于是测试可以塞一套极简的假实现，
+ * 不必在 jsdom 里跑真的 WebGL。
+ */
 export interface PixiCtor {
   readonly Container: typeof Container;
   readonly Graphics: typeof Graphics;
   readonly Text: typeof Text;
+  /** 图标用（`render/icons.ts`）。 */
+  readonly Sprite: typeof Sprite;
 }
 
 /* ------------------------------------------------------------------ *

@@ -17,8 +17,10 @@ import { LOGICAL_H, LOGICAL_W, type ScalingMode } from './render/scaling';
 import { observeStage } from './render/sizes';
 import { BattleScene } from './render/BattleScene';
 import type { Combatant, StatKey } from './core/types';
+import type { Texture } from 'pixi.js';
 import { SettingsButton } from './ui/settings/SettingsButton';
 import { SettingsPanel } from './ui/settings/SettingsPanel';
+import { setIconDecoder } from './render/icons';
 import './styles.css';
 
 /**
@@ -112,7 +114,19 @@ async function bootstrap(): Promise<void> {
   const stage = document.querySelector<HTMLElement>('#stage');
   if (!stage) throw new Error('index.html is missing the #stage container');
 
-  const { Application, Container, Graphics, Text } = await import('pixi.js');
+  const { Application, Assets, Container, Graphics, Sprite, Text } = await import('pixi.js');
+
+  /**
+   * 注册 SVG 图标解码器。
+   *
+   * ⚠️ 必须用 `Assets.load`：Pixi v8 的 `Texture.from(svgDataUri)`
+   * 会返回 1×1 的 EMPTY 纹理（并警告"不在 Assets 缓存里"），
+   * 因为 SVG 要先经资源系统光栅化。
+   *
+   * 必须在创建任何 `Icon` 之前注册 —— `SettingsButton` 在 bootstrap
+   * 中构造，所以这行要放在它前面。
+   */
+  setIconDecoder((uri: string) => Assets.load<Texture>(uri) as Promise<Texture>);
 
   const app = new Application();
   await app.init({
@@ -135,7 +149,7 @@ async function bootstrap(): Promise<void> {
   /* ---------- 场景 ---------- */
   const scene = new BattleScene({
     app,
-    pixi: { Container, Graphics, Text },
+    pixi: { Container, Graphics, Sprite, Text },
     translate: (key) => {
       try {
         return translator.t(key as Parameters<typeof translator.t>[0]);
@@ -275,7 +289,7 @@ async function bootstrap(): Promise<void> {
 
   /* ---------- 设置界面 ---------- */
   const settings = new SettingsPanel({
-    pixi: { Container, Graphics, Text },
+    pixi: { Container, Graphics, Sprite, Text },
     translate: (key) => translateSafe(key),
     getRows: () =>
       bindings.map((b) => ({
@@ -300,7 +314,7 @@ async function bootstrap(): Promise<void> {
   app.stage.addChild(settings.root);
 
   const settingsButton = new SettingsButton({
-    pixi: { Container, Graphics, Text },
+    pixi: { Container, Graphics, Sprite, Text },
     translate: (key) => translateSafe(key),
     onClick: () => toggleSettings(),
   });

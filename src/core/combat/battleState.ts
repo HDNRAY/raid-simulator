@@ -720,7 +720,7 @@ export class BattleEngine {
     /**
      * ⚠️ 必须从**工作副本**读 actor，不能读 `this.state`。
      *
-     * 踩过的坑：同一 tick 内的第二个技能会读到"还没挂上 GCD"的旧状态，
+     * 踩过的坑：同一 tick 内的第二个技能会读到"还没扣掉代价"的旧状态，
      * 于是 `strike` 和 `riposte` 能在**同一个 tick 里都施放成功** ——
      * 门禁形同虚设，实测 DPS 因此虚高 3 倍以上。
      *
@@ -842,7 +842,7 @@ export class BattleEngine {
         skillId,
       });
     } else {
-      // 瞬发：先同步 GCD / 冷却，再结算 —— 之后**不再写回**
+      // 瞬发：先同步冷却，再结算 —— 之后**不再写回**
       this.replaceCombatant(next);
       this.resolveSkillHits(next, skill);
     }
@@ -953,14 +953,14 @@ export class BattleEngine {
    *      —— 闪避 / 格挡这类"用了就给自己挂 buff"的技能走这条。
    *      （踩过的坑：一开始只实现了 trigger 形态，于是 dodge 施放成功
    *        但 buff 从未挂上，表现为"闪避没效果"。）
-   *   2. **trigger onCastFinish**：GCD / 派生窗口走这条。
+   *   2. **trigger onCastFinish**：派生窗口走这条。
    */
   /**
    * 结算技能自带的 abilities。
    *
    * ⚠️ 这里**必须操作传入的累积对象 `actor`，不能回读 `this.current()`**。
    *
-   * 踩过的坑：回读会拿到 state 里的旧版本（此时 GCD / 冷却还没写回），
+   * 踩过的坑：回读会拿到 state 里的旧版本（此时冷却还没写回），
    * 于是挂上 buff 后用旧的 buffs 数组整条覆盖回去 ——
    * 表现为"dodge 施放成功、buffApplied 事件也发了，但 buff 立刻消失"。
    *
