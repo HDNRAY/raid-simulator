@@ -306,6 +306,15 @@ export interface BuffInstance {
   /** 唯一。同一 `defId` 可以有多份（G4）。 */
   readonly instanceId: string;
   readonly defId: BuffId;
+  /**
+   * 内容定义（不可变，可安全共享引用）。
+   *
+   * 为什么不只存 `defId`：引擎需要一个 defId → BuffDef 的解析途径。
+   * 内容**定义**是不可变对象，引用它不会破坏"状态可结构化克隆"
+   * （结构化克隆会复制它），也不会破坏可哈希性（哈希看的是值）。
+   * 数值仍然**不在**这里 —— 派生值每次重新求值。
+   */
+  readonly def?: BuffDef;
   readonly stacks: number;
   /** 施加时刻（tick） */
   readonly appliedAtTick: number;

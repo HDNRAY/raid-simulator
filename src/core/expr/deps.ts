@@ -153,8 +153,12 @@ export function collectDerivedSources(abilities: readonly Ability[]): readonly D
   return out;
 }
 
-/** 把 buff 的 modifiers/triggers 统一成 ability 形状，便于递归遍历。 */
-function buffAbilities(buff: BuffDef): readonly Ability[] {
+/**
+ * 把 buff 的 modifiers/triggers 统一成 ability 形状，便于递归遍历。
+ *
+ * 导出给内容校验器复用 —— "buff 里的能力"这个概念只该有一种展开方式。
+ */
+export function buffAbilities(buff: BuffDef): readonly Ability[] {
   const out: Ability[] = [];
   for (const modifier of buff.modifiers ?? []) {
     out.push({ kind: 'modifier', modifier });
