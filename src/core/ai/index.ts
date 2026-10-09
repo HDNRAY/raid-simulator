@@ -308,7 +308,7 @@ export const VERROT_BEHAVIORS: readonly Behavior[] = [
       {
         skillId: 'boss-sweep',
         when: { kind: 'hasBuff', who: 'self', buffId: 'boss-frenzy' },
-        gapMs: 2_700,
+        gapMs: 2_200,
       },
       { skillId: 'boss-empower', gapMs: 7_700 },
       /**
@@ -335,10 +335,17 @@ export const VERROT_BEHAVIORS: readonly Behavior[] = [
             { kind: 'hasBuff', who: 'self', buffId: 'boss-frenzy' },
           ],
         },
-        gapMs: 4_600,
+        gapMs: 6_400,
       },
-      { skillId: 'boss-sweep', gapMs: 4_300 },
-      { skillId: 'boss-cleave', gapMs: 1_200 },
+      /**
+       * ⚠️ `gapMs` 与技能的 `cooldown` **要一起调**。
+       *
+       * 踩过的坑：冷却确实存在（重斩 3s、横扫 6s），但 `gapMs` 更短，
+       * 于是冷却还没走完、轮转就先放行了 —— 观感上像"重斩没有 CD"。
+       * 真正决定间隔的是两者中**更长的那个**。
+       */
+      { skillId: 'boss-sweep', gapMs: 6_400 },
+      { skillId: 'boss-cleave', gapMs: 2_200 },
     ],
   },
 ];

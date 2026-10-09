@@ -448,7 +448,15 @@ const BOSS_CLEAVE: SkillDef = {
   icon: 'boss_cleave',
   abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: BOSS_TELEGRAPH }],
   castTime: logicMs(18),
-  cooldown: logicMs(30),
+  /**
+   * 冷却 **4.5 秒**（原 3 秒）。
+   *
+   * 为什么要加：需求指出"重斩看起来没有 CD"。核实后发现冷却确实存在，
+   * 但**真正限制它的是轮转的 `gapMs`**（1.2 秒）—— 冷却还没走完，
+   * 轮转这一关就先放行了，所以观感上像"连续重斩"。
+   * 冷却与 `gapMs` 一起放大之后间隔才真正拉开（见 ai 里的 rotation）。
+   */
+  cooldown: logicMs(60),
   cost: [],
   targeting: { mode: 'primaryEnemy' },
   hits: [
@@ -468,7 +476,7 @@ const BOSS_CLEAVE: SkillDef = {
            * 单发 14 点看起来不重，但出招频率提到了约 1.1 秒一次 ——
            * "重"体现在**总压力**上，而不是非要一击半血。
            */
-          damage: { base: S(26), school: 'physical', canCrit: false, countsAsHit: true },
+          damage: { base: S(30), school: 'physical', canCrit: false, countsAsHit: true },
         },
       ],
     },
@@ -488,7 +496,8 @@ const BOSS_SWEEP: SkillDef = {
   abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: BOSS_TELEGRAPH }],
   // 比重斩（1.8s）更长：它是"必须躲"的那一招
   castTime: logicMs(22),
-  cooldown: logicMs(60),
+  /** 冷却 **8 秒**（原 6 秒，同样配合 `gapMs` 一起放大）。 */
+  cooldown: logicMs(100),
   cost: [],
   targeting: { mode: 'primaryEnemy' },
   hits: [
@@ -509,7 +518,7 @@ const BOSS_SWEEP: SkillDef = {
            * 前摇更长（长到能看清并闪避），命中更痛 —— 所以"看到横扫
            * 必须反应"是本作的核心节奏。
            */
-          damage: { base: S(34), school: 'fire', canCrit: false, countsAsHit: true },
+          damage: { base: S(38), school: 'fire', canCrit: false, countsAsHit: true },
         },
       ],
     },

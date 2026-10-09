@@ -119,18 +119,17 @@ describe('真实内容：Boss 的机制都接线了', () => {
     expect(sawEnd).toBeDefined();
   });
 
-  it('【需求】只按「攻」能赢，但**只剩 8 血** —— 近乎没有容错', () => {
+  it('【需求】只按「攻」打不过 Boss —— 不用防御就是输', () => {
     /**
-     * 平衡目标是"不闪避或防御的话，就算完美进攻循环也打不过，
-     * 但要加一点容错"。
+     * 需求目标："不闪避或防御的话，就算完美进攻循环也打不过，
+     * 但加一点容错。"
      *
-     * 实测：纯「攻」（读条结束就按下一个，最理想的输出手法）能赢，
-     * 但**只剩 5 血**（满血 100，挨 95 伤）—— 任何一次失误都会死。
-     * 而闪避一次就能把余量抬到 38 血（见黄金重放）。
+     * 实测：纯「攻」（读条一结束就按下一个，最理想的输出手法）
+     * **败**，5.0 秒被打死，Boss 还剩 60 血。
+     * 用上闪避/格挡才能赢（见黄金重放：剩 54 血）。
      *
-     * 所以这一条锁住的是"**纯进攻几乎没有容错**"，而不是
-     * "纯进攻必败"（后者在不改玩家输出的前提下做不到，
-     * 详见 `bossHp.ts` 里的说明）。
+     * 这条以前断言的是"能赢但只剩 8 血"，那是 Boss 只有 160 血、
+     * 伤害还偏低的时期的结论。现在纯进攻**必败** —— 更贴合需求。
      */
     const engine = makeEngine();
     let attacks = 0;
@@ -149,11 +148,11 @@ describe('真实内容：Boss 的机制都接线了', () => {
     }
     const player = engine.snapshot.combatants.find((c) => c.side === 'ally')!;
     const boss = engine.snapshot.combatants.find((c) => c.side === 'enemy')!;
-    expect(attacks).toBeGreaterThan(10);
-    expect(boss.resources.hp).toBe(0);
-    // 关键：几乎没剩血 —— "一次失误就死"的紧度
-    expect(player.resources.hp).toBeLessThanOrEqual(12);
-    expect(player.alive).toBe(true);
+    expect(attacks).toBeGreaterThan(5);
+    expect(engine.snapshot.status).toBe('defeat');
+    expect(player.alive).toBe(false);
+    // 而且 Boss 还有相当的血量 —— 说明输得不是"差一点"
+    expect(boss.resources.hp).toBeGreaterThan(30);
   });
 
   it('3 分钟超时判负', () => {
