@@ -1,20 +1,24 @@
 /**
  * 战斗场景（M5）。
  *
- * 组成：背景 → 竞技场 → Boss 精灵 → 玩家背影 → HUD。
+ * ------------------------------------------------------------------
+ * 设计要点
+ * ------------------------------------------------------------------
  *
- * 数据流是**单向**的：`update(view)` 只读传入的快照，
- * 从不反向调用引擎，也不持有引擎对象。这是架构规范 C3 的落地。
+ * 1. **不画地面预警扇形**。本作没有位移 —— 玩家不能走出去，
+ *    所以"范围"这个概念不存在。判断压力全部来自**读条结束的时机**
+ *    （该躲 / 该挡 / 该打断），表达它的地方是顶部那条预警条，不是地面。
  *
- * 性能纪律：
- *   - 所有组件**创建一次**，每帧只 `update()`
- *   - 文本只在值真变化时赋值（Pixi 改 `text` 会重建纹理）
- *   - 进度条在比例变化 < 0.2% 时跳过重绘
+ * 2. **HUD 让路**：画面中央只放角色，不放任何面板。
+ *
+ * 3. **元素小、信息密度高**：技能格 48、buff 图标 26、字号 11–20。
+ *
+ * 数据流单向：`update(view)` 只读传入的快照。
  */
 
 import type { Application, Container, Graphics } from 'pixi.js';
-import { PALETTE, TYPE, css } from './theme';
-import { LAYOUT, LOGICAL, buffIconRect, skillSlotRect } from '../ui/layout';
+import { PALETTE } from './theme';
+import { FONT, LAYOUT, LOGICAL, iconRect, skillSlotRect } from '../ui/layout';
 import { Bar, Label, Panel, drawCorners, type PixiCtor } from '../ui/primitives';
 import { BossSprite } from './actors/BossSprite';
 import {
@@ -23,11 +27,9 @@ import {
   telegraphHint,
   type BattleSnapshotView,
   type BuffView,
-  type CombatantView,
   type SkillSlotView,
 } from './viewModel';
 
-/** 本地化函数：把 nameKey 变成可显示文字。 */
 export type TranslateFn = (key: string) => string;
 
 export interface BattleSceneOptions {
@@ -36,106 +38,211 @@ export interface BattleSceneOptions {
   readonly translate: TranslateFn;
 }
 
-/* ------------------------------------------------------------------ *
+/* ================================================================== *
  * 背景
- * ------------------------------------------------------------------ */
+ * ================================================================== */
 
 function drawBackground(g: Graphics): void {
   g.clear();
 
-  // 天空渐变（用横向色带模拟，比真渐变便宜且更像像素画）
-  const bands = 24;
+  const horizon = 372;
+
+  /* ---- 天空：从近黑到暖褐的竖向渐变（色带模拟） ---- */
+  const bands = 26;
   for (let i = 0; i < bands; i += 1) {
     const t = i / (bands - 1);
-    const color = mixColor(PALETTE.bgTop, PALETTE.bgBottom, t);
-    g.rect(0, (LOGICAL.height * 0.66 * i) / bands, LOGICAL.width, LOGICAL.height * 0.66 / bands + 1);
-    g.fill(color);
+    // 上暗下亮，且下半段更快变亮 —— 视觉重心落在接近地平线处
+    const eased = t * t;
+    const color = mixColor(PALETTE.bgTop, PALETTE.bgBottom, eased);
+    g.rect(0, (horizon * i) / bands, LOGICAL.width, horizon / bands + 1).fill(color);
   }
 
-  // 远景拱门（废墟感）
-  const arches: Array<[number, number, number]> = [
-    [104, 120, 196],
-    [252, 88, 210],
-    [520, 104, 200],
-    [700, 88, 214],
+  /* ---- 月亮：给画面一个焦点，也让角色剪影有背光 ---- */
+  g.circle(742, 118, 34).fill({ color: 0xd8c8a8, alpha: 0.1 });
+  g.circle(742, 118, 26).fill({ color: 0xe8d8b8, alpha: 0.14 });
+  g.circle(742, 118, 18).fill({ color: 0xf0e4c8, alpha: 0.2 });
+
+  /* ---- 远景废墟：**只放两侧**，中间留空给角色 ---- */
+  // 塔身用比天空更暗的色，才能读成"远处的黑剪影"而不是灰块
+  const spires: Array<[number, number, number]> = [
+    [24, 40, 176],
+    [84, 22, 232],
+    [120, 30, 200],
+    [800, 26, 214],
+    [860, 44, 158],
+    [916, 18, 246],
   ];
-  for (const [x, w, top] of arches) {
-    g.rect(x, top, w, 360 - top);
-    g.fill({ color: 0x14111c, alpha: 0.8 });
-    g.rect(x + 6, top + 10, w - 12, 360 - top);
-    g.fill(0x0d0b12);
+  for (const [x, w, top] of spires) {
+    g.rect(x, top, w, horizon - top).fill(0x08070c);
+    // 塔尖
+    g.poly([x - 4, top, x + w / 2, top - 22, x + w + 4, top]).fill(0x08070c);
+  }
+  // 远处的拱门轮廓（只有边框，暗示有建筑）
+  g.rect(150, 244, 78, horizon - 244).stroke({ color: 0x121019, width: 3 });
+  g.rect(756, 232, 62, horizon - 232).stroke({ color: 0x121019, width: 3 });
+
+  /* ---- 地表雾：把地平线糊开，避免一条生硬的直线 ---- */
+  for (let i = 0; i < 8; i += 1) {
+    const t = i / 7;
+    g.rect(0, horizon - 18 + i * 5, LOGICAL.width, 6).fill({
+      color: mixColor(PALETTE.ground, 0x3a2c34, t),
+      alpha: 0.42 - t * 0.3,
+    });
   }
 
-  // 地面
-  g.rect(0, 360, LOGICAL.width, LOGICAL.height - 360).fill(PALETTE.ground);
-  g.rect(0, 360, LOGICAL.width, 2).fill(PALETTE.groundLine);
-  // 地砖线
-  for (let x = 0; x < LOGICAL.width; x += 48) {
-    g.rect(x, 362, 1, LOGICAL.height - 362).fill({ color: 0x2a1f22, alpha: 0.5 });
+  /* ---- 地面 ---- */
+  g.rect(0, horizon, LOGICAL.width, LOGICAL.height - horizon).fill(PALETTE.ground);
+  // 地面近处更暗（暗角），把角色所在的中景"顶"出来
+  g.rect(0, horizon, LOGICAL.width, 26).fill({ color: 0x241a20, alpha: 0.9 });
+  g.rect(0, LOGICAL.height - 46, LOGICAL.width, 46).fill({ color: 0x0f0b11, alpha: 0.85 });
+
+  // 地砖透视：近处间距更大
+  for (let i = 0; i <= 12; i += 1) {
+    const t = i / 12;
+    const x = -40 + t * (LOGICAL.width + 80);
+    g.moveTo(x, horizon).lineTo(x + (x - LOGICAL.width / 2) * 0.18, LOGICAL.height);
+    g.stroke({ color: 0x241a22, width: 1, alpha: 0.5 });
   }
+  for (const y of [horizon + 22, horizon + 54, horizon + 96]) {
+    g.moveTo(0, y).lineTo(LOGICAL.width, y);
+    g.stroke({ color: 0x241a22, width: 1, alpha: 0.4 });
+  }
+
+  /* ---- 顶部压暗：让 HUD 区域与战场分层 ---- */
+  g.rect(0, 0, LOGICAL.width, 128).fill({ color: 0x000000, alpha: 0.34 });
 }
 
-/* ------------------------------------------------------------------ *
- * 预警区域（地面扇形）
- * ------------------------------------------------------------------ */
+/* ================================================================== *
+ * 图标条（buff / debuff 通用）
+ * ================================================================== */
 
-class TelegraphZone {
+class IconStrip {
   readonly root: Container;
-  private readonly gfx: Graphics;
-  private lastProgress = -1;
+  private readonly icons: Array<{
+    bg: Graphics;
+    text: Label;
+    time: Label;
+    x: number;
+    y: number;
+  }> = [];
+  private readonly pixi: PixiCtor;
 
-  constructor(pixi: PixiCtor) {
+  constructor(
+    pixi: PixiCtor,
+    private readonly strip: {
+      readonly x: number;
+      readonly y: number;
+      readonly size: number;
+      readonly gap: number;
+      readonly max: number;
+    },
+    private readonly translate: TranslateFn,
+  ) {
+    this.pixi = pixi;
     this.root = new pixi.Container();
-    this.gfx = new pixi.Graphics();
-    this.root.addChild(this.gfx);
-    this.root.visible = false;
   }
 
-  /** @param progress 0..1，进度越高扇形越满（表现"技能正在成形"） */
-  update(on: boolean, progress: number): void {
-    this.root.visible = on;
-    if (!on) return;
-    if (Math.abs(progress - this.lastProgress) < 0.02) return;
-    this.lastProgress = progress;
-
-    const g = this.gfx;
-    g.clear();
-    const cx = 620;
-    const cy = 392;
-    const radius = 250;
-    const spread = 0.35 + 0.65 * progress; // 从窄到宽
-    const half = (Math.PI / 2) * spread;
-
-    const points: number[] = [cx, cy];
-    const steps = 18;
-    for (let i = 0; i <= steps; i += 1) {
-      const angle = -Math.PI / 2 - half + (2 * half * i) / steps;
-      points.push(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
+  private ensure(count: number): void {
+    const target = Math.min(count, this.strip.max);
+    while (this.icons.length < target) {
+      const rect = iconRect(this.strip, this.icons.length);
+      const bg = new this.pixi.Graphics();
+      // 图标暂用「名字前两字」当地占位符号 —— 接入正式素材后换成贴图
+      const text = new Label(this.pixi, {
+        x: rect.x + rect.w / 2,
+        y: rect.y + 4,
+        size: FONT.small,
+        color: 0xffffff,
+        anchorX: 0.5,
+      });
+      const time = new Label(this.pixi, {
+        x: rect.x + rect.w / 2,
+        y: rect.y + rect.h - 12,
+        size: FONT.tiny,
+        color: 0xd8d8e4,
+        anchorX: 0.5,
+        stroke: 0x000000,
+        strokeWidth: 2,
+      });
+      this.root.addChild(bg, text.root, time.root);
+      this.icons.push({ bg, text, time, x: rect.x, y: rect.y });
     }
-    g.poly(points);
-    g.fill({ color: PALETTE.danger.base, alpha: 0.16 + 0.14 * progress });
-    g.poly(points);
-    g.stroke({ color: PALETTE.danger.bright, width: 2, alpha: 0.9 });
+  }
+
+  update(buffs: readonly BuffView[]): void {
+    // 判定窗口类排最前：玩家最需要看到"我还能躲多久"
+    const sorted = [...buffs].sort((a, b) => Number(b.isDefensive) - Number(a.isDefensive));
+    this.ensure(sorted.length);
+
+    const { size } = this.strip;
+    for (let i = 0; i < this.icons.length; i += 1) {
+      const icon = this.icons[i];
+      const view = sorted[i];
+      if (!icon) continue;
+
+      if (!view) {
+        icon.bg.clear();
+        icon.text.set('');
+        icon.time.set('');
+        continue;
+      }
+
+      const tight = isTightWindow(view);
+      const edge = view.isDefensive
+        ? tight
+          ? PALETTE.iframe.bright
+          : PALETTE.iframe.base
+        : view.polarity === 'debuff'
+          ? PALETTE.debuff.base
+          : view.polarity === 'neutral'
+            ? PALETTE.neutral.base
+            : PALETTE.buff.base;
+
+      const g = icon.bg;
+      g.clear();
+      // 26px 太小，画渐层看不清 —— 只用底色 + 描边 + 顶边色带
+      g.rect(icon.x, icon.y, size, size).fill({ color: 0x0b0b12, alpha: 0.92 });
+      g.rect(icon.x, icon.y, size, size).stroke({ color: edge, width: tight ? 2 : 1 });
+      g.rect(icon.x + 1, icon.y + 1, size - 2, 2).fill(edge);
+
+      const dur = Number.isFinite(view.durationMs) && view.durationMs > 0 ? view.durationMs : 1;
+      const frac = Number.isFinite(view.remainingMs)
+        ? Math.min(1, Math.max(0, view.remainingMs / dur))
+        : 1;
+      if (frac < 1) {
+        g.rect(icon.x + 1, icon.y + size - 3, Math.round((size - 2) * frac), 2).fill(edge);
+      }
+
+      icon.text.set(this.translate(view.nameKey).slice(0, 2));
+      icon.text.setColor(edge);
+      icon.time.set(
+        view.stacks > 1
+          ? `${view.stacks}`
+          : Number.isFinite(view.remainingMs) && view.remainingMs < 10_000
+            ? `${Math.ceil(view.remainingMs / 1000)}`
+            : '',
+      );
+    }
   }
 }
 
-/* ------------------------------------------------------------------ *
+/* ================================================================== *
  * 技能栏
- * ------------------------------------------------------------------ */
+ * ================================================================== */
 
 class SkillBarView {
   readonly root: Container;
   private readonly slots: Array<{
-    panel: Panel;
     gfx: Graphics;
     key: Label;
     name: Label;
     cdText: Label;
+    /** 已弃用：不可用原因改由状态区统一显示（格子太小放不下） */
+    blocked: undefined;
     rect: { x: number; y: number; w: number; h: number };
   }> = [];
-  /** 槽位是按需创建的 —— 数量由槽位表决定，不是硬编码 */
-  private slotCount = 0;
   private readonly pixi: PixiCtor;
+  private slotCount = 0;
 
   constructor(
     pixi: PixiCtor,
@@ -145,255 +252,135 @@ class SkillBarView {
     this.root = new pixi.Container();
   }
 
-  /** 确保创建了 `count` 个槽位（只增不减，避免每帧 new）。 */
-  private ensureSlots(count: number): void {
-    const target = Math.min(count, LAYOUT.skillBar.maxCount);
+  private ensure(count: number): void {
+    const target = Math.min(count, LAYOUT.skillBar.max);
     while (this.slots.length < target) {
       const i = this.slots.length;
       const rect = skillSlotRect(i, target);
-      const panel = new Panel(this.pixi, {
-        x: rect.x,
-        y: rect.y,
-        w: rect.w,
-        h: rect.h,
-        fill: 0x0c0c12,
-        line: 0x3a3a48,
-        fillAlpha: 0.9,
-      });
       const gfx = new this.pixi.Graphics();
-      const key = new Label(this.pixi, { x: rect.x + 5, y: rect.y + rect.h - 18, size: TYPE.md, color: 0xffffff });
+      const key = new Label(this.pixi, {
+        x: rect.x + 3,
+        y: rect.y + 2,
+        size: FONT.tiny,
+        color: 0xffffff,
+      });
+      // 技能名放格子**下方**，不挤在格子里（48px 放不下中文）。
+      // 不可用原因**不写在格子上** —— 七个格子各挂一行小字会糊成一片，
+      // 改由状态提示区统一说明。
       const name = new Label(this.pixi, {
         x: rect.x + rect.w / 2,
-        y: rect.y + rect.h - 20,
-        size: TYPE.xs,
-        color: 0xffffff,
+        y: rect.y + rect.h + 1,
+        size: FONT.small,
+        color: 0xc8c8d8,
         anchorX: 0.5,
       });
       const cdText = new Label(this.pixi, {
         x: rect.x + rect.w / 2,
-        y: rect.y + 20,
-        size: TYPE.md,
+        y: rect.y + rect.h / 2 - 3,
+        size: FONT.body,
         color: 0xffffff,
         anchorX: 0.5,
+        stroke: 0x000000,
+        strokeWidth: 3,
       });
-      this.root.addChild(panel.root, gfx, key.root, name.root, cdText.root);
-      this.slots.push({ panel, gfx, key, name, cdText, rect });
+      this.root.addChild(gfx, key.root, name.root, cdText.root);
+      this.slots.push({ gfx, key, name, cdText, blocked: undefined, rect });
     }
-    // 槽位数变化时重新居中：直接改每个 slot 的 x
+
     if (target !== this.slotCount) {
       this.slotCount = target;
+      // 右对齐：槽位数变化时整条栏向左延展，需重算每个槽位坐标
       for (let i = 0; i < this.slots.length; i += 1) {
         const rect = skillSlotRect(i, target);
-        const slot = this.slots[i];
-        if (!slot) continue;
-        const dx = rect.x - slot.rect.x;
-        slot.rect = rect;
-        slot.panel.set({ x: rect.x, y: rect.y, w: rect.w, h: rect.h });
-        slot.gfx.x = dx;
-        slot.key.root.x = rect.x + 5;
-        slot.name.root.x = rect.x + rect.w / 2;
-        slot.cdText.root.x = rect.x + rect.w / 2;
-        // gfx 内部用的是绝对坐标，所以平移它
-        slot.gfx.x = dx;
-        slot.gfx.y = 0;
+        const s = this.slots[i];
+        if (!s) continue;
+        s.rect = rect;
+        s.key.root.x = rect.x + 3;
+        s.key.root.y = rect.y + 2;
+        s.name.root.x = rect.x + rect.w / 2;
+        s.name.root.y = rect.y + rect.h + 1;
+        s.cdText.root.x = rect.x + rect.w / 2;
+        s.cdText.root.y = rect.y + rect.h / 2 - 3;
       }
     }
   }
 
   update(skills: readonly SkillSlotView[]): void {
-    this.ensureSlots(skills.length);
+    this.ensure(skills.length);
+
     for (let i = 0; i < this.slots.length; i += 1) {
-      const slot = this.slots[i];
+      const s = this.slots[i];
       const view = skills[i];
-      if (!slot) continue;
+      if (!s) continue;
 
       if (!view) {
-        slot.panel.set({ fill: 0x0a0a10, line: 0x2a2a34 });
-        slot.gfx.clear();
-        slot.key.set('');
-        slot.name.set('');
-        slot.cdText.set('');
+        s.gfx.clear();
+        s.key.set('');
+        s.name.set('');
+        s.cdText.set('');
         continue;
       }
 
-      const filled = !view.usable;
-      // 底色：可用时用技能自己的色（这里用语义色分类），不可用时压暗
-      const baseColor = view.comboReady
+      const { x, y, w, h } = s.rect;
+      const base = view.comboReady
         ? PALETTE.proc.base
         : view.offGcd
           ? PALETTE.iframe.base
           : PALETTE.energy.base;
 
-      slot.panel.set({
-        fill: filled ? 0x1a1a22 : baseColor,
-        line: view.comboReady ? PALETTE.proc.bright : 0x6a6c80,
-      });
-
-      const g = slot.gfx;
+      const g = s.gfx;
       g.clear();
-      const { x, y, w, h } = slot.rect;
-      // 内层渐变（两段即可，够像素味）
-      if (!filled) {
-        g.rect(x + 3, y + 3, w - 6, h - 6).fill({ color: baseColor, alpha: 0.45 });
-        g.rect(x + 3, y + 3, w - 6, 14).fill({ color: baseColor, alpha: 0.75 });
+      g.rect(x, y, w, h).fill({ color: view.usable ? 0x14141c : 0x0c0c12, alpha: 0.95 });
+      if (view.usable) {
+        g.rect(x + 1, y + 1, w - 2, h - 2).fill({ color: base, alpha: 0.3 });
       }
-      // 冷却遮罩：从顶部往下盖
+      // 左侧一道色条标示技能类别 —— 比整格上色克制得多
+      g.rect(x, y, 3, h).fill(view.usable ? base : 0x3a3a46);
       if (view.cooldownRatio > 0.001) {
-        const cdH = Math.round((h - 4) * view.cooldownRatio);
-        g.rect(x + 2, y + 2, w - 4, cdH).fill({ color: 0x06060a, alpha: 0.82 });
+        const cdH = Math.round((h - 2) * view.cooldownRatio);
+        g.rect(x + 1, y + 1, w - 2, cdH).fill({ color: 0x05050a, alpha: 0.86 });
       }
-      // 顶部高光
-      g.rect(x, y, w, 2).fill(view.usable ? 0xffffff : 0x3a3a46);
-      // 派生就绪的发光边框
-      if (view.comboReady) {
-        drawCorners(g, x - 3, y - 3, w + 6, h + 6, PALETTE.proc.bright, 8, 2);
-      }
+      g.rect(x, y, w, h).stroke({
+        color: view.comboReady ? PALETTE.proc.bright : view.usable ? 0x6a6c80 : 0x30303a,
+        width: view.comboReady ? 2 : 1,
+      });
 
-      slot.key.set(view.key.toUpperCase());
-      slot.name.set(this.translate(view.nameKey));
-      slot.cdText.set(view.cooldownRatio > 0.001 ? view.cooldownSec.toFixed(1) : '');
+      if (view.comboReady) drawCorners(g, x - 2, y - 2, w + 4, h + 4, PALETTE.proc.bright, 6, 2);
+
+      s.key.set(view.key.toUpperCase());
+      s.key.setColor(view.usable ? 0xffffff : 0x70707e);
+      s.name.set(this.translate(view.nameKey));
+      s.cdText.set(view.cooldownRatio > 0.001 ? Math.ceil(view.cooldownSec).toString() : '');
     }
   }
 }
 
-/* ------------------------------------------------------------------ *
- * Buff 条
- * ------------------------------------------------------------------ */
-
-class BuffStripView {
-  readonly root: Container;
-  private readonly icons: Array<{
-    panel: Panel;
-    gfx: Graphics;
-    glyph: Label;
-    timer: Label;
-    rect: { x: number; y: number; w: number; h: number };
-  }> = [];
-
-  constructor(
-    pixi: PixiCtor,
-    private readonly translate: TranslateFn,
-  ) {
-    this.root = new pixi.Container();
-    for (let i = 0; i < LAYOUT.buffStrip.max; i += 1) {
-      const rect = buffIconRect(i);
-      const panel = new Panel(pixi, {
-        x: rect.x,
-        y: rect.y,
-        w: rect.w,
-        h: rect.h,
-        fill: 0x101018,
-        line: 0x505266,
-        fillAlpha: 0.9,
-      });
-      const gfx = new pixi.Graphics();
-      const glyph = new Label(pixi, {
-        x: rect.x + rect.w / 2,
-        y: rect.y + 8,
-        size: TYPE.lg,
-        color: 0xffffff,
-        anchorX: 0.5,
-      });
-      const timer = new Label(pixi, {
-        x: rect.x + rect.w / 2,
-        y: rect.y + rect.h - 18,
-        size: TYPE.xs,
-        color: 0xd8d8e4,
-        anchorX: 0.5,
-      });
-      this.root.addChild(panel.root, gfx, glyph.root, timer.root);
-      this.icons.push({ panel, gfx, glyph, timer, rect });
-    }
-  }
-
-  update(buffs: readonly BuffView[]): void {
-    // 判定窗口类排前面（玩家最需要看到它）
-    const sorted = [...buffs].sort((a, b) => Number(b.isDefensive) - Number(a.isDefensive));
-
-    for (let i = 0; i < this.icons.length; i += 1) {
-      const icon = this.icons[i];
-      const view = sorted[i];
-      if (!icon) continue;
-
-      if (!view) {
-        icon.panel.set({ fill: 0x101018, line: 0x2a2a34 });
-        icon.gfx.clear();
-        icon.glyph.set('');
-        icon.timer.set('');
-        continue;
-      }
-
-      const tight = isTightWindow(view);
-      const lineColor = view.isDefensive
-        ? tight
-          ? PALETTE.iframe.bright
-          : PALETTE.iframe.base
-        : view.polarity === 'debuff'
-          ? PALETTE.debuff.base
-          : PALETTE.buff.base;
-
-      icon.panel.set({
-        fill: view.isDefensive ? 0x3a1010 : 0x101018,
-        line: lineColor,
-      });
-
-      const g = icon.gfx;
-      g.clear();
-      const { x, y, w, h } = icon.rect;
-      // 剩余时间条
-      const dur = Number.isFinite(view.durationMs) && view.durationMs > 0 ? view.durationMs : 1;
-      const frac = Number.isFinite(view.remainingMs)
-        ? Math.min(1, Math.max(0, view.remainingMs / dur))
-        : 1;
-      if (frac < 1) {
-        g.rect(x + 3, y + h - 6, Math.round((w - 6) * frac), 3).fill(lineColor);
-      }
-      if (view.stacks > 1) {
-        g.rect(x + w - 14, y + 3, 11, 11).fill(0x000000);
-        g.rect(x + w - 13, y + 4, 9, 9).fill(0x2a2a34);
-      }
-
-      icon.glyph.set(this.translate(view.nameKey).slice(0, 2));
-      icon.glyph.setColor(lineColor);
-      icon.timer.set(
-        view.stacks > 1
-          ? `x${view.stacks}`
-          : Number.isFinite(view.remainingMs)
-            ? `${(view.remainingMs / 1000).toFixed(1)}`
-            : '',
-      );
-    }
-  }
-}
-
-/* ------------------------------------------------------------------ *
+/* ================================================================== *
  * 飘字
- * ------------------------------------------------------------------ */
-
-interface FloatingItem {
-  readonly label: Label;
-  x: number;
-  y: number;
-  life: number;
-}
+ * ================================================================== */
 
 class FloatingTextLayer {
   readonly root: Container;
-  private readonly pool: FloatingItem[] = [];
+  private readonly pool: Array<{ label: Label }> = [];
 
   constructor(private readonly pixi: PixiCtor) {
     this.root = new pixi.Container();
   }
 
   update(items: BattleSnapshotView['floatingText']): void {
-    // 池化：需要几个创建几个，多余隐藏（避免每帧 new Text）
-    while (this.pool.length < items.length && this.pool.length < 32) {
-      const label = new Label(this.pixi, { x: 0, y: 0, size: TYPE.lg, color: 0xffffff, anchorX: 0.5 });
-      const item: FloatingItem = { label, x: 0, y: 0, life: 0 };
+    while (this.pool.length < items.length && this.pool.length < 24) {
+      const label = new Label(this.pixi, {
+        x: 0,
+        y: 0,
+        size: FONT.title,
+        color: 0xffffff,
+        anchorX: 0.5,
+        stroke: 0x000000,
+        strokeWidth: 3,
+      });
       this.root.addChild(label.root);
-      this.pool.push(item);
+      this.pool.push({ label });
     }
-
     for (let i = 0; i < this.pool.length; i += 1) {
       const slot = this.pool[i];
       const view = items[i];
@@ -407,370 +394,419 @@ class FloatingTextLayer {
       slot.label.setColor(view.color);
       slot.label.root.x = view.x;
       slot.label.root.y = view.y;
-      // life 从 1 → 0：向上飘并淡出
-      slot.label.root.alpha = Math.min(1, view.life * 1.6);
-      slot.label.root.scale.set(1 + (1 - view.life) * 0.15);
+      slot.label.root.alpha = Math.min(1, view.life * 1.5);
     }
   }
 }
 
-/* ------------------------------------------------------------------ *
+/* ================================================================== *
  * 主场景
- * ------------------------------------------------------------------ */
+ * ================================================================== */
 
 export class BattleScene {
   readonly root: Container;
-  private readonly background: Graphics;
-  private readonly telegraph: TelegraphZone;
+
   private readonly boss: BossSprite;
   private readonly playerAnim: Graphics;
-  private readonly hud: Container;
+  private readonly flashOverlay: Graphics;
 
-  private readonly bossPanel: Panel;
+  /* 顶栏 */
   private readonly bossName: Label;
   private readonly bossPhase: Label;
   private readonly bossHpBar: Bar;
   private readonly bossHpText: Label;
+  private readonly timerLabel: Label;
+  private readonly enrageBadge: Label;
 
+  /* 预警条 */
   private readonly castPanel: Panel;
   private readonly castName: Label;
   private readonly castHint: Label;
   private readonly castBar: Bar;
 
+  /* 玩家面板 */
   private readonly playerPanel: Panel;
   private readonly playerName: Label;
   private readonly hpBar: Bar;
-  private readonly energyBar: Bar;
-  private readonly douqiBar: Bar;
   private readonly hpText: Label;
+  private readonly energyBar: Bar;
   private readonly energyLabel: Label;
-  private readonly douqiLabel: Label;
   private readonly energyText: Label;
+  private readonly douqiBar: Bar;
+  private readonly douqiLabel: Label;
   private readonly douqiText: Label;
 
+  /* 图标条 */
+  private readonly bossBuffs: IconStrip;
+  private readonly playerBuffs: IconStrip;
+
   private readonly skillBar: SkillBarView;
-  private readonly buffStrip: BuffStripView;
   private readonly floating: FloatingTextLayer;
-  private readonly timerLabel: Label;
   private readonly statusLabel: Label;
-  private readonly interruptPrompt: Label;
+  private readonly statusSub: Label;
 
-  /** 玩家受击闪白用的全屏遮罩 */
-  private readonly flashOverlay: Graphics;
+  private lastPlayerPose = 1;
 
-  constructor(private readonly options: BattleSceneOptions) {
+  private readonly options: BattleSceneOptions;
+
+  constructor(options: BattleSceneOptions) {
+    this.options = options;
     const { pixi, app, translate } = options;
 
     this.root = new pixi.Container();
     app.stage.addChild(this.root);
 
-    /* ---- 背景与场地 ---- */
-    this.background = new pixi.Graphics();
-    drawBackground(this.background);
-    this.root.addChild(this.background);
+    /* ---------- 背景 ---------- */
+    const background = new pixi.Graphics();
+    drawBackground(background);
+    this.root.addChild(background);
 
-    this.telegraph = new TelegraphZone(pixi);
-    this.root.addChild(this.telegraph.root);
-
-    /* ---- Boss ---- */
-    this.boss = new BossSprite(pixi, { x: 620, y: 392 });
+    /* ---------- 角色（Boss 右、玩家左，中间留空给飘字） ---------- */
+    this.boss = new BossSprite(pixi, { x: 630, y: 378 });
     this.root.addChild(this.boss.root);
 
-    /* ---- 玩家背影（简化为一个剪影，M7 再换成素材） ---- */
     this.playerAnim = new pixi.Graphics();
     this.drawPlayer(1);
     this.root.addChild(this.playerAnim);
 
-    /* ---- 全屏闪光（受击 / 闪避成功） ---- */
+    /* ---------- 全屏闪光 ---------- */
     this.flashOverlay = new pixi.Graphics();
     this.flashOverlay.rect(0, 0, LOGICAL.width, LOGICAL.height).fill(0xffffff);
     this.flashOverlay.alpha = 0;
     this.root.addChild(this.flashOverlay);
 
-    /* ---- HUD ---- */
-    this.hud = new pixi.Container();
-    this.root.addChild(this.hud);
+    /* ---------- HUD ---------- */
+    const hud = new pixi.Container();
+    this.root.addChild(hud);
 
-    // Boss 面板
-    this.bossPanel = new Panel(pixi, LAYOUT.bossFrame);
-    this.bossName = new Label(pixi, { x: LAYOUT.bossFrame.x + 10, y: LAYOUT.bossFrame.y + 6, size: TYPE.md, color: PALETTE.text });
-    this.bossPhase = new Label(pixi, { x: LAYOUT.bossFrame.x + 250, y: LAYOUT.bossFrame.y + 6, size: TYPE.sm, color: PALETTE.textDim });
+    const bb = LAYOUT.bossBar;
+    this.bossName = new Label(pixi, { x: bb.x + 2, y: bb.y, size: FONT.title, color: PALETTE.text });
+    this.bossPhase = new Label(pixi, { x: bb.x + 2, y: bb.y + 1, size: FONT.small, color: PALETTE.textDim });
+    this.timerLabel = new Label(pixi, {
+      x: LOGICAL.width - 8,
+      y: bb.y,
+      size: FONT.title,
+      color: 0xf0c060,
+      anchorX: 1,
+    });
+    this.enrageBadge = new Label(pixi, {
+      x: LOGICAL.width - LAYOUT.timer.w - 10,
+      y: bb.y + 3,
+      size: FONT.small,
+      color: PALETTE.danger.bright,
+      anchorX: 1,
+    });
+    hud.addChild(this.bossName.root, this.bossPhase.root, this.timerLabel.root, this.enrageBadge.root);
+
+    const bh = LAYOUT.bossHp;
     this.bossHpBar = new Bar(pixi, {
-      x: LAYOUT.bossFrame.x + 10,
-      y: LAYOUT.bossFrame.y + 26,
-      w: LAYOUT.bossFrame.w - 200,
-      h: 10,
+      x: bh.x,
+      y: bh.y,
+      w: bh.w,
+      h: bh.h,
       color: PALETTE.hp.base,
       darkColor: PALETTE.hp.dark,
       brightColor: PALETTE.hp.bright,
     });
+    // 血量文字放在**名字那一行**（血条上方），不再压在血条上 ——
+    // 压在血条上会和 buff 图标、进度条抢位置
     this.bossHpText = new Label(pixi, {
-      x: LAYOUT.bossFrame.x + LAYOUT.bossFrame.w - 10,
-      y: LAYOUT.bossFrame.y + 22,
-      size: TYPE.sm,
-      color: PALETTE.text,
+      x: LOGICAL.width - LAYOUT.timer.w - 10,
+      y: bb.y + 3,
+      size: FONT.small,
+      color: 0xd8d0d8,
       anchorX: 1,
     });
-    this.hud.addChild(
-      this.bossPanel.root,
-      this.bossName.root,
-      this.bossPhase.root,
-      this.bossHpBar.root,
-      this.bossHpText.root,
-    );
+    hud.addChild(this.bossHpBar.root, this.bossHpText.root);
 
-    // 施法条 / 预警条
+    this.bossBuffs = new IconStrip(pixi, LAYOUT.bossBuffs, translate);
+    hud.addChild(this.bossBuffs.root);
+
+    /* 预警条 */
+    const cb = LAYOUT.castBar;
     this.castPanel = new Panel(pixi, {
-      ...LAYOUT.castBar,
+      x: cb.x,
+      y: cb.y,
+      w: cb.w,
+      h: cb.h,
       fill: 0x2a0c0e,
       line: PALETTE.danger.base,
+      fillAlpha: 0.9,
+      radius: 2,
     });
-    this.castName = new Label(pixi, { x: LAYOUT.castBar.x + 10, y: LAYOUT.castBar.y + 4, size: TYPE.md, color: PALETTE.danger.bright });
+    this.castName = new Label(pixi, { x: cb.x + 12, y: cb.y + 6, size: FONT.warn, color: 0xffe0d0 });
     this.castHint = new Label(pixi, {
-      x: LAYOUT.castBar.x + LAYOUT.castBar.w - 10,
-      y: LAYOUT.castBar.y + 4,
-      size: TYPE.sm,
+      x: cb.x + cb.w - 10,
+      y: cb.y + 9,
+      size: FONT.body,
       color: 0xffd0b0,
       anchorX: 1,
     });
     this.castBar = new Bar(pixi, {
-      x: LAYOUT.castBar.x + 10,
-      y: LAYOUT.castBar.y + 22,
-      w: LAYOUT.castBar.w - 20,
-      h: 8,
-      color: 0xecb03c,
+      x: cb.x + 1,
+      y: cb.y + cb.h - 5,
+      w: cb.w - 2,
+      h: 4,
+      color: 0xffc050,
       darkColor: 0x4a2a10,
-      brightColor: 0xffd870,
+      brightColor: 0xfff0b0,
     });
     this.castPanel.root.visible = false;
     this.castName.root.visible = false;
     this.castHint.root.visible = false;
     this.castBar.root.visible = false;
-    this.hud.addChild(this.castPanel.root, this.castName.root, this.castHint.root, this.castBar.root);
+    hud.addChild(this.castPanel.root, this.castBar.root, this.castName.root, this.castHint.root);
 
-    // 玩家面板
-    this.playerPanel = new Panel(pixi, LAYOUT.playerFrame);
-    const pf = LAYOUT.playerFrame;
-    this.playerName = new Label(pixi, { x: pf.x + 8, y: pf.y + 4, size: TYPE.md, color: PALETTE.text });
-    // 生命条：整宽，数值右对齐（用 xs 字号避免超出面板）
-    this.hpBar = new Bar(pixi, { x: pf.x + 8, y: pf.y + 24, w: pf.w - 16, h: 14, color: PALETTE.hp.base, darkColor: PALETTE.hp.dark, brightColor: PALETTE.hp.bright });
+    /* 玩家面板 */
+    const pf = LAYOUT.player;
+    this.playerPanel = new Panel(pixi, {
+      x: pf.x,
+      y: pf.y,
+      w: pf.w,
+      h: pf.h,
+      fill: 0x0c0c14,
+      line: 0x4a4c60,
+      fillAlpha: 0.86,
+    });
+    this.playerName = new Label(pixi, { x: pf.x + 8, y: pf.y + 4, size: FONT.body, color: PALETTE.text });
+    this.hpBar = new Bar(pixi, {
+      x: pf.x + 8,
+      y: pf.y + 24,
+      w: pf.w - 16,
+      h: 13,
+      color: PALETTE.hp.base,
+      darkColor: PALETTE.hp.dark,
+      brightColor: PALETTE.hp.bright,
+    });
     this.hpText = new Label(pixi, {
       x: pf.x + pf.w - 10,
-      y: pf.y + 24,
-      size: TYPE.sm,
+      y: pf.y + 23,
+      size: FONT.tiny,
       color: 0xffffff,
       anchorX: 1,
       stroke: 0x2a0808,
       strokeWidth: 3,
     });
-    // 只有两种资源：精力（短循环）与斗炁（积攒），正好并排一行
     const halfW = Math.round((pf.w - 20) / 2);
-    this.energyBar = new Bar(pixi, { x: pf.x + 8, y: pf.y + 46, w: halfW, h: 16, color: PALETTE.energy.base, darkColor: PALETTE.energy.dark, brightColor: PALETTE.energy.bright });
-    this.douqiBar = new Bar(pixi, { x: pf.x + 12 + halfW, y: pf.y + 46, w: halfW, h: 16, color: PALETTE.douqi.base, darkColor: PALETTE.douqi.dark, brightColor: PALETTE.douqi.bright });
-    this.energyLabel = new Label(pixi, { x: pf.x + 12, y: pf.y + 46, size: TYPE.sm, color: 0x0d1a0d });
-    this.douqiLabel = new Label(pixi, { x: pf.x + 16 + halfW, y: pf.y + 46, size: TYPE.sm, color: 0x2a1c06 });
-    // 数值压在亮色条上，必须描边才读得清
-    this.energyText = new Label(pixi, { x: pf.x + halfW + 2, y: pf.y + 47, size: TYPE.sm, color: 0xffffff, anchorX: 1, stroke: 0x0a1408, strokeWidth: 3 });
-    this.douqiText = new Label(pixi, { x: pf.x + pf.w - 10, y: pf.y + 47, size: TYPE.sm, color: 0xffffff, anchorX: 1, stroke: 0x2a1a04, strokeWidth: 3 });
-
-    this.hud.addChild(
+    this.energyBar = new Bar(pixi, {
+      x: pf.x + 8,
+      y: pf.y + 44,
+      w: halfW,
+      h: 14,
+      color: PALETTE.energy.base,
+      darkColor: PALETTE.energy.dark,
+      brightColor: PALETTE.energy.bright,
+    });
+    this.douqiBar = new Bar(pixi, {
+      x: pf.x + 12 + halfW,
+      y: pf.y + 44,
+      w: halfW,
+      h: 14,
+      color: PALETTE.douqi.base,
+      darkColor: PALETTE.douqi.dark,
+      brightColor: PALETTE.douqi.bright,
+    });
+    this.energyLabel = new Label(pixi, { x: pf.x + 11, y: pf.y + 44, size: FONT.small, color: 0x0d1a0d });
+    this.douqiLabel = new Label(pixi, { x: pf.x + 15 + halfW, y: pf.y + 44, size: FONT.small, color: 0x2a1c06 });
+    this.energyText = new Label(pixi, {
+      x: pf.x + halfW + 4,
+      y: pf.y + 44,
+      size: FONT.small,
+      color: 0xffffff,
+      anchorX: 1,
+      stroke: 0x0a1408,
+      strokeWidth: 3,
+    });
+    this.douqiText = new Label(pixi, {
+      x: pf.x + pf.w - 10,
+      y: pf.y + 44,
+      size: FONT.small,
+      color: 0xffffff,
+      anchorX: 1,
+      stroke: 0x2a1a04,
+      strokeWidth: 3,
+    });
+    hud.addChild(
       this.playerPanel.root,
       this.playerName.root,
       this.hpBar.root,
       this.hpText.root,
       this.energyBar.root,
       this.douqiBar.root,
-      this.energyBar.root,
       this.energyLabel.root,
       this.douqiLabel.root,
       this.energyText.root,
       this.douqiText.root,
-      this.energyLabel.root,
     );
 
-    // 技能栏 / buff 条 / 飘字
-    this.skillBar = new SkillBarView(pixi, translate);
-    this.hud.addChild(this.skillBar.root);
-    this.buffStrip = new BuffStripView(pixi, translate);
-    this.hud.addChild(this.buffStrip.root);
-    this.floating = new FloatingTextLayer(pixi);
-    this.hud.addChild(this.floating.root);
+    this.playerBuffs = new IconStrip(pixi, LAYOUT.playerBuffs, translate);
+    hud.addChild(this.playerBuffs.root);
 
-    // 计时与状态
-    this.timerLabel = new Label(pixi, {
-      x: LAYOUT.bossFrame.x + LAYOUT.bossFrame.w - 10,
-      y: LAYOUT.bossFrame.y + 4,
-      size: TYPE.lg,
-      color: 0xf0c060,
-      anchorX: 1,
-    });
-    this.hud.addChild(this.timerLabel.root);
+    this.skillBar = new SkillBarView(pixi, translate);
+    hud.addChild(this.skillBar.root);
+
+    this.floating = new FloatingTextLayer(pixi);
+    hud.addChild(this.floating.root);
 
     this.statusLabel = new Label(pixi, {
-      x: LAYOUT.statusFlash.x,
-      y: LAYOUT.statusFlash.y,
-      size: TYPE.xl,
+      x: LAYOUT.status.x,
+      y: LAYOUT.status.y,
+      size: FONT.warn,
       color: 0xffffff,
       anchorX: 0.5,
+      stroke: 0x000000,
+      strokeWidth: 4,
     });
-    this.hud.addChild(this.statusLabel.root);
-
-    this.interruptPrompt = new Label(pixi, {
-      x: LAYOUT.statusFlash.x,
-      y: LAYOUT.statusFlash.y + 36,
-      size: TYPE.md,
+    this.statusSub = new Label(pixi, {
+      x: LAYOUT.status.x,
+      y: LAYOUT.status.y + FONT.warn + 4,
+      size: FONT.body,
       color: PALETTE.interrupt.bright,
       anchorX: 0.5,
+      stroke: 0x000000,
+      strokeWidth: 3,
     });
-    this.hud.addChild(this.interruptPrompt.root);
+    hud.addChild(this.statusLabel.root, this.statusSub.root);
   }
 
-  /** 玩家背影剪影。`pose`：1 = 正常，0.85 = 闪避下沉。 */
+  /** 玩家背影。`pose`：1 = 站姿，0.85 = 下沉（闪避/格挡）。 */
   private drawPlayer(pose: number): void {
     const g = this.playerAnim;
     const P = PALETTE;
     const cx = 300;
-    // 脚底站在地面线上；闪避时整体下沉 14px（表现"闪开"）
-    const base = 470 + (1 - pose) * 14;
+    const base = 456 + (1 - pose) * 12;
+    const h = 84 * pose;
     g.clear();
 
-    // 斗篷
-    const h = 92 * pose;
-    // 斗篷主体（梯形）
-    g.poly([cx - 62, base, cx - 34, base - h, cx + 34, base - h, cx + 62, base, cx + 38, base, cx - 38, base]);
+    g.poly([cx - 54, base, cx - 30, base - h, cx + 30, base - h, cx + 54, base, cx + 34, base, cx - 34, base]);
     g.fill(P.playerCloak);
-    // 左侧暗部（光源在右上）
-    g.poly([cx - 62, base, cx - 34, base - h, cx - 8, base - h, cx - 14, base]);
+    g.poly([cx - 54, base, cx - 30, base - h, cx - 7, base - h, cx - 12, base]);
     g.fill(P.playerCloakDark);
-    // 肩甲
-    g.poly([cx - 60, base, cx - 33, base - h - 4, cx - 16, base - h + 6, cx - 41, base]);
+    g.poly([cx - 52, base, cx - 29, base - h - 3, cx - 14, base - h + 5, cx - 36, base]);
     g.fill(P.playerCloakLight);
-    g.poly([cx + 60, base, cx + 33, base - h - 4, cx + 16, base - h + 6, cx + 41, base]);
+    g.poly([cx + 52, base, cx + 29, base - h - 3, cx + 14, base - h + 5, cx + 36, base]);
     g.fill(P.playerCloakLight);
-    // 后脑
-    g.ellipse(cx, base - h - 16, 18, 19).fill(0x1a2036);
-    g.ellipse(cx, base - h - 15, 15, 16).fill(0x2a3450);
-    // 武器（斜向右上）
-    g.poly([cx + 44, base - 6, cx + 78, base - 100, cx + 88, base - 96, cx + 54, base + 4]);
+    g.ellipse(cx, base - h - 14, 16, 17).fill(0x1a2036);
+    g.ellipse(cx, base - h - 13, 13, 14).fill(0x2a3450);
+    g.poly([cx + 40, base - 5, cx + 71, base - 92, cx + 80, base - 88, cx + 49, base + 3]);
     g.fill(0x8a90a0);
-    g.poly([cx + 48, base - 9, cx + 75, base - 95, cx + 81, base - 92, cx + 53, base + 1]);
+    g.poly([cx + 44, base - 8, cx + 68, base - 87, cx + 74, base - 84, cx + 48, base + 1]);
     g.fill(0xb8bcc8);
-    g.rect(cx + 38, base - 12, 20, 13).fill(0xa8863c);
+    g.rect(cx + 34, base - 11, 18, 12).fill(0xa8863c);
   }
 
-  /**
-   * 每帧更新。
-   *
-   * @param view 只读快照
-   * @param alpha 插值系数（渲染平滑用）
-   */
-  update(view: BattleSnapshotView, alpha = 0): void {
+  update(view: BattleSnapshotView): void {
     const { translate } = this.options;
 
-    /* ---- Boss ---- */
+    /* ---------- 角色 ---------- */
     this.boss.update(view.telegraphing, view.bossFlash);
 
-    // Boss 名与阶段
-    this.bossName.set(translate(view.boss.nameKey));
-    this.bossPhase.set(
-      view.enraged
-        ? `${translate('hud.phase')} ${view.phase}  ·  ${translate('event.enrage')}`
-        : `${translate('hud.phase')} ${view.phase}`,
-    );
-    this.bossPhase.setColor(view.enraged ? PALETTE.danger.bright : PALETTE.textDim);
-    this.bossHpBar.update(ratioOf(view.boss.hp));
-    this.bossHpText.set(`${Math.round(view.boss.hp.current)} / ${Math.round(view.boss.hp.cap)}`);
+    const dodging = view.player.buffs.some((b) => b.id.startsWith('dodge') && b.remainingMs > 0);
+    const guarding = view.player.buffs.some((b) => b.id.startsWith('guard') && b.remainingMs > 0);
+    const pose = dodging || guarding ? 0.85 : 1;
+    if (pose !== this.lastPlayerPose) {
+      this.lastPlayerPose = pose;
+      this.drawPlayer(pose);
+    }
+    this.playerAnim.tint = dodging ? 0x9ad8ff : guarding ? 0xc8d0e8 : 0xffffff;
 
-    // 计时
+    /* ---------- 顶栏 ---------- */
+    const bb = LAYOUT.bossBar;
+    this.bossName.set(translate(view.boss.nameKey));
+    // 阶段紧跟名字，用实际宽度定位（不硬编码偏移，换语言也不会重叠）
+    this.bossPhase.root.x = bb.x + 2 + this.bossName.root.width + 10;
+    this.bossPhase.set(`${translate('hud.phase')} ${view.phase}`);
+    this.bossPhase.setColor(view.enraged ? PALETTE.danger.bright : PALETTE.textDim);
     this.timerLabel.set(view.remainingMs === undefined ? '' : formatClockSafe(view.remainingMs));
     this.timerLabel.setColor(
       view.remainingMs !== undefined && view.remainingMs < 30_000 ? PALETTE.danger.bright : 0xf0c060,
     );
 
-    /* ---- 预警条 ---- */
+    this.bossHpBar.update(ratioOf(view.boss.hp));
+    // 血量与狂暴标记共用一行：狂暴时用它替换血量数字（更紧急的信息优先）
+    if (view.enraged) {
+      this.enrageBadge.set(translate('event.enrage'));
+      this.bossHpText.set('');
+    } else {
+      this.enrageBadge.set('');
+      this.bossHpText.set(
+        `${Math.ceil(view.boss.hp.current / 1000)}k / ${Math.ceil(view.boss.hp.cap / 1000)}k   ${percentOf(view.boss.hp)}%`,
+      );
+    }
+    this.bossBuffs.update(view.boss.buffs);
+
+    /* ---------- 预警条 ---------- */
     const cast = view.boss.cast;
-    const hasCast = cast !== undefined || view.telegraphing;
-    this.castPanel.root.visible = hasCast;
-    this.castName.root.visible = hasCast;
-    this.castHint.root.visible = hasCast;
-    this.castBar.root.visible = hasCast;
+    this.castPanel.root.visible = cast !== undefined;
+    this.castName.root.visible = cast !== undefined;
+    this.castHint.root.visible = cast !== undefined;
+    this.castBar.root.visible = cast !== undefined;
 
     if (cast) {
       this.castName.set(translate(cast.nameKey));
-      // 提示由 key + 秒数拼成：翻译在 UI 层做，view-model 只给 key
       const hint = telegraphHint(cast);
-      this.castHint.set(hint ? `${hint.seconds}s  ·  ${translate(hint.key)}` : '');
+      this.castHint.set(hint ? `${hint.seconds}s   ${translate(hint.key)}` : '');
+      this.castHint.setColor(cast.interruptible ? PALETTE.interrupt.bright : 0xffd0b0);
       this.castBar.update(cast.progress);
-    } else if (view.telegraphing) {
-      this.castName.set(translate('hud.casting'));
-      this.castHint.set(translate('hint.dodgeOrGuard'));
-      this.castBar.update(0.5);
+      // 进度越接近满，边框越亮 —— 把"快到了"变成视觉压力
+      this.castPanel.set({ line: cast.progress > 0.75 ? 0xffd060 : PALETTE.danger.base });
     }
-    this.telegraph.update(hasCast, cast?.progress ?? 0.5);
 
-    /* ---- 玩家 ---- */
-    // 闪避时下沉（用"有无无敌 buff"判断）
-    const dodging = view.player.buffs.some((b) => b.id === 'dodge-iframe' && b.remainingMs > 0);
-    const guarding = view.player.buffs.some((b) => b.id.startsWith('guard') && b.remainingMs > 0);
-    this.playerAnim.visible = true;
-    if (dodging || guarding) {
-      if (this.lastPlayerPose !== 0.85) {
-        this.lastPlayerPose = 0.85;
-        this.drawPlayer(0.85);
-      }
-      this.playerAnim.tint = dodging ? 0x9ad8ff : 0xc8d0e8;
-    } else {
-      if (this.lastPlayerPose !== 1) {
-        this.lastPlayerPose = 1;
-        this.drawPlayer(1);
-      }
-      this.playerAnim.tint = 0xffffff;
-    }
-    void alpha;
-
+    /* ---------- 玩家面板 ---------- */
     this.playerName.set(translate(view.player.nameKey));
     this.hpBar.update(ratioOf(view.player.hp));
-    this.hpText.set(`${Math.round(view.player.hp.current)}/${Math.round(view.player.hp.cap)}`);
+    this.hpText.set(`${Math.ceil(view.player.hp.current)}/${Math.ceil(view.player.hp.cap)}`);
     this.energyBar.update(ratioOf(view.player.energy));
     this.douqiBar.update(ratioOf(view.player.douqi));
-    this.energyBar.update(ratioOf(view.player.energy));
     this.energyLabel.set(translate('resource.energy'));
     this.douqiLabel.set(translate('resource.douqi'));
-    this.energyText.set(`${Math.round(view.player.energy.current)}`);
-    this.douqiText.set(`${Math.round(view.player.douqi.current)}`);
-    this.energyLabel.set(translate('resource.energy'));
+    this.energyText.set(`${Math.floor(view.player.energy.current)}`);
+    this.douqiText.set(`${Math.floor(view.player.douqi.current)}`);
+    this.playerBuffs.update(view.player.buffs);
 
-    /* ---- 技能栏与 buff ---- */
+    /* ---------- 技能栏 / 飘字 / 状态 ---------- */
     this.skillBar.update(view.skills);
-    this.buffStrip.update(view.player.buffs);
-
-    /* ---- 飘字 ---- */
     this.floating.update(view.floatingText);
 
-    /* ---- 状态提示 ---- */
-    this.statusLabel.set(view.statusLine ?? '');
-    this.statusLabel.root.visible = (view.statusLine ?? '') !== '';
+    const status = view.statusLine;
+    // 状态提示 = 主文案（原因）+ 副文案（技能名）。
+    // 副文案只在"技能被拒"时才有值，读条时的可打断提示优先。
+    if (status !== undefined && view.statusDetail !== undefined) {
+      this.statusLabel.set(translate(status));
+      this.statusSub.set(`${translate(view.statusDetail)}  ·  ${translate(status)}`);
+      this.statusLabel.set('');
+      this.statusSub.setColor(0xffb0a0);
+    } else if (cast?.interruptible === true) {
+      this.statusLabel.set('');
+      this.statusSub.set(translate('hint.interruptible'));
+      this.statusSub.setColor(PALETTE.interrupt.bright);
+    } else {
+      this.statusLabel.set(status === undefined ? '' : translate(status));
+      this.statusSub.set('');
+    }
+    this.statusLabel.root.visible = this.statusLabel.root.text !== '';
+    this.statusSub.root.visible = this.statusSub.root.text !== '';
 
-    // 可打断提示：Boss 正在读可打断的技能时，告诉玩家"现在能打断"
-    const interruptible = cast?.interruptible === true;
-    this.interruptPrompt.set(interruptible ? translate('hint.interruptible') : '');
-    this.interruptPrompt.root.visible = interruptible;
-
-    /* ---- 全屏闪光 ---- */
-    this.flashOverlay.alpha = Math.min(0.35, view.playerFlash * 0.35);
+    /* ---------- 闪光 ---------- */
+    this.flashOverlay.alpha = Math.min(0.3, view.playerFlash * 0.3);
   }
-
-  private lastPlayerPose = 1;
 }
 
-/** 本地包装，避免把 viewModel 的 formatClock 依赖带进来（渲染层只依赖类型）。 */
+/* ================================================================== *
+ * 小工具
+ * ================================================================== */
+
 function formatClockSafe(ms: number): string {
   if (!Number.isFinite(ms)) return '--:--';
   const total = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, '0')}`;
 }
 
-/** 颜色线性混合（像素画里用色带模拟渐变）。 */
+function percentOf(resource: { current: number; cap: number }): number {
+  if (!Number.isFinite(resource.cap) || resource.cap <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((resource.current / resource.cap) * 100)));
+}
+
 function mixColor(a: number, b: number, t: number): number {
   const ar = (a >> 16) & 0xff;
   const ag = (a >> 8) & 0xff;
@@ -778,12 +814,9 @@ function mixColor(a: number, b: number, t: number): number {
   const br = (b >> 16) & 0xff;
   const bg = (b >> 8) & 0xff;
   const bb = b & 0xff;
-  const r = Math.round(ar + (br - ar) * t);
-  const g = Math.round(ag + (bg - ag) * t);
-  const bl = Math.round(ab + (bb - ab) * t);
-  return (r << 16) | (g << 8) | bl;
+  return (
+    (Math.round(ar + (br - ar) * t) << 16) |
+    (Math.round(ag + (bg - ag) * t) << 8) |
+    Math.round(ab + (bb - ab) * t)
+  );
 }
-
-/** 未使用但保留：技能格悬停色之类的扩展点。 */
-export const _unused = css;
-export type { CombatantView };

@@ -1,66 +1,124 @@
 /**
  * 布局表（架构规范 §6.2）。
  *
- * 固定布局用**数据**描述，不散落在各组件里 —— 改布局 = 改这张表。
+ * ------------------------------------------------------------------
+ * 设计意图
+ * ------------------------------------------------------------------
  *
- * 所有坐标都是 960×540 逻辑像素。关键元素距边界不少于 24 逻辑像素
- * （超宽屏 letterbox 时的安全区，§10.5）。
+ * **核心原则：战场是主角，HUD 让路。**
+ *
+ * 本作没有位移 —— 全部注意力都在"读条 → 该躲/该挡/该打断"这条判断上。
+ * 所以布局要满足两条：
+ *
+ * 1. **画面中央的开阔区域完全留给角色** —— 不放任何面板。
+ *    之前版本在屏幕右侧竖了一条 buff 图标，既切断了画面
+ *    又和角色抢位置。
+ * 2. **"现在该做什么"必须最先被看到** —— 因此预警条占据
+ *    中上部最宽的一条，字号最大、颜色最醒目。
+ *
+ * 分区（自上而下）：
+ *   ┌──────────────────────────────────────────┐
+ *   │ Boss 名 / 阶段 / 计时 + Boss 血条 + debuff│  顶栏
+ *   │ 预警条（读条进度 + "该做什么"）           │  判断区 ← 最重要
+ *   ├──────────────────────────────────────────┤
+ *   │                                          │
+ *   │            战 场（Boss / 玩家）           │  留白
+ *   │                                          │
+ *   ├──────────────────────────────────────────┤
+ *   │ 玩家面板（血/精力/斗炁）+ buff │   技能栏  │  操作区
+ *   └──────────────────────────────────────────┘
+ *
+ * **尺寸纪律**：所有元素按"够用就好"设计。技能格 48、buff 图标 26、
+ * 字号 11/13/15。像素风格下小元素反而更清晰 ——
+ * 之前 68 的技能格和 16+ 的字号在 1280 宽屏上被放大后显得笨重。
  */
 
 export const LOGICAL = { width: 960, height: 540 } as const;
 
-/** 安全区：关键元素不得更靠边。 */
-export const SAFE_MARGIN = 24;
+/** 安全区：关键元素不得更靠边（超宽屏 letterbox 时）。 */
+export const SAFE_MARGIN = 8;
+
+/**
+ * 字号。**中文 >= 13**，拉丁/数字可到 11。
+ */
+export const FONT = {
+  /** 数字、按键提示 */
+  tiny: 11,
+  /** 中文标签（下限） */
+  small: 13,
+  /** 技能名、资源名 */
+  body: 15,
+  /** 面板标题 */
+  title: 17,
+  /** 预警主文案 */
+  warn: 20,
+  /** 秒数等强数字 */
+  big: 26,
+} as const;
 
 export const LAYOUT = {
-  /** Boss 名 + 阶段 + 战斗计时 */
-  bossFrame: { x: 24, y: 14, w: 912, h: 46 },
-  /** Boss 施法条 = 预警条。整条屏宽，因为它是"要躲"的唯一信息源 */
-  castBar: { x: 24, y: 66, w: 912, h: 40 },
-
-  /** 玩家资源面板 */
-  playerFrame: { x: 24, y: 118, w: 336, h: 104 },
-
-  /** Buff 图标条（从右往左排） */
-  buffStrip: { x: 936, y: 118, h: 64, w: 56, gap: 6, max: 10 },
+  /** 顶栏：Boss 名 + 阶段 + 计时 */
+  bossBar: { x: 8, y: 4, w: 944, h: 18 },
+  /** Boss 血条 */
+  bossHp: { x: 8, y: 24, w: 944, h: 12 },
+  /** Boss 的 buff / debuff 图标（血条下方左侧） */
+  bossBuffs: { x: 8, y: 40, size: 26, gap: 3, max: 12 },
 
   /**
-   * 技能栏（底部居中）。
+   * 预警条 —— **全屏最重要的元素**。
    *
-   * `count` 是**最大值**：实际渲染几个由槽位表决定，
-   * 否则会出现"右边几个空槽"（踩过）。
+   * 放在中上部而不是顶部角落：玩家视线通常落在角色位置（画面中央），
+   * 预警必须在余光范围内。
+   *
+   * 宽度**不占满整屏**（居中 720）：满屏一条会被读成"又一个 UI 边框"，
+   * 居中短条更像一个弹出警告，反而更抓眼。
    */
-  skillBar: { slotW: 68, slotH: 68, gap: 8, maxCount: 10, y: 462 },
+  castBar: { x: 120, y: 76, w: 720, h: 32 },
 
-  /** 战斗计时（右上角，与 Boss 面板同一行） */
-  timer: { x: 936, y: 22, w: 96, h: 30 },
+  /** 玩家面板（左下）：血 / 精力 / 斗炁 */
+  player: { x: 8, y: 452, w: 264, h: 80 },
+  /** 玩家 buff 图标（玩家面板右侧，横向展开） */
+  playerBuffs: { x: 280, y: 452, size: 26, gap: 3, max: 12 },
 
-  /** 飘字区域（画面中央偏上） */
-  combatText: { x: 480, y: 250 },
+  /** 技能栏（右下，**右对齐**到安全区 —— 右手操作区） */
+  skillBar: { slot: 48, gap: 5, max: 12, y: 474, right: 8 },
 
-  /** 状态提示（"闪避"/"免疫"这类） */
-  statusFlash: { x: 480, y: 320 },
+  /** 战斗计时（顶栏右侧） */
+  timer: { x: 868, y: 3, w: 84, h: 20 },
+
+  /** 飘字：出现在角色上方，坐标由 viewAdapter 决定 */
+  combatTextY: { player: 408, boss: 150 },
+
+  /** 状态提示（"闪避！"/"被打断"）：角色之间的空旷处 */
+  status: { x: 480, y: 236 },
 } as const;
 
 /**
- * 计算技能栏某个槽位的坐标。
+ * 技能栏某个槽位的坐标。
  *
- * @param index 槽位下标
- * @param total 本次实际要渲染的槽位总数（决定整条栏的居中位置）
+ * 整条栏**右对齐**而不是居中 —— 技能栏属于操作区，
+ * 靠右下角更接近键盘手的位置，也给左下角的玩家面板让出空间。
  */
 export function skillSlotRect(
   index: number,
   total: number,
 ): { x: number; y: number; w: number; h: number } {
-  const { slotW, slotH, gap, y } = LAYOUT.skillBar;
-  const count = Math.max(1, Math.min(total, LAYOUT.skillBar.maxCount));
-  const totalW = count * slotW + (count - 1) * gap;
-  const startX = Math.round((LOGICAL.width - totalW) / 2);
-  return { x: startX + index * (slotW + gap), y, w: slotW, h: slotH };
+  const { slot, gap, y, right, max } = LAYOUT.skillBar;
+  const count = Math.max(1, Math.min(total, max));
+  const totalW = count * slot + (count - 1) * gap;
+  const startX = LOGICAL.width - right - totalW;
+  return { x: startX + index * (slot + gap), y, w: slot, h: slot };
 }
 
-/** 计算 buff 条第 index 个图标的坐标（从右往左）。 */
-export function buffIconRect(index: number): { x: number; y: number; w: number; h: number } {
-  const { x, y, w, h, gap } = LAYOUT.buffStrip;
-  return { x: x - w - index * (w + gap), y, w, h };
+/** 图标条某一位的坐标（左起横向展开）。 */
+export function iconRect(
+  strip: { readonly x: number; readonly y: number; readonly size: number; readonly gap: number },
+  index: number,
+): { x: number; y: number; w: number; h: number } {
+  return {
+    x: strip.x + index * (strip.size + strip.gap),
+    y: strip.y,
+    w: strip.size,
+    h: strip.size,
+  };
 }

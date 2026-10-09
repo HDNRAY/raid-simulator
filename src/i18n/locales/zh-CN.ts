@@ -72,13 +72,18 @@ export const zhCN = {
     guard: '格挡',
   },
 
-  /** 技能格不可用的原因 */
+  /**
+   * 技能不可用的原因。
+   *
+   * 这些文案由**状态提示区**统一显示（技能格 48px 放不下），
+   * 格式是「技能名 · 原因」。
+   */
   block: {
     comboWindow: '派生窗口未开启',
-    cost: '资源不足',
-    gcd: '公共冷却',
+    cost: '精力或斗炁不足',
+    gcd: '公共冷却中',
     cooldown: '冷却中',
-    casting: '正在施法',
+    casting: '正在施法中',
     locked: '被限制',
     condition: '条件不满足',
     target: '没有目标',

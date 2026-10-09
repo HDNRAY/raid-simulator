@@ -23,6 +23,8 @@ import type { PixiCtor } from '../../ui/primitives';
 export interface BossViewOptions {
   readonly x: number;
   readonly y: number;
+  /** 整体缩放，默认 0.72 */
+  readonly scale?: number;
 }
 
 /**
@@ -42,6 +44,11 @@ export class BossSprite {
     this.root = new pixi.Container();
     this.root.x = options.x;
     this.root.y = options.y;
+    /**
+     * 整体缩放。绘制定在"原始尺寸"上（便于按像素调形），
+     * 由这里统一缩到场景里合适的比例 —— 改比例不用重画。
+     */
+    this.root.scale.set(options.scale ?? 0.72);
 
     this.body = new pixi.Graphics();
     this.telegraphOverlay = new pixi.Graphics();

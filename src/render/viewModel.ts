@@ -96,8 +96,10 @@ export interface BattleSnapshotView {
   readonly skills: readonly SkillSlotView[];
   /** 飘字（由事件累积而成，渲染层负责淡出） */
   readonly floatingText: readonly FloatingTextView[];
-  /** 一行状态提示（如"闪避！"/"被打断"） */
+  /** 一行状态提示（**本地化 key**，如"闪避"/"被打断"） */
   readonly statusLine?: string;
+  /** 状态提示的副标题（技能名 —— 说明"是哪个技能不能用"） */
+  readonly statusDetail?: string;
   /** Boss 正在前摇 —— 驱动全屏预警表现 */
   readonly telegraphing: boolean;
   /** 玩家受击闪白强度 0..1 */

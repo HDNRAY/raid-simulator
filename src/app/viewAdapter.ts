@@ -15,6 +15,7 @@ import type { BattleEngine } from '../core/combat/battleState';
 import type { SkillDef, EventDef } from '../core/types';
 import { GCD_MS } from '../core/combat';
 import { PALETTE } from '../render/theme';
+import { LAYOUT } from '../ui/layout';
 import type {
   BattleSnapshotView,
   BuffView,
@@ -37,6 +38,44 @@ function isDefensiveBuff(buffId: string): boolean {
   return DEFENSIVE_BUFF_PREFIXES.some((p) => buffId.startsWith(p));
 }
 
+/**
+ * 引擎内部用的标记 buff —— **不在 UI 上显示图标**。
+ *
+ * 它们不是"玩家应该看到的增益/减益"，而是引擎的状态标记：
+ *   - `gcd`：公共冷却，UI 通过技能格变灰表达，不需要图标
+ *   - `boss-telegraph`：前摇标记，UI 通过预警条表达
+ *   - `combo-window`：派生窗口，UI 通过技能格高亮表达
+ *
+ * 早期版本没做这个过滤，结果预警条上压着一个被裁掉的图标。
+ */
+const INTERNAL_BUFF_IDS = new Set(['gcd', 'boss-telegraph-active', 'boss-telegraph']);
+
+function isInternalBuff(buffId: string): boolean {
+  return INTERNAL_BUFF_IDS.has(buffId) || buffId.startsWith('combo-window');
+}
+
+/** 拒绝原因 → 本地化 key 后缀。 */
+function blockKeyOf(reason: string): string {
+  switch (reason) {
+    case 'gcd':
+      return 'gcd';
+    case 'cooldown':
+      return 'cooldown';
+    case 'cost':
+      return 'cost';
+    case 'condition':
+      return 'condition';
+    case 'casting':
+      return 'casting';
+    case 'locked':
+      return 'locked';
+    case 'target':
+      return 'target';
+    default:
+      return 'condition';
+  }
+}
+
 /** 事件的颜色规则（数据模型规范 §12 的 EventDef → 视觉）。 */
 function damageColor(amount: number, crit: boolean): number {
   if (crit) return 0xfff0a0;
@@ -57,8 +96,13 @@ export class ViewAdapter {
 
   /** 每个技能上次使用的 tick，用于在引擎不暴露 CD 时估算冷却显示。 */
   private readonly lastUsed = new Map<string, number>();
+  private readonly skillNameKeys = new Map<string, string>();
+  /** 状态提示的副标题（例如"龙破斩 · 公共冷却"） */
+  private statusDetail = '';
 
-  constructor(private readonly skills: ReadonlyMap<string, SkillDef>) {}
+  constructor(private readonly skills: ReadonlyMap<string, SkillDef>) {
+    for (const [id, skill] of skills) this.skillNameKeys.set(id, skill.nameKey);
+  }
 
   /**
    * 消费引擎事件。**必须在引擎 tick 之后、渲染之前调用一次。**
@@ -68,14 +112,19 @@ export class ViewAdapter {
       switch (event.kind) {
         case 'damage': {
           if (event.amount <= 0) break;
+          // 飘字落在**被打的人**头上。用 side 判断而不是写死 id ——
+          // 换 Boss 时不需要改这里。
+          const onBoss = event.targetId !== 'player';
+          const baseY = onBoss ? LAYOUT.combatTextY.boss : LAYOUT.combatTextY.player;
+          const baseX = onBoss ? 630 : 300;
           this.pushFloating(
             `-${event.amount}${event.crit ? '!' : ''}`,
             damageColor(event.amount, event.crit),
-            event.targetId === 'verrot' ? 620 : 300,
-            event.targetId === 'verrot' ? 200 : 380,
+            baseX,
+            baseY,
           );
-          if (event.targetId === 'player') this.playerFlash = 1;
-          else if (event.targetId === 'verrot') this.bossFlash = 1;
+          if (onBoss) this.bossFlash = 1;
+          else this.playerFlash = 1;
           break;
         }
         case 'heal': {
@@ -84,14 +133,20 @@ export class ViewAdapter {
           break;
         }
         case 'avoided': {
-          this.setStatus(event.reason === 'immune' ? 'hud.hud.immune' : 'hud.dodged', 180);
-          this.pushFloating('0', PALETTE.iframe.bright, 300, 360);
+          this.setStatus(event.reason === 'immune' ? 'hud.immune' : 'hud.dodged', 90);
+          this.pushFloating('0', PALETTE.iframe.bright, 300, LAYOUT.combatTextY.player);
           this.playerFlash = 0.6;
           break;
         }
         case 'skillRejected': {
-          // 只提示"为什么不能放"，不刷屏
-          this.setStatus(`reject.${event.reason}`, 45);
+          /**
+           * 技能被拒时把「技能名 + 原因」放进状态区。
+           *
+           * 为什么不写在技能格上：七个格子各挂一行小字会糊成一片，
+           * 而且格子只有 48px。集中一行反而读得更快。
+           */
+          const skillName = this.skillNameKeys.get(event.skillId) ?? event.skillId;
+          this.setStatus(`block.${blockKeyOf(event.reason)}`, 55, skillName);
           break;
         }
         case 'castInterrupted': {
@@ -120,7 +175,10 @@ export class ViewAdapter {
     this.bossFlash = Math.max(0, this.bossFlash - 0.12);
     if (this.statusLineTtl > 0) {
       this.statusLineTtl -= 1;
-      if (this.statusLineTtl === 0) this.statusLine = '';
+      if (this.statusLineTtl === 0) {
+        this.statusLine = '';
+        this.statusDetail = '';
+      }
     }
 
     // 飘字上浮与淡出
@@ -144,9 +202,10 @@ export class ViewAdapter {
     if (this.floating.length > 24) this.floating.splice(0, this.floating.length - 24);
   }
 
-  private setStatus(key: string, ttl: number): void {
+  private setStatus(key: string, ttl: number, detailKey?: string): void {
     this.statusLine = key;
     this.statusLineTtl = ttl;
+    this.statusDetail = detailKey ?? '';
   }
 
   /** 构建完整的渲染快照。 */
@@ -188,6 +247,7 @@ export class ViewAdapter {
       skills,
       floatingText: this.floating,
       ...(this.statusLine === '' ? {} : { statusLine: this.statusLine }),
+      ...(this.statusDetail === '' ? {} : { statusDetail: this.statusDetail }),
       telegraphing: boss.cast !== undefined,
       playerFlash: this.playerFlash,
       bossFlash: this.bossFlash,
@@ -284,7 +344,7 @@ function toCombatantView(engine: BattleEngine, id: string, tick: number): Combat
     };
   }
 
-  const buffs: BuffView[] = raw.buffs.map((buff) => {
+  const buffs: BuffView[] = raw.buffs.filter((buff) => !isInternalBuff(buff.defId)).map((buff) => {
     const def = engine.buffDef(buff.defId);
     const durationMs = def?.duration ?? 0;
     const remainingMs = Number.isFinite(buff.expiresAtTick)
