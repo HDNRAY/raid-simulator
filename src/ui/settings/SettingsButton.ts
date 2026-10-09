@@ -60,6 +60,15 @@ export class SettingsButton {
       kai: true,
     });
     this.root.addChild(this.gfx, this.label.root);
+    /**
+     * 标签文案**必须显式赋值**。
+     *
+     * 踩过的坑：`Label` 构造时传入空字符串（内容要等 i18n），
+     * 而我一直没调 `set()` —— 于是按钮渲染成一个**空方块**，
+     * 看起来像"图标没加载"，实际是文本为空。
+     * 探针读渲染层文本才定位到（截图上看不出是"空"还是"被遮住"）。
+     */
+    this.label.set(options.translate('settings.open'));
     this.draw();
   }
 

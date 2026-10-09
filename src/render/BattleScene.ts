@@ -18,7 +18,7 @@
 
 import type { Application, Container, Graphics } from 'pixi.js';
 import { PALETTE } from './theme';
-import { FONT, LAYOUT, LOGICAL, skillSlotRect } from '../ui/layout';
+import { FONT, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../ui/layout';
 import { DISPLAY_SCALE } from '../data/balance';
 import { Bar, Label, Panel, type PixiCtor } from '../ui/primitives';
 import { BossSprite } from './actors/BossSprite';
@@ -255,6 +255,7 @@ class SkillBarView {
     while (this.slots.length < target) {
       const i = this.slots.length;
       const rect = skillSlotRect(i, target);
+      const pos = skillSlotLabels(rect);
       const gfx = new this.pixi.Graphics();
 
       /**
@@ -264,36 +265,52 @@ class SkillBarView {
        * 都更能表达技能（攻/闪/防/破/轰/凝）。楷体在 30px 上下
        * 比黑体更易辨认（见 theme.ts 的说明）。
        */
+      /**
+       * 技能字用 `FONT.body`（15px）而不是 `FONT.big`（26px）。
+       *
+       * 26px 的楷体字高 28px，占掉了 44px 格子的 2/3，
+       * 冷却秒数无论放哪都会与它相交。15px 的字高约 17px，
+       * 加上下方 20px 的秒数位置才放得下 —— 这是算出来的，
+       * 不是试出来的（见 `skillSlotLabels` 的说明）。
+       */
       const glyph = new Label(this.pixi, {
-        x: rect.x + rect.w / 2,
-        // 略高于几何中心：下方要放冷却秒数
-        y: rect.y + 6,
-        size: FONT.big,
+        x: pos.glyph.x,
+        y: pos.glyph.y,
+        size: FONT.body,
         color: 0xffffff,
         anchorX: 0.5,
         kai: true,
       });
       /**
-       * 按键提示放在格子**外的左下角**。
+       * 按键提示：格子内**右下角**。
        *
-       * 早期放在格子内部右下角，结果**被冷却弧压住**（弧的直径几乎等于
-       * 格子宽度）。移到格外既避开了弧，也不必和技能字抢位置。
+       * 踩过两次坑：
+       *   1. 一开始放格子内右下角，被**冷却弧**压住（弧的半径几乎
+       *      等于格子半宽）。
+       *   2. 于是移到格子**外面**下方 —— 结果落到画布底边之外，
+       *      被截断（技能栏底部就在 y=530，画布只有 540）。
+       *
+       * 3. 弧缩小后又放回右下角 → 与冷却数字挤在一起（被测试抓到）。
+       *
+       * 现在放**左上角**：冷却弧的内圈在那里留了空白，
+       * 而技能字在正中、数字在正中下方，三者互不侵犯。
        */
       const key = new Label(this.pixi, {
-        x: rect.x + 2,
-        y: rect.y + rect.h + 1,
+        x: pos.key.x,
+        y: pos.key.y,
         size: FONT.tiny,
         color: 0x9090a0,
       });
       /**
-       * 冷却剩余秒数：放在格子**底部居中**。
+       * 冷却剩余秒数：格子**正中偏下**，压在技能字下方一点点。
        *
-       * 早期放在正中，结果与技能字**完全重叠**（两者都在格子中心），
-       * 数字被字盖住 —— 用探针读渲染层实际文本才发现（截图上看不出来）。
+       * 位置换过三次，最后靠**矩形重叠检测**定下来：
+       * 放正中会与技能字完全重叠；放底部居中会与按键提示挤在一起。
+       * 现在放**右下角压在弧线上**，技能字完整保留（字与数字不重叠）。
        */
       const cd = new Label(this.pixi, {
-        x: rect.x + rect.w / 2,
-        y: rect.y + rect.h - FONT.small - 1,
+        x: pos.cooldown.x,
+        y: pos.cooldown.y,
         size: FONT.small,
         color: 0xffffff,
         anchorX: 0.5,
@@ -309,15 +326,16 @@ class SkillBarView {
       // 右对齐：槽位数变化时整条栏向左延展
       for (let i = 0; i < this.slots.length; i += 1) {
         const rect = skillSlotRect(i, target);
+        const pos = skillSlotLabels(rect);
         const s = this.slots[i];
         if (!s) continue;
         s.rect = rect;
-        s.glyph.root.x = rect.x + rect.w / 2;
-        s.glyph.root.y = rect.y + 6;
-        s.key.root.x = rect.x + 2;
-        s.key.root.y = rect.y + rect.h + 1;
-        s.cd.root.x = rect.x + rect.w / 2;
-        s.cd.root.y = rect.y + rect.h - FONT.small - 1;
+        s.glyph.root.x = pos.glyph.x;
+        s.glyph.root.y = pos.glyph.y;
+        s.key.root.x = pos.key.x;
+        s.key.root.y = pos.key.y;
+        s.cd.root.x = pos.cooldown.x;
+        s.cd.root.y = pos.cooldown.y;
       }
     }
   }
