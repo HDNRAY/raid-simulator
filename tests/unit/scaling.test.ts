@@ -6,7 +6,7 @@ import {
   computeCanvasCssSize,
   computeScale,
 } from '../../src/render/scaling';
-import { FONT, GLYPH_BASELINE_NUDGE, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../../src/ui/layout';
+import { FONT, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../../src/ui/layout';
 
 describe('逻辑分辨率常量', () => {
   it('是 960x540 且为 16:9', () => {
@@ -107,15 +107,27 @@ describe('技能格内三个标签都不越界、互不重叠', () => {
 
   it('【关键】所有标签都在画布内 —— 不能贴到底边之外', () => {
     const total = 6;
-    /** 标签的字号上限：技能字 26、其它 13。加它是为了估算文字高度。 */
-    const heights: Record<string, number> = { glyph: 17, cooldown: 18, key: 13 };
+    /**
+     * 各自的实际占位 + 锚点。
+     *
+     * 需求把信息分到了四角（左上按键 / 右上代价 / 左下冷却 / 正中图标），
+     * 所以每个标签的**锚点都不同**，不能再套同一个公式估算 ——
+     * 冷却现在是左下角（anchorY = 1），它的下边缘是 `pos.y` 本身。
+     */
+    const layout: Record<string, { h: number; ax: number; ay: number }> = {
+      glyph: { h: 26, ax: 0.5, ay: 0.5 },
+      cooldown: { h: 20, ax: 0, ay: 1 },
+      key: { h: 13, ax: 0, ay: 0 },
+      cost: { h: 13, ax: 1, ay: 0 },
+    };
     for (let i = 0; i < total; i += 1) {
       const rect = skillSlotRect(i, total);
       const pos = skillSlotLabels(rect);
       for (const [name, p] of Object.entries(pos)) {
-        expect(p.y + (heights[name] ?? 0), `${name} 超出画布高度`).toBeLessThanOrEqual(
-          LOGICAL.height,
-        );
+        const spec = layout[name];
+        expect(spec, `未声明的标签 ${name}`).toBeDefined();
+        const bottom = p.y + spec!.h * (1 - spec!.ay);
+        expect(bottom, `${name} 超出画布高度`).toBeLessThanOrEqual(LOGICAL.height);
       }
     }
   });
@@ -133,7 +145,7 @@ describe('技能格内三个标签都不越界、互不重叠', () => {
      *   冷却秒数 18px     → 17x23（含描边）
      *   按键提示 11px     → 7x13
      */
-    const sizes = { glyph: { w: 13, h: 15 }, cooldown: { w: 17, h: 23 }, key: { w: 7, h: 13 } };
+    const sizes = { glyph: { w: 32, h: 26 }, cooldown: { w: 17, h: 20 }, key: { w: 7, h: 13 }, cost: { w: 15, h: 13 } };
     const total = 6;
     for (let i = 0; i < total; i += 1) {
       const rect = skillSlotRect(i, total);
@@ -157,23 +169,6 @@ describe('技能格内三个标签都不越界、互不重叠', () => {
     }
   });
 
-  it('技能字与冷却数字**水平同心**；垂直方向技能字上移一个补偿量', () => {
-    /**
-     * 需求："数字应该盖在按键 icon 上" —— 两者要叠在一起。
-     *
-     * 水平方向必须同心（否则数字会偏向一侧）。
-     * 垂直方向**故意错开 `GLYPH_BASELINE_NUDGE`**：Pixi 的 `Text` 按
-     * 整行高居中，而 CJK 字形重心偏下，所以图标要上移才**视觉**居中；
-     * 数字是纯数字、没有这个问题，保持几何居中。两者因此差一个补偿量。
-     */
-    for (let i = 0; i < 6; i += 1) {
-      const rect = skillSlotRect(i, 6);
-      const pos = skillSlotLabels(rect);
-      expect(pos.glyph.x, `槽位 ${i} 水平`).toBeCloseTo(pos.cooldown.x, 5);
-      // 垂直方向相差恰好一个补偿量（不是随手错开）
-      expect(pos.cooldown.y - pos.glyph.y, `槽位 ${i} 垂直`).toBeCloseTo(GLYPH_BASELINE_NUDGE, 5);
-    }
-  });
 
   it('格子尺寸与需求一致：40×40', () => {
     /**
@@ -322,16 +317,6 @@ describe('技能格：图标尺寸与冷却时的可读性', () => {
     expect(FONT.skillIcon).toBeGreaterThan(FONT.cd);
   });
 
-  it('技能字有纵向视觉补偿 —— 按行高居中会让 CJK 字形偏下', () => {
-    /**
-     * Pixi 的 `Text` 按**整行高**居中，而 CJK 字形重心偏下。
-     * 实测 32px 楷体在 40px 格子里：字形占 495..529（格子 492..532），
-     * 视觉上明显"坐得太低"。所以要上移一个补偿量。
-     */
-    expect(GLYPH_BASELINE_NUDGE).toBeGreaterThan(0);
-    const pos = skillSlotLabels(skillSlotRect(0, 6));
-    expect(pos.glyph.y).toBeLessThan(skillSlotRect(0, 6).y + LAYOUT.skillBar.slot / 2);
-  });
 });
 
 describe('角落快捷键提示（Esc）的可读性', () => {
@@ -346,5 +331,55 @@ describe('角落快捷键提示（Esc）的可读性', () => {
      */
     expect(src).toMatch(/cornerStroke: 3,/);
     expect(src).toMatch(/color: corner \? PALETTE\.text : PALETTE\.textDim/);
+  });
+});
+
+describe('技能格四角布局', () => {
+  /**
+   * 需求："左上保持快捷键，左下显示 cd 数字，单位秒，单位不显示，
+   * 右上显示资源代价，炁 / 缠 / 甚至血，用相应的颜色代表那种资源。"
+   *
+   * 40px 的格子塞四类信息，所以每个角的位置与锚点都必须钉死 ——
+   * 一旦谁越界，就会和相邻的角叠在一起。
+   */
+  const rect = () => skillSlotRect(2, 6);
+
+  it('按键在左上角，代价在右上角（同一行）', () => {
+    const r = rect();
+    const pos = skillSlotLabels(r);
+    expect(pos.key.y).toBe(pos.cost.y);
+    expect(pos.key.x).toBeLessThan(r.x + r.w / 2);
+    expect(pos.cost.x).toBeGreaterThan(r.x + r.w / 2);
+    // 代价是右对齐的（渲染层用 anchorX = 1）
+    expect(pos.cost.x).toBeGreaterThan(pos.key.x);
+  });
+
+  it('冷却数字在左下角', () => {
+    const r = rect();
+    const pos = skillSlotLabels(r);
+    expect(pos.cooldown.x).toBeLessThan(r.x + r.w / 2);
+    expect(pos.cooldown.y).toBeGreaterThan(r.y + r.h / 2);
+    // 左下角且是"底对齐"，所以它离格子底边很近
+    expect(r.y + r.h - pos.cooldown.y).toBeLessThanOrEqual(4);
+  });
+
+  it('图标在正中', () => {
+    const r = rect();
+    const pos = skillSlotLabels(r);
+    expect(pos.glyph.x).toBeCloseTo(r.x + r.w / 2, 5);
+    expect(pos.glyph.y).toBeCloseTo(r.y + r.h / 2, 5);
+  });
+
+  it('代价只给数字，不给单位 —— 40px 的角落放不下"30炁"', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    // 代价那行必须是 String(Math.round(...))，不能拼上资源名或单位
+    expect(src).toMatch(/s\.cost\.set\(String\(Math\.round\(view\.cost\.value\)\)\)/);
+  });
+
+  it('冷却秒数不带单位 —— "4" 而不是 "4s"', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    expect(src).toMatch(/s\.cd\.set\(view\.cooldownRatio > 0\.001 \? Math\.ceil\(view\.cooldownSec\)\.toString\(\) : ''\)/);
   });
 });

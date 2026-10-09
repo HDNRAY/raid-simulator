@@ -24,6 +24,18 @@ import { DISPLAY_SCALE } from '../data/balance';
 
 /** 冷却矮条的最大高度（取自布局表，避免两处写魔数）。 */
 const SLOT_COOLDOWN_BAR_H = LAYOUT.skillBar.cooldownBarHeight;
+
+/**
+ * 技能格右上角"资源代价"的颜色。
+ *
+ * **与资源条用的是同一个 base 色** —— 玩家不用学第二套映射：
+ * 格子右上角那个绿"10"就是左下面板的炁。
+ */
+const RESOURCE_COLORS: Readonly<Record<ResourceKeyName, number>> = {
+  hp: PALETTE.hp.base,
+  energy: PALETTE.energy.base,
+  douqi: PALETTE.douqi.base,
+};
 import { Bar, Label, Panel, type PixiCtor } from '../ui/primitives';
 import { BossSprite } from './actors/BossSprite';
 import {
@@ -31,6 +43,7 @@ import {
   ratioOf,
   type BattleSnapshotView,
   type BuffView,
+  type ResourceKeyName,
   type SkillSlotView,
 } from './viewModel';
 
@@ -240,6 +253,7 @@ class SkillBarView {
     glyph: Label;
     key: Label;
     cd: Label;
+    cost: Label;
     rect: { x: number; y: number; w: number; h: number };
   }> = [];
   private readonly pixi: PixiCtor;
@@ -308,19 +322,11 @@ class SkillBarView {
         color: 0x9090a0,
       });
       /**
-       * 冷却剩余秒数：格子**正中偏下**，压在技能字下方一点点。
+       * 冷却秒数：**左下角**（需求）。
        *
-       * 位置换过三次，最后靠**矩形重叠检测**定下来：
-       * 放正中会与技能字完全重叠；放底部居中会与按键提示挤在一起。
-       * 现在放**右下角压在弧线上**，技能字完整保留（字与数字不重叠）。
-       */
-      /**
-       * 冷却秒数：**居中盖在技能字上**。
-       *
-       * - 字号 `FONT.cd`(18px) > 技能字 `FONT.small`(13px)，
-       *   这样"谁盖谁"在视觉上是明确的。
-       *   （40px 的格子放不下原来的 26px，所以两个都缩小了）
-       * - 双向居中（anchor 0.5/0.5），所以 `pos.cooldown` 是中心点
+       * - 单位**不显示**（"4" 而不是 "4s"）：格子只有 40px，
+       *   多一个字母会挤掉图标
+       * - 左对齐 + 底对齐（anchor 0,1），所以 `pos.cooldown` 是左下角
        * - 描边保证在任何底色上都读得清（白色遮罩 / 深色格子都行）
        */
       const cd = new Label(this.pixi, {
@@ -328,14 +334,29 @@ class SkillBarView {
         y: pos.cooldown.y,
         size: FONT.cd,
         color: 0xffffff,
-        anchorX: 0.5,
-        anchorY: 0.5,
+        anchorY: 1,
         stroke: 0x000000,
         strokeWidth: 3,
         bold: true,
       });
-      this.root.addChild(gfx, glyph.root, key.root, cd.root);
-      this.slots.push({ gfx, glyph, key, cd, rect });
+      /**
+       * 资源代价：**右上角**（需求）。
+       *
+       * 只显示**数字**，资源种类靠**颜色**区分（炁绿 / 缠金 / 血红）——
+       * 40px 的角落放不下"30炁"三个字。
+       */
+      const cost = new Label(this.pixi, {
+        x: pos.cost.x,
+        y: pos.cost.y,
+        size: FONT.tiny,
+        color: 0xffffff,
+        anchorX: 1,
+        stroke: 0x000000,
+        strokeWidth: 2,
+      });
+      // 层叠：底 → 图标 → 按键 → 代价 → 冷却（冷却最上层）
+      this.root.addChild(gfx, glyph.root, key.root, cost.root, cd.root);
+      this.slots.push({ gfx, glyph, key, cd, cost, rect });
     }
 
     if (target !== this.slotCount) {
@@ -353,6 +374,8 @@ class SkillBarView {
         s.key.root.y = pos.key.y;
         s.cd.root.x = pos.cooldown.x;
         s.cd.root.y = pos.cooldown.y;
+        s.cost.root.x = pos.cost.x;
+        s.cost.root.y = pos.cost.y;
       }
     }
   }
@@ -370,6 +393,7 @@ class SkillBarView {
         s.glyph.set('');
         s.key.set('');
         s.cd.set('');
+        s.cost.set('');
         continue;
       }
 
@@ -423,15 +447,13 @@ class SkillBarView {
         view.usable ? 0xffffff : view.cooldownRatio > 0.001 ? 0xb0b0be : 0x5a5a68,
       );
       /**
-       * 冷却时把技能字**压暗**。
+       * 图标**不再因冷却而压暗**。
        *
-       * 图标放大到 32px 之后，它和 18px 的冷却数字在同一格里会互相打架。
-       * 白色半透明遮罩本身不够——两层重字叠在一起仍然乱。
-       *
-       * 所以冷却时让图标退到 alpha 0.4：它仍然"在那儿"（不丢失识别），
-       * 但数字是格里唯一清晰的东西。这正是"数字盖住图标"该有的观感。
+       * 曾经用过 alpha 0.4：那时冷却数字居中压在图标上，两层重字会打架。
+       * 现在数字移到了**左下角**（需求），不再与图标重叠，
+       * 而 32px 的图标是格子的主角 —— 压暗它只会让整条技能栏显得脏。
+       * 冷却状态由白色遮罩 + 左下角数字表达，足够了。
        */
-      s.glyph.root.alpha = view.cooldownRatio > 0.001 ? 0.4 : 1;
       s.key.set(view.key.toUpperCase());
       /**
        * **键位提示也要跟着状态变。**
@@ -462,6 +484,19 @@ class SkillBarView {
        * 加描边是为了在任何底色上都读得清（白色遮罩 / 深色格子都行）。
        */
       s.cd.set(view.cooldownRatio > 0.001 ? Math.ceil(view.cooldownSec).toString() : '');
+      /**
+       * 资源代价：数字 + **资源色**。
+       *
+       * 需求："用相应的颜色代表那种资源"。颜色取自 `PALETTE` 里
+       * 资源条用的**同一个 base 色**，于是格子右上角的"30"和
+       * 左下面板的炁条是同一个绿 —— 玩家不需要学第二套映射。
+       */
+      if (view.cost) {
+        s.cost.set(String(Math.round(view.cost.value)));
+        s.cost.setColor(RESOURCE_COLORS[view.cost.resource]);
+      } else {
+        s.cost.set('');
+      }
     }
   }
 }

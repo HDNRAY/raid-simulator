@@ -251,8 +251,8 @@ describe('技能格：冷却遮罩（白）与数字的层叠', () => {
     const m = /this\.root\.addChild\((gfx,[^)]*cd\.root[^)]*)\)/.exec(src);
     expect(m, '未找到技能格的 addChild').not.toBeNull();
     const order = m![1]!.split(',').map((x) => x.trim());
-    // 顺序：格子底 → 技能字 → 按键 → **冷却数字（最后 = 最上层）**
-    expect(order).toEqual(['gfx', 'glyph.root', 'key.root', 'cd.root']);
+    // 顺序：格子底 → 技能字 → 按键 → 代价 → **冷却数字（最后 = 最上层）**
+    expect(order).toEqual(['gfx', 'glyph.root', 'key.root', 'cost.root', 'cd.root']);
   });
 
   it('数字字号大于技能字 —— 冷却时它才是关键信息', () => {

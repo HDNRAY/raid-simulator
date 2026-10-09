@@ -234,14 +234,6 @@ export const LAYOUT = {
 } as const;
 
 /**
- * 技能字纵向的视觉补偿（像素）。
- *
- * 与 `skillSlotLabels` 里的字形居中配合使用；数值由实测得出，
- * 不是调到手感对为止 —— 见那里的说明。
- */
-export const GLYPH_BASELINE_NUDGE = 4;
-
-/**
  * 技能栏某个槽位的坐标。
  *
  * 整条栏**右对齐**而不是居中 —— 技能栏属于操作区，
@@ -285,6 +277,8 @@ export function skillSlotRect(
  * 不必靠截图肉眼判断。
  */
 export interface SlotLabelRects {
+  /** 资源代价（右上角，右对齐） */
+  readonly cost: { readonly x: number; readonly y: number };
   readonly glyph: { readonly x: number; readonly y: number };
   readonly cooldown: { readonly x: number; readonly y: number };
   readonly key: { readonly x: number; readonly y: number };
@@ -298,49 +292,28 @@ export function skillSlotLabels(rect: {
 }): SlotLabelRects {
   return {
     /**
-     * 技能字：**正中央**（`anchorX/Y = 0.5`，所以这是中心点）。
+     * 技能字（图标）：**正中**。
      *
-     * 早期它偏上（`y + 2`），因为那时冷却秒数放在它**下方**、
-     * 两者不能重叠。现在秒数改成**居中盖住**技能字（需求：
-     * "数字应该盖在按键 icon 上"），所以技能字也回到正中 ——
-     * 两者同心地叠在一起，冷却时数字压住图标。
+     * 需求把周围四角分配给了别的信息（左上按键、右上代价、左下冷却），
+     * 所以图标不能再做纵向偏移 —— 它必须老老实实居中，
+     * 否则会和某个角撞上。
      */
+    glyph: { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 },
     /**
-     * ⚠️ 纵向要**减去 `GLYPH_BASELINE_NUDGE`**。
+     * 冷却秒数：**左下角**。
      *
-     * Pixi 的 `Text` 是按**整行高**居中的，而 CJK 字体的字形只占行高的
-     * 一部分、且重心偏下 —— 直接按 `h/2` 居中会让字看起来"坐得太低"。
-     * 实测（32px 楷体、40px 格子）：字形占 495..529，格子 492..532，
-     * 上方只余 3px、下方 3px，但视觉上明显偏下。
-     * 上移 `GLYPH_BASELINE_NUDGE` 之后才真正居中。
+     * 需求："左下显示 cd 数字，单位秒，单位不显示"。
+     * 单位不显示是因为格子只有 40px —— "4" 够用，"4s" 会挤掉图标。
      */
-    glyph: { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 - GLYPH_BASELINE_NUDGE },
-    /**
-     * 冷却秒数：**格子正中，直接盖在技能字上**。
-     *
-     * 需求："按键的 cd，数字应该盖在按键 icon 上。"
-     *
-     * 演进：我先放在技能字**下方**（想避免重叠），但那样数字很小、
-     * 又要和技能字抢纵向空间。现在改成**居中盖住**：
-     *   - 数字用 `FONT.big`（26px），比技能字（15px）大一圈
-     *   - 白色半透明遮罩铺满整格，把技能字压暗
-     *   - 于是数字成为格子里最醒目的元素 —— 冷却时它才是关键信息
-     *
-     * 用 `anchorX/Y = 0.5` 居中，所以这里给的是**中心点**。
-     * 实测数字占 y 491..525，格子上限 530 —— 放得下。
-     */
-    cooldown: { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 },
-    /**
-     * 按键提示：**左上角**。
-     *
-     * 位置换过三次：
-     *   1. 格子内右下角 → 被冷却弧压住
-     *   2. 格子**外**下方 → 落到画布底边之外被截断
-     *   3. 格子内右下角（弧缩小之后）→ 与冷却数字挤在一起
-     *
-     * 左上角是唯一的空位：冷却弧的内圈在那里留了空白，
-     * 而技能字在正中、数字在正中下方，三者互不侵犯。
-     */
+    cooldown: { x: rect.x + 3, y: rect.y + rect.h - 3 },
+    /** 按键提示：**左上角**（锚点 0,0） */
     key: { x: rect.x + 3, y: rect.y + 2 },
+    /**
+     * 资源代价：**右上角**（锚点 1,0）。
+     *
+     * 需求："右上显示资源代价，炁 / 缠 / 甚至血，
+     * 用相应的颜色代表那种资源"。
+     */
+    cost: { x: rect.x + rect.w - 3, y: rect.y + 2 },
   };
 }

@@ -22,6 +22,7 @@ import type {
   FloatingTextView,
   ResultView,
   SkillSlotView,
+  SlotCost,
 } from '../render/viewModel';
 
 /** 一条槽位绑定（键位 → 技能）。 */
@@ -444,6 +445,28 @@ export class ViewAdapter {
     else if (cooldownRatio > 0.001) blockedKey = 'block.cooldown';
     else if (casting) blockedKey = 'block.casting';
 
+    /**
+     * 资源代价 —— 取**第一项**。
+     *
+     * 现在的技能都只有一项代价；如果以后出现"同时消耗炁和缠"，
+     * 这里要改成数组（格子右上角放不下两项，得换表达方式）。
+     * 按住技（「防」）的代价在 `holdDrain` 里，不是 `cost`。
+     */
+    const firstCost = skill.cost[0];
+    const drain = skill.holdDrain;
+    /**
+     * 数据层（`core/types.ts`）把 `resource` 声明成了宽泛的 `string`，
+     * 而视图层要的是 `'hp' | 'energy' | 'douqi'`。用**类型守卫**收敛，
+     * 不用 `as` 断言（AGENTS.md §1）。守卫失败就当作"没有代价可显示"，
+     * 这比让一个未知字符串漏进渲染层更安全。
+     */
+    const cost: SlotCost | undefined =
+      firstCost !== undefined && typeof firstCost.value === 'number'
+        ? toSlotCost(firstCost.resource, firstCost.value)
+        : drain !== undefined
+          ? toSlotCost(drain.resource, drain.perLogicTick)
+          : undefined;
+
     return {
       index: slot.index,
       key: slot.key,
@@ -452,6 +475,7 @@ export class ViewAdapter {
       icon: skill.icon,
       usable,
       cooldownRatio,
+      ...(cost === undefined ? {} : { cost }),
       cooldownSec: (remainTicks * (1000 / 60)) / 1000,
       comboReady: (skill.requires?.length ?? 0) > 0 && conditionOk,
       ...(blockedKey === undefined ? {} : { blockedKey }),
@@ -576,3 +600,16 @@ export const DEFAULT_SLOTS: readonly SlotBinding[] = [
 ];
 
 /** GCD 时长再导出，避免渲染层直接 import core/combat。 */
+
+/**
+ * 把 core 的宽泛 `resource: string` 收敛成视图层的 `ResourceKeyName`。
+ *
+ * 用类型守卫而不是断言：未知资源名返回 `undefined`，
+ * 渲染层就只是"这个格子没有代价可显示"，不会拿到一个它不认识的值。
+ */
+function toSlotCost(resource: string, value: number): SlotCost | undefined {
+  if (resource === 'hp' || resource === 'energy' || resource === 'douqi') {
+    return { resource, value };
+  }
+  return undefined;
+}

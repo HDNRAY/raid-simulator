@@ -68,6 +68,20 @@ export interface CombatantView {
   };
 }
 
+/**
+ * 资源 key。
+ *
+ * 与 core 的 `ResourceKey` 是同一组字面量。**故意在这里重复声明** ——
+ * 渲染层不许 import core 内部（见本文件开头），所以类型也要自持。
+ */
+export type ResourceKeyName = 'hp' | 'energy' | 'douqi';
+
+/** 技能格的资源代价（右上角显示）。 */
+export interface SlotCost {
+  readonly resource: ResourceKeyName;
+  readonly value: number;
+}
+
 export interface SkillSlotView {
   readonly index: number;
   /** 物理按键（如 '1' / 'q'） */
@@ -82,6 +96,17 @@ export interface SkillSlotView {
   readonly cooldownSec: number;
   /** 是否是派生技且当前窗口已开 */
   readonly comboReady: boolean;
+  /**
+   * 资源代价（用于在技能格右上角显示）。
+   *
+   * 需求："右上显示资源代价，炁 / 缠 / 甚至血，用相应的颜色代表那种资源"。
+   *
+   * ⚠️ 这里给的是**资源 key + 数值**，不是文案 —— 渲染层按 key 取颜色、
+   * 自己格式化成数字（i18n 规范 I1：渲染层不持有可显示文字）。
+   * 「防」是按住技，它的代价是 `holdDrain`（每逻辑步扣多少），
+   * 所以也走同一个字段。
+   */
+  readonly cost?: SlotCost;
   /** 不可用的原因（**本地化 key**，不是文案） */
   readonly blockedKey?: string;
 }
@@ -224,3 +249,4 @@ export function telegraphHint(cast: CombatantView['cast']): TelegraphHint | unde
 export function isTightWindow(buff: BuffView): boolean {
   return buff.isDefensive && buff.remainingMs < 200;
 }
+
