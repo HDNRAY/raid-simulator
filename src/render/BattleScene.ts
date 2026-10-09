@@ -17,7 +17,7 @@
  */
 
 import type { Application, Container, Graphics } from 'pixi.js';
-import { PALETTE } from './theme';
+import { PALETTE, lerpColor } from './theme';
 import { FONT, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../ui/layout';
 import { DISPLAY_SCALE } from '../data/balance';
 
@@ -484,13 +484,10 @@ export class BattleScene {
   private readonly castPanel: Panel;
   private readonly castName: Label;
   private readonly castHint: Label;
-  /** Boss 预警条的进度（实心填充） */
-  private readonly castBar: Bar;
   /** 玩家自己的读条（面板顶部）。与 Boss 预警条是**两套**对象 —— 见布局说明。 */
   private readonly playerCastPanel: Panel;
   private readonly playerCastName: Label;
   private readonly playerCastTime: Label;
-  private readonly playerCastBar: Bar;
 
   /* 玩家面板 */
   private readonly playerPanel: Panel;
@@ -622,31 +619,26 @@ export class BattleScene {
     });
     /**
     /**
-     * **实心填充的进度条**（需求：还是进度条，但用"实心填充"表达，
-     * 不要背景渐变）。
+     * **背景色即进度**（需求明确：背景色作为 progress）。
      *
-     * 演进过程记录：
-     *   1. 最早是"面板 + 一条 4px 的细线" —— 细线看不清。
-     *   2. 改成"整个面板背景色渐变" —— 也能读，但**整块都在变**，
-     *      反而失去了"进度条"那种一眼可量的刻度感。
-     *   3. 现在：**中性底槽 + 实心纯色填充**，从左向右推进。
-     *      这是最标准的进度条形态，也最好读。
+     * 形态演进（走过两次弯路，记下来避免再绕）：
+     *   1. 面板 + 一条 4px 细线 —— 细线看不清。
+     *   2. 改成"整块背景渐变" —— 我误以为"整块在变"不够像进度条，
+     *      于是又改回"独立的实心填充条"。
+     *   3. **回到背景色即进度**（当前）—— 需求要的就是这个：
+     *      整块面板从暗到亮，一眼扫过去就知道还剩多久，
+     *      比盯着一条 5px 的细条更省注意力。
+     *
+     * ⚠️ 这里的**渲染顺序**踩过坑：读条面板曾经和玩家面板重叠，
+     * 而后者是后 `addChild` 的，于是深色面板把读条整块盖住 ——
+     * 表现为"读条一片暗"，我为此改了好几轮颜色都没用。
+     * 现在两者的矩形由布局测试保证**不重叠**（`playerCastBar` 在
+     * `player` 上方）。
      */
     this.castPanel.root.visible = false;
     this.castName.root.visible = false;
     this.castHint.root.visible = false;
-    this.castBar = new Bar(pixi, {
-      x: cb.x + 1,
-      // 收进面板内：底部留 2px，否则 5px 的条会盖住面板下边框
-      y: cb.y + cb.h - 7,
-      w: cb.w - 2,
-      h: 5,
-      color: 0xff6a3a,
-      darkColor: 0x3a1418,
-      brightColor: 0xffd0a0,
-    });
-    this.castBar.root.visible = false;
-    hud.addChild(this.castPanel.root, this.castBar.root, this.castName.root, this.castHint.root);
+    hud.addChild(this.castPanel.root, this.castName.root, this.castHint.root);
 
     /* 玩家读条（面板顶部） */
     const pcb = LAYOUT.playerCastBar;
@@ -699,26 +691,11 @@ export class BattleScene {
       color: 0xffffff,
       anchorX: 1,
     });
-    this.playerCastBar = new Bar(pixi, {
-      x: pcb.x + 1,
-      // 收进面板内：底部留 2px
-      y: pcb.y + pcb.h - 8,
-      w: pcb.w - 2,
-      h: 6,
-      color: 0xffc040,
-      darkColor: 0x3a2a0c,
-      brightColor: 0xfff4c0,
-    });
     this.playerCastPanel.root.visible = false;
     this.playerCastName.root.visible = false;
     this.playerCastTime.root.visible = false;
-    this.playerCastBar.root.visible = false;
-    hud.addChild(
-      this.playerCastPanel.root,
-      this.playerCastBar.root,
-      this.playerCastName.root,
-      this.playerCastTime.root,
-    );
+    // 背景色即进度，所以没有独立的进度条对象
+    hud.addChild(this.playerCastPanel.root, this.playerCastName.root, this.playerCastTime.root);
 
     /* 玩家面板：生命 / 缠 / 炁 **垂直排列** */
     const pf = LAYOUT.player;
@@ -1000,11 +977,17 @@ export class BattleScene {
       this.castHint.set(`${hint?.seconds ?? ''}s`);
       this.castHint.setColor(cast.interruptible ? PALETTE.interrupt.bright : 0x30c8d0);
 
-      // 进度：实心填充，从左向右推进
-      this.castBar.update(cast.progress);
-      // 越接近命中，边框越亮 —— 把"快到了"变成视觉压力
+      /**
+       * 进度 → **整块背景色**：深红 → 亮橙。
+       *
+       * 用整数插值（`lerpColor`）而不是每帧拼颜色：`Panel.set` 会重建
+       * Graphics，而颜色只有有限级数，插值到整数后重复值会被跳过。
+       */
+      const t = Math.min(1, Math.max(0, cast.progress));
       this.castPanel.set({
-        line: cast.progress > 0.7 ? 0xffd060 : PALETTE.danger.base,
+        fill: lerpColor(0x3a0a0c, 0xff7a30, t),
+        fillAlpha: 1,
+        line: lerpColor(PALETTE.danger.base, 0xffe080, t),
       });
     }
 
@@ -1023,23 +1006,18 @@ export class BattleScene {
     this.playerCastPanel.root.visible = playerCast !== undefined;
     this.playerCastName.root.visible = playerCast !== undefined;
     this.playerCastTime.root.visible = playerCast !== undefined;
-    this.playerCastBar.root.visible = playerCast !== undefined;
     if (playerCast) {
       this.playerCastName.set(translate(playerCast.nameKey));
       this.playerCastTime.set(`${(playerCast.remainingMs / 1000).toFixed(1)}s`);
-      this.playerCastBar.update(playerCast.progress);
       /**
-       * 进度：**实心填充**（需求：还是进度条，用实心填充而不是背景渐变）。
-       *
-       * 与 Boss 预警条同一形态，只是配色改成暖金 —— 两处读条
-       * 用同一套视觉语言，玩家不必学两次。
-       *
-       * 底面固定为中性深金、填充为亮金：这样"还剩多久"是**可量的**
-       * （一段实心色块的长度），而不是靠感知整块背景的亮度差。
+       * 进度 → **整块背景色**：深金 → 亮金（与 Boss 预警条同一形态，
+       * 配色换成暖色系 —— 红色是威胁、金色是自己的动作）。
        */
-      this.playerCastBar.update(playerCast.progress);
+      const t = Math.min(1, Math.max(0, playerCast.progress));
       this.playerCastPanel.set({
-        line: playerCast.progress > 0.7 ? 0xfff4c0 : 0xd8a840,
+        fill: lerpColor(0x2a1c06, 0xd8a020, t),
+        fillAlpha: 1,
+        line: lerpColor(0x8a6a20, 0xffe080, t),
       });
     }
 

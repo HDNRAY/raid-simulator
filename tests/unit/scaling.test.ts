@@ -6,7 +6,7 @@ import {
   computeCanvasCssSize,
   computeScale,
 } from '../../src/render/scaling';
-import { LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../../src/ui/layout';
+import { FONT, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../../src/ui/layout';
 
 describe('逻辑分辨率常量', () => {
   it('是 960x540 且为 16:9', () => {
@@ -254,13 +254,14 @@ describe('玩家面板：读条与资源条都是"实心填充进度条"', () =>
     expect(LAYOUT.player.h - (top + 2 * stride + barH)).toBe(bottom);
   });
 
-  it('读条与 Boss 预警条都留有放进度条的内部空间', () => {
+  it('两处读条都够高：要放"技能名 + 剩余秒数"一行字', () => {
     /**
-     * 两处读条都从"细线"改成了"实心填充的进度条"，
-     * 所以高度必须够放一个 ≥5px 的条 + 上方的技能名。
+     * 进度改用**整块背景色**表达之后，读条里不再有独立的进度条，
+     * 所以高度只需保证"一行 15px 的字 + 上下呼吸空间"。
+     * 早期这里断言的是"要放得下 5px 的进度条"——那个形态已经不用了。
      */
-    expect(LAYOUT.castBar.h).toBeGreaterThanOrEqual(24);
-    expect(LAYOUT.playerCastBar.h).toBeGreaterThanOrEqual(20);
+    expect(LAYOUT.castBar.h).toBeGreaterThanOrEqual(FONT.body + 8);
+    expect(LAYOUT.playerCastBar.h).toBeGreaterThanOrEqual(FONT.body + 6);
   });
 
   it('玩家读条不与面板重叠（面板后绘制会盖住它）', () => {
