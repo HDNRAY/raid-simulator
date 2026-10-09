@@ -115,7 +115,7 @@ describe('技能格内三个标签都不越界、互不重叠', () => {
      * 冷却现在是左下角（anchorY = 1），它的下边缘是 `pos.y` 本身。
      */
     const layout: Record<string, { h: number; ax: number; ay: number }> = {
-      glyph: { h: 26, ax: 0.5, ay: 0.5 },
+      glyph: { h: 21, ax: 0.5, ay: 0.5 },
       cooldown: { h: 20, ax: 0, ay: 1 },
       key: { h: 13, ax: 0, ay: 0 },
       cost: { h: 13, ax: 1, ay: 0 },
@@ -145,7 +145,7 @@ describe('技能格内三个标签都不越界、互不重叠', () => {
      *   冷却秒数 18px     → 17x23（含描边）
      *   按键提示 11px     → 7x13
      */
-    const sizes = { glyph: { w: 32, h: 26 }, cooldown: { w: 17, h: 20 }, key: { w: 7, h: 13 }, cost: { w: 15, h: 13 } };
+    const sizes = { glyph: { w: 26, h: 21 }, cooldown: { w: 17, h: 20 }, key: { w: 7, h: 13 }, cost: { w: 15, h: 13 } };
     const total = 6;
     for (let i = 0; i < total; i += 1) {
       const rect = skillSlotRect(i, total);
@@ -300,17 +300,23 @@ describe('玩家面板：读条与资源条都是"实心填充进度条"', () =>
 });
 
 describe('技能格：图标尺寸与冷却时的可读性', () => {
-  it('技能字（图标）至少 32px —— 需求下限', () => {
+  it('技能字（图标）为 26px，且四周留出呼吸空间', () => {
     /**
-     * 需求："按键的'楷体字'图标，再大一点，至少 32 吧"。
+     * 演进 13 → 32 → **26**。
      *
-     * 32px 楷体实测只占 32×25.2（`measureText` 的
-     * `actualBoundingBox`，**不是行高**），放进 40×40 的格子上下各余 7px。
-     * ⚠️ 楷体的行高远大于字形本身，按行高估算会误判为放不下。
+     * 需求先要求"至少 32"，之后下调到 26 —— 这是**信息密度**的取舍：
+     * 四角都有东西（按键 / 代价 / 冷却），32px 几乎占满整格。
+     *
+     * ⚠️ 估算能否放下要用 `measureText` 的 `actualBoundingBox`
+     * （楷体字形高约 0.79×字号），**不能看行高** —— 行高远大于字形，
+     * 按行高算会误判为放不下。
      */
-    expect(FONT.skillIcon).toBeGreaterThanOrEqual(32);
-    // 而且必须放得进格子（字形高约 0.79×字号）
-    expect(LAYOUT.skillBar.slot).toBeGreaterThanOrEqual(FONT.skillIcon * 0.79);
+    expect(FONT.skillIcon).toBe(26);
+    const glyphH = FONT.skillIcon * 0.79;
+    // 上下各留至少 5px，四角的小字才有地方站
+    expect(LAYOUT.skillBar.slot - glyphH).toBeGreaterThanOrEqual(10);
+    // 横向也要留（楷体是等宽方块字）
+    expect(LAYOUT.skillBar.slot - FONT.skillIcon).toBeGreaterThanOrEqual(8);
   });
 
   it('图标比冷却数字**大**，冷却时"数字盖住图标"才成立', () => {
