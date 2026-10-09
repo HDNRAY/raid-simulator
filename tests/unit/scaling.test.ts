@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   LOGICAL_ASPECT,
@@ -7,6 +8,18 @@ import {
   computeScale,
 } from '../../src/render/scaling';
 import { FONT, GLYPH_NUDGE, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../../src/ui/layout';
+
+/**
+ * 技能栏的实现**已拆到 `skillBar.ts`**（原文件超长）。
+ *
+ * 只读 `BattleScene.ts` 会让这些"锁实现细节"的断言假失败 ——
+ * 断言本身仍然有效，只是代码搬了家。
+ */
+function READ_SKILL_BAR_SRC(): string {
+  const bar = readFileSync(new URL('../../src/render/skillBar.ts', import.meta.url), 'utf8');
+  const scene = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+  return bar + scene;
+}
 
 describe('逻辑分辨率常量', () => {
   it('是 960x540 且为 16:9', () => {
@@ -328,7 +341,6 @@ describe('技能格：图标尺寸与冷却时的可读性', () => {
 
 describe('角落快捷键提示（Esc）的可读性', () => {
   it('描边 3px 且文字用亮色 —— 深色字压在浅色图标上会糊', async () => {
-    const { readFileSync } = await import('node:fs');
     const src = readFileSync(new URL('../../src/ui/IconButton.ts', import.meta.url), 'utf8');
     /**
      * 需求："esc 的描边没有让它看起来足够清晰"。
@@ -389,15 +401,13 @@ describe('技能格四角布局', () => {
   });
 
   it('代价只给数字 + 可选后缀，不拼资源名（角落放不下"30炁"）', async () => {
-    const { readFileSync } = await import('node:fs');
-    const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    const src = READ_SKILL_BAR_SRC();
     // `10` / `2/s` —— 数字 + suffix，**不是**数字 + 资源名
     expect(src).toMatch(/s\.cost\.set\(`\$\{Math\.round\(view\.cost\.value\)\}\$\{view\.cost\.suffix \?\? ''\}`\)/);
   });
 
   it('两个 CD 都只给数字 —— 单位一律不显示', async () => {
-    const { readFileSync } = await import('node:fs');
-    const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    const src = READ_SKILL_BAR_SRC();
     // 实时："4"
     expect(src).toMatch(/s\.cd\.set\(view\.cooldownRatio > 0\.001 \? Math\.ceil\(view\.cooldownSec\)\.toString\(\) : ''\)/);
     /**

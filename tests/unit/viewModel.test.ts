@@ -237,8 +237,16 @@ describe('技能格：冷却遮罩（白）与数字的层叠', () => {
   const read = async (rel: string): Promise<string> =>
     (await import('node:fs')).readFileSync(new URL(rel, import.meta.url), 'utf8');
 
+  /**
+   * 技能格相关的实现**已经搬到 `skillBar.ts`**（拆分超长文件）。
+   * 这里同时读两个文件，断言在"技能栏代码所在之处"匹配 ——
+   * 这样再搬家也不会因为路径变了而假失败。
+   */
+  const readSkillBar = async (): Promise<string> =>
+    (await read('../../src/render/skillBar.ts')) + (await read('../../src/render/BattleScene.ts'));
+
   it('遮罩是**白色**半透明，而不是黑色', async () => {
-    const src = await read('../../src/render/BattleScene.ts');
+    const src = await readSkillBar();
     // 冷却遮罩那次 fill 必须是白色
     const m = /SLOT_COOLDOWN_BAR_H \* view\.cooldownRatio\)\);\s*\n\s*g\.rect\([^)]*\)\.fill\(\{ color: (0x[0-9a-f]+), alpha: ([\d.]+) \}\)/.exec(src);
     expect(m, '未找到冷却遮罩的 fill 调用').not.toBeNull();
@@ -254,7 +262,7 @@ describe('技能格：冷却遮罩（白）与数字的层叠', () => {
   });
 
   it('【关键】数字在技能字**之后**绘制 —— 否则盖不住 icon', async () => {
-    const src = await read('../../src/render/BattleScene.ts');
+    const src = await readSkillBar();
     // 技能格那一次 addChild 的参数里有 cd.root（其它 addChild 没有）
     const m = /this\.root\.addChild\((gfx,[^)]*cd\.root[^)]*)\)/.exec(src);
     expect(m, '未找到技能格的 addChild').not.toBeNull();
