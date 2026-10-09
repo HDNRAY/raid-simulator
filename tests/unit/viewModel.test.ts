@@ -53,14 +53,12 @@ describe('formatClock', () => {
 
 describe('telegraphHint —— 预警必须告诉玩家该做什么', () => {
   /**
-   * 提示文案的**语义变过**：
+   * 预警条右侧的提示**只剩剩余秒数**。
    *
-   * 早期是"可打断 → 显示可打断 / 不可打断 → 显示闪避或格挡"。
-   * 后来需求改成"所有 Boss 招式默认都能打断"，于是"可打断"那行字
-   * 在绝大多数时候都是噪声，删掉了。现在只在**真的打不断**时提示
-   * （即施法者处于霸体），其余情况给永远适用的"闪避或格挡"。
+   * 需求：不要"闪避或格挡"字样。这两种应对永远适用，写出来是噪声；
+   * 玩家真正要读的是"还有多久命中"。所以这里不再断言任何文案 key。
    */
-  it('能打断的技能给出"闪避或格挡"（默认情况，不再显示"可打断"）', () => {
+  it('给出剩余秒数（保留 1 位）', () => {
     const hint = telegraphHint({
       skillId: 'corruption',
       nameKey: 'boss.cleave.name',
@@ -68,27 +66,15 @@ describe('telegraphHint —— 预警必须告诉玩家该做什么', () => {
       interruptible: true,
       remainingMs: 1500,
     });
-    expect(hint?.key).toBe('hint.dodgeOrGuard');
     expect(hint?.seconds).toBe('1.5');
-  });
-
-  it('打不断的（霸体）给出"霸体"提示', () => {
-    const hint = telegraphHint({
-      skillId: 'crimson-arc',
-      nameKey: 'boss.crimsonArc.name',
-      progress: 0.5,
-      interruptible: false,
-      remainingMs: 800,
-    });
-    expect(hint?.key).toBe('hint.armored');
-    expect(hint?.seconds).toBe('0.8');
+    expect(Object.keys(hint ?? {})).toEqual(['seconds']);
   });
 
   it('没有读条时返回 undefined', () => {
     expect(telegraphHint(undefined)).toBeUndefined();
   });
 
-  it('【关键】返回的是 key 而不是文案 —— 渲染层不持有可显示文字', () => {
+  it('【关键】只有数字，没有任何可显示文案 —— 渲染层不持有文字（i18n 规范 I1）', () => {
     const hint = telegraphHint({
       skillId: 'x',
       nameKey: 'boss.x.name',
@@ -96,8 +82,9 @@ describe('telegraphHint —— 预警必须告诉玩家该做什么', () => {
       interruptible: true,
       remainingMs: 1000,
     });
-    // 断言它不含中文（i18n 规范 I1：渲染层不许硬编码文案）
-    expect(hint?.key).not.toMatch(/[\u4e00-\u9fff]/);
+    // 去掉"闪避或格挡"之后，提示里只剩一个数字串
+    expect(hint?.seconds).toMatch(/^[\d.]+$/);
+    expect(JSON.stringify(hint)).not.toMatch(/[\u4e00-\u9fff]/);
   });
 });
 

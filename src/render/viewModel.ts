@@ -204,25 +204,20 @@ export function formatClock(ms: number): string {
  * 渲染层不持有任何可显示文字（i18n 规范 I1）。
  */
 export interface TelegraphHint {
-  /** 提示文字的本地化 key */
-  readonly key: string;
   /** 剩余的读条时间，秒（保留 1 位） */
   readonly seconds: string;
 }
 
 /**
- * 预警条右侧的提示。
+ * 预警条右侧只显示**剩余秒数**。
  *
- * **不再显示"可打断"** —— 需求明确"都可以打断"，所以那行字
- * 在绝大多数时候都是噪声。现在只在**真的打不断**时给出提示：
- * 施法者处于霸体状态。其余情况给"闪避或格挡"（永远适用的应对）。
+ * 需求：不要"闪避或格挡"字样。这两种应对永远都适用，写出来是
+ * 纯噪声；玩家真正需要读的是"还有多久命中"。
+ * 霸体状态改由**秒数颜色**表达（青绿 = 可打断 / 青蓝 = 霸体）。
  */
 export function telegraphHint(cast: CombatantView['cast']): TelegraphHint | undefined {
   if (!cast) return undefined;
-  return {
-    key: cast.interruptible ? 'hint.dodgeOrGuard' : 'hint.armored',
-    seconds: (cast.remainingMs / 1000).toFixed(1),
-  };
+  return { seconds: (cast.remainingMs / 1000).toFixed(1) };
 }
 
 /** 判定窗口的剩余时间是否短到需要高亮（< 0.2s 时闪红）。 */

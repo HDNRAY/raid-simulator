@@ -104,7 +104,7 @@ export const LAYOUT = {
    * ⚠️ **读条在这块面板的上方，不与它重叠**（`playerCastBar` 的
    * y + h ≤ 这里的 y）。原因见 `playerCastBar` 的说明。
    */
-  player: { x: 8, y: 402, w: 228, h: 138 },
+  player: { x: 8, y: 418, w: 228, h: 122 },
 
   /**
    * 玩家读条（面板顶部那一条）。
@@ -124,7 +124,7 @@ export const LAYOUT = {
    * 现在读条在 y 376..398、面板从 402 开始，两者不重叠。
    * 这条约束由布局测试守着（见 `tests/unit/scaling.test.ts`）。
    */
-  playerCastBar: { x: 8, y: 376, w: 228, h: 22 },
+  playerCastBar: { x: 8, y: 392, w: 228, h: 22 },
 
   /**
    * 玩家三根资源条的排布。
@@ -141,8 +141,8 @@ export const LAYOUT = {
   playerBars: {
     /** 单根条的高度（够画出内阴影与文字） */
     h: 16,
-    /** 第一根条距面板顶部的偏移（读条已移到面板外，所以从较上处开始） */
-    top: 22,
+    /** 第一根条距面板顶部的偏移 */
+    top: 20,
     /**
      * 相邻两根条的行距。
      *
@@ -152,9 +152,9 @@ export const LAYOUT = {
      * 面板高 140，所以底部留白 140 − 94 = 46…… 减去读条占的 22 之后
      * 实际视觉留白约 24px，与上下边距相当。
      */
-    stride: 32,
+    stride: 27,
     /** 距面板底部的留白（测试用来检验"浪费的纵向空间"） */
-    bottom: 24,
+    bottom: 32,
   },
   /** 玩家的 buff / debuff 条（玩家面板右侧，横向展开） */
   playerBuffs: { x: 244, y: 424, size: 20, gap: 6, max: 10, labelGap: 4 },

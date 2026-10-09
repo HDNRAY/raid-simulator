@@ -233,3 +233,39 @@ describe('玩家面板：读条在顶部、三根条不越界', () => {
     expect(pcb.y + pcb.h).toBeLessThanOrEqual(LOGICAL.height);
   });
 });
+
+describe('玩家面板：读条与资源条都是"实心填充进度条"', () => {
+  it('面板高度明显小于原先的 140（消除底部空白）', () => {
+    // 用户反馈"底部空一截"。原先 h=140、三根条只用到 y+88，
+    // 底部空出 52px。现在收窄到 122。
+    expect(LAYOUT.player.h).toBeLessThan(140);
+  });
+
+  it('三根条铺满面板，底部留白不超过面板的 30%', () => {
+    const { h: barH, top, stride } = LAYOUT.playerBars;
+    const lastBottom = top + 2 * stride + barH;
+    const slack = LAYOUT.player.h - lastBottom;
+    expect(slack).toBeGreaterThan(0);
+    expect(slack).toBeLessThanOrEqual(LAYOUT.player.h * 0.3);
+  });
+
+  it('布局表声明的 bottom 与实际留白一致（防止两处漂移）', () => {
+    const { h: barH, top, stride, bottom } = LAYOUT.playerBars;
+    expect(LAYOUT.player.h - (top + 2 * stride + barH)).toBe(bottom);
+  });
+
+  it('读条与 Boss 预警条都留有放进度条的内部空间', () => {
+    /**
+     * 两处读条都从"细线"改成了"实心填充的进度条"，
+     * 所以高度必须够放一个 ≥5px 的条 + 上方的技能名。
+     */
+    expect(LAYOUT.castBar.h).toBeGreaterThanOrEqual(24);
+    expect(LAYOUT.playerCastBar.h).toBeGreaterThanOrEqual(20);
+  });
+
+  it('玩家读条不与面板重叠（面板后绘制会盖住它）', () => {
+    const pcb = LAYOUT.playerCastBar;
+    const pf = LAYOUT.player;
+    expect(pcb.y + pcb.h).toBeLessThanOrEqual(pf.y);
+  });
+});

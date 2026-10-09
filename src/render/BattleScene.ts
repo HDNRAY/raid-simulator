@@ -17,7 +17,7 @@
  */
 
 import type { Application, Container, Graphics } from 'pixi.js';
-import { PALETTE, lerpColor } from './theme';
+import { PALETTE } from './theme';
 import { FONT, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../ui/layout';
 import { DISPLAY_SCALE } from '../data/balance';
 
@@ -484,6 +484,8 @@ export class BattleScene {
   private readonly castPanel: Panel;
   private readonly castName: Label;
   private readonly castHint: Label;
+  /** Boss 预警条的进度（实心填充） */
+  private readonly castBar: Bar;
   /** 玩家自己的读条（面板顶部）。与 Boss 预警条是**两套**对象 —— 见布局说明。 */
   private readonly playerCastPanel: Panel;
   private readonly playerCastName: Label;
@@ -619,19 +621,32 @@ export class BattleScene {
       anchorX: 1,
     });
     /**
-     * **不再有独立的进度条** —— 进度直接用预警条的**背景色**表达。
+    /**
+     * **实心填充的进度条**（需求：还是进度条，但用"实心填充"表达，
+     * 不要背景渐变）。
      *
-     * 需求：进度改成背景色。这样做的好处是省掉一条细线，
-     * 整块面的颜色推进比 4px 的线更容易读到（尤其在小窗口下）。
-     *
-     * 实现方式是改 `Panel` 的填充色而不是加图形：
-     * 深红（刚起手）→ 橙红 → 亮橙（快出招）。颜色本身承担
-     * "还剩多久"的信息，同时"越亮越危险"的直觉也成立。
+     * 演进过程记录：
+     *   1. 最早是"面板 + 一条 4px 的细线" —— 细线看不清。
+     *   2. 改成"整个面板背景色渐变" —— 也能读，但**整块都在变**，
+     *      反而失去了"进度条"那种一眼可量的刻度感。
+     *   3. 现在：**中性底槽 + 实心纯色填充**，从左向右推进。
+     *      这是最标准的进度条形态，也最好读。
      */
     this.castPanel.root.visible = false;
     this.castName.root.visible = false;
     this.castHint.root.visible = false;
-    hud.addChild(this.castPanel.root, this.castName.root, this.castHint.root);
+    this.castBar = new Bar(pixi, {
+      x: cb.x + 1,
+      // 收进面板内：底部留 2px，否则 5px 的条会盖住面板下边框
+      y: cb.y + cb.h - 7,
+      w: cb.w - 2,
+      h: 5,
+      color: 0xff6a3a,
+      darkColor: 0x3a1418,
+      brightColor: 0xffd0a0,
+    });
+    this.castBar.root.visible = false;
+    hud.addChild(this.castPanel.root, this.castBar.root, this.castName.root, this.castHint.root);
 
     /* 玩家读条（面板顶部） */
     const pcb = LAYOUT.playerCastBar;
@@ -656,8 +671,8 @@ export class BattleScene {
       y: pcb.y,
       w: pcb.w,
       h: pcb.h,
-      fill: 0x4a3410,
-      line: 0xffc040,
+      fill: 0x241a08,
+      line: 0xd8a840,
       fillAlpha: 1,
       radius: 2,
     });
@@ -686,12 +701,13 @@ export class BattleScene {
     });
     this.playerCastBar = new Bar(pixi, {
       x: pcb.x + 1,
-      y: pcb.y + pcb.h - 3,
+      // 收进面板内：底部留 2px
+      y: pcb.y + pcb.h - 8,
       w: pcb.w - 2,
-      h: 2,
-      color: 0xfff0b0,
-      darkColor: 0x604818,
-      brightColor: 0xffffff,
+      h: 6,
+      color: 0xffc040,
+      darkColor: 0x3a2a0c,
+      brightColor: 0xfff4c0,
     });
     this.playerCastPanel.root.visible = false;
     this.playerCastName.root.visible = false;
@@ -973,27 +989,23 @@ export class BattleScene {
     if (cast) {
       this.castName.set(translate(cast.nameKey));
       const hint = telegraphHint(cast);
-      this.castHint.set(hint ? `${hint.seconds}s   ${translate(hint.key)}` : '');
+      this.castHint.set(hint ? `${hint.seconds}s` : '');
       /**
-       * 提示颜色表示**能不能打断**：
-       *   可打断 → 青绿（"你可以阻止它"）
-       *   霸体   → 金橙（"只能躲/挡"）
-       */
-      this.castHint.setColor(cast.interruptible ? PALETTE.interrupt.bright : 0xffc870);
-
-      /**
-       * 进度 → **背景色**。深红 → 橙红 → 亮橙。
+       * 提示区**只显示剩余秒数**。
        *
-       * 用整数插值（`lerpColor`）而不是每帧拼字符串：
-       * 每帧改 Panel 的构造参数会重建 Graphics，代价明显。
+       * 需求：不要"闪避或格挡"字样。理由也很直接 —— 这两种应对
+       * 永远都适用，写出来是纯噪声；而"还有多久命中"才是玩家真正
+       * 需要读的信息。霸体状态改由**技能名颜色**表达（见下）。
        */
-      const t = Math.min(1, Math.max(0, cast.progress));
-      const fill = lerpColor(0x3a0a0c, 0xff8a30, t);
-      // 进度越接近满，边框越亮 —— 把"快到了"变成视觉压力
-      const line = cast.interruptible
-        ? lerpColor(0x8a2020, 0xffd060, t)
-        : 0x30c8d0;
-      this.castPanel.set({ fill, line });
+      this.castHint.set(`${hint?.seconds ?? ''}s`);
+      this.castHint.setColor(cast.interruptible ? PALETTE.interrupt.bright : 0x30c8d0);
+
+      // 进度：实心填充，从左向右推进
+      this.castBar.update(cast.progress);
+      // 越接近命中，边框越亮 —— 把"快到了"变成视觉压力
+      this.castPanel.set({
+        line: cast.progress > 0.7 ? 0xffd060 : PALETTE.danger.base,
+      });
     }
 
     /* ---------- 玩家读条 ---------- */
@@ -1017,42 +1029,17 @@ export class BattleScene {
       this.playerCastTime.set(`${(playerCast.remainingMs / 1000).toFixed(1)}s`);
       this.playerCastBar.update(playerCast.progress);
       /**
-       * 进度 → **背景色**（与 Boss 预警条同一套表达，但冷色换成暖金）。
+       * 进度：**实心填充**（需求：还是进度条，用实心填充而不是背景渐变）。
        *
-       * 用整数插值而不是每帧拼参数：`Panel.set` 会重建 Graphics，
-       * 每帧改颜色是明显开销，而颜色只有 256 级。
+       * 与 Boss 预警条同一形态，只是配色改成暖金 —— 两处读条
+       * 用同一套视觉语言，玩家不必学两次。
+       *
+       * 底面固定为中性深金、填充为亮金：这样"还剩多久"是**可量的**
+       * （一段实心色块的长度），而不是靠感知整块背景的亮度差。
        */
-      /**
-       * ⚠️ 区间要比"看起来够"更亮。
-       *
-       * 第一次改成背景色时我用了 `0x3d2a08 → 0xe0a020`，结果用户仍然
-       * 觉得暗 —— 因为暗端几乎与面板同色，而亮端也只是一个中等饱和的
-       * 橙。中文字形在低对比度下尤其难读。
-       *
-       * 现在暗端提到深金 `0x5a3c08`（明显比面板亮），
-       * 亮端到 `0xffc040`（高饱和金），边框到 `0xfff0a0`。
-       */
-      const t = Math.min(1, Math.max(0, playerCast.progress));
-      /**
-       * 第二次调亮把暗端提到 `0x5a3c08` 之后**仍然偏暗** ——
-       * 因为"读条刚开始"恰恰是最需要被看到的一刻（玩家要知道
-       * 自己正在酝酿），而那时进度接近 0，颜色也最暗。
-       *
-       * 所以暗端直接取**饱和金** `0x8a5c10`，整条读条从头到尾都
-       * 明显亮于面板底色；进度只负责"更亮"而不是"从黑到亮"。
-       */
-      /**
-       * ⚠️ 必须一起传 `fillAlpha: 1`。
-       *
-       * 踩过的坑：`Panel.set()` 是**累积 props** 后整块重绘，而
-       * `fillAlpha` 的默认值是 0.82（给普通半透明面板用的）。
-       * 我只传 `fill`/`line` 时，alpha 落到 0.82 —— 饱和金被压成
-       * 深橄榄色，"提亮"完全没生效（实测底色像素是 RGB(40,34,25)）。
-       */
+      this.playerCastBar.update(playerCast.progress);
       this.playerCastPanel.set({
-        fill: lerpColor(0x8a5c10, 0xffd050, t),
-        line: lerpColor(0xe0b050, 0xfff4c0, t),
-        fillAlpha: 1,
+        line: playerCast.progress > 0.7 ? 0xfff4c0 : 0xd8a840,
       });
     }
 
