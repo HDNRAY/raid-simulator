@@ -567,12 +567,12 @@ function emptyView(tick: number): BattleSnapshotView {
  * （基础 → 强击 → 派生 → 持续 → 终结 → 防御）。
  */
 export const DEFAULT_SLOTS: readonly SlotBinding[] = [
-  { index: 0, key: '1', skillId: 'attack' },
-  { index: 1, key: '2', skillId: 'blast' },
-  { index: 2, key: '3', skillId: 'focus' },
-  { index: 3, key: '4', skillId: 'break' },
-  { index: 4, key: 'q', skillId: 'dodge' },
-  { index: 5, key: 'e', skillId: 'guard' },
+  { index: 0, key: 'q', skillId: 'attack' },
+  { index: 1, key: 'w', skillId: 'blast' },
+  { index: 2, key: 'e', skillId: 'focus' },
+  { index: 3, key: 'r', skillId: 'break' },
+  { index: 4, key: 'a', skillId: 'dodge' },
+  { index: 5, key: 's', skillId: 'guard' },
 ];
 
 /** GCD 时长再导出，避免渲染层直接 import core/combat。 */

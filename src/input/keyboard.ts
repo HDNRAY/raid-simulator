@@ -35,25 +35,28 @@ export interface KeyBinding {
 }
 
 /**
- * 默认键位（2026-10-09 重做）。
+ * 默认键位：**Q W E R / A S D F 手位区**。
  *
- * 只有 6 个技能，所以布局按**手位**而不是"循环优先级"排：
+ * 本作没有位移，所以左手最自然的这块键区整体留给技能。
+ * 6 个技能铺在一块 2×4 上：
  *
- *   1 / 2 / 3 = 输出与增益（食指、中指、无名指，最顺）
- *   4         = 破（打断）—— 放在最外侧，因为它是"应急键"，
- *               不该和输出键混在一起误触
- *   Q         = 闪 —— 拇指/小指位，闪避要能在输出节奏中零延迟插入
- *   E         = 防 —— 按住键，无名指按住时其余手指还能按 1/2/3
+ *   上排  Q W E R
+ *   下排  A S D F
  *
- * 本作没有位移，所以 WASD 整块空出来给技能。
+ *   Q = 攻（普攻，最常用的按在最短的食指/无名指位上）
+ *   W = 轰   E = 凝   R = 破（打断，放最外侧 —— 应急键要和输出键隔开）
+ *   A = 闪    S = 防
+ *
+ * **D / F 暂时空着**：技能以后会增加，这两个位置留着不动，
+ * 玩家已经形成的肌肉记忆就不用重来。
  */
 export const DEFAULT_BINDINGS: readonly KeyBinding[] = [
-  { key: '1', skillId: 'attack' },
-  { key: '2', skillId: 'blast' },
-  { key: '3', skillId: 'focus' },
-  { key: '4', skillId: 'break' },
-  { key: 'q', skillId: 'dodge' },
-  { key: 'e', skillId: 'guard' },
+  { key: 'q', skillId: 'attack' },
+  { key: 'w', skillId: 'blast' },
+  { key: 'e', skillId: 'focus' },
+  { key: 'r', skillId: 'break' },
+  { key: 'a', skillId: 'dodge' },
+  { key: 's', skillId: 'guard' },
 ];
 
 /** 需要拦掉默认行为的键（浏览器会用它们做别的）。 */
