@@ -21,6 +21,7 @@ import { PALETTE } from './theme';
 import { CastBar } from '../ui/CastBar';
 import { LogPanel } from '../ui/LogPanel';
 import { FONT, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../ui/layout';
+import { UiLayout } from '../ui/uiLayout';
 import { DISPLAY_SCALE } from '../data/balance';
 
 /** 冷却矮条的最大高度（取自布局表，避免两处写魔数）。 */
@@ -279,6 +280,14 @@ class SkillBarView {
     skillCd: Label;
     rect: { x: number; y: number; w: number; h: number };
   }> = [];
+  /**
+   * UI 缩放系数（默认 1）。
+   *
+   * 缩放变化时**重建**整条栏（清空 slots + `slotCount = 0`，让 `ensure`
+   * 重新算几何）—— 技能格的尺寸、间距、右对齐位置、字号都要跟着变，
+   * 逐项改比重建更容易漏。重建只在用户拖 slider 时发生，不在热路径。
+   */
+  private uiScale = 1;
   private readonly pixi: PixiCtor;
   private slotCount = 0;
 
@@ -290,11 +299,48 @@ class SkillBarView {
     this.root = new pixi.Container();
   }
 
+  /**
+   * 设定 UI 缩放。
+   *
+   * ⚠️ 必须把旧的 Graphics **从显示列表里移除**，而不只是清空数组：
+   * `this.slots.length = 0` 只丢引用，那些 Graphics 仍然是 `root` 的
+   * 子节点 —— 于是下一次 `ensure` 建的新格子会和旧的**叠在一起**
+   * （实测：缩放后技能栏出现两层，一层原尺寸一层放大）。
+   *
+   * 用 `destroy({ children: true })` 一并释放纹理。
+   */
+  setUiScale(scale: number): void {
+    if (scale === this.uiScale) return;
+    this.uiScale = scale;
+    /**
+     * ⚠️ **每个格子里的东西都要销毁**，不只是底图 `gfx`。
+     *
+     * 踩过的坑：第一版只 `gfx.destroy()` —— 但 `glyph` / `key` / `cd` /
+     * `cost` / `skillCd` 这些 Label 也是 `root` 的**直接子节点**，
+     * 不会被 `gfx` 的销毁带走。于是缩放后新旧两层叠在一起
+     * （实测「攻」出现两次：`699,494` 与 `575,484`）。
+     */
+    for (const slot of this.slots) {
+      for (const node of [
+        slot.gfx,
+        slot.glyph.root,
+        slot.key.root,
+        slot.cd.root,
+        slot.cost.root,
+        slot.skillCd.root,
+      ]) {
+        node.destroy({ children: true });
+      }
+    }
+    this.slots.length = 0;
+    this.slotCount = 0;
+  }
+
   private ensure(count: number): void {
     const target = Math.min(count, LAYOUT.skillBar.max);
     while (this.slots.length < target) {
       const i = this.slots.length;
-      const rect = skillSlotRect(i, target);
+      const rect = skillSlotRect(i, target, this.uiScale);
       const pos = skillSlotLabels(rect);
       const gfx = new this.pixi.Graphics();
 
@@ -317,7 +363,8 @@ class SkillBarView {
         x: pos.glyph.x,
         y: pos.glyph.y,
         // 图标用专门的字号（32px），比 body 大得多 —— 见 FONT.skillIcon
-        size: FONT.skillIcon,
+        // 字号跟着 UI 缩放 —— 见 `Label.setSize` 的说明
+        size: Math.max(1, Math.round(FONT.skillIcon * this.uiScale)),
         color: 0xffffff,
         // 双向居中 —— 需求指出技能字原先"位置也不是居中的"
         anchorX: 0.5,
@@ -341,7 +388,7 @@ class SkillBarView {
       const key = new Label(this.pixi, {
         x: pos.key.x,
         y: pos.key.y,
-        size: FONT.tiny,
+        size: Math.max(1, Math.round(FONT.tiny * this.uiScale)),
         color: 0x9090a0,
       });
       /**
@@ -353,7 +400,7 @@ class SkillBarView {
       const cd = new Label(this.pixi, {
         x: pos.cooldown.x,
         y: pos.cooldown.y,
-        size: FONT.cd,
+        size: Math.max(1, Math.round(FONT.cd * this.uiScale)),
         color: 0xffffff,
         anchorX: 0.5,
         anchorY: 0.5,
@@ -371,8 +418,8 @@ class SkillBarView {
         x: pos.skillCd.x,
         // 与右侧的代价**同一行对齐**：两者锚点不同（这里底对齐、
         // 代价也是底对齐），但小字形的下伸不同，实测差 2px，补上
-        y: pos.skillCd.y - 2,
-        size: FONT.tiny,
+        y: pos.skillCd.y - Math.max(1, Math.round(2 * this.uiScale)),
+        size: Math.max(1, Math.round(FONT.tiny * this.uiScale)),
         color: 0x8c8c9e,
         anchorY: 1,
       });
@@ -385,7 +432,7 @@ class SkillBarView {
       const cost = new Label(this.pixi, {
         x: pos.cost.x,
         y: pos.cost.y,
-        size: FONT.tiny,
+        size: Math.max(1, Math.round(FONT.tiny * this.uiScale)),
         color: 0xffffff,
         anchorX: 1,
         anchorY: 1,
@@ -401,7 +448,7 @@ class SkillBarView {
       this.slotCount = target;
       // 右对齐：槽位数变化时整条栏向左延展
       for (let i = 0; i < this.slots.length; i += 1) {
-        const rect = skillSlotRect(i, target);
+        const rect = skillSlotRect(i, target, this.uiScale);
         const pos = skillSlotLabels(rect);
         const s = this.slots[i];
         if (!s) continue;
@@ -642,6 +689,8 @@ export class BattleScene {
   /* 图标条 */
   private readonly bossBuffs: IconStrip;
   private readonly playerBuffs: IconStrip;
+  /** UI 缩放系数（默认 1）——只影响 UI 部件，不影响画布与战斗画面 */
+  private uiScale = 1;
 
   private readonly skillBar: SkillBarView;
   private readonly floating: FloatingTextLayer;
@@ -1007,6 +1056,60 @@ export class BattleScene {
     g.poly([cx + 44, base - 8, cx + 68, base - 87, cx + 74, base - 84, cx + 48, base + 1]);
     g.fill(0xb8bcc8);
     g.rect(cx + 34, base - 11, 18, 12).fill(0xa8863c);
+  }
+
+  /**
+   * **UI 缩放**（需求："缩放游戏 UI……战斗画面和战斗文字保持不变"）。
+   *
+   * 只作用于 UI 部件，**不碰画布尺寸** —— 画布仍是 960×540 的逻辑
+   * 分辨率，所以角色、场景、飘字都不受影响。这与"整体缩放画布"是
+   * 两回事，后者会把战斗画面一起放大。
+   *
+   * 目前作用范围：技能栏 + 玩家面板（含三根资源条与它们的文字）。
+   * 其它部件（顶栏、日志面板）暂不缩放 —— 它们贴屏幕边缘，
+   * 缩放收益小，而改动的风险不小。
+   */
+  setUiScale(scale: number): void {
+    if (scale === this.uiScale) return;
+    this.uiScale = scale;
+    this.skillBar.setUiScale(scale);
+
+    const ui = new UiLayout(scale);
+    const pf = ui.playerPanel;
+    this.playerPanel.set({ x: pf.x, y: pf.y, w: pf.w, h: pf.h });
+
+    /**
+     * 资源条与文字**一起重排**。
+     *
+     * ⚠️ 字必须跟着走：只放大框不挪字，会出现"面板很大、字挤在角上"。
+     * 条的几何走 `Bar.setRect`（它会重置缓存强制重绘），
+     * 文字走 `anchorY: 0.5` + 条中线 —— 所以这里只改坐标，不改偏移。
+     */
+    const { h: barH, top: barsTop, stride } = ui.playerBars;
+    const barX = pf.x + ui.len(8);
+    const barW = pf.w - ui.len(16);
+    const bars: Array<{ bar: Bar; label: Label; text: Label }> = [
+      { bar: this.hpBar, label: this.hpLabel, text: this.hpText },
+      { bar: this.energyBar, label: this.energyLabel, text: this.energyText },
+      { bar: this.douqiBar, label: this.douqiLabel, text: this.douqiText },
+    ];
+    /**
+     * 字号也要跟着缩放 —— 只放大框不放大字，会变成"面板很大、字很小"。
+     * `Label.setSize` 会触发纹理重光栅化，所以只在缩放变化时调
+     * （`setUiScale` 本身就有"值没变就 return"的短路）。
+     */
+    const textSize = ui.len(FONT.small);
+    for (const [row, entry] of bars.entries()) {
+      const y = pf.y + barsTop + row * stride;
+      entry.bar.setRect({ x: barX, y, w: barW, h: barH });
+      const midY = y + barH / 2;
+      entry.label.setSize(textSize);
+      entry.label.root.x = barX + ui.len(4);
+      entry.label.root.y = midY;
+      entry.text.setSize(textSize);
+      entry.text.root.x = barX + barW - ui.len(4);
+      entry.text.root.y = midY;
+    }
   }
 
   /**

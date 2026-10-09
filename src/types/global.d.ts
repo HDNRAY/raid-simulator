@@ -16,6 +16,8 @@ declare global {
        * 端到端脚本用它来"按某个技能"，而不是把键位写死在脚本里。
        */
       bindings(): readonly { readonly key: string; readonly skillId: string }[];
+      /** 设定 UI 缩放（端到端脚本用） */
+      setUiScale(value: number): void;
       /** Pixi 根容器（调试用：读取渲染层实际写入的文本） */
       stage: unknown;
       /** 设置界面（调试用：headless 下模拟点击不可靠） */

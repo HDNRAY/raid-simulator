@@ -214,13 +214,7 @@ async function bootstrap(): Promise<void> {
    * `ResizeObserver` 不会因为"视口尺寸没变"而重新回调。
    */
   let uiScale = 1;
-  const stageObserver = observeStage(
-    stage,
-    app.canvas,
-    SCALING_MODE,
-    () => {},
-    () => uiScale,
-  );
+  const stageObserver = observeStage(stage, app.canvas, SCALING_MODE, () => {});
 
   /* ---------- 主循环 ---------- */
   app.ticker.add(() => {
@@ -286,6 +280,16 @@ async function bootstrap(): Promise<void> {
      * 只看截图无法区分"没画"和"画了但看不见"。
      */
     stage: app.stage,
+    /**
+     * 设定 UI 缩放（端到端脚本用）。
+     *
+     * 走的是设置面板的**同一条路径**（`onUiScale` → `scene.setUiScale`），
+     * 所以它验证的就是真实行为，不是另一套旁路。
+     */
+    setUiScale: (value: number) => {
+      uiScale = clampUiScale(value);
+      scene.setUiScale(uiScale);
+    },
     /**
      * 设置界面的调试入口。
      *
@@ -398,8 +402,16 @@ async function bootstrap(): Promise<void> {
     getUiScale: () => uiScale,
     onUiScale: (value) => {
       uiScale = clampUiScale(value);
-      // 视口尺寸没变，ResizeObserver 不会回调 —— 必须手动重测一次
-      stageObserver.refresh();
+      /**
+       * ⚠️ **不重测画布**（`stageObserver.refresh()`）。
+       *
+       * 需求澄清过："我不是说缩放整个游戏画面，我是指，缩放游戏 UI，
+       * 比如面板、技能图标等，战斗画面和战斗文字保持不变。"
+       *
+       * 所以缩放系数**只传给渲染层的 UI 部件**，画布尺寸照旧（自动适配）。
+       * 之前那版调 `refresh()` 会把整个画面一起放大 —— 方向错了。
+       */
+      scene.setUiScale(uiScale);
     },
   });
   app.stage.addChild(settings.root);

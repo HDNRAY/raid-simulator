@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { LogFormatter } from '../../src/app/logFormat';
-import { LAYOUT, LOGICAL } from '../../src/ui/layout';
+import { LAYOUT, LOGICAL, scaleUiRect } from '../../src/ui/layout';
+import { UiLayout } from '../../src/ui/uiLayout';
 import {
   UI_SCALE_MAX,
   UI_SCALE_MIN,
@@ -238,16 +239,22 @@ describe('UI 缩放（设置 · 通用页的 slider）', () => {
     }
   });
 
-  it('倍数乘在自动适配之上', () => {
-    const base = computeScale(1920, 1080, 'fit');
-    expect(computeScale(1920, 1080, 'fit', 1.5)).toBeCloseTo(base * 1.5, 10);
-    // 非有限输入不能让画布变成 NaN 宽
-    expect(computeCanvasCssSize(1920, 1080, 'fit', 1.5).width).toBe(
-      Math.round(LOGICAL.width * base * 1.5),
-    );
+  it('【关键】UI 缩放**不影响画布** —— 战斗画面保持不变', () => {
+    /**
+     * 需求澄清："我不是说缩放整个游戏画面，我是指，缩放游戏 UI……
+     * 战斗画面和战斗文字保持不变。"
+     *
+     * 所以画布尺寸只由"自动适配视口"决定，与 UI 系数无关。
+     * 这条断言的是**接口本身**：`computeScale` 不再接受倍率参数。
+     */
+    const a = computeScale(1920, 1080, 'fit');
+    const b = computeScale(1920, 1080, 'fit');
+    expect(a).toBe(b);
+    // 画布 CSS 尺寸也不该受任何"UI 系数"影响 —— 它只有 3 个参数
+    expect(computeCanvasCssSize.length).toBeLessThanOrEqual(3);
   });
 
-  it('slider 的矩形在弹窗内、且在 tab 行下方', () => {
+  it('slider 的矩形在弹窗内、且在 **tab 栏下方**（不遮挡）', () => {
     const rect = uiScaleSliderRect();
     expect(rect.x).toBeGreaterThanOrEqual(SETTINGS_PANEL.x);
     expect(rect.x + rect.w).toBeLessThanOrEqual(SETTINGS_PANEL.x + SETTINGS_PANEL.w);
@@ -383,5 +390,64 @@ describe('日志不该被按键频率放大', () => {
     const f = new LogFormatter();
     f.consume([damage({ tick: 1, amount: 10 }), damage({ tick: 2, amount: 10 })]);
     expect(f.all()).toHaveLength(2);
+  });
+});
+
+describe('UI 缩放：只缩放 UI，不缩放战斗画面', () => {
+  /**
+   * 需求澄清："我不是说缩放整个游戏画面，我是指，缩放游戏 UI，
+   * 比如面板、技能图标等，战斗画面和战斗文字保持不变。"
+   */
+  it('【关键】缩放按**锚点**进行 —— 否则右下角的技能栏会离开右下角', () => {
+    const base = { x: 100, y: 200, w: 40, h: 40 };
+    // 贴右下：右下角坐标不变
+    const br = scaleUiRect(base, 'bottom-right', 1.5);
+    expect(br.x + br.w).toBe(base.x + base.w);
+    expect(br.y + br.h).toBe(base.y + base.h);
+    expect(br.w).toBe(60);
+    // 贴左下：左下角坐标不变
+    const bl = scaleUiRect(base, 'bottom-left', 1.5);
+    expect(bl.x).toBe(base.x);
+    expect(bl.y + bl.h).toBe(base.y + base.h);
+    // 贴顶：水平居中且顶边不变
+    const t = scaleUiRect({ x: 0, y: 0, w: 100, h: 10 }, 'top', 2);
+    expect(t.y).toBe(0);
+    expect(t.x + t.w / 2).toBe(50);
+  });
+
+  it('技能栏缩放后仍然**右对齐**（最后一格的右缘贴边距）', () => {
+    const ui = new UiLayout(1.5);
+    const rect = ui.skillSlotRect(5, 6);
+    const expectedRight = LOGICAL.width - Math.round(LAYOUT.skillBar.right * 1.5);
+    expect(rect.x + rect.w).toBe(expectedRight);
+    // 格子也变大了
+    expect(rect.w).toBe(Math.round(LAYOUT.skillBar.slot * 1.5));
+  });
+
+  it('技能栏缩放后**底边**保持不动（不往画布下方跑）', () => {
+    const a = new UiLayout(1);
+    const b = new UiLayout(2);
+    const baseBottom = a.skillSlotRect(0, 6).y + a.skillSlotRect(0, 6).h;
+    const scaledBottom = b.skillSlotRect(0, 6).y + b.skillSlotRect(0, 6).h;
+    expect(scaledBottom).toBe(baseBottom);
+  });
+
+  it('系数被钳到合法范围（解析器是唯一入口）', () => {
+    expect(new UiLayout(99).scale).toBe(UI_SCALE_MAX);
+    expect(new UiLayout(0.01).scale).toBe(UI_SCALE_MIN);
+    expect(new UiLayout(Number.NaN).scale).toBe(1);
+  });
+
+  it('玩家面板按左下锚点缩放，资源条的行距跟着变', () => {
+    const a = new UiLayout(1);
+    const b = new UiLayout(2);
+    const pa = a.playerPanel;
+    const pb = b.playerPanel;
+    // 左下角不动
+    expect(pb.x).toBe(pa.x);
+    expect(pb.y + pb.h).toBe(pa.y + pa.h);
+    // 条高与行距翻倍
+    expect(b.playerBars.h).toBe(a.playerBars.h * 2);
+    expect(b.playerBars.stride).toBe(a.playerBars.stride * 2);
   });
 });

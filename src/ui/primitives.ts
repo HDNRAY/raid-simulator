@@ -89,7 +89,8 @@ export interface BarProps {
 export class Bar {
   readonly root: Container;
   private readonly gfx: Graphics;
-  private readonly props: BarProps;
+  /** 几何是可变的 —— UI 缩放时要整体重排（见 `setRect`）。 */
+  private props: BarProps;
   /** 上一次的值，用于跳过无变化的绘图 */
   private lastRatio = -1;
 
@@ -98,6 +99,17 @@ export class Bar {
     this.root = new pixi.Container();
     this.gfx = new pixi.Graphics();
     this.root.addChild(this.gfx);
+  }
+
+  /**
+   * 改几何（UI 缩放时用）。
+   *
+   * ⚠️ 必须把 `lastRatio` 置回 -1：否则"新尺寸 + 相同数值"会被
+   * 跳过重绘，条还停在旧尺寸上（表现为"改了缩放但条没变"）。
+   */
+  setRect(rect: { readonly x: number; readonly y: number; readonly w: number; readonly h: number }): void {
+    this.props = { ...this.props, ...rect };
+    this.lastRatio = -1;
   }
 
   /** `ratio` 会被钳到 [0,1]；NaN 视作 0（见数值纪律）。 */
@@ -188,6 +200,21 @@ export class Label {
 
   setColor(color: number): void {
     this.root.style.fill = css(color);
+  }
+
+  /**
+   * 改字号（UI 缩放时用）。
+   *
+   * ⚠️ Pixi 的 `Text` 在 `style.fontSize` 变化时会**重新光栅化**纹理 ——
+   * 所以这不是免费操作，别放在每帧路径上。调用方要记住"上次设定的字号"，
+   * 只在缩放真的变了的时候调（见 `SkillBarView` 里的 `lastIconSize`）。
+   *
+   * 之前没有这个方法，导致"缩放 UI"只放大了格子与间距、**字没变** ——
+   * 看起来就是"图标没放大"。
+   */
+  setSize(size: number): void {
+    if (this.root.style.fontSize === size) return;
+    this.root.style.fontSize = size;
   }
 }
 

@@ -265,12 +265,26 @@ export const LAYOUT = {
 export function skillSlotRect(
   index: number,
   total: number,
+  /**
+   * UI 缩放系数（默认 1）。
+   *
+   * ⚠️ 右对齐关系必须在**缩放后的坐标系里重算**：直接把结果乘系数
+   * 会让最后一格离开右边距（它不再是"贴右"的）。所以尺寸与边距
+   * 各自乘系数，位置用缩放后的值重排。
+   */
+  uiScale = 1,
 ): { x: number; y: number; w: number; h: number } {
   const { slot, gap, y, right, max } = LAYOUT.skillBar;
+  const k = Number.isFinite(uiScale) && uiScale > 0 ? uiScale : 1;
+  const size = Math.max(1, Math.round(slot * k));
+  const spacing = Math.max(1, Math.round(gap * k));
+  const margin = Math.max(1, Math.round(right * k));
   const count = Math.max(1, Math.min(total, max));
-  const totalW = count * slot + (count - 1) * gap;
-  const startX = LOGICAL.width - right - totalW;
-  return { x: startX + index * (slot + gap), y, w: slot, h: slot };
+  const totalW = count * size + (count - 1) * spacing;
+  const startX = LOGICAL.width - margin - totalW;
+  // 底边对齐：底边位置不随缩放变（栏始终贴着技能栏那条基线）
+  const baseY = y + slot - size;
+  return { x: startX + index * (size + spacing), y: Math.round(baseY), w: size, h: size };
 }
 
 /**
@@ -367,3 +381,73 @@ export function skillSlotLabels(rect: {
     cost: { x: rect.x + rect.w - 3, y: rect.y + rect.h - 3 },
   };
 }
+
+/* ------------------------------------------------------------------ *
+ * UI 缩放
+ * ------------------------------------------------------------------ */
+
+/**
+ * UI 元素的**锚点** —— 决定缩放时它从哪里长出去。
+ *
+ * 需求："我不是说缩放整个游戏画面，我是指，缩放游戏 UI，比如面板、
+ * 技能图标等，战斗画面和战斗文字保持不变，因此你可能需要新加一个
+ * 缩放系数"。
+ *
+ * ⚠️ 为什么"整体缩放画布"不行：那样连战斗画面（角色、场景）和飘字
+ * 都一起变了。而玩家想放大的是**读数用的部件**。
+ *
+ * 另一个坑：UI 元素是**绝对定位**的，直接乘系数会让它们朝画布中心
+ * 挤过去（右下角的技能栏会离开右下角）。所以必须**按锚点缩放** ——
+ * 贴右下角的从右下角长、贴左下角的从左下角长。
+ */
+export type UiAnchor =
+  | 'bottom-left'
+  | 'bottom-right'
+  | 'top'
+  | 'top-left'
+  | 'right';
+
+/**
+ * 按锚点缩放一个矩形。
+ *
+ * 语义：把矩形在**该锚点方向**上放大/缩小，锚点本身的位置保持不变。
+ * 例：技能栏锚在 `bottom-right`，放大 150% 后它仍然贴着右下角，
+ * 只是向左、向上各长出一半。
+ */
+export function scaleUiRect(
+  rect: { readonly x: number; readonly y: number; readonly w: number; readonly h: number },
+  anchor: UiAnchor,
+  scale: number,
+): { readonly x: number; readonly y: number; readonly w: number; readonly h: number } {
+  const w = Math.round(rect.w * scale);
+  const h = Math.round(rect.h * scale);
+  switch (anchor) {
+    case 'bottom-left':
+      return { x: rect.x, y: rect.y + rect.h - h, w, h };
+    case 'bottom-right':
+      return { x: rect.x + rect.w - w, y: rect.y + rect.h - h, w, h };
+    case 'top-left':
+      return { x: rect.x, y: rect.y, w, h };
+    case 'top':
+      // 水平居中、贴顶
+      return { x: Math.round(rect.x + (rect.w - w) / 2), y: rect.y, w, h };
+    case 'right':
+      // 贴右、垂直居中
+      return { x: rect.x + rect.w - w, y: Math.round(rect.y + (rect.h - h) / 2), w, h };
+  }
+}
+
+/**
+ * 各 UI 部件的锚点。
+ *
+ * 集中在一处声明，而不是散在渲染代码里 —— 这样"技能栏贴右下"这种
+ * 约定只有一份，缩放、布局测试、将来的拖拽调整都用同一份。
+ */
+export const UI_ANCHORS = {
+  playerPanel: 'bottom-left',
+  playerCastBar: 'bottom-left',
+  playerBars: 'bottom-left',
+  skillBar: 'bottom-right',
+  bossBar: 'top',
+  bossHp: 'top',
+} as const satisfies Readonly<Record<string, UiAnchor>>;

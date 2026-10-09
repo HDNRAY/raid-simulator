@@ -28,13 +28,6 @@ export function computeScale(
   viewportW: number,
   viewportH: number,
   mode: ScalingMode,
-  /**
-   * 用户可调的额外倍数（设置里的"UI 缩放"）。
-   *
-   * 乘在自动适配结果之上 —— 于是"120%"不依赖具体窗口尺寸，
-   * 语义稳定。调用方负责把范围钳到 `UI_SCALE_MIN..MAX`。
-   */
-  scaleMultiplier = 1,
 ): number {
   if (!Number.isFinite(viewportW) || !Number.isFinite(viewportH)) return 1;
   if (viewportW <= 0 || viewportH <= 0) return 1;
@@ -42,8 +35,7 @@ export function computeScale(
   const fit = Math.min(viewportW / LOGICAL_W, viewportH / LOGICAL_H);
   if (fit <= 0) return 1;
 
-  const base = mode === 'integer' ? Math.max(1, Math.floor(fit)) : fit;
-  return base * scaleMultiplier;
+  return mode === 'integer' ? Math.max(1, Math.floor(fit)) : fit;
 }
 
 /** 计算 canvas 的 CSS 尺寸（始终保持 16:9）。 */
@@ -51,9 +43,8 @@ export function computeCanvasCssSize(
   viewportW: number,
   viewportH: number,
   mode: ScalingMode,
-  scaleMultiplier = 1,
 ): { width: number; height: number; scale: number } {
-  const scale = computeScale(viewportW, viewportH, mode, scaleMultiplier);
+  const scale = computeScale(viewportW, viewportH, mode);
   return {
     scale,
     width: Math.round(LOGICAL_W * scale),

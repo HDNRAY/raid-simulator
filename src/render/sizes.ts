@@ -27,19 +27,15 @@ export interface StageSize {
 /**
  * 计算当前视口下 canvas 应有的 CSS 尺寸与黑边。
  *
- * `scaleMultiplier` 是**用户可调**的额外倍数（设置里的"UI 缩放"），
- * 乘在自动适配之上，所以"120%"在任意窗口下都是"比自动适配再大 20%"。
+ * ⚠️ 这里**没有**用户缩放倍数：画布永远是"自动适配视口"。
+ * 设置里的"UI 缩放"只作用于 UI 部件（`ui/uiLayout.ts`），
+ * 不改变画布 —— 需求明确要求"战斗画面保持不变"。
  */
-export function measureStage(
-  stage: HTMLElement,
-  mode: ScalingMode,
-  scaleMultiplier = 1,
-): StageSize {
+export function measureStage(stage: HTMLElement, mode: ScalingMode): StageSize {
   const { width, height, scale } = computeCanvasCssSize(
     stage.clientWidth,
     stage.clientHeight,
     mode,
-    scaleMultiplier,
   );
   return {
     width,
@@ -79,17 +75,9 @@ export function observeStage(
   canvas: HTMLCanvasElement,
   mode: ScalingMode,
   onResize?: (size: StageSize) => void,
-  /**
-   * 额外的缩放倍数（用户可调，见设置里的"UI 缩放"）。
-   *
-   * 传**函数**而不是数值：这样它每次测量时读取当前值，
-   * 于是回调里改了倍数、只要再触发一次重测就生效 ——
-   * 不需要重建整个 observer。
-   */
-  scaleMultiplier: () => number = () => 1,
 ): { dispose: () => void; refresh: () => void } {
   const update = () => {
-    const size = measureStage(stage, mode, scaleMultiplier());
+    const size = measureStage(stage, mode);
     applyStageSize(canvas, size);
     onResize?.(size);
   };

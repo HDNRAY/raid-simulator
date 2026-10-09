@@ -114,8 +114,14 @@ export const RESET_BUTTON = {
  */
 export const UI_SCALE_SLIDER = {
   x: 16,
-  /** 距弹窗顶部的距离（tab 行下方） */
-  top: 56,
+  /**
+   * 距弹窗顶部的距离。
+   *
+   * ⚠️ 必须**大于 TAB_BAR 的底部**（40 + 30 = 70），否则会盖住 tab 栏。
+   * 需求："ui 缩放控件现在盖住了 tabbar，需要往下挪"。
+   * 取 96：距 tab 栏底 26px，是"另一组设置"该有的间距。
+   */
+  top: 96,
   w: 320,
   h: 24,
 } as const;

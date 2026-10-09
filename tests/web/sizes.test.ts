@@ -80,15 +80,12 @@ describe('observeStage', () => {
     dispose();
   });
 
-  it('refresh() 按**当前**缩放倍数重测（用户拖 slider 时用）', () => {
+  it('refresh() 用当前视口重测（面板尺寸变化后可手动触发）', () => {
     const canvas = makeCanvas();
-    let multiplier = 1;
-    const handle = observeStage(makeStage(1280, 720), canvas, 'fit', () => {}, () => multiplier);
+    const handle = observeStage(makeStage(1280, 720), canvas, 'fit');
     expect(canvas.style.width).toBe('1280px');
-    // 用户把 UI 缩放调到 150%（视口没变，ResizeObserver 不会自己回调）
-    multiplier = 1.5;
     handle.refresh();
-    expect(canvas.style.width).toBe('1920px');
+    expect(canvas.style.width).toBe('1280px');
     handle.dispose();
   });
 

@@ -26,9 +26,9 @@
 
 import type { Container, Graphics } from 'pixi.js';
 import { PALETTE } from '../../render/theme';
-import { UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP, clampUiScale } from '../../render/scaling';
 import { FONT, LOGICAL } from '../layout';
 import { isReservedKey, reservedKeyLabel } from '../../input/keyboard';
+import { ScaleSlider } from './ScaleSlider';
 import { Label, Panel, type PixiCtor } from '../primitives';
 import {
   INITIAL_FOCUS,
@@ -40,7 +40,6 @@ import {
   resetButtonRect,
   resolveKeyAction,
   tabRect,
-  uiScaleSliderRect,
   KEY_GRID_CAPACITY,
   hintLineY,
   moveFocus,
@@ -99,9 +98,14 @@ export class SettingsPanel {
   private readonly title: Label;
   private readonly closeHint: Label;
 
-  /** UI 缩放 slider 的标签（左：名称，右：百分比） */
-  private readonly scaleLabel: Label;
-  private readonly scaleValue: Label;
+  /**
+   * UI 缩放滑块。
+   *
+   * 抽成独立组件（需求指出原先"没有做好组件和模块化"）——
+   * 第一版把两个 Label 直接建在 body 上，切 tab 时不清理，
+   * 于是滑块漏到了按键页。现在**显示/隐藏由组件自己拥有**。
+   */
+  private readonly scaleSlider: ScaleSlider;
 
   private readonly tabButtons: Array<{
     tab: SettingsTab;
@@ -268,22 +272,14 @@ export class SettingsPanel {
     this.resetButton = { gfx: resetGfx, label: resetLabel, rect: resetRect };
     this.body.addChild(resetGfx, resetLabel.root);
 
-    /* ---------- 通用页：UI 缩放 slider ---------- */
-    const slider = uiScaleSliderRect();
-    this.scaleLabel = new Label(pixi, {
-      x: slider.x,
-      y: slider.y,
-      size: FONT.body,
-      color: PALETTE.text,
+    /* ---------- 通用页：UI 缩放滑块 ---------- */
+    this.scaleSlider = new ScaleSlider({
+      pixi,
+      translate: options.translate,
+      get: options.getUiScale,
+      set: options.onUiScale,
     });
-    this.scaleValue = new Label(pixi, {
-      x: slider.x + slider.w,
-      y: slider.y,
-      size: FONT.body,
-      color: PALETTE.text,
-      anchorX: 1,
-    });
-    this.body.addChild(this.scaleLabel.root, this.scaleValue.root);
+    this.body.addChild(this.scaleSlider.root);
 
     this.drawFrame();
   }
@@ -428,8 +424,7 @@ export class SettingsPanel {
          */
         const horizontal = action.direction === 'left' || action.direction === 'right';
         if (this.focus.zone === 'slider' && horizontal) {
-          const delta = action.direction === 'right' ? UI_SCALE_STEP : -UI_SCALE_STEP;
-          this.options.onUiScale(clampUiScale(this.options.getUiScale() + delta));
+          this.scaleSlider.nudge(action.direction === 'right' ? 1 : -1);
           this.redraw();
           return true;
         }
@@ -648,7 +643,15 @@ export class SettingsPanel {
     for (const row of this.rowLabels) {
       row.name.set('');
       row.key.set('');
+      row.tags.set('');
     }
+    /**
+     * **离开通用页时藏起滑块。**
+     *
+     * 只在这一处写"隐藏"，通用页分支只写"显示" —— 单一职责，
+     * 不会再出现"某个 tab 忘了清"的情况（第一版正是这样漏的）。
+     */
+    this.scaleSlider.setVisible(false);
 
     if (this.tab === 'general') {
       // 通用 tab 目前是空的 —— 明确写出来，而不是给一片空白
@@ -656,7 +659,15 @@ export class SettingsPanel {
       // 通用页没有"恢复默认键位"，那一栏留空（它属于按键页）
       this.resetButton.label.set('');
       this.resetButton.gfx.clear();
-      this.drawGeneralBody();
+      /**
+       * 通用页的控件：**显示** + 重画。
+       *
+       * ⚠️ 这里只负责"现在是通用页"；**隐藏由下面那行统一处理** ——
+       * 两处都写 hide 就会漏（第一版就是这样漏到按键页的）。
+       */
+      this.scaleSlider.setVisible(true);
+      this.scaleSlider.setFocused(this.focus.zone === 'slider');
+      this.scaleSlider.redraw();
       return;
     }
 
@@ -731,51 +742,6 @@ export class SettingsPanel {
   }
 
   /** 空 tab 的占位：一行主文案 + 一行提示，避免一片空白让人以为坏了。 */
-  /**
-   * 「通用」页的内容：目前只有 **UI 缩放**。
-   *
-   * 画法：名称在左、百分比在右、中间一条轨道 + 一个方块把手。
-   * 焦点落在它上面时加一圈描边（与其它焦点态同一套语言）。
-   */
-  private drawGeneralBody(): void {
-    const rect = uiScaleSliderRect();
-    const scale = clampUiScale(this.options.getUiScale());
-    const t = (scale - UI_SCALE_MIN) / (UI_SCALE_MAX - UI_SCALE_MIN);
-    const focused = this.focus.zone === 'slider';
-
-    this.scaleLabel.set(this.options.translate('settings.uiScale'));
-    this.scaleValue.set(`${Math.round(scale * 100)}%`);
-    this.scaleValue.setColor(focused ? PALETTE.douqi.bright : PALETTE.text);
-    this.scaleLabel.setColor(focused ? PALETTE.douqi.bright : PALETTE.text);
-
-    const g = this.rowGfx;
-    /** 轨道：底部一条 4px 的细线（与技能栏的冷却条同一套语言） */
-    const trackY = rect.y + rect.h - 8;
-    const trackW = rect.w - 8;
-    g.rect(rect.x + 4, trackY, trackW, 4).fill({ color: 0x2a2c38, alpha: 1 });
-    g.rect(rect.x + 4, trackY, Math.round(trackW * t), 4).fill({
-      color: PALETTE.douqi.base,
-      alpha: 1,
-    });
-    /**
-     * 把手：一个 10×14 的方块。
-     *
-     * 用方块而不是圆：本作整套 UI 没有圆形元素（技能格、条、按钮
-     * 全是直角），一个圆把手会显得是"从别处搬来的控件"。
-     */
-    const knobW = 10;
-    const knobX = rect.x + 4 + Math.round(trackW * t) - knobW / 2;
-    g.rect(knobX, trackY - 6, knobW, 16).fill({
-      color: focused ? PALETTE.douqi.bright : 0xd8d8e4,
-      alpha: 1,
-    });
-    if (focused) {
-      g.rect(rect.x, rect.y, rect.w, rect.h).stroke({
-        color: PALETTE.douqi.bright,
-        width: 1.5,
-      });
-    }
-  }
 }
 
 /**
