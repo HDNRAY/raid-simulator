@@ -222,6 +222,64 @@ describe('AGENTS.md 硬规则：禁止类型断言逃生舱', () => {
     expect(offenders, `发现 ${offenders.length} 处违规：\n${offenders.join('\n')}`).toEqual([]);
   });
 
+  it('单文件不超过 700 行（已超限的走棘轮：不许再变大）', async () => {
+    const { readFileSync, globSync } = await import('node:fs');
+
+    /** 行数上限（AGENTS.md §3）。 */
+    const LIMIT = 700;
+
+    /**
+     * 规则生效时**已经**超限的文件 —— 它们不因规则生效而变小，
+     * 所以记录当时的行数当"天花板"，只要求**不再变大**。
+     *
+     * 这是棘轮（ratchet）：既让规则立刻可执行，又不需要为了过测试
+     * 去做一次大重构（那正是 AGENTS.md §3 说要先问用户的事）。
+     * 拆小之后请把对应条目从这张表里删掉。
+     */
+    const GRANDFATHERED: Record<string, number> = {
+      // ⚠️ 口径是 `content.split('\n').length`（末行没有换行符时比 `wc -l` 多 1）
+      'src/core/combat/battleState.ts': 1580,
+      'src/render/BattleScene.ts': 1421,
+      'src/core/types.ts': 1091,
+      'src/ui/settings/SettingsPanel.ts': 938,
+    };
+
+    const overLimit: string[] = [];
+    const ratchetBreaks: string[] = [];
+
+    for (const root of ['src', 'tests', 'tools']) {
+      let files: string[] = [];
+      try {
+        files = globSync(`${root}/**/*.{ts,tsx,mts,cts,mjs}`);
+      } catch {
+        continue;
+      }
+      for (const file of files) {
+        const lines = readFileSync(file, 'utf8').split('\n').length;
+        const ceiling = GRANDFATHERED[file];
+        if (ceiling === undefined) {
+          if (lines > LIMIT) overLimit.push(`${file} = ${lines} 行`);
+        } else if (lines > ceiling) {
+          ratchetBreaks.push(`${file} = ${lines} 行（天花板 ${ceiling}）`);
+        }
+      }
+    }
+
+    expect(
+      overLimit,
+      `以下文件超过 ${LIMIT} 行。按 AGENTS.md §3：**先问用户是否立刻拆分**，\n` +
+        `要拆就拆、并同步上面的 GRANDFATHERED 表；不拆也请把行数登记进去。\n` +
+        overLimit.join('\n'),
+    ).toEqual([]);
+
+    expect(
+      ratchetBreaks,
+      `以下文件已经超过 ${LIMIT} 行，这次改动还让它变得更大了。\n` +
+        `按 AGENTS.md §3：**先问用户是否立刻拆分**。\n` +
+        ratchetBreaks.join('\n'),
+    ).toEqual([]);
+  });
+
   it('扫描范围不是空的（防止路径写错导致假通过）', async () => {
     const { globSync } = await import('node:fs');
     let total = 0;
