@@ -1,33 +1,101 @@
-import { SimClient } from './app/simClient';
+import { BattleLoop } from './app/battleLoop';
+import { DEFAULT_SLOTS } from './app/viewAdapter';
+import { createRegistry } from './core/content/registry';
+import { VERROT_BEHAVIORS } from './core/ai';
+import { ALL_BUFFS, ALL_SKILLS } from './data/content';
+import { ENTROPY_CLOCK } from './data/entities/entropyClock';
+import { DEFAULT_BINDINGS } from './input/keyboard';
+import { flattenCatalog, translator } from './i18n/translator';
+import { zhCN } from './i18n/locales/zh-CN';
 import { LOGICAL_H, LOGICAL_W, type ScalingMode } from './render/scaling';
-import { observeStage, type StageSize } from './render/sizes';
-import { DebugPanel } from './ui/debug/DebugPanel';
+import { observeStage } from './render/sizes';
+import { BattleScene } from './render/BattleScene';
+import type { Combatant, StatKey, StatModifier } from './core/types';
 import './styles.css';
 
 /**
- * M0 启动入口。
+ * MVP 入口。
  *
- * 这一版把数据流跑通了：worker（或主线程退回）推进模拟 ->
- * 快照 -> 渲染层插值绘制。屏幕上那块色块**由 tick 驱动**，
- * 不是由 requestAnimationFrame 直接驱动 —— 这是 §2.3 那条约定的可见证据。
+ * 数据流（严格单向）：
+ *   键盘 → Action → 引擎 tick → 事件 → view-model → Pixi 场景
  *
- * 渲染内容仍是 M0 的占位（往复色块 + 调试面板）；
- * M5 起换成真正的战斗场景与 HUD。
+ * 渲染层**只读** view-model，从不反向调用引擎（架构规范 C3）。
  */
 
-/** 暂定默认值；M5 的设置界面会做成可持久化选项。 */
 const SCALING_MODE: ScalingMode = 'fit';
 
-/** 演示色块的尺寸与纵向位置（逻辑像素）。 */
-const BOX_W = 120;
-const BOX_H = 80;
-const BOX_Y = 200;
+/** 每场战斗的时限。超时判负。与 Boss 的 enrage 阈值一致。 */
+const TIME_LIMIT_MS = 180_000;
+
+/** 玩家基础属性。 */
+const PLAYER_BASE: Partial<Record<StatKey, number>> = {
+  strength: 120,
+  agility: 100,
+  intelligence: 110,
+  spirit: 100,
+};
+
+/** 玩家资源上限。 */
+const PLAYER_CAPS = { hp: 12_000, mp: 8_000, energy: 120, fury: 100 };
+
+/**
+ * Boss 资源上限。
+ *
+ * 15 万血配玩家约 1000 DPS → 一场约 2.5 分钟的战斗，
+ * 正好压在 3 分钟时限内、且在狂暴之前。
+ */
+const BOSS_CAPS = { hp: 150_000, mp: 0, energy: 0, fury: 0 };
+
+function makePlayer(): Combatant {
+  return {
+    id: 'player',
+    nameKey: 'hud.you',
+    side: 'ally',
+    caps: { ...PLAYER_CAPS },
+    resources: { hp: PLAYER_CAPS.hp, mp: PLAYER_CAPS.mp, energy: PLAYER_CAPS.energy, fury: 0 },
+    counters: {},
+    basePrimary: { strength: 120, agility: 100, intelligence: 110, spirit: 100 },
+    buffs: [],
+    cooldowns: {},
+    casts: [],
+    uses: {},
+    behaviors: [],
+    alive: true,
+  };
+}
+
+function makeBoss(): Combatant {
+  return {
+    id: 'verrot',
+    nameKey: 'boss.name',
+    side: 'enemy',
+    caps: { ...BOSS_CAPS },
+    resources: { hp: BOSS_CAPS.hp, mp: 0, energy: 0, fury: 0 },
+    counters: {},
+    basePrimary: { strength: 400, agility: 200, intelligence: 300, spirit: 200 },
+    buffs: [],
+    cooldowns: {},
+    casts: [],
+    uses: {},
+    behaviors: VERROT_BEHAVIORS,
+    alive: true,
+  };
+}
+
+/** 把熵之钟的能力展开成被动修正池（装备就是"被动修正的集合"）。 */
+function clockModifiers(): StatModifier[] {
+  const out: StatModifier[] = [];
+  for (const ability of ENTROPY_CLOCK.abilities) {
+    if (ability.kind === 'modifier') out.push(ability.modifier);
+    else if (ability.kind === 'derived') out.push({ ...ability.modifier, value: ability.value });
+  }
+  return out;
+}
 
 async function bootstrap(): Promise<void> {
   const stage = document.querySelector<HTMLElement>('#stage');
   if (!stage) throw new Error('index.html is missing the #stage container');
 
-  // 动态 import：Pixi 只在真正需要时加载，失败时错误更清楚
   const { Application, Container, Graphics, Text } = await import('pixi.js');
 
   const app = new Application();
@@ -35,137 +103,127 @@ async function bootstrap(): Promise<void> {
     width: LOGICAL_W,
     height: LOGICAL_H,
     resolution: 1,
-    // 不让 Pixi 按 devicePixelRatio 改 canvas 内部尺寸 —— 缩放一律交给 CSS
     autoDensity: false,
     antialias: false,
     roundPixels: true,
     background: 0x0a0a0f,
-    // 刻意不设 resizeTo：那会让 Pixi 自己改内部尺寸
   });
   stage.appendChild(app.canvas);
 
-  // ---- 演示图形 ----
-  const world = new Container();
-  app.stage.addChild(world);
+  /* ---------- 内容（校验通过才允许使用） ---------- */
+  const registry = createRegistry(
+    { entities: [ENTROPY_CLOCK], skills: [...ALL_SKILLS], buffs: [...ALL_BUFFS] },
+    { localeKeys: new Set(flattenCatalog(zhCN).keys()) },
+  );
 
-  const board = new Graphics()
-    .rect(40, BOX_Y + BOX_H + 20, LOGICAL_W - 80, 2)
-    .fill(0x1e141c);
-  world.addChild(board);
-
-  const box = new Container();
-  const boxBody = new Graphics()
-    .rect(0, 0, BOX_W, BOX_H)
-    .fill(0xd23a34)
-    .rect(0, 0, BOX_W, 4)
-    .fill(0xf0605a);
-  const boxLabel = new Text({
-    text: 'tick-driven',
-    style: { fontFamily: 'monospace', fontSize: 16, fill: 0xf0f0f6 },
+  /* ---------- 场景 ---------- */
+  const scene = new BattleScene({
+    app,
+    pixi: { Container, Graphics, Text },
+    translate: (key) => {
+      try {
+        return translator.t(key as Parameters<typeof translator.t>[0]);
+      } catch {
+        return key;
+      }
+    },
   });
-  boxLabel.x = 10;
-  boxLabel.y = BOX_H - 24;
-  box.addChild(boxBody, boxLabel);
-  box.y = BOX_Y;
-  world.addChild(box);
 
-  const debug = new DebugPanel({ Container, Graphics, Text });
-  app.stage.addChild(debug.root);
-
-  // ---- 模拟接线 ----
-  const sim = new SimClient();
-
-  // observeStage 返回的是取消订阅函数；尺寸通过回调拿到
-  let stageSize: StageSize = { width: 0, height: 0, scale: 1, padX: 0, padY: 0 };
-  const disposeStageObserver = observeStage(stage, app.canvas, SCALING_MODE, (size) => {
-    stageSize = size;
-  });
-  sim.start(Date.now() >>> 0, performance.now());
-
-  /**
-   * 插值端点。
-   *
-   * 注意两个都踩过的坑：
-   *
-   * 1. **必须用逐 tick 的 render 载荷，不能用每 60 tick 的 snapshot。**
-   *    用快照会让位置在两次快照之间冻住 —— 实测"静止 184ms 然后跳 36px"。
-   * 2. **不要在这里做 Math.round。** Pixi 已经开了 `roundPixels: true`，
-   *    再取整会把平滑插值量化成整像素阶梯 —— 实测 ±1~2px 的持续抖动。
-   *    要让位置保持亚像素精度，由渲染器统一决定如何对齐像素。
-   */
-  let prevX = 0;
-  let currX = 0;
-
-  app.ticker.add(() => {
-    const realNow = performance.now();
-    sim.frame(realNow);
-
-    const { render, snapshot, stats } = sim.view;
-    // 优先用逐 tick 载荷；退回时用快照（主线程路径每帧都带快照）
-    const authoritativeX = render?.demoX ?? snapshot?.demoX;
-    if (authoritativeX !== undefined && authoritativeX !== currX) {
-      prevX = currX;
-      currX = authoritativeX;
-    }
-
-    const alpha = stats?.alpha ?? 0;
-    box.x = prevX + (currX - prevX) * alpha;
-
-    debug.update({
-      tick: stats?.tick ?? 0,
-      steps: stats?.steps ?? 0,
-      alpha,
-      droppedMs: stats?.droppedMs ?? 0,
-      fps: app.ticker.FPS,
-      scale: stageSize.scale,
-      usingWorker: sim.usingWorker,
-      snapshotTick: snapshot?.tick ?? -1,
+  /* ---------- 一局战斗 ---------- */
+  const startBattle = (): BattleLoop =>
+    new BattleLoop({
+      engineOptions: {
+        combatants: [makePlayer(), makeBoss()],
+        // 用真实时钟做种子：每次开局不同，但仍可复现（记录 seed 即可）
+        seed: Date.now() >>> 0,
+        bossId: 'verrot',
+        timeLimitMs: TIME_LIMIT_MS,
+        buffs: registry.buffs,
+        skills: registry.skills,
+        baseStats: new Map<string, Partial<Record<StatKey, number>>>([
+          ['player', PLAYER_BASE],
+          ['verrot', {}],
+        ]),
+        passiveModifiers: new Map([['player', clockModifiers()]]),
+      },
+      bindings: DEFAULT_BINDINGS_LOCAL,
+      slots: DEFAULT_SLOTS,
+      timeLimitMs: TIME_LIMIT_MS,
+      stopOnEnd: true,
     });
 
-    sim.clearEvents();
+  let loop = startBattle();
+
+  const disposeStageObserver = observeStage(stage, app.canvas, SCALING_MODE, () => {});
+
+  /* ---------- 主循环 ---------- */
+  app.ticker.add(() => {
+    frameCount += 1;
+    loop.frame(performance.now());
+    scene.update(loop.snapshot);
   });
 
-  stage.classList.add('ready');
+  /* ---------- 重开 ----------
+   * 战斗结束后按 Enter 重开（而不是 R —— R 是技能键之一）。 */
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && loop.engineState.snapshot.status !== 'running') {
+      loop.dispose();
+      loop = startBattle();
+    }
+  });
 
   /**
-   * 把只读状态挂到 window，供端到端验证读取。
+   * 调试探针：把战斗状态挂到 window，供端到端验证读取。
    *
-   * 这是 M0 阶段的可观测性手段：静态截图看不出"在动"，
-   * 需要能查询 tick 是否真的在推进。M5 起会被真正的调试面板与
-   * 录制回放取代。
+   * 静态截图只能证明"渲染了一帧"，证明不了"战斗在推进"。
+   * M7 起会被真正的调试面板与回放录制取代。
    */
-  // 渲染侧探针：报告**实际写到 Pixi 上的值**，用于诊断视觉跳动
-  window.__raidProbe = () => ({
-    boxX: box.x,
-    currX,
-    prevX,
-    snapX: sim.view.snapshot?.demoX ?? -1,
-    simX: sim.view.render?.demoX ?? -1,
-    tick: sim.view.stats?.tick ?? -1,
-    snapshotTick: sim.view.snapshot?.tick ?? -1,
+  /** 捕获运行期异常，供端到端验证读取（否则会被静默吞掉）。 */
+  const runtimeErrors: string[] = [];
+  window.addEventListener('error', (event) => {
+    runtimeErrors.push(String(event.message));
+  });
+  window.addEventListener('unhandledrejection', (event) => {
+    runtimeErrors.push(`unhandled rejection: ${String(event.reason)}`);
   });
 
-  window.__raidDebug = {
+  let frameCount = 0;
+
+  window.__raidBattle = {
     probe: () => {
-      const { snapshot, stats } = sim.view;
+      const state = loop.engineState.snapshot;
+      const player = state.combatants.find((c) => c.side === 'ally');
+      const boss = state.combatants.find((c) => c.side === 'enemy');
+      const view = loop.snapshot;
       return {
-        tick: stats?.tick ?? 0,
-        steps: stats?.steps ?? 0,
-        alpha: stats?.alpha ?? 0,
-        droppedMs: stats?.droppedMs ?? 0,
-        usingWorker: sim.usingWorker,
-        lastError: sim.lastError?.message ?? null,
-        snapshotTick: snapshot?.tick ?? -1,
-        demoX: snapshot?.demoX ?? -1,
+        tick: state.tick,
+        status: state.status,
+        phase: state.phase,
+        playerHp: player?.resources.hp ?? -1,
+        playerHpCap: player?.caps.hp ?? -1,
+        playerFury: player?.resources.fury ?? -1,
+        playerCooldowns: player?.cooldowns ?? {},
+        playerCasts: player?.casts.length ?? -1,
+        bossHp: boss?.resources.hp ?? -1,
+        bossHpCap: boss?.caps.hp ?? -1,
+        bossCasts: boss?.casts.length ?? -1,
+        skillCount: view.skills.length,
+        floatingCount: view.floatingText.length,
+        frameCount,
+        errors: [...runtimeErrors],
       };
     },
   };
 
-  // 页面卸载时断开监听，避免开发期 HMR 反复挂载造成叠加的 observer
+  stage.classList.add('ready');
+
   window.addEventListener('pagehide', () => {
     disposeStageObserver();
-    sim.stop();
+    loop.dispose();
   });
 }
+
+/** 键位（与 DEFAULT_SLOTS 对应）。 */
+const DEFAULT_BINDINGS_LOCAL = DEFAULT_BINDINGS;
 
 void bootstrap();

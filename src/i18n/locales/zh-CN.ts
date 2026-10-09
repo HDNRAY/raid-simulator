@@ -62,8 +62,29 @@ export const zhCN = {
     furyRegen: '储能回复',
   },
 
+  /** 预警提示：告诉玩家"现在该做什么" */
+  hint: {
+    dodgeOrGuard: '闪避或格挡',
+    interruptible: '可打断',
+    dodge: '闪避',
+    guard: '格挡',
+  },
+
+  /** 技能格不可用的原因 */
+  block: {
+    comboWindow: '派生窗口未开启',
+    cost: '资源不足',
+    gcd: '公共冷却',
+    cooldown: '冷却中',
+    casting: '正在施法',
+    locked: '被限制',
+    condition: '条件不满足',
+    target: '没有目标',
+  },
+
   /** HUD 文案 */
   hud: {
+    you: '你',
     iframe: 'I-FRAME',
     combo: '派生',
     phase: '阶段',

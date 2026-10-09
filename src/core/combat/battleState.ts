@@ -151,6 +151,26 @@ export class BattleEngine {
     return this.state;
   }
 
+  /**
+   * 按 id 查技能定义。
+   *
+   * 暴露给渲染适配器（它需要技能名与 hit 时间轴来画预警条）。
+   * 这是**只读查询**，不改变任何状态。
+   */
+  skillOf(skillId: string): SkillDef | undefined {
+    return this.options.skills.get(skillId);
+  }
+
+  /** 按 id 查 buff 定义（只读，同上）。 */
+  buffDef(buffId: string): BuffDef | undefined {
+    return this.options.buffs.get(buffId);
+  }
+
+  /** 全部技能 id（UI 构建技能栏用）。 */
+  get skillIds(): readonly string[] {
+    return [...this.options.skills.keys()];
+  }
+
   /** 取出并清空自上次调用以来产生的事件。 */
   drainEvents(): readonly EventDef[] {
     const out = [...this.events];

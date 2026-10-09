@@ -6,6 +6,26 @@
  */
 declare global {
   interface Window {
+    /** 战斗探针：验证"战斗真的在推进" */
+    __raidBattle?: {
+      probe(): {
+        tick: number;
+        status: string;
+        phase: number;
+        playerHp: number;
+        playerHpCap: number;
+        playerFury: number;
+        playerCooldowns: Record<string, number>;
+        playerCasts: number;
+        bossHp: number;
+        bossHpCap: number;
+        bossCasts: number;
+        skillCount: number;
+        floatingCount: number;
+        frameCount: number;
+        errors: string[];
+      };
+    };
     /** 渲染侧探针：报告实际写到 Pixi 上的位置 */
     __raidProbe?(): {
       boxX: number;
