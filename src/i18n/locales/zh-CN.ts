@@ -22,14 +22,21 @@ export const zhCN = {
   /**
    * 资源名。
    *
-   * 三种：**血**（生命）是生死线，**炁**是积攒型资源
-   * （高威力技能消耗、靠战斗动作积攒），**缠**是短循环资源
-   * （常规技能消耗、回复快）。
+   * 三个单字：**血 / 炁 / 缠**。
+   *
+   *   `energy` → **炁**  短循环资源，每 0.1 秒自动回复 1 点
+   *   `douqi`  → **缠**  积攒型资源，按伤害换算（造成或受到都算）
+   *   `hp`     → **血**  生死线
+   *
+   * ⚠️ 注意标识符与中文名的对应关系：`energy` 是"炁"、`douqi` 是"缠"。
+   * 代码里的 `douqi` **不是**"斗炁"的缩写 —— 那个名字在 2026-10-09
+   * 与"精力"对调过一次，标识符出于历史原因保留了。
+   * 改中文名只需要动这个文件，不影响引擎。
    */
   resource: {
     hp: '血',
-    energy: '缠',
-    douqi: '炁',
+    energy: '炁',
+    douqi: '缠',
     /**
      * 状态条上的**单字标签**（楷体显示）。
      *
@@ -38,8 +45,8 @@ export const zhCN = {
      * （例如"生命值"），标签需要独立于全名，不必再改布局。
      */
     hpShort: '血',
-    energyShort: '缠',
-    douqiShort: '炁',
+    energyShort: '炁',
+    douqiShort: '缠',
   },
 
   /** 主属性与次级属性 */
@@ -68,11 +75,11 @@ export const zhCN = {
     healingBoost: '治疗加成',
     shieldBoost: '护盾加成',
     maxHp: '生命上限',
-    maxEnergy: '缠上限',
-    maxDouqi: '炁上限',
+    maxEnergy: '炁上限',
+    maxDouqi: '缠上限',
     hpRegen: '生命回复',
-    energyRegen: '缠回复',
-    douqiRegen: '炁回复',
+    energyRegen: '炁回复',
+    douqiRegen: '缠回复',
   },
 
   /**
@@ -112,7 +119,7 @@ export const zhCN = {
    */
   block: {
     comboWindow: '派生窗口未开启',
-    cost: '缠或炁不足',
+    cost: '炁或缠不足',
     gcd: '公共冷却中',
     cooldown: '冷却中',
     casting: '正在施法中',
@@ -182,15 +189,15 @@ export const zhCN = {
   skill: {
     attack: {
       name: '攻',
-      desc: '普攻。消耗 10 缠，造成 10 点伤害。',
+      desc: '普攻。消耗 10 炁，造成 10 点伤害。'
     },
     dodge: {
       name: '闪',
-      desc: '消耗 40 缠，获得 0.5 秒完全无敌。不占公共冷却。',
+      desc: '消耗 40 炁，获得 0.5 秒完全无敌。不占公共冷却。'
     },
     guard: {
       name: '防',
-      desc: '按住持续减伤 40%，每 0.1 秒消耗 2 缠。松开即取消。',
+      desc: '按住持续减伤 40%，每 0.1 秒消耗 2 炁。松开即取消。'
     },
     break: {
       name: '破',
@@ -198,11 +205,11 @@ export const zhCN = {
     },
     blast: {
       name: '轰',
-      desc: '消耗 50 炁，造成 30 点伤害并使目标易伤。',
+      desc: '消耗 50 缠，造成 30 点伤害并使目标易伤。'
     },
     focus: {
       name: '凝',
-      desc: '消耗 50 炁，自身增伤 20%，持续 30 秒。',
+      desc: '消耗 50 缠，自身增伤 20%，持续 30 秒。'
     },
   },
 
