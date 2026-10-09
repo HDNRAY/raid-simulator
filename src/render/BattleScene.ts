@@ -405,6 +405,21 @@ class SkillBarView {
         view.usable ? 0xffffff : view.cooldownRatio > 0.001 ? 0xb0b0be : 0x5a5a68,
       );
       s.key.set(view.key.toUpperCase());
+      /**
+       * **键位提示也要跟着状态变。**
+       *
+       * 踩过的坑：`s.key` 的颜色只在构造时设了一次（`0x9090a0`），
+       * 之后从没更新 —— 于是技能进冷却时**按键那一侧完全没有反馈**
+       * （需求："现在技能 cd 时，按键那边没有反馈了"）。
+       *
+       * 现在它跟技能字用同一套明暗：
+       *   可用   → 亮（玩家一眼知道这个键现在能按）
+       *   冷却中 → 偏灰
+       *   不可用 → 更暗
+       */
+      s.key.setColor(
+        view.usable ? 0xd8d8e4 : view.cooldownRatio > 0.001 ? 0x8a8a98 : 0x55555f,
+      );
       // 剩余秒数：0.1 秒精度（逻辑步长就是 0.1 秒，再细没意义）
       /**
        * 冷却剩秒**取整**。

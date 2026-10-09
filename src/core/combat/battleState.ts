@@ -788,26 +788,16 @@ export class BattleEngine {
      * 先 `castInterrupted`、再 `skillRejected`。
      */
     /**
-     * ⚠️ **自保型瞬发不打断自己的读条**（「闪」）。
+     * **瞬发技能都会打断自己的读条** —— 包括「闪」（需求明确）。
      *
-     * 理由：闪避是"随时可用的应对手段"，代价已经写在 30 炁上。
-     * 如果它还会打断自己在读的「攻」，就变成**双重代价** ——
-     * 实测表现为"按闪避反而输得更惨"：省下的 24-34 点伤害
-     * 抵不过损失的那一次「攻」。修掉之后闪避才真正是"容错"
-     * （纯进攻剩 5 血 → 闪一次变 38 血）。
+     * 我一度给「闪」开了豁免（"瞬发自保不该有双重代价"），
+     * 但需求要的是它**必须**打断：读条中按闪避 = 放弃这次输出
+     * 换取生存，这个取舍本身就是玩法。
      *
-     * ⚠️ **但「破」不能豁免**：它的整个意义就是打断读条
-     * （包括自己在读的条 —— 那是"用一次输出换一次打断"的取舍）。
-     * 我第一版用 `invulnerable` 判定时顺手把它也排除了，
-     * 结果"瞬发技能能打断读条"这条直接失效。
-     *
-     * 所以豁免条件是**两个**都满足：瞬发 + 自保 buff。
+     * ⚠️ 代价确实很大（一次「攻」≈10 伤 + 30 炁），所以给「闪」
+     * 加了 **1 秒冷却** —— 既保留"要打断"的取舍，又避免连按浪费。
      */
-    const isSelfProtection = skill.abilities.some(
-      (a) => a.kind === 'grant' && a.buff.flags?.invulnerable === true,
-    );
-    const kind = skill.tags?.includes('interrupt') ? 'interrupt' : 'other';
-    const isDefensiveReaction = isSelfProtection && kind !== 'interrupt';
+    const isDefensiveReaction = false;
     if (gate.ok && actor.casts.length > 0 && !isDefensiveReaction) {
       for (const cast of actor.casts) {
         this.events.push({

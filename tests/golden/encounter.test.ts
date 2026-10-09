@@ -515,30 +515,35 @@ describe('读条与打断（公共冷却已删除，节奏改由读条表达）'
     expect(engine.snapshot.combatants[0]!.casts[0]!.skillId).toBe('attack');
   });
 
-  it('自保型瞬发（闪）**不打断**自己的读条 —— 否则闪避是双重代价', () => {
+  it('「闪」**会**打断自己的读条 —— 这是"放弃一次输出换生存"的取舍', () => {
     /**
-     * 需求/设计：闪避是"随时可用的应对手段"，代价已经写在 30 炁上。
-     * 如果它还会打断自己在读的「攻」，就等于**用一次输出换一次免伤**，
-     * 算下来反而更亏 —— 实测表现为"按闪避比不闪还差"。
+     * 需求明确：闪避应该打断自己的「攻」。
      *
-     * 修掉之后：纯进攻剩 5 血 → 闪避一次剩 38 血，容错才成立。
+     * 我一度给它开了豁免（理由："瞬发自保不该有双重代价"），
+     * 但需求要的是它**必须**打断 —— 读条中按闪避 = 放弃这次输出
+     * 换取生存，这个取舍本身就是玩法。
      *
-     * 注意「破」是**例外**：它的整个意义就是打断读条，
-     * 所以它仍然会打断（包括自己正在读的条）。
+     * 代价确实很大（一次「攻」≈10 伤 + 30 炁），所以给「闪」
+     * 加了 1 秒冷却，避免连按把炁浪费掉。
      */
     const engine = makeEngine();
     engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
     engine.drainEvents();
-    const castBefore = engine.snapshot.combatants[0]!.casts[0]!.skillId;
+    expect(engine.snapshot.combatants[0]!.casts.length).toBe(1);
 
     engine.tick([{ type: 'useSkill', skillId: 'dodge', atTick: 1 }]);
     const events = engine.drainEvents();
 
-    // 无敌挂上了
+    // 读条被打断
+    expect(events.some((e) => e.kind === 'castInterrupted')).toBe(true);
+    expect(engine.snapshot.combatants[0]!.casts.length).toBe(0);
+    // 无敌仍然挂上了 —— 打断换来的是生存
     expect(events.some((e) => e.kind === 'buffApplied' && e.buffId === 'dodge-iframe')).toBe(true);
-    // 但「攻」的读条**没有**被打断
-    expect(events.some((e) => e.kind === 'castInterrupted')).toBe(false);
-    expect(engine.snapshot.combatants[0]!.casts[0]?.skillId).toBe(castBefore);
+  });
+
+  it('「闪」有 1 秒冷却（保留取舍，但不让连按浪费炁）', () => {
+    const dodge = registry.skills.get('dodge')!;
+    expect(dodge.cooldown).toBe(1000);
   });
 
   it('「破」仍然会打断自己的读条 —— 它的意义就是打断', () => {
