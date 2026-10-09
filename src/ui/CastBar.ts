@@ -43,7 +43,13 @@ export interface CastBarOptions {
   readonly fill: number;
   /** 底槽色（"还没走完"的那一段） */
   readonly track: number;
-  /** 描边色 */
+  /**
+   * 描边色 —— **固定值，不随进度变**。
+   *
+   * 曾经有过"进度过 70% 时描边转亮"的提示，已去掉：剩余秒数已经写在
+   * 条上，而且 70% 对长短不同的招式意味着不同的剩余时间，
+   * 不是一个玩家能学会的稳定规则。见 `BattleScene` 里的调用处。
+   */
   readonly line: number;
   readonly labelColor?: number;
   readonly timeColor?: number;
@@ -71,8 +77,6 @@ export class CastBar {
   private readonly nameText: Text;
   private readonly timeText: Text;
   private lastProgress = -1;
-  /** 记住当前描边色，`update()` 重画时用 */
-  private currentLine: number;
 
   constructor(private readonly options: CastBarOptions) {
     const { pixi, rect } = options;
@@ -87,7 +91,6 @@ export class CastBar {
 
     // ── 描边 ──
     this.border = new pixi.Graphics();
-    this.currentLine = options.line;
     this.drawBorder(options.line);
 
     // ── 文字：垂直居中（用 anchor，不猜偏移） ──
@@ -143,18 +146,6 @@ export class CastBar {
   /** 剩余秒数颜色。 */
   setTimeColor(color: number): void {
     this.timeText.style.fill = css(color);
-  }
-
-  /**
-   * 描边颜色。
-   *
-   * 需求问过"进度条快完的时候边框有个高亮，是干啥用的？" ——
-   * 那是"快命中了"的视觉压力（越接近命中越亮）。
-   * 保留这个提示，但把颜色说明清楚：见 `BattleScene` 里的调用处。
-   */
-  setBorderColor(color: number): void {
-    this.currentLine = color;
-    this.drawBorder(color);
   }
 
   /**
@@ -220,7 +211,7 @@ export class CastBar {
      * 所以再加一道保险：无论填充怎么变，描边永远是最后画上去的
      * （`this.border` 也在 `addChild` 顺序里排在填充之后）。
      */
-    this.drawBorder(this.currentLine);
+    this.drawBorder(this.options.line);
   }
 
   set visible(v: boolean) {

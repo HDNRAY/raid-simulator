@@ -957,12 +957,17 @@ export class BattleScene {
       this.castBar.setNameColor(cast.interruptible ? PALETTE.interrupt.bright : 0x30c8d0);
       this.castBar.update(cast.progress);
       /**
-       * **边框高亮 = "快命中了"**（需求问过这个是干啥用的）。
+       * ⚠️ 边框**不再随进度变色**。
        *
-       * 进度过 70% 后边框转亮金 —— 因为这时候玩家已经没有多少时间
-       * 反应了，用亮度制造视觉压力。平时是普通的危险红。
+       * 曾经在进度过 70% 时把边框从危险红转成亮金（"快命中了"的压力感）。
+       * 去掉了，两个原因：
+       *   1. 信息重复 —— 剩余秒数已经直接写在条上
+       *   2. 阈值的语义不一致 —— 硬编码 70% 对 1.8 秒的重斩和 2.2 秒的
+       *      横扫意味着不同的剩余时间（0.54s vs 0.66s），
+       *      玩家没法把它当成一个稳定的规则来学
+       *
+       * 现在边框恒为红色（构造时定下），只用来界定"这是一条威胁读条"。
        */
-      this.castBar.setBorderColor(cast.progress > 0.7 ? 0xffd060 : PALETTE.danger.base);
     }
 
     /* ---------- 玩家读条 ---------- */
@@ -984,7 +989,7 @@ export class BattleScene {
         `${(playerCast.remainingMs / 1000).toFixed(1)}s`,
       );
       this.playerCastBar.update(playerCast.progress);
-      this.playerCastBar.setBorderColor(playerCast.progress > 0.7 ? 0xfff4c0 : 0xd8a840);
+      // 同上：边框恒为金色，不随进度变色
     }
 
     /* ---------- 玩家面板 ---------- */

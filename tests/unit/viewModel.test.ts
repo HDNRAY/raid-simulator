@@ -259,3 +259,29 @@ describe('技能格：冷却遮罩（白）与数字的层叠', () => {
     expect(FONT.big).toBeGreaterThan(FONT.body);
   });
 });
+
+describe('读条边框：恒色，不随进度变色', () => {
+  /**
+   * 曾经在进度过 70% 时把边框从危险红转成亮金（"快命中了"的压力感）。
+   * 去掉了，因为：
+   *   1. 信息重复 —— 剩余秒数已经直接写在条上
+   *   2. 阈值语义不一致 —— 硬编码 70% 对 1.8 秒的重斩和 2.2 秒的横扫
+   *      意味着不同的剩余时间（0.54s vs 0.66s），玩家学不会一个稳定规则
+   *
+   * 这条断言防止它被"顺手加回来"。
+   */
+  it('渲染层不再有按进度改边框色的逻辑', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    expect(src).not.toContain('setBorderColor');
+    expect(src).not.toMatch(/progress\s*>\s*0\.7/);
+  });
+
+  it('组件也不暴露改边框色的入口', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/ui/CastBar.ts', import.meta.url), 'utf8');
+    // 只有构造时用 options.line；没有运行期改色方法
+    expect(src).not.toContain('setBorderColor');
+    expect(src).toMatch(/drawBorder\(this\.options\.line\)/);
+  });
+});
