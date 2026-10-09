@@ -13,7 +13,7 @@ import { BOSS_HP_DISPLAY } from './data/entities/bossHp';
 import { DEFAULT_BINDINGS, type KeyBinding } from './input/keyboard';
 import { flattenCatalog, translator } from './i18n/translator';
 import { zhCN } from './i18n/locales/zh-CN';
-import { LOGICAL_H, LOGICAL_W, type ScalingMode } from './render/scaling';
+import { LOGICAL_H, LOGICAL_W, clampUiScale, type ScalingMode } from './render/scaling';
 import { observeStage } from './render/sizes';
 import { BattleScene } from './render/BattleScene';
 import type { Combatant, StatKey } from './core/types';
@@ -152,9 +152,12 @@ async function bootstrap(): Promise<void> {
   const scene = new BattleScene({
     app,
     pixi: { Container, Graphics, Sprite, Text },
-    translate: (key) => {
+    translate: (key, params) => {
       try {
-        return translator.t(key as Parameters<typeof translator.t>[0]);
+        return translator.t(
+          key as Parameters<typeof translator.t>[0],
+          params as Parameters<typeof translator.t>[1],
+        );
       } catch {
         return key;
       }
@@ -164,6 +167,15 @@ async function bootstrap(): Promise<void> {
   /* ---------- 一局战斗 ---------- */
   const startBattle = (): BattleLoop =>
     new BattleLoop({
+      // 飘字要"闪躲"这种本地化文案 —— 注入取词函数，而不是让
+      // ViewAdapter 去 import i18n 单例
+      translate: (key) => {
+        try {
+          return translator.t(key as never);
+        } catch {
+          return key;
+        }
+      },
       engineOptions: {
         combatants: [makePlayer(), makeBoss()],
         // 用真实时钟做种子：每次开局不同，但仍可复现（记录 seed 即可）
@@ -194,13 +206,27 @@ async function bootstrap(): Promise<void> {
 
   let loop = startBattle();
 
-  const disposeStageObserver = observeStage(stage, app.canvas, SCALING_MODE, () => {});
+  /**
+   * **UI 缩放**（设置里的 slider）。
+   *
+   * 它是"乘在自动适配之上的额外倍数" —— 所以 120% 在任意窗口下
+   * 都是"比自动适配再大 20%"。改它之后要手动 `refresh()` 一次：
+   * `ResizeObserver` 不会因为"视口尺寸没变"而重新回调。
+   */
+  let uiScale = 1;
+  const stageObserver = observeStage(
+    stage,
+    app.canvas,
+    SCALING_MODE,
+    () => {},
+    () => uiScale,
+  );
 
   /* ---------- 主循环 ---------- */
   app.ticker.add(() => {
     frameCount += 1;
     loop.frame(performance.now());
-    scene.update(loop.snapshot);
+    scene.update(loop.snapshot, loop.logEntries);
     settingsButton.update();
     settings.update();
   });
@@ -369,6 +395,12 @@ async function bootstrap(): Promise<void> {
         },
       ),
     onClose: () => closeSettings(),
+    getUiScale: () => uiScale,
+    onUiScale: (value) => {
+      uiScale = clampUiScale(value);
+      // 视口尺寸没变，ResizeObserver 不会回调 —— 必须手动重测一次
+      stageObserver.refresh();
+    },
   });
   app.stage.addChild(settings.root);
 
@@ -498,9 +530,15 @@ async function bootstrap(): Promise<void> {
   );
 
   /** 统一的翻译入口（缺 key 时回退到 key 本身，而不是抛错）。 */
-  function translateSafe(key: string): string {
+  function translateSafe(
+    key: string,
+    params?: Readonly<Record<string, string | number>>,
+  ): string {
     try {
-      return translator.t(key as Parameters<typeof translator.t>[0]);
+      return translator.t(
+        key as Parameters<typeof translator.t>[0],
+        params as Parameters<typeof translator.t>[1],
+      );
     } catch {
       return key;
     }
@@ -509,7 +547,7 @@ async function bootstrap(): Promise<void> {
   stage.classList.add('ready');
 
   window.addEventListener('pagehide', () => {
-    disposeStageObserver();
+    stageObserver.dispose();
     loop.dispose();
   });
 

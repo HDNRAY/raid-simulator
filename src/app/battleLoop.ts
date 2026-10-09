@@ -14,6 +14,7 @@ import { BattleEngine, type CreateBattleOptions } from '../core/combat/battleSta
 import { MS_PER_TICK } from '../core/loopConstants';
 import { createKeyboardInput, repeatHeld, type InputSource, type KeyBinding } from '../input/keyboard';
 import { ViewAdapter, DEFAULT_SLOTS, type SlotBinding } from './viewAdapter';
+import { LogFormatter, type LogEntry } from './logFormat';
 import type { BattleSnapshotView } from '../render/viewModel';
 import type { Action } from '../core/types';
 
@@ -30,6 +31,12 @@ export interface BattleLoopOptions {
   readonly input?: InputSource;
   /** 是否在引擎结束后自动停止推进 */
   readonly stopOnEnd?: boolean;
+  /**
+   * 本地化取词（注入）。
+   *
+   * 只有"纯字符串载荷"（飘字）需要它；状态提示仍然传 i18n key 给渲染层。
+   */
+  readonly translate?: (key: string) => string;
 }
 
 /**
@@ -40,6 +47,7 @@ export interface BattleLoopOptions {
 export class BattleLoop {
   private engine: BattleEngine;
   private readonly adapter: ViewAdapter;
+  private readonly logFormatter: LogFormatter;
   private input: InputSource | undefined;
   private accumulator = 0;
   private lastRealNow: number | undefined;
@@ -56,7 +64,15 @@ export class BattleLoop {
     this.options = options;
     this.bindings = options.bindings;
     this.engine = new BattleEngine(options.engineOptions);
-    this.adapter = new ViewAdapter(options.engineOptions.skills);
+    this.adapter = new ViewAdapter(options.engineOptions.skills, options.translate);
+    /**
+     * 日志格式化器。
+     *
+     * ⚠️ 它**独立于 ViewAdapter** 消费同一批事件 —— 这样日志的存在
+     * 与否完全不影响战斗快照的构建（低耦合的具体含义：加/删日志
+     * 不需要动 ViewAdapter）。
+     */
+    this.logFormatter = new LogFormatter();
     this.attachInput(options.input);
   }
 
@@ -163,7 +179,21 @@ export class BattleLoop {
 
     const actions: Action[] = [...fromInput, ...held];
     this.engine.tick(actions);
-    this.adapter.consume(this.engine.drainEvents(), this.engine.snapshot.tick);
+    /**
+     * **一次 drain，两个独立消费者。**
+     *
+     * 视图快照与战斗日志都读同一批事件，但彼此不知道对方存在 ——
+     * 加/删日志不需要动 `ViewAdapter`（这就是"低耦合"的具体含义）。
+     * `drainEvents` 是**排空**语义，所以只能调一次，必须在这里分发。
+     */
+    const events = this.engine.drainEvents();
+    this.adapter.consume(events, this.engine.snapshot.tick);
+    this.logFormatter.consume(events);
+  }
+
+  /** 当前战斗日志（只读，供渲染层画右侧面板）。 */
+  get logEntries(): readonly LogEntry[] {
+    return this.logFormatter.all();
   }
 
   /**
@@ -213,6 +243,7 @@ export class BattleLoop {
 
   /** 请求重开（下一帧生效）。 */
   requestRestart(): void {
+    this.logFormatter.clear();
     this.restartRequested = true;
   }
 

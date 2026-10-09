@@ -28,6 +28,13 @@ export function computeScale(
   viewportW: number,
   viewportH: number,
   mode: ScalingMode,
+  /**
+   * 用户可调的额外倍数（设置里的"UI 缩放"）。
+   *
+   * 乘在自动适配结果之上 —— 于是"120%"不依赖具体窗口尺寸，
+   * 语义稳定。调用方负责把范围钳到 `UI_SCALE_MIN..MAX`。
+   */
+  scaleMultiplier = 1,
 ): number {
   if (!Number.isFinite(viewportW) || !Number.isFinite(viewportH)) return 1;
   if (viewportW <= 0 || viewportH <= 0) return 1;
@@ -35,7 +42,8 @@ export function computeScale(
   const fit = Math.min(viewportW / LOGICAL_W, viewportH / LOGICAL_H);
   if (fit <= 0) return 1;
 
-  return mode === 'integer' ? Math.max(1, Math.floor(fit)) : fit;
+  const base = mode === 'integer' ? Math.max(1, Math.floor(fit)) : fit;
+  return base * scaleMultiplier;
 }
 
 /** 计算 canvas 的 CSS 尺寸（始终保持 16:9）。 */
@@ -43,11 +51,29 @@ export function computeCanvasCssSize(
   viewportW: number,
   viewportH: number,
   mode: ScalingMode,
+  scaleMultiplier = 1,
 ): { width: number; height: number; scale: number } {
-  const scale = computeScale(viewportW, viewportH, mode);
+  const scale = computeScale(viewportW, viewportH, mode, scaleMultiplier);
   return {
     scale,
     width: Math.round(LOGICAL_W * scale),
     height: Math.round(LOGICAL_H * scale),
   };
+}
+
+/* ------------------------------------------------------------------ *
+ * UI 缩放（用户可调）
+ * ------------------------------------------------------------------ */
+
+/** UI 缩放的取值范围与步长（设置里的 slider 用）。 */
+export const UI_SCALE_MIN = 0.5;
+export const UI_SCALE_MAX = 2;
+export const UI_SCALE_STEP = 0.1;
+
+/** 把任意输入钳到合法范围并对齐到步长。 */
+export function clampUiScale(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  const clamped = Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, value));
+  // 对齐到步长，避免 0.30000000000000004 这类浮点尾数渗进布局
+  return Math.round(clamped / UI_SCALE_STEP) * UI_SCALE_STEP;
 }

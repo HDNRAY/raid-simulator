@@ -19,6 +19,7 @@
 import type { Application, Container, Graphics } from 'pixi.js';
 import { PALETTE } from './theme';
 import { CastBar } from '../ui/CastBar';
+import { LogPanel } from '../ui/LogPanel';
 import { FONT, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../ui/layout';
 import { DISPLAY_SCALE } from '../data/balance';
 
@@ -55,8 +56,18 @@ import {
   type ResourceKeyName,
   type SkillSlotView,
 } from './viewModel';
+import type { LogEntry } from '../app/logFormat';
 
-export type TranslateFn = (key: string) => string;
+/**
+ * 取词函数。
+ *
+ * `params` 是插值参数（模板里的 `{name}`）—— 日志条目带 `{amount}`
+ * 这类占位符，所以渲染层需要能把参数一起传下去。
+ */
+export type TranslateFn = (
+  key: string,
+  params?: Readonly<Record<string, string | number>>,
+) => string;
 
 export interface BattleSceneOptions {
   readonly app: Application;
@@ -599,6 +610,8 @@ export class BattleScene {
   private readonly enrageBadge: Label;
 
   /* 预警条 */
+  /** 战斗日志（屏幕右侧） */
+  private readonly logPanel: LogPanel;
   /** Boss 预警条（与玩家读条共用 `ui/CastBar.ts`） */
   private readonly castBar: CastBar;
   /** 玩家读条（同一个组件，换配色） */
@@ -720,6 +733,19 @@ export class BattleScene {
 
     this.bossBuffs = new IconStrip(pixi, LAYOUT.bossBuffs, translate);
     hud.addChild(this.bossBuffs.root);
+
+    /* 战斗日志（右侧）—— 画在 HUD 下层，避免压住技能栏与资源面板 */
+    this.logPanel = new LogPanel({
+      pixi,
+      translate: (key, params) => {
+        try {
+          return translate(key, params);
+        } catch {
+          return key;
+        }
+      },
+    });
+    hud.addChild(this.logPanel.root);
 
     /* Boss 预警条 */
     /**
@@ -974,8 +1000,18 @@ export class BattleScene {
     g.rect(cx + 34, base - 11, 18, 12).fill(0xa8863c);
   }
 
-  update(view: BattleSnapshotView): void {
+  /**
+   * 每帧重画。
+   *
+   * `logEntries` 与 `view` **分开传** —— 日志和战斗快照是两个独立的
+   * 数据流（各自消费同一批引擎事件），所以不该硬塞进 `view` 里。
+   * 这样"要不要显示日志"就只是调用方传不传数组的问题。
+   */
+  update(view: BattleSnapshotView, logEntries: readonly LogEntry[] = []): void {
     const { translate } = this.options;
+
+    /* ---------- 战斗日志（右侧） ---------- */
+    this.logPanel.update(logEntries);
 
     /* ---------- 角色 ---------- */
     this.boss.update(view.telegraphing, view.bossFlash, view.armored);

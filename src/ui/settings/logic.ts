@@ -106,6 +106,35 @@ export const RESET_BUTTON = {
 } as const;
 
 /** 提示文字那一行的顶部（在按钮上方）。 */
+/**
+ * 「通用」页上的 UI 缩放 slider。
+ *
+ * ⚠️ 它**只在通用页**出现，而 tab 行/恢复按钮两页都有 ——
+ * 所以焦点模型要能表达"这一页有没有 slider"（`hasSlider`）。
+ */
+export const UI_SCALE_SLIDER = {
+  x: 16,
+  /** 距弹窗顶部的距离（tab 行下方） */
+  top: 56,
+  w: 320,
+  h: 24,
+} as const;
+
+/** slider 在弹窗坐标系里的矩形。 */
+export function uiScaleSliderRect(): {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+} {
+  return {
+    x: SETTINGS_PANEL.x + UI_SCALE_SLIDER.x,
+    y: SETTINGS_PANEL.y + UI_SCALE_SLIDER.top,
+    w: UI_SCALE_SLIDER.w,
+    h: UI_SCALE_SLIDER.h,
+  };
+}
+
 export const HINT_LINE = {
   height: 20,
   /** 与按钮之间的间隙 */
@@ -321,6 +350,7 @@ export function keyLabel(key: string, unboundText: string): string {
 export type SettingsFocus =
   | { readonly zone: 'tabs'; readonly index: number }
   | { readonly zone: 'grid'; readonly index: number }
+  | { readonly zone: 'slider' }
   | { readonly zone: 'reset' };
 
 /** 初始焦点：按键 tab 的第一个技能格（最常改的东西）。 */
@@ -337,7 +367,23 @@ export function moveFocus(
   focus: SettingsFocus,
   direction: 'up' | 'down' | 'left' | 'right',
   cellCount: number,
+  /**
+   * 当前页有没有 UI 缩放 slider（只有「通用」页有）。
+   *
+   * 不把它写死是因为**焦点模型不该知道 tab 的语义** ——
+   * 调用方说"这页有什么"，模型只负责在它们之间走。
+   */
+  hasSlider = false,
+  /** 当前页有没有技能格（只有「按键」页有）。 */
+  hasGrid = true,
 ): SettingsFocus {
+  /** 通用页的纵向顺序：tabs → slider → reset */
+  const downFromTabs: SettingsFocus = hasGrid
+    ? { zone: 'grid', index: 0 }
+    : hasSlider
+      ? { zone: 'slider' }
+      : { zone: 'reset' };
+
   if (focus.zone === 'tabs') {
     // tab 行是横向的一排
     if (direction === 'left') {
@@ -346,15 +392,24 @@ export function moveFocus(
     if (direction === 'right') {
       return { zone: 'tabs', index: (focus.index + 1) % TAB_COUNT };
     }
-    // 往下离开 tab 行 → 进网格
-    return cellCount > 0 ? { zone: 'grid', index: 0 } : { zone: 'reset' };
+    return downFromTabs;
+  }
+
+  if (focus.zone === 'slider') {
+    // slider **不吃上下**：上下是"离开这一行"，左右留给调用方当调节键
+    if (direction === 'down') return { zone: 'reset' };
+    if (direction === 'up' || direction === 'left' || direction === 'right') {
+      return { zone: 'tabs', index: 0 };
+    }
+    return focus;
   }
 
   if (focus.zone === 'reset') {
     if (direction === 'up' || direction === 'left') {
-      return cellCount > 0
-        ? { zone: 'grid', index: cellCount - 1 }
-        : { zone: 'tabs', index: 0 };
+      if (hasGrid) {
+        return cellCount > 0 ? { zone: 'grid', index: cellCount - 1 } : { zone: 'tabs', index: 0 };
+      }
+      return hasSlider ? { zone: 'slider' } : { zone: 'tabs', index: 0 };
     }
     return focus;
   }
@@ -388,9 +443,17 @@ export function moveFocus(
 }
 
 /** Tab / Shift+Tab 在较大区域之间切换（无障碍习惯用 Tab，所以也支持）。 */
-export function cycleZone(focus: SettingsFocus, cellCount: number, back = false): SettingsFocus {
-  const order: readonly SettingsFocus['zone'][] = ['tabs', 'grid', 'reset'];
-  const usable = cellCount > 0 ? order : (['tabs', 'reset'] as const);
+export function cycleZone(
+  focus: SettingsFocus,
+  cellCount: number,
+  back = false,
+  hasSlider = false,
+): SettingsFocus {
+  /** Tab 顺序跟着"这一页实际有什么"走 —— 见 `moveFocus` 的同名参数说明 */
+  const usable: SettingsFocus['zone'][] = ['tabs'];
+  if (cellCount > 0) usable.push('grid');
+  if (hasSlider) usable.push('slider');
+  usable.push('reset');
   const current = usable.indexOf(focus.zone);
   const step = back ? -1 : 1;
   const next = usable[(current + step + usable.length) % usable.length]!;
@@ -398,6 +461,7 @@ export function cycleZone(focus: SettingsFocus, cellCount: number, back = false)
     const index = focus.zone === 'grid' ? focus.index : 0;
     return { zone: 'grid', index: Math.min(index, Math.max(0, cellCount - 1)) };
   }
+  if (next === 'slider') return { zone: 'slider' };
   if (next === 'tabs') return { zone: 'tabs', index: 0 };
   return { zone: 'reset' };
 }
@@ -466,6 +530,9 @@ export function resolveActivate(
     return { kind: 'switchTab', tab: focus.index === 0 ? 'general' : 'keys' };
   }
   if (focus.zone === 'reset') return { kind: 'resetKeys' };
+  // slider 没有"激活"动作 —— 它的变化由左右方向键直接完成
+  // （见 SettingsPanel 里 `move` 分支对 slider 的专门处理）
+  if (focus.zone === 'slider') return { kind: 'none' };
   const skillId = rowSkillIds[focus.index];
   return skillId === undefined ? { kind: 'none' } : { kind: 'startCapture', skillId };
 }

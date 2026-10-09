@@ -26,6 +26,7 @@
 
 import type { Container, Graphics } from 'pixi.js';
 import { PALETTE } from '../../render/theme';
+import { UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP, clampUiScale } from '../../render/scaling';
 import { FONT, LOGICAL } from '../layout';
 import { isReservedKey, reservedKeyLabel } from '../../input/keyboard';
 import { Label, Panel, type PixiCtor } from '../primitives';
@@ -39,6 +40,7 @@ import {
   resetButtonRect,
   resolveKeyAction,
   tabRect,
+  uiScaleSliderRect,
   KEY_GRID_CAPACITY,
   hintLineY,
   moveFocus,
@@ -82,6 +84,10 @@ export interface SettingsPanelOptions {
   readonly onCapture: (handler: ((key: string) => void) | undefined) => void;
   /** 关闭弹窗 */
   readonly onClose: () => void;
+  /** 读当前 UI 缩放倍数（1 = 自动适配） */
+  readonly getUiScale: () => number;
+  /** UI 缩放变了（调用方负责把它应用到画布尺寸上） */
+  readonly onUiScale: (value: number) => void;
 }
 
 
@@ -92,6 +98,10 @@ export class SettingsPanel {
   private readonly panel: Panel;
   private readonly title: Label;
   private readonly closeHint: Label;
+
+  /** UI 缩放 slider 的标签（左：名称，右：百分比） */
+  private readonly scaleLabel: Label;
+  private readonly scaleValue: Label;
 
   private readonly tabButtons: Array<{
     tab: SettingsTab;
@@ -258,7 +268,34 @@ export class SettingsPanel {
     this.resetButton = { gfx: resetGfx, label: resetLabel, rect: resetRect };
     this.body.addChild(resetGfx, resetLabel.root);
 
+    /* ---------- 通用页：UI 缩放 slider ---------- */
+    const slider = uiScaleSliderRect();
+    this.scaleLabel = new Label(pixi, {
+      x: slider.x,
+      y: slider.y,
+      size: FONT.body,
+      color: PALETTE.text,
+    });
+    this.scaleValue = new Label(pixi, {
+      x: slider.x + slider.w,
+      y: slider.y,
+      size: FONT.body,
+      color: PALETTE.text,
+      anchorX: 1,
+    });
+    this.body.addChild(this.scaleLabel.root, this.scaleValue.root);
+
     this.drawFrame();
+  }
+
+  /** 当前 tab 有没有 UI 缩放 slider（只有通用页有）。 */
+  private hasSlider(): boolean {
+    return this.tab === 'general';
+  }
+
+  /** 当前 tab 有没有技能格（只有按键页有）。 */
+  private hasGrid(): boolean {
+    return this.tab === 'keys';
   }
 
   /** 某一行的矩形（相对弹窗内的固定偏移）。 */
@@ -381,12 +418,33 @@ export class SettingsPanel {
       case 'capture':
         // 捕获模式下输入层直接回调，这里不重复处理
         return true;
-      case 'move':
-        this.focus = moveFocus(this.focus, action.direction, cellCount);
+      case 'move': {
+        /**
+         * slider 焦点下，**左右是"调值"而不是"移动焦点"**。
+         *
+         * 需求："设置的通用里，加一个 UI 缩放的 slide，可以调整所有 UI 的比例"，
+         * 而本项目要求"几乎全键盘可操作"，所以 slider 必须能纯键盘调。
+         * 上下仍然用于离开这一项（回 tab 行 / 去恢复按钮）。
+         */
+        const horizontal = action.direction === 'left' || action.direction === 'right';
+        if (this.focus.zone === 'slider' && horizontal) {
+          const delta = action.direction === 'right' ? UI_SCALE_STEP : -UI_SCALE_STEP;
+          this.options.onUiScale(clampUiScale(this.options.getUiScale() + delta));
+          this.redraw();
+          return true;
+        }
+        this.focus = moveFocus(
+          this.focus,
+          action.direction,
+          cellCount,
+          this.hasSlider(),
+          this.hasGrid(),
+        );
         this.redraw();
         return true;
+      }
       case 'cycle':
-        this.focus = cycleZone(this.focus, cellCount, action.back);
+        this.focus = cycleZone(this.focus, cellCount, action.back, this.hasSlider());
         this.redraw();
         return true;
       case 'activate':
@@ -594,10 +652,11 @@ export class SettingsPanel {
 
     if (this.tab === 'general') {
       // 通用 tab 目前是空的 —— 明确写出来，而不是给一片空白
-      this.hintLabel.set(this.options.translate('settings.generalEmpty'));
+      this.hintLabel.set(this.options.translate('settings.generalHint'));
+      // 通用页没有"恢复默认键位"，那一栏留空（它属于按键页）
       this.resetButton.label.set('');
       this.resetButton.gfx.clear();
-      this.drawEmptyGeneral();
+      this.drawGeneralBody();
       return;
     }
 
@@ -672,15 +731,50 @@ export class SettingsPanel {
   }
 
   /** 空 tab 的占位：一行主文案 + 一行提示，避免一片空白让人以为坏了。 */
-  private drawEmptyGeneral(): void {
-    const { x, y } = this.origin;
+  /**
+   * 「通用」页的内容：目前只有 **UI 缩放**。
+   *
+   * 画法：名称在左、百分比在右、中间一条轨道 + 一个方块把手。
+   * 焦点落在它上面时加一圈描边（与其它焦点态同一套语言）。
+   */
+  private drawGeneralBody(): void {
+    const rect = uiScaleSliderRect();
+    const scale = clampUiScale(this.options.getUiScale());
+    const t = (scale - UI_SCALE_MIN) / (UI_SCALE_MAX - UI_SCALE_MIN);
+    const focused = this.focus.zone === 'slider';
+
+    this.scaleLabel.set(this.options.translate('settings.uiScale'));
+    this.scaleValue.set(`${Math.round(scale * 100)}%`);
+    this.scaleValue.setColor(focused ? PALETTE.douqi.bright : PALETTE.text);
+    this.scaleLabel.setColor(focused ? PALETTE.douqi.bright : PALETTE.text);
+
     const g = this.rowGfx;
-    const cy = y + 140;
-    g.roundRect(x + 40, cy - 26, SETTINGS_PANEL.w - 80, 52, 4).stroke({
-      color: 0x3a3a48,
-      width: 1,
+    /** 轨道：底部一条 4px 的细线（与技能栏的冷却条同一套语言） */
+    const trackY = rect.y + rect.h - 8;
+    const trackW = rect.w - 8;
+    g.rect(rect.x + 4, trackY, trackW, 4).fill({ color: 0x2a2c38, alpha: 1 });
+    g.rect(rect.x + 4, trackY, Math.round(trackW * t), 4).fill({
+      color: PALETTE.douqi.base,
+      alpha: 1,
     });
-    void g;
+    /**
+     * 把手：一个 10×14 的方块。
+     *
+     * 用方块而不是圆：本作整套 UI 没有圆形元素（技能格、条、按钮
+     * 全是直角），一个圆把手会显得是"从别处搬来的控件"。
+     */
+    const knobW = 10;
+    const knobX = rect.x + 4 + Math.round(trackW * t) - knobW / 2;
+    g.rect(knobX, trackY - 6, knobW, 16).fill({
+      color: focused ? PALETTE.douqi.bright : 0xd8d8e4,
+      alpha: 1,
+    });
+    if (focused) {
+      g.rect(rect.x, rect.y, rect.w, rect.h).stroke({
+        color: PALETTE.douqi.bright,
+        width: 1.5,
+      });
+    }
   }
 }
 

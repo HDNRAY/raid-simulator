@@ -139,7 +139,7 @@ export const zhCN = {
     level: '等级',
     casting: '施法中',
     interrupted: '被打断',
-    dodged: '闪避',
+    dodged: '闪躲',
     immune: '免疫',
   },
 
@@ -272,6 +272,9 @@ export const zhCN = {
     tabGeneral: '通用',
     tabKeys: '按键',
     /** 通用 tab 暂时没有可调项 */
+    /** 通用页：UI 缩放 slider */
+    uiScale: 'UI 缩放',
+    generalHint: '← → 调整，↑ ↓ 切换项',
     generalEmpty: '暂时还没有可调项',
     generalEmptyHint: '音量、画面与体验相关的选项之后加在这里',
 
@@ -283,6 +286,14 @@ export const zhCN = {
      *   - 「霸体」→ 提示玩家**无法被打断**（别浪费「破」）
      *   - 「高伤」→ 提示**闪避比防御更值得**（闪避全免，防御只减伤）
      *   - 「打断」→ 这一招会打断目标读条
+     */
+    /**
+     * 战斗日志的文案。
+     *
+     * 需求："在屏幕右侧，加一个 log 面板，闪避，造成伤害什么的也记录一下"。
+     *
+     * 这些 key 由 `app/logFormat.ts` 产生（**格式化层只给 key + 参数**），
+     * 文案在这里 —— 换语言时只需重新取词，历史条目不用重算。
      */
     hintTags: {
       interruptImmune: '霸体',
@@ -310,6 +321,25 @@ export const zhCN = {
     keyUnbound: '未绑定',
   },
 
+  /**
+   * 战斗日志（`app/logFormat.ts` 产生 key，这里给文案）。
+   *
+   * 参数用 `{name}` 形式插值（见 translator 的模板规则）。
+   */
+  log: {
+    title: '战斗日志',
+    damage: '造成 {amount} 伤害',
+    takeDamage: '受到 {amount} 伤害',
+    avoided: '闪躲',
+    missed: '未命中',
+    castStarted: '开始读条',
+    castInterrupted: '读条被打断（{reason}）',
+    interruptSuccess: '打断成功',
+    interruptImmune: '目标霸体，打断无效',
+    skillRejected: '技能被拒（{reason}）',
+    heal: '回复 {amount}',
+    encounterEnd: '战斗结束',
+  },
   screen: {
     pause: '暂停',
     resume: '继续',

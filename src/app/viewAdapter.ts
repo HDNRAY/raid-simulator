@@ -141,6 +141,15 @@ function damageColor(amount: number, crit: boolean): number {
  * 适配器：持有"渲染侧的瞬时状态"（飘字、闪光），
  * 这些不属于引擎状态（它们纯粹是表现）。
  */
+/**
+ * 飘字的位置散布范围（逻辑像素）。
+ *
+ * 横向比纵向大：飘字本身是往上浮的，纵向散太多会和上一个数字叠一起。
+ * 需求："战斗文字 位置随机一点"。
+ */
+const FLOATING_SPREAD_X = 76;
+const FLOATING_SPREAD_Y = 34;
+
 export class ViewAdapter {
   private floating: FloatingTextView[] = [];
   private nextFloatingId = 1;
@@ -170,7 +179,16 @@ export class ViewAdapter {
    */
   private lastReject: { readonly key: string; readonly tick: number } | undefined;
 
-  constructor(private readonly skills: ReadonlyMap<string, SkillDef>) {
+  /**
+   * @param skills 技能定义表（视图只读它，不回写引擎）
+   * @param translate 本地化取词。**注入而不是 import i18n 单例** ——
+   *   视图适配器要能在测试里用假翻译跑，也便于将来换语言/换实现。
+   *   只有飘字这类"纯字符串载荷"用它；状态提示仍然传 key 给渲染层。
+   */
+  constructor(
+    private readonly skills: ReadonlyMap<string, SkillDef>,
+    private readonly translate: ((key: string) => string) | undefined = undefined,
+  ) {
     for (const [id, skill] of skills) this.skillNameKeys.set(id, skill.nameKey);
   }
 
@@ -209,7 +227,19 @@ export class ViewAdapter {
         }
         case 'avoided': {
           this.setStatus(event.reason === 'immune' ? 'hud.immune' : 'hud.dodged', 90);
-          this.pushFloating('0', PALETTE.iframe.bright, 300, LAYOUT.combatTextY.player);
+          /**
+           * 完全免伤时飘的是"闪躲"而不是数字 `0`。
+           *
+           * 需求："闪避现在飘的战斗文字是'免疫'？改成闪躲"。
+           * 确实原来是 `immune`（免疫）—— 那是"伤害被豁免"的机制词，
+           * 而玩家做的是"闪躲"这个动作，用动作词更自然。
+           *
+           * ⚠️ 这里**只改满免伤（immune）**；被其他原因避免的
+           * （如目标已死）仍然走 `0`，因为它不是玩家闪出来的。
+           */
+          const label =
+            event.reason === 'immune' ? this.text('hud.dodged') : '0';
+          this.pushFloating(label, PALETTE.iframe.bright, 300, LAYOUT.combatTextY.player);
           this.playerFlash = 0.6;
           break;
         }
@@ -291,17 +321,44 @@ export class ViewAdapter {
     void tick;
   }
 
+  /**
+   * 加一条飘字。
+   *
+   * 位置带**确定性随机**（需求："战斗文字 位置随机一点"）。
+   *
+   * 为什么不用 `Math.random`：core 与视图都要能在 Node 里复现 ——
+   * 引擎的纪律是"所有随机走 `rngSeed`"，视图沿用同一套思路，
+   * 用一个自增的 id 做散列即可（视觉上足够随机，且完全可复现）。
+   *
+   * 原来的做法是 `(floating.length % 5) * 18`：那会让**相邻几条**
+   * 严格排在 5 个固定位置上，连打时看起来像一列整齐的队列。
+   */
   private pushFloating(text: string, color: number, x: number, y: number): void {
+    const seed = this.nextFloatingId * 2654435761;
+    /** 取散列的不同位段，得到两个独立的伪随机值 */
+    const jitterX = ((seed >>> 8) % 100) / 100 - 0.5; // -0.5..0.5
+    const jitterY = ((seed >>> 16) % 100) / 100 - 0.5;
     this.floating.push({
       id: this.nextFloatingId++,
       text,
       color,
-      x: x + (this.floating.length % 5) * 18 - 36,
-      y,
+      x: x + jitterX * FLOATING_SPREAD_X,
+      y: y + jitterY * FLOATING_SPREAD_Y,
       life: 1,
     });
     // 上限，避免长时间战斗累积
     if (this.floating.length > 24) this.floating.splice(0, this.floating.length - 24);
+  }
+
+  /** 取一条本地化文案（视图层内部用小工具，避免各处重复 try/catch）。 */
+  private text(key: string): string {
+    if (!this.translate) return key;
+    try {
+      return this.translate(key);
+    } catch {
+      // 缺 key 时退回 key 本身：飘字是装饰，不该让整场战斗崩掉
+      return key;
+    }
   }
 
   private setStatus(key: string, ttl: number, detailKey?: string): void {

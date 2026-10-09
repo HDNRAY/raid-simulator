@@ -24,11 +24,22 @@ export interface StageSize {
 }
 
 /** 计算当前视口下 canvas 应有的 CSS 尺寸与黑边。 */
-export function measureStage(stage: HTMLElement, mode: ScalingMode): StageSize {
+/**
+ * 计算当前视口下 canvas 应有的 CSS 尺寸与黑边。
+ *
+ * `scaleMultiplier` 是**用户可调**的额外倍数（设置里的"UI 缩放"），
+ * 乘在自动适配之上，所以"120%"在任意窗口下都是"比自动适配再大 20%"。
+ */
+export function measureStage(
+  stage: HTMLElement,
+  mode: ScalingMode,
+  scaleMultiplier = 1,
+): StageSize {
   const { width, height, scale } = computeCanvasCssSize(
     stage.clientWidth,
     stage.clientHeight,
     mode,
+    scaleMultiplier,
   );
   return {
     width,
@@ -68,9 +79,17 @@ export function observeStage(
   canvas: HTMLCanvasElement,
   mode: ScalingMode,
   onResize?: (size: StageSize) => void,
-): () => void {
+  /**
+   * 额外的缩放倍数（用户可调，见设置里的"UI 缩放"）。
+   *
+   * 传**函数**而不是数值：这样它每次测量时读取当前值，
+   * 于是回调里改了倍数、只要再触发一次重测就生效 ——
+   * 不需要重建整个 observer。
+   */
+  scaleMultiplier: () => number = () => 1,
+): { dispose: () => void; refresh: () => void } {
   const update = () => {
-    const size = measureStage(stage, mode);
+    const size = measureStage(stage, mode, scaleMultiplier());
     applyStageSize(canvas, size);
     onResize?.(size);
   };
@@ -79,10 +98,18 @@ export function observeStage(
 
   if (typeof ResizeObserver === 'undefined') {
     window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
+    return {
+      dispose: () => window.removeEventListener('resize', update),
+      refresh: update,
+    };
   }
 
   const observer = new ResizeObserver(update);
   observer.observe(stage);
-  return () => observer.disconnect();
+  return {
+    dispose: () => observer.disconnect(),
+    // 用户改了缩放倍数时手动触发一次
+    // （ResizeObserver 不会因为"同样的视口尺寸"而重新回调）
+    refresh: update,
+  };
 }

@@ -74,16 +74,28 @@ describe('applyStageSize', () => {
 describe('observeStage', () => {
   it('首次调用立即应用一次尺寸', () => {
     const canvas = makeCanvas();
-    const dispose = observeStage(makeStage(1280, 720), canvas, 'fit');
+    const { dispose } = observeStage(makeStage(1280, 720), canvas, 'fit');
     expect(canvas.style.width).toBe('1280px');
     expect(canvas.style.height).toBe('720px');
     dispose();
   });
 
+  it('refresh() 按**当前**缩放倍数重测（用户拖 slider 时用）', () => {
+    const canvas = makeCanvas();
+    let multiplier = 1;
+    const handle = observeStage(makeStage(1280, 720), canvas, 'fit', () => {}, () => multiplier);
+    expect(canvas.style.width).toBe('1280px');
+    // 用户把 UI 缩放调到 150%（视口没变，ResizeObserver 不会自己回调）
+    multiplier = 1.5;
+    handle.refresh();
+    expect(canvas.style.width).toBe('1920px');
+    handle.dispose();
+  });
+
   it('回调收到尺寸信息，dispose 之后不再触发', () => {
     const canvas = makeCanvas();
     const onResize = vi.fn();
-    const dispose = observeStage(makeStage(960, 540), canvas, 'fit', onResize);
+    const { dispose } = observeStage(makeStage(960, 540), canvas, 'fit', onResize);
     expect(onResize).toHaveBeenCalledTimes(1);
     expect(onResize.mock.calls[0]?.[0]).toMatchObject({ width: 960, height: 540 });
     dispose();
