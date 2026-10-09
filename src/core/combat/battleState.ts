@@ -26,16 +26,12 @@
  * 见架构规范 §12。
  */
 
-import { aggregateFlags, applyBuff, expireBuffs,
+import { applyBuff, expireBuffs,
 } from '../buffs';
 import {
-  applyDamage,
-  applyHeal,
   capOf,
   changeResource,
   checkGate,
-  computeDamage,
-  computeHeal,
   hastedCastTime,
   hastedCooldown,
   payCosts,
@@ -47,6 +43,7 @@ import { DOUQI_PER_INTERNAL_DAMAGE } from '../../data/balance';
 import { TICKS_PER_LOGIC_TICK } from '../loopConstants';
 import { createAiState, decide, type AiState, type AiView } from '../ai';
 import type { StatBreakdown } from '../stats/pipeline';
+import { resolveHit, type HitResolutionContext } from './hitResolution';
 import {
   applyEnrage,
   statsBreakdownOf,
@@ -60,7 +57,6 @@ Action,
   BuffDef,
   CastInstance,
   Combatant,
-  Effect,
   EventDef,
   HitDef,
   SkillDef,
@@ -323,6 +319,30 @@ export class BattleEngine {
 
   private applyEnrage(boss: Combatant): void {
     applyEnrage(this.statsContext(), boss);
+  }
+
+  /**
+   * 命中结算 —— 实现搬到 `./hitResolution.ts`（约 190 行）。
+   *
+   * 这里只有薄委托：把引擎的能力打包成 `HitResolutionContext`。
+   */
+  private resolveHit(actor: Combatant, skill: SkillDef, hit: HitDef): void {
+    resolveHit(this.hitContext(), actor, skill, hit);
+  }
+
+  /** 命中结算阶段需要的引擎能力（每次现取，避免持有可变引用）。 */
+  private hitContext(): HitResolutionContext {
+    return {
+      state: this.state,
+      events: this.events,
+      current: (id) => this.current(id),
+      replaceCombatant: (updated) => this.replaceCombatant(updated),
+      opponentOf: (id) => this.opponentOf(id),
+      statsOf: (id) => this.statsOf(id),
+      rollCrit: (stats, damage) => this.rollCrit(stats, damage),
+      gainDouqiFromDamage: (id, damage, tick) => this.gainDouqiFromDamage(id, damage, tick),
+      pushBuffApplied: (id, buffId, stacks) => this.pushBuffApplied(id, buffId, stacks),
+    };
   }
 
   /** 属性计算阶段需要的引擎能力（每次现取，避免持有可变引用）。 */
@@ -1147,191 +1167,7 @@ export class BattleEngine {
    * 单个 hit 段的结算（判定层的核心）
    * ---------------------------------------------------------------- */
 
-  private resolveHit(actor: Combatant, skill: SkillDef, hit: HitDef): void {
-    const target = this.opponentOf(actor.id);
-    if (!target) return;
 
-    const casterStats = this.statsOf(actor.id);
-    const victimFlags = aggregateFlags(target);
-
-    for (const effect of hit.effects) {
-      switch (effect.kind) {
-        case 'damage': {
-          if (!effect.damage) break;
-          /**
-           * 暴击判定。
-           *
-           * ⚠️ 这里长期是硬编码 `crit: false` —— 也就是说引擎**从未做过
-           * 暴击判定**，`critChance` 是个死属性，而熵之钟的
-           * "暴击后翻倍"触发因此永远不会发生。
-           *
-           * 抽成 `rollCrit` 而不是内联，是为了让"消耗随机数"这件事
-           * 只在一个地方发生 —— 重放的确定性完全取决于它。
-           */
-          const crit = this.rollCrit(casterStats, effect.damage);
-          const result = computeDamage(
-            effect.damage,
-            casterStats,
-            victimFlags,
-            { crit, multiplier: crit ? 1 + (casterStats.critDamage ?? 0) : 1 },
-          );
-          // 命中本身也会触发"授予 buff"类效果（例如 Boss 给自己挂前摇标记）
-          this.applyHitEffects(actor, target, effect);
-          const applied = applyDamage(
-            this.current(target.id),
-            result,
-            actor.id,
-            skill.id,
-            effect.damage.school,
-            this.state.tick,
-          );
-          this.replaceCombatant(applied.combatant);
-          this.events.push(...applied.events);
-
-          /**
-           * 炁按伤害换算：**造成伤害的人**与**受到伤害的人**各得一份。
-           * 放在这里（而不是内容里）才能覆盖所有伤害来源。
-           */
-          if (result.amount > 0) {
-            this.gainDouqiFromDamage(actor.id, result.amount, this.state.tick);
-            this.gainDouqiFromDamage(target.id, result.amount, this.state.tick);
-          }
-          break;
-        }
-        case 'heal': {
-          if (!effect.damage) break;
-          const amount = computeHeal(effect.damage, casterStats, { crit: false, multiplier: 1 });
-          const healed = applyHeal(this.current(actor.id), amount, actor.id, false, this.state.tick);
-          this.replaceCombatant(healed.combatant);
-          this.events.push(...healed.events);
-          break;
-        }
-        default:
-          this.applyHitEffects(actor, target, effect);
-          break;
-      }
-    }
-  }
-
-  /** 非伤害类效果（授予 buff / 改资源 / 打断）。 */
-  private applyHitEffects(actor: Combatant, target: Combatant, effect: Effect): void {
-    if (effect.kind === 'grantBuff' && effect.buff) {
-      const who = effect.target?.mode === 'self' ? actor : target;
-      const applied = applyBuff(this.current(who.id), effect.buff, actor.id, this.state.tick);
-      this.replaceCombatant({ ...this.current(who.id), buffs: applied.buffs });
-      this.events.push({
-        kind: 'buffApplied',
-        tick: this.state.tick,
-        targetId: who.id,
-        buffId: effect.buff.id,
-        stacks: applied.stacks,
-        sourceId: actor.id,
-      });
-      return;
-    }
-
-    if (effect.kind === 'removeBuff') {
-      /**
-       * 移除 buff。
-       *
-       * 用途：**派生技消耗掉它自己的开启条件**。
-       * 没有这一步时，`combo-window` 在窗口期内可被反复利用，
-       * 派生技会完全取代基础技（实测 152 次派生 vs 38 次基础）。
-       * 移除之后，一次基础技只能换来一次派生。
-       */
-      const buffId = effect.buff?.id ?? effect.buffId;
-      if (buffId) {
-        const who = effect.target?.mode === 'self' ? actor : target;
-        const current = this.current(who.id);
-        if (current.buffs.some((b) => b.defId === buffId)) {
-          this.replaceCombatant({
-            ...current,
-            buffs: current.buffs.filter((b) => b.defId !== buffId),
-          });
-          this.events.push({
-            kind: 'buffExpired',
-            tick: this.state.tick,
-            targetId: who.id,
-            buffId,
-            stacks: 0,
-            sourceId: actor.id,
-          });
-        }
-      }
-      return;
-    }
-
-    if (effect.kind === 'resource' && effect.resource) {
-      const delta = typeof effect.resource.delta === 'number' ? effect.resource.delta : 0;
-      const result = changeResource(this.current(actor.id), effect.resource.key, delta, this.state.tick);
-      this.replaceCombatant(result.combatant);
-      this.events.push(...result.events);
-      return;
-    }
-
-    if (effect.kind === 'interrupt') {
-      /**
-       * **霸体（`interruptImmune`）拦截一切打断，包括「破」的强制打断。**
-       *
-       * 需求：所有 Boss 招式默认都能被打断 / 闪避 / 格挡，
-       * 除非 Boss 处于霸体状态 —— 霸体由一个有 CD 的招式给自己挂上。
-       *
-       * 这里刻意**不看 `effect.force`**：`force` 的语义是"无视技能的
-       * 可打断标记"，但霸体是**更上层的状态**，它必须连强制打断也挡住，
-       * 否则霸体招式就没有意义了。
-       *
-       * 踩过的坑：`BuffFlags.interruptImmune` 早就定义了、`aggregateFlags`
-       * 也一直在算它，但**没有任何地方读它** —— 一个"看起来支持但实际
-       * 不生效"的字段。接上它比新造一个 flag 好：语义更准，
-       * 而且不用动数据模型。
-       */
-      if (aggregateFlags(target).interruptImmune) {
-        this.events.push({
-          kind: 'interruptImmune',
-          tick: this.state.tick,
-          targetId: target.id,
-          // 记录"本来会被打断的那个读条"，供 UI 提示用
-          skillId: target.casts[0]?.skillId ?? '',
-        });
-        return;
-      }
-
-      if (target.casts.length > 0) {
-        /**
-         * `force: true` 时**不看可打断性** —— 这是「破」的语义
-         * （需求：可以打断任何技能）。默认仍尊重目标技能的可打断性。
-         */
-        const interrupted = effect.force
-          ? [...target.casts]
-          : target.casts.filter((c: CastInstance) => c.interruptible);
-        if (interrupted.length > 0) {
-          const interruptedIds = new Set(interrupted.map((c: CastInstance) => c.skillId));
-          this.replaceCombatant({
-            ...this.current(target.id),
-            casts: this.current(target.id).casts.filter(
-              (c: CastInstance) => !interruptedIds.has(c.skillId),
-            ),
-          });
-          for (const cast of interrupted) {
-            this.events.push({
-              kind: 'castInterrupted',
-              tick: this.state.tick,
-              sourceId: target.id,
-              skillId: cast.skillId,
-              reason: 'interrupted',
-            });
-            this.events.push({
-              kind: 'interruptSuccess',
-              tick: this.state.tick,
-              sourceId: actor.id,
-              targetId: target.id,
-              skillId: cast.skillId,
-            });
-          }
-        }
-      }
-    }
-  }
 
   /* ---------------------------------------------------------------- *
    * 持续效果、buff 过期、资源回复、死亡
