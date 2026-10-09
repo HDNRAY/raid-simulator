@@ -423,9 +423,21 @@ export class SettingsPanel {
         this.setNotice(this.options.translate('settings.keysResetDone'));
         this.redraw();
         return true;
-      case 'keyRow':
-        this.startCapture(target.skillId);
+      case 'keyRow': {
+        /**
+         * ⚠️ 点技能格 = **选中**，不是直接改键。
+         *
+         * 需求："设置里的按键设置，目前方向键选中和鼠标选中是两件事，
+         * 应该合并。"
+         *
+         * 原先点格子会立刻 `startCapture`（进入改键），而方向键只是移动
+         * 焦点 —— 两套语义，而且点完之后详情区显示的还是**上一个**
+         * 技能（焦点没变）。现在鼠标与方向键都只做"选中"，
+         * 改键统一走 `Enter`（`activateFocus`）。
+         */
+        this.setFocusToSkill(target.skillId);
         return true;
+      }
       case 'scaleSlider':
         /**
          * 鼠标点/拖滑块：由横坐标直接反算倍数（点到哪跳到哪）。
@@ -441,6 +453,45 @@ export class SettingsPanel {
         // 点在弹窗内的空白处：消费掉，不穿透到战斗
         return true;
     }
+  }
+
+  /**
+   * 选中某个技能（合并鼠标与键盘的"选中"语义）。
+   *
+   * 只移动焦点并重画 —— **不**进入改键。改键统一由 `Enter` 触发
+   * （见 `activateFocus`），于是"选中"与"改键"是两个清晰的动作。
+   */
+  setFocusToSkill(skillId: string): void {
+    const index = this.options.getRows().findIndex((r) => r.skillId === skillId);
+    if (index < 0) return;
+    this.setFocus({ zone: 'grid', index });
+  }
+
+  /**
+   * 鼠标悬停到某个技能格上 —— 与方向键选中是**同一件事**。
+   *
+   * 需求要求合并这两者；悬停也走同一条路径，所以"鼠标划过"与
+   * "方向键移动"看到的是同一个高亮、同一份详情。
+   */
+  hoverSkill(px: number, py: number): void {
+    if (!this.visible || this.tab !== 'keys') return;
+    const rows = this.options.getRows();
+    const target = hitTestLogic(px, py, {
+      tab: this.tab,
+      rowSkillIds: rows.map((r) => r.skillId),
+    });
+    if (target.kind !== 'keyRow') return;
+    this.setFocusToSkill(target.skillId);
+  }
+
+  /** 设焦点并重画（统一入口，保证焦点变化一定会重绘）。 */
+  private setFocus(next: SettingsFocus): void {
+    const same =
+      next.zone === this.focus.zone &&
+      (next.zone !== 'grid' || next.index === (this.focus.zone === 'grid' ? this.focus.index : -1));
+    if (same) return;
+    this.focus = next;
+    this.redraw();
   }
 
   /** 某个逻辑坐标是否落在通用页的滑块上（拖动拖拽用）。 */

@@ -514,9 +514,19 @@ async function bootstrap(): Promise<void> {
   });
 
   app.canvas.addEventListener('pointermove', (event) => {
-    if (!draggingSlider) return;
-    const { px } = pointerAt(event);
-    settings.dragScaleSlider(px);
+    const { px, py } = pointerAt(event);
+    /**
+     * 拖滑块优先 —— 一次手势一旦从滑块开始，就不要再被悬停抢走。
+     */
+    if (draggingSlider) {
+      settings.dragScaleSlider(px);
+      return;
+    }
+    /**
+     * 鼠标悬停到技能格 = **选中它**（需求："方向键选中和鼠标选中，
+     * 应该合并"）。与方向键走同一条路径，所以高亮与详情完全一致。
+     */
+    settings.hoverSkill(px, py);
   });
 
   // 松开/离开画布就结束这次手势（否则会一直粘着）

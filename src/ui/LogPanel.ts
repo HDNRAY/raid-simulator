@@ -28,7 +28,7 @@
 import type { Container } from 'pixi.js';
 import type { LogEntry } from '../app/logFormat';
 import { FONT, LAYOUT, LOGICAL } from './layout';
-import { Label, Panel, type PixiCtor } from './primitives';
+import { Label, PANEL_STYLE, Panel, type PixiCtor } from './primitives';
 import { PALETTE } from '../render/theme';
 
 export interface LogPanelOptions {
@@ -79,15 +79,13 @@ export class LogPanel {
     const r = LAYOUT.log;
     this.root = new pixi.Container();
 
+    // 与玩家资源面板**同一套外观**（见 `PANEL_STYLE` 的说明）
     this.panel = new Panel(pixi, {
       x: r.x,
       y: r.y,
       w: r.w,
       h: r.h,
-      fill: 0x0d0e16,
-      line: 0x2a2c3a,
-      fillAlpha: 0.72,
-      radius: 3,
+      ...PANEL_STYLE,
     });
     this.root.addChild(this.panel.root);
 

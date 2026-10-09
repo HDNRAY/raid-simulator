@@ -64,7 +64,7 @@ const pressSkill = async (skillId, ms = 600) => {
 };
 
 // 打一轮：攻 → 轰 → 攻
-for (const id of ['attack', 'blast', 'attack']) await pressSkill(id, 700);
+for (const id of ['attack', 'blast', 'attack']) await pressSkill(id, 600);
 const b = await probe();
 console.log('按键后:', JSON.stringify(b));
 // 打 8 秒，看伤害是否累计
@@ -77,8 +77,9 @@ console.log('按键后:', JSON.stringify(b));
  * 脚本会误报"Boss 受到伤害 ✗"。
  */
 for (let i=0;i<8;i++){
-  await pressSkill('attack', 700);
-  await pressSkill('blast', 1100);
+  // ⚠️ 只需略长于读条：「攻」500ms、「轰」900ms
+  await pressSkill('attack', 600);
+  await pressSkill('blast', 1000);
 }
 const c = await probe();
 console.log('持续输出后:', JSON.stringify(c));

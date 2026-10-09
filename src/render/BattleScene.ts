@@ -49,7 +49,7 @@ const RESOURCE_COLORS: Readonly<Record<ResourceKeyName, number>> = {
   energy: PALETTE.energy.base,
   douqi: PALETTE.douqi.base,
 };
-import { Bar, Label, Panel, type PixiCtor } from '../ui/primitives';
+import { Bar, Label, PANEL_STYLE, Panel, type PixiCtor } from '../ui/primitives';
 import { BossSprite } from './actors/BossSprite';
 import {
   isTightWindow,
@@ -878,9 +878,7 @@ export class BattleScene {
       y: pf.y,
       w: pf.w,
       h: pf.h,
-      fill: 0x0c0c14,
-      line: 0x4a4c60,
-      fillAlpha: 0.86,
+      ...PANEL_STYLE,
     });
     /**
      * 面板标题去掉了（原来是「你」）。
@@ -1009,6 +1007,11 @@ export class BattleScene {
     const rh = LAYOUT.result.h;
     const rx = Math.round((LOGICAL.width - rw) / 2);
     const ry = Math.round((LOGICAL.height - rh) / 2) - 20;
+    /**
+     * 结算面板**故意比其它面板不透明**（0.97）：它是"结算"，
+     * 需要挡住背后的战斗画面让人专心看结果 —— 所以显式覆盖透明度，
+     * 而不是跟着 `PANEL_STYLE` 走。
+     */
     this.resultPanel = new Panel(pixi, {
       x: rx,
       y: ry,

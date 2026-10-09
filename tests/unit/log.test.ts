@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { LogFormatter } from '../../src/app/logFormat';
 import { LAYOUT, LOGICAL, scaleUiRect } from '../../src/ui/layout';
 import { UiLayout } from '../../src/ui/uiLayout';
+import { PANEL_STYLE } from '../../src/ui/primitives';
 import {
   UI_SCALE_MAX,
   UI_SCALE_MIN,
@@ -502,5 +503,50 @@ describe('UI 缩放：覆盖面与鼠标支持', () => {
     expect(hitTest(rect.x + 4, rect.y + 4, { tab: 'keys', rowSkillIds: ['attack'] }).kind).not.toBe(
       'scaleSlider',
     );
+  });
+});
+
+describe('面板外观统一', () => {
+  /**
+   * 需求："战斗日志和人物资源面板用的是一个组件吗？最好用一个，
+   * 然后把背景的透明度调低。"
+   *
+   * 它们**本来就用同一个 `Panel` 组件**，但构造参数各写一遍
+   * （填充 `0x0c0c14` vs `0x0d0e16`、描边 `0x4a4c60` vs `0x2a2c3a`）——
+   * 差异小到看不出，却是两处要同步维护的真相。
+   */
+  it('【关键】日志面板与资源面板共用同一组外观参数', async () => {
+    const { readFileSync } = await import('node:fs');
+    const log = readFileSync(new URL('../../src/ui/LogPanel.ts', import.meta.url), 'utf8');
+    const scene = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    // 两者都从共享常量展开，而不是各写 fill/line/fillAlpha
+    expect(log).toMatch(/\.\.\.PANEL_STYLE/);
+    expect(scene).toMatch(/\.\.\.PANEL_STYLE/);
+    // 而且都不该再出现"自己写的面板填充色"
+    expect(log).not.toMatch(/fill: 0x0d0e16/);
+    expect(scene).not.toMatch(/fill: 0x0c0c14/);
+  });
+
+  it('共享样式的透明度低于原先的两个值（需求："调低"）', () => {
+    expect(PANEL_STYLE.fillAlpha).toBeLessThan(0.72);
+    expect(PANEL_STYLE.fillAlpha).toBeGreaterThan(0.3);
+  });
+
+  it('结算面板**故意**比常规面板不透明（它是结算，要挡住战斗画面）', async () => {
+    const { readFileSync } = await import('node:fs');
+    const scene = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    const idx = scene.indexOf('this.resultPanel = new Panel');
+    expect(idx).toBeGreaterThan(0);
+    expect(scene.slice(idx, idx + 400)).toMatch(/fillAlpha: 0\.9/);
+  });
+
+  it('日志面板在右侧中段：不压顶栏、不压技能栏、不与 Boss 本体重叠', () => {
+    const r = LAYOUT.log;
+    // 下移过（150 → 216）：与顶栏/Boss buff 拉开距离
+    expect(r.y).toBeGreaterThanOrEqual(200);
+    expect(r.y + r.h).toBeLessThanOrEqual(LAYOUT.skillBar.y);
+    // 贴右边缘（留安全边距）
+    expect(r.x + r.w).toBeLessThanOrEqual(LOGICAL.width);
+    expect(r.x).toBeGreaterThan(LOGICAL.width / 2);
   });
 });
