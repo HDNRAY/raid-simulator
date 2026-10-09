@@ -118,6 +118,22 @@ export class UiLayout {
     return this.rect(LAYOUT.bossHp, UI_ANCHORS.bossHp);
   }
 
+  /**
+   * Boss 的 buff 条（血条下方左侧）。
+   *
+   * `IconStrip` 的几何是"`size` 方块 + 间距 + 流式排布"，所以这里
+   * 返回一个**缩放后的矩形**，strip 自己按它重排（见 `IconStrip.setUiScale`）。
+   */
+  get bossBuffs(): { readonly x: number; readonly y: number; readonly size: number; readonly gap: number } {
+    const base = LAYOUT.bossBuffs;
+    return {
+      x: base.x,
+      y: base.y,
+      size: this.len(base.size),
+      gap: this.len(base.gap),
+    };
+  }
+
   get logPanel(): Rect {
     return this.rect(LAYOUT.log, 'right');
   }

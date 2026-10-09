@@ -34,11 +34,12 @@ import { Text } from 'pixi.js';
 import type { Container, Graphics } from 'pixi.js';
 import { FONT_FAMILY } from '../render/theme';
 import { FONT } from './layout';
-import type { PixiCtor } from './primitives';
+import { HALF_PIXEL, type PixiCtor } from './primitives';
 
 export interface CastBarOptions {
   readonly pixi: PixiCtor;
-  readonly rect: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+  /** ⚠️ 可变：UI 缩放会重设它（见 `setRect`） */
+  rect: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   /** 填充色（纯色，无渐变） */
   readonly fill: number;
   /** 底槽色（"还没走完"的那一段） */
@@ -72,6 +73,8 @@ const INSET = 2;
 export class CastBar {
   readonly root: Container;
 
+  /** 底槽（UI 缩放时重画） */
+  private readonly bg: Graphics;
   private readonly fillGfx: Graphics;
   private readonly border: Graphics;
   private readonly nameText: Text;
@@ -90,8 +93,8 @@ export class CastBar {
     this.root = new pixi.Container();
 
     // ── 底槽 ──
-    const bg = new pixi.Graphics();
-    bg.roundRect(rect.x, rect.y, rect.w, rect.h, RADIUS).fill({ color: options.track, alpha: 1 });
+    this.bg = new pixi.Graphics();
+    this.bg.roundRect(rect.x, rect.y, rect.w, rect.h, RADIUS).fill({ color: options.track, alpha: 1 });
 
     // ── 填充（内容由 update() 画） ──
     this.fillGfx = new pixi.Graphics();
@@ -147,7 +150,7 @@ export class CastBar {
      * 看起来像"上边框缺失"）。所以顺序写在这里、只写一次 ——
      * 这也是把两处读条合并成一个组件的主要收益。
      */
-    this.root.addChild(bg, this.fillGfx, this.border, this.nameText, this.tagText, this.timeText);
+    this.root.addChild(this.bg, this.fillGfx, this.border, this.nameText, this.tagText, this.timeText);
   }
 
   /**
@@ -194,7 +197,7 @@ export class CastBar {
     const { x, y, w, h } = this.options.rect;
     this.border.clear();
     this.border
-      .roundRect(x + 0.5, y + 0.5, w - 1, h - 1, RADIUS)
+      .roundRect(x + HALF_PIXEL, y + HALF_PIXEL, w - 1, h - 1, RADIUS)
       .stroke({ color, width: 1 });
   }
 
@@ -239,6 +242,35 @@ export class CastBar {
      * （`this.border` 也在 `addChild` 顺序里排在填充之后）。
      */
     this.drawBorder(this.options.line);
+  }
+
+  /**
+   * 改几何与字号（UI 缩放时用）。
+   *
+   * 三件事必须**一起**做，否则会出现"框变大了、字没变"或"字变大了、
+   * 位置还按旧框算"：
+   *   1. 记住新的矩形（`update` / `drawBorder` 都读它）
+   *   2. 重画底槽与描边
+   *   3. 按新矩形重排文字（行内垂直居中，所以 y 也要跟着变）
+   */
+  setRect(rect: { readonly x: number; readonly y: number; readonly w: number; readonly h: number }, scale: number): void {
+    this.options.rect = rect;
+    const midY = rect.y + rect.h / 2;
+    this.bg.clear();
+    this.bg.roundRect(rect.x, rect.y, rect.w, rect.h, RADIUS).fill({ color: this.options.track, alpha: 1 });
+    this.drawBorder(this.options.line);
+    const nameSize = Math.max(1, Math.round(FONT.warn * scale));
+    const timeSize = Math.max(1, Math.round(FONT.body * scale));
+    this.nameText.style.fontSize = nameSize;
+    this.nameText.x = rect.x + Math.round(12 * scale);
+    this.nameText.y = midY;
+    this.timeText.style.fontSize = timeSize;
+    this.timeText.x = rect.x + rect.w - Math.round(10 * scale);
+    this.timeText.y = midY;
+    this.tagText.style.fontSize = Math.max(1, Math.round(FONT.small * scale));
+    this.tagText.y = midY;
+    // 强制下一帧重画填充（几何变了，缓存的进度不再有效）
+    this.lastProgress = -1;
   }
 
   set visible(v: boolean) {

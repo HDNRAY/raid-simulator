@@ -191,7 +191,7 @@ describe('读条组件（CastBar）：两处读条共用同一个实现', () => 
     expect(m).not.toBeNull();
     const order = m![1]!.split(',').map((x) => x.trim());
     expect(order).toEqual([
-      'bg',
+      'this.bg',
       'this.fillGfx',
       'this.border',
       'this.nameText',
@@ -213,7 +213,8 @@ describe('读条组件（CastBar）：两处读条共用同一个实现', () => 
      */
     expect(src).toMatch(/const INSET = 2;/);
     expect(src).toMatch(/rect\(x \+ INSET, y \+ INSET, filled, innerH\)/);
-    expect(src).toMatch(/roundRect\(x \+ 0\.5, y \+ 0\.5, w - 1, h - 1, RADIUS\)/);
+    // 半像素偏移现在是共用常量（`HALF_PIXEL`），不再是字面量 0.5
+    expect(src).toMatch(/roundRect\(x \+ HALF_PIXEL, y \+ HALF_PIXEL, w - 1, h - 1, RADIUS\)/);
   });
 
   it('两处读条都够高，且都不与所属面板重叠', () => {

@@ -149,6 +149,32 @@ export class LogPanel {
     }
   }
 
+  /**
+   * 改几何与行距（UI 缩放时用）。
+   *
+   * 行标签是**一次性建满**的（避免反复 new Text），所以缩放时不能
+   * 重建，只能改它们的坐标、字号与面板矩形。行距同样按系数走 ——
+   * 只放大框不放大行距，十行会挤在面板顶部。
+   */
+  setUiScale(scale: number, rect: { readonly x: number; readonly y: number; readonly w: number; readonly h: number }): void {
+    this.panel.set({ x: rect.x, y: rect.y, w: rect.w, h: rect.h });
+    this.title.root.x = rect.x + Math.round(8 * scale);
+    this.title.root.y = rect.y + Math.round(5 * scale);
+    this.title.setSize(Math.max(1, Math.round(FONT.tiny * scale)));
+    const lineH = Math.max(1, Math.round(LINE_H * scale));
+    const lineGap = Math.max(1, Math.round(LINE_GAP * scale));
+    const lineSize = Math.max(1, Math.round(FONT.tiny * scale));
+    for (let i = 0; i < this.lines.length; i += 1) {
+      const label = this.lines[i];
+      if (!label) continue;
+      label.root.x = rect.x + Math.round(8 * scale);
+      label.root.y = rect.y + rect.h - Math.round(8 * scale) - (i + 1) * (lineH + lineGap) + lineGap;
+      label.setSize(lineSize);
+    }
+    // 内容没变，但坐标变了 —— 强制下一帧重排一次
+    this.lastSignature = '';
+  }
+
   /** 面板整体显隐（结算后可留在屏幕上供复盘）。 */
   set visible(v: boolean) {
     this.root.visible = v;

@@ -484,14 +484,47 @@ async function bootstrap(): Promise<void> {
   };
 
   /* 鼠标：canvas 里自己算坐标（不做逐对象事件绑定，便于测试驱动） */
-  app.canvas.addEventListener('pointerdown', (event) => {
+  /** 把一次指针事件换算成逻辑坐标。 */
+  const pointerAt = (event: PointerEvent): { px: number; py: number } => {
     const rect = app.canvas.getBoundingClientRect();
     // CSS 尺寸 → 逻辑坐标（canvas 内部分辨率固定，靠 CSS 缩放）
-    const px = ((event.clientX - rect.left) / rect.width) * LOGICAL_W;
-    const py = ((event.clientY - rect.top) / rect.height) * LOGICAL_H;
-    if (settingsOpen) settings.hitTest(px, py);
-    else if (settingsButton.hitTest(px, py)) openSettings();
+    return {
+      px: ((event.clientX - rect.left) / rect.width) * LOGICAL_W,
+      py: ((event.clientY - rect.top) / rect.height) * LOGICAL_H,
+    };
+  };
+
+  /**
+   * 是否正在拖滑块。
+   *
+   * 需求："ui 缩放的 slider 还是要支持鼠标。"
+   * 点一下就能调（`hitTest` 里按横坐标反算），而**拖动**需要额外
+   * 记住"这次手势从滑块开始" —— 否则鼠标划过面板时也会一直改数值。
+   */
+  let draggingSlider = false;
+
+  app.canvas.addEventListener('pointerdown', (event) => {
+    const { px, py } = pointerAt(event);
+    if (!settingsOpen) {
+      if (settingsButton.hitTest(px, py)) openSettings();
+      return;
+    }
+    const onSlider = settings.hitTest(px, py) && settings.isOnScaleSlider(px, py);
+    draggingSlider = onSlider;
   });
+
+  app.canvas.addEventListener('pointermove', (event) => {
+    if (!draggingSlider) return;
+    const { px } = pointerAt(event);
+    settings.dragScaleSlider(px);
+  });
+
+  // 松开/离开画布就结束这次手势（否则会一直粘着）
+  const endDrag = (): void => {
+    draggingSlider = false;
+  };
+  app.canvas.addEventListener('pointerup', endDrag);
+  app.canvas.addEventListener('pointerleave', endDrag);
 
   /**
    * 设置相关的键盘处理。

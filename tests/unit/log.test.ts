@@ -12,7 +12,9 @@ import {
 import {
   SETTINGS_PANEL,
   cycleZone,
+  hitTest,
   moveFocus,
+  uiScaleFromPointer,
   uiScaleSliderRect,
 } from '../../src/ui/settings/logic';
 import { LOG_PANEL_METRICS } from '../../src/ui/LogPanel';
@@ -449,5 +451,56 @@ describe('UI 缩放：只缩放 UI，不缩放战斗画面', () => {
     // 条高与行距翻倍
     expect(b.playerBars.h).toBe(a.playerBars.h * 2);
     expect(b.playerBars.stride).toBe(a.playerBars.stride * 2);
+  });
+});
+
+describe('UI 缩放：覆盖面与鼠标支持', () => {
+  it('Boss 面板 / 读条 / 日志面板都在缩放范围内', () => {
+    const a = new UiLayout(1);
+    const b = new UiLayout(1.5);
+    // Boss 顶栏与血条：贴顶居中，放大后仍然贴顶
+    expect(b.bossBar.y).toBe(a.bossBar.y);
+    expect(b.bossBar.w).toBeGreaterThan(a.bossBar.w);
+    expect(b.bossHp.h).toBeGreaterThan(a.bossHp.h);
+    // 两处读条
+    expect(b.castBar.h).toBeGreaterThan(a.castBar.h);
+    expect(b.playerCastBar.h).toBeGreaterThan(a.playerCastBar.h);
+    // 日志面板：贴右，放大后右缘不动
+    expect(b.logPanel.x + b.logPanel.w).toBe(a.logPanel.x + a.logPanel.w);
+    expect(b.logPanel.w).toBeGreaterThan(a.logPanel.w);
+    // Boss buff 条的方块与间距
+    expect(b.bossBuffs.size).toBeGreaterThan(a.bossBuffs.size);
+    expect(b.bossBuffs.gap).toBeGreaterThan(a.bossBuffs.gap);
+  });
+
+  it('滑块支持鼠标：按横坐标反算倍数', () => {
+    /**
+     * 需求："ui 缩放的 slider 还是要支持鼠标。"
+     *
+     * 点到轨道的哪里就跳到哪个值 —— 而不是只能点中把手。
+     */
+    const rect = uiScaleSliderRect();
+    // 轨道最左 → 最小值
+    expect(uiScaleFromPointer(rect.x)).toBe(UI_SCALE_MIN);
+    // 轨道最右 → 最大值
+    expect(uiScaleFromPointer(rect.x + rect.w)).toBe(UI_SCALE_MAX);
+    // 中点 → 约中间值（对齐步长后是 1.2 或 1.3）
+    const mid = uiScaleFromPointer(rect.x + rect.w / 2);
+    expect(mid).toBeGreaterThan(1.1);
+    expect(mid).toBeLessThan(1.4);
+    // 点在面板内但不在滑块上 → 不该返回滑块目标
+    expect(
+      hitTest(rect.x + rect.w + 40, rect.y + 4, { tab: 'general', rowSkillIds: [] }).kind,
+    ).not.toBe('scaleSlider');
+  });
+
+  it('滑块只属于通用页 —— 按键页点它不该命中', () => {
+    const rect = uiScaleSliderRect();
+    expect(hitTest(rect.x + 4, rect.y + 4, { tab: 'general', rowSkillIds: [] }).kind).toBe(
+      'scaleSlider',
+    );
+    expect(hitTest(rect.x + 4, rect.y + 4, { tab: 'keys', rowSkillIds: ['attack'] }).kind).not.toBe(
+      'scaleSlider',
+    );
   });
 });

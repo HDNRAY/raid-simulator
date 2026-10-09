@@ -40,6 +40,9 @@ import {
   resetButtonRect,
   skillDetailRect,
   resolveKeyAction,
+  uiScaleFromPointer,
+  uiScaleSliderRect,
+  contains,
   tabRect,
   KEY_GRID_CAPACITY,
   hintLineY,
@@ -423,10 +426,33 @@ export class SettingsPanel {
       case 'keyRow':
         this.startCapture(target.skillId);
         return true;
+      case 'scaleSlider':
+        /**
+         * 鼠标点/拖滑块：由横坐标直接反算倍数（点到哪跳到哪）。
+         *
+         * 需求："ui 缩放的 slider 还是要支持鼠标。"
+         * 拖动也能用，因为主循环每次 pointerdown / pointermove 都会
+         * 走到这里 —— 面板不需要自己维护"是否在拖"的状态。
+         */
+        this.options.onUiScale(uiScaleFromPointer(px));
+        this.redraw();
+        return true;
       case 'none':
         // 点在弹窗内的空白处：消费掉，不穿透到战斗
         return true;
     }
+  }
+
+  /** 某个逻辑坐标是否落在通用页的滑块上（拖动拖拽用）。 */
+  isOnScaleSlider(px: number, py: number): boolean {
+    return this.visible && this.tab === 'general' && contains(uiScaleSliderRect(), px, py);
+  }
+
+  /** 拖拽滑块到某个横坐标（由主循环在 pointermove 时调用）。 */
+  dragScaleSlider(px: number): void {
+    if (this.tab !== 'general') return;
+    this.options.onUiScale(uiScaleFromPointer(px));
+    this.redraw();
   }
 
   /**

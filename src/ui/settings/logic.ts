@@ -20,6 +20,7 @@
  */
 
 import { LOGICAL } from '../layout';
+import { UI_SCALE_MAX, UI_SCALE_MIN, clampUiScale } from '../../render/scaling';
 
 /* ------------------------------------------------------------------ *
  * 几何
@@ -247,6 +248,8 @@ export type ClickTarget =
   | { readonly kind: 'tab'; readonly tab: SettingsTab }
   | { readonly kind: 'resetKeys' }
   | { readonly kind: 'keyRow'; readonly skillId: string }
+  /** 通用页的 UI 缩放滑块（支持鼠标点击/拖动） */
+  | { readonly kind: 'scaleSlider' }
   | { readonly kind: 'none' };
 
 /**
@@ -269,6 +272,14 @@ export function hitTest(
   const tabs: readonly SettingsTab[] = ['general', 'keys'];
   for (const [i, tab] of tabs.entries()) {
     if (contains(tabRect(i), px, py)) return { kind: 'tab', tab };
+  }
+
+  /**
+   * 通用页的滑块**要支持鼠标**（需求："ui 缩放的 slider 还是要支持鼠标"）。
+   * 命中测试放在 tab 判断之后、按键页分支之前 —— 它只属于通用页。
+   */
+  if (options.tab === 'general' && contains(uiScaleSliderRect(), px, py)) {
+    return { kind: 'scaleSlider' };
   }
 
   if (options.tab === 'keys') {
@@ -589,4 +600,20 @@ export function skillDetailRect(): {
     w: SKILL_DETAIL.w,
     h: SKILL_DETAIL.h,
   };
+}
+
+/**
+ * 鼠标点击滑块时，由**横坐标**反算出倍数。
+ *
+ * 轨道的可点区间与 `ScaleSlider` 里的一致（左右各让 4px、宽 `w-8`），
+ * 所以点击位置与把手的视觉位置是对齐的 —— 点到哪里就跳到哪里。
+ * 结果**钳到合法范围并对齐步长**（与键盘调值是同一套约束）。
+ */
+export function uiScaleFromPointer(px: number): number {
+  const rect = uiScaleSliderRect();
+  const trackX = rect.x + 4;
+  const trackW = rect.w - 8;
+  const t = trackW <= 0 ? 0 : (px - trackX) / trackW;
+  const clamped = Math.min(1, Math.max(0, t));
+  return clampUiScale(UI_SCALE_MIN + clamped * (UI_SCALE_MAX - UI_SCALE_MIN));
 }

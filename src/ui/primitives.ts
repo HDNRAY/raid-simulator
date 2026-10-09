@@ -46,6 +46,18 @@ export interface PanelProps {
   readonly radius?: number;
 }
 
+/**
+ * 奇数宽度描边的**半像素偏移**。
+ *
+ * 1px 的线以路径线为中心、向两侧各铺 0.5px。路径落在整数坐标上时，
+ * 它跨越两个半行像素、各混一次，于是被稀释到几乎看不见。
+ * 内移 0.5px 之后，线正好覆盖一个整行/整列像素。
+ *
+ * 这个坑在**读条**（`ui/CastBar.ts`）和**面板**（这里）各踩过一次 ——
+ * 所以提成常量，别再靠记忆。
+ */
+export const HALF_PIXEL = 0.5;
+
 export class Panel {
   readonly root: Container;
   private readonly gfx: Graphics;
@@ -68,7 +80,14 @@ export class Panel {
     const { x, y, w, h, fill = 0x11121b, line = 0x505266, fillAlpha = 0.82, radius = 3 } = this.props;
     this.gfx.clear();
     this.gfx.roundRect(x, y, w, h, radius).fill({ color: fill, alpha: fillAlpha });
-    this.gfx.roundRect(x, y, w, h, radius).stroke({ color: line, width: 1 });
+    /**
+     * ⚠️ 描边路径**内移半像素**（见 `HALF_PIXEL` 的说明）。
+     * 画在整数坐标上时，1px 的线会被反锯齿劈成两个半行像素 ——
+     * 实测**上边框几乎看不见**（`#020305` 就是背景色），而下/左正常。
+     */
+    this.gfx
+      .roundRect(x + HALF_PIXEL, y + HALF_PIXEL, w - 1, h - 1, radius)
+      .stroke({ color: line, width: 1 });
   }
 }
 

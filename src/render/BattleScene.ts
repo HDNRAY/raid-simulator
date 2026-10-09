@@ -164,21 +164,46 @@ class IconStrip {
     timer: Label;
   }> = [];
   private readonly pixi: PixiCtor;
+  /** UI 缩放系数（默认 1）—— 只在 Boss buff 条上用到 */
+  private uiScale = 1;
 
   constructor(
     pixi: PixiCtor,
-    private readonly strip: {
-      readonly x: number;
-      readonly y: number;
-      readonly size: number;
-      readonly gap: number;
+    /** ⚠️ 可变：UI 缩放会重设 x/y/size/gap（见 `setUiScale`） */
+    private strip: {
+      x: number;
+      y: number;
+      size: number;
+      gap: number;
       readonly max: number;
-      readonly labelGap?: number;
+      labelGap?: number;
     },
     private readonly translate: TranslateFn,
   ) {
     this.pixi = pixi;
     this.root = new pixi.Container();
+  }
+
+  /**
+   * 设定 UI 缩放（Boss buff 条用）。
+   *
+   * 与技能栏同理：**销毁旧的方块与标签再让 `ensure` 重建**。
+   * ⚠️ 只清数组不销毁，旧节点仍挂在 root 上 —— 缩放后会新旧两层叠加
+   * （技能栏上踩过这个坑，这里一次做对）。
+   */
+  setUiScale(
+    scale: number,
+    rect: { readonly x: number; readonly y: number; readonly size: number; readonly gap: number },
+  ): void {
+    if (scale === this.uiScale) return;
+    this.uiScale = scale;
+    this.strip = { ...this.strip, x: rect.x, y: rect.y, size: rect.size, gap: rect.gap, labelGap: Math.max(1, Math.round(4 * scale)) };
+    for (const item of this.items) {
+      item.square.destroy({ children: true });
+      item.label.root.destroy({ children: true });
+      item.timer.root.destroy({ children: true });
+    }
+    this.items.length = 0;
   }
 
   private ensure(count: number): void {
@@ -1110,6 +1135,34 @@ export class BattleScene {
       entry.text.root.x = barX + barW - ui.len(4);
       entry.text.root.y = midY;
     }
+
+    /* ---------- Boss 相关（需求："boss 相关面板 buff，读条"） ---------- */
+    const bb = ui.bossBar;
+    this.bossName.setSize(ui.len(FONT.body));
+    this.bossName.root.x = bb.x + ui.len(2);
+    this.bossName.root.y = bb.y;
+    this.bossPhase.setSize(ui.len(FONT.small));
+    this.timerLabel.setSize(ui.len(FONT.small));
+    this.timerLabel.root.y = bb.y + ui.len(3);
+
+    /**
+     * ⚠️ Boss 血条的**位置**在顶栏矩形里算，但条的宽度还要扣掉右侧
+     * 计时器的占位 —— 这里沿用它原来的比例：血量条占顶栏宽度减去
+     * 一个固定右缩进。缩放后同样成立（两者都乘了系数）。
+     */
+    const bh = ui.bossHp;
+    this.bossHpBar.setRect({ x: bh.x, y: bh.y, w: bh.w, h: bh.h });
+    this.bossHpText.setSize(ui.len(FONT.small));
+
+    // Boss 的 buff 条（图标方块 + 标签）也按系数走
+    this.bossBuffs.setUiScale(scale, ui.bossBuffs);
+
+    // 两处读条（Boss 预警 + 玩家读条）
+    this.castBar.setRect(ui.castBar, scale);
+    this.playerCastBar.setRect(ui.playerCastBar, scale);
+
+    // 日志面板
+    this.logPanel.setUiScale(scale, ui.logPanel);
   }
 
   /**
