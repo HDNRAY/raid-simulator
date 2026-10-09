@@ -6,7 +6,7 @@ import {
   computeCanvasCssSize,
   computeScale,
 } from '../../src/render/scaling';
-import { LOGICAL, skillSlotLabels, skillSlotRect } from '../../src/ui/layout';
+import { LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../../src/ui/layout';
 
 describe('逻辑分辨率常量', () => {
   it('是 960x540 且为 16:9', () => {
@@ -175,5 +175,44 @@ describe('技能格内三个标签都不越界、互不重叠', () => {
     const total = 6;
     const last = skillSlotRect(total - 1, total);
     expect(last.x + last.w).toBe(LOGICAL.width - 8);
+  });
+});
+
+describe('玩家面板：读条在顶部、三根条不越界', () => {
+  /**
+   * 这组断言守的是**面板内部的空间分配** —— 玩家读条与三根状态条
+   * 挤在同一个 228×140 的框里，靠坐标算术排布。这类错误在截图里
+   * 很难看出来（"字没画"和"画到框外"长得一样）。
+   */
+  const pf = LAYOUT.player;
+  const pcb = LAYOUT.playerCastBar;
+
+  it('读条在面板顶部、且完整落在面板内', () => {
+    expect(pcb.y).toBeGreaterThanOrEqual(pf.y);
+    expect(pcb.x).toBeGreaterThanOrEqual(pf.x);
+    expect(pcb.x + pcb.w).toBeLessThanOrEqual(pf.x + pf.w);
+    expect(pcb.y + pcb.h).toBeLessThanOrEqual(pf.y + pf.h);
+  });
+
+  it('读条比 Boss 预警条矮 —— 它不是威胁提示', () => {
+    // Boss 预警条要抢注意力（红色 + 高）；自己的读条只需"知道在放什么"
+    expect(pcb.h).toBeLessThan(LAYOUT.castBar.h);
+  });
+
+  it('三根状态条都在读条下方、且都在面板内', () => {
+    const topY = pf.y + 32;
+    const barH = 16;
+    const gapY = 12;
+    const lastBottom = topY + 2 * (barH + gapY) + barH;
+    // 第一根条不能与读条重叠
+    expect(topY).toBeGreaterThanOrEqual(pcb.y + pcb.h);
+    // 最后一根条不能超出面板
+    expect(lastBottom).toBeLessThanOrEqual(pf.y + pf.h);
+  });
+
+  it('面板不越出画布底边', () => {
+    // 玩家面板贴在左下角，最容易"长高之后掉出画布"
+    expect(pf.y + pf.h).toBeLessThanOrEqual(LOGICAL.height);
+    expect(pcb.y + pcb.h).toBeLessThanOrEqual(LOGICAL.height);
   });
 });

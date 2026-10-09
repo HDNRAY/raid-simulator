@@ -485,6 +485,11 @@ export class BattleScene {
   private readonly castName: Label;
   private readonly castHint: Label;
   private readonly castBar: Bar;
+  /** 玩家自己的读条（面板顶部）。与 Boss 预警条是**两套**对象 —— 见布局说明。 */
+  private readonly playerCastPanel: Panel;
+  private readonly playerCastName: Label;
+  private readonly playerCastTime: Label;
+  private readonly playerCastBar: Bar;
 
   /* 玩家面板 */
   private readonly playerPanel: Panel;
@@ -629,6 +634,52 @@ export class BattleScene {
     this.castBar.root.visible = false;
     hud.addChild(this.castPanel.root, this.castBar.root, this.castName.root, this.castHint.root);
 
+    /* 玩家读条（面板顶部） */
+    const pcb = LAYOUT.playerCastBar;
+    this.playerCastPanel = new Panel(pixi, {
+      x: pcb.x,
+      y: pcb.y,
+      w: pcb.w,
+      h: pcb.h,
+      fill: 0x14100c,
+      line: 0x6a5a3a,
+      fillAlpha: 0.92,
+      radius: 2,
+    });
+    this.playerCastName = new Label(pixi, {
+      x: pcb.x + 8,
+      y: pcb.y + 3,
+      size: FONT.small,
+      color: 0xffe8c0,
+      kai: true,
+    });
+    this.playerCastTime = new Label(pixi, {
+      x: pcb.x + pcb.w - 8,
+      y: pcb.y + 4,
+      size: FONT.small,
+      color: 0xffd090,
+      anchorX: 1,
+    });
+    this.playerCastBar = new Bar(pixi, {
+      x: pcb.x + 1,
+      y: pcb.y + pcb.h - 4,
+      w: pcb.w - 2,
+      h: 3,
+      color: 0xffb050,
+      darkColor: 0x40301c,
+      brightColor: 0xfff0c0,
+    });
+    this.playerCastPanel.root.visible = false;
+    this.playerCastName.root.visible = false;
+    this.playerCastTime.root.visible = false;
+    this.playerCastBar.root.visible = false;
+    hud.addChild(
+      this.playerCastPanel.root,
+      this.playerCastBar.root,
+      this.playerCastName.root,
+      this.playerCastTime.root,
+    );
+
     /* 玩家面板：生命 / 缠 / 炁 **垂直排列** */
     const pf = LAYOUT.player;
     this.playerPanel = new Panel(pixi, {
@@ -640,14 +691,22 @@ export class BattleScene {
       line: 0x4a4c60,
       fillAlpha: 0.86,
     });
+    /**
+     * 面板标题去掉了（原来是「你」）。
+     *
+     * 场面上只有一个主角，"你"是冗余信息；去掉之后顶部那一行
+     * 正好让给自己的读条。
+     */
     this.playerName = new Label(pixi, { x: pf.x + 8, y: pf.y + 4, size: FONT.body, color: PALETTE.text });
+    this.playerName.root.visible = false;
 
     // 三根条的几何：等距垂直排列，每根 16 高（够画出内阴影与文字）
     const barX = pf.x + 8;
     const barW = pf.w - 16;
     const barH = 16;
     const gapY = 12;
-    const topY = pf.y + 24;
+    // 顶部让给玩家读条（h=20 + 8 间距），所以三根条从 +32 开始
+    const topY = pf.y + 32;
     const barY = (row: number): number => topY + row * (barH + gapY);
 
     this.hpBar = new Bar(pixi, {
@@ -874,6 +933,30 @@ export class BattleScene {
       this.castBar.update(cast.progress);
       // 进度越接近满，边框越亮 —— 把"快到了"变成视觉压力
       this.castPanel.set({ line: cast.progress > 0.75 ? 0xffd060 : PALETTE.danger.base });
+    }
+
+    /* ---------- 玩家读条 ---------- */
+    /**
+     * 玩家自己的读条。
+     *
+     * 与 Boss 预警条共用一个组件形状（Panel + Label + Bar），
+     * 但用**暖金色**而不是危险红 —— 颜色在这里承担语义：
+     * 红色 = "要挨打了"，金色 = "我在出手"。
+     *
+     * 不显示"可打断 / 需闪避"那类提示：那是 Boss 预警条的信息，
+     * 对自己没有意义。
+     */
+    const playerCast = view.player.cast;
+    this.playerCastPanel.root.visible = playerCast !== undefined;
+    this.playerCastName.root.visible = playerCast !== undefined;
+    this.playerCastTime.root.visible = playerCast !== undefined;
+    this.playerCastBar.root.visible = playerCast !== undefined;
+    if (playerCast) {
+      this.playerCastName.set(translate(playerCast.nameKey));
+      this.playerCastTime.set(`${(playerCast.remainingMs / 1000).toFixed(1)}s`);
+      this.playerCastBar.update(playerCast.progress);
+      // 进度越接近满边框越亮 —— 与 Boss 预警条一致的手感
+      this.playerCastPanel.set({ line: playerCast.progress > 0.75 ? 0xffd060 : 0x6a5a3a });
     }
 
     /* ---------- 玩家面板 ---------- */
