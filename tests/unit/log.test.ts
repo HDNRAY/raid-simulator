@@ -204,16 +204,29 @@ describe('日志文案与布局', () => {
     expect(text).not.toContain('{');
   });
 
-  it('面板在画布右侧、不越界、也不压技能栏', () => {
+  it('面板在画布左侧、不越界、也不压其它 UI', () => {
     /**
-     * 需求："不要显示在屏幕正中，在屏幕右侧"。
+     * ⚠️ 这条断言**反过来了**。
+     *
+     * 需求演进：
+     *   早期 "不要显示在屏幕正中，在屏幕右侧"  → 所以曾经断言"在右半边"
+     *   现在 "双弧，日志可以放左边"           → 右侧整块要让给移动端的
+     *                                          双弧触屏按钮（外弧最左缘 x 654）
+     *
+     * 所以现在断言的是"**靠左**、且不与左侧信息柱里的其它部件重叠"。
      */
-    expect(LAYOUT.log.x + LAYOUT.log.w).toBeLessThanOrEqual(LOGICAL.width);
-    // 明显在右半边
-    expect(LAYOUT.log.x).toBeGreaterThan(LOGICAL.width / 2);
-    // 不与技能栏（y 492 起）或顶栏重叠
-    expect(LAYOUT.log.y + LAYOUT.log.h).toBeLessThanOrEqual(LAYOUT.skillBar.y);
-    expect(LAYOUT.log.y).toBeGreaterThan(LAYOUT.castBar.y + LAYOUT.castBar.h);
+    expect(LAYOUT.log.x).toBe(0 + LAYOUT.player.x); // 与玩家面板同一列
+    expect(LAYOUT.log.x + LAYOUT.log.w).toBeLessThan(LOGICAL.width / 2);
+    // 不与 Boss 区（顶栏 + buff 条）重叠
+    expect(LAYOUT.log.y).toBeGreaterThan(LAYOUT.bossBuffs.y + LAYOUT.bossBuffs.size);
+    // 不与玩家 buff / 读条 / 面板重叠
+    expect(LAYOUT.log.y + LAYOUT.log.h).toBeLessThanOrEqual(LAYOUT.playerBuffs.y);
+    /**
+     * **右侧留给触屏按钮**：日志右缘必须远小于双弧的最左缘（x 654）。
+     * 这条是"日志挪左边"这个决定的**可执行理由** —— 如果将来有人把
+     * 日志挪回右边，这里会失败并指向计划文档。
+     */
+    expect(LAYOUT.log.x + LAYOUT.log.w).toBeLessThan(654);
   });
 
   it('面板高度放得下要显示的行数', () => {
@@ -557,13 +570,19 @@ describe('面板外观统一', () => {
     expect(scene.slice(idx, idx + 400)).toMatch(/fillAlpha: 0\.9/);
   });
 
-  it('日志面板在右侧中段：不压顶栏、不压技能栏、不与 Boss 本体重叠', () => {
+  it('日志面板在左侧信息柱顶端：不压 Boss 区、不压玩家区、让开右下角', () => {
     const r = LAYOUT.log;
-    // 下移过（150 → 216）：与顶栏/Boss buff 拉开距离
-    expect(r.y).toBeGreaterThanOrEqual(200);
-    expect(r.y + r.h).toBeLessThanOrEqual(LAYOUT.skillBar.y);
-    // 贴右边缘（留安全边距）
-    expect(r.x + r.w).toBeLessThanOrEqual(LOGICAL.width);
-    expect(r.x).toBeGreaterThan(LOGICAL.width / 2);
+    // 在左侧（与玩家面板同列）
+    expect(r.x).toBe(LAYOUT.player.x);
+    expect(r.x + r.w).toBeLessThan(LOGICAL.width / 2);
+    // 不与 Boss 区重叠
+    expect(r.y).toBeGreaterThan(LAYOUT.bossBuffs.y + LAYOUT.bossBuffs.size);
+    // 不与玩家 buff 区重叠
+    expect(r.y + r.h).toBeLessThanOrEqual(LAYOUT.playerBuffs.y);
+    /**
+     * 右下角整块让给触屏双弧按钮（外弧最左缘 x 654）——
+     * 见 `docs/plans/2026-10-10-m8-mobile.md` §2.2b。
+     */
+    expect(r.x + r.w).toBeLessThan(654);
   });
 });

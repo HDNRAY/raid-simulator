@@ -17,7 +17,7 @@
 
 import type { Container } from 'pixi.js';
 import { IconButton } from '../IconButton';
-import { LOGICAL } from '../layout';
+import { LAYOUT } from '../layout';
 import type { PixiCtor } from '../primitives';
 
 export interface SettingsButtonOptions {
@@ -26,9 +26,23 @@ export interface SettingsButtonOptions {
   readonly onClick: () => void;
 }
 
-/** 按钮几何：右下角，压在技能栏上方一点。 */
-const SIZE = 18;
+/**
+ * 按钮几何。
+ *
+ * ==================================================================
+ * 演进：右下角 → **玩家面板右侧**（需求："设置按钮，暂时挪到玩家面板
+ * 的右侧"）
+ * ==================================================================
+ *
+ * 原先在右下角（压在技能栏上方）。但那块地方要留给移动端的**双弧
+ * 触屏按钮**（外弧半径 210，最左缘到 `x 654`），必须让开。
+ *
+ * 新位置离右下角的拇指区更近，而且 `x 244..288` 与双弧最左缘之间
+ * 还有 366px 余量（见 `docs/plans/2026-10-10-m8-mobile.md` §2.2）。
+ */
 const MARGIN = 8;
+/** 按钮区域的边长（含可点范围），比图标本身大一圈。 */
+const HIT = 44;
 
 export class SettingsButton {
   readonly root: Container;
@@ -40,11 +54,15 @@ export class SettingsButton {
     this.button = new IconButton({
       pixi,
       icon: 'gear',
-      // 图标 + 快捷键提示，整体居中在"压在技能栏上方"的位置
+      /**
+       * 图标 + 快捷键提示，整体居中在**玩家面板右侧**。
+       *
+       * 面板在 `x 8..236, y 452..532`（见 `LAYOUT.player`），
+       * 按钮贴在它右缘外 8px、与面板**垂直居中**。
+       */
       anchor: {
-        x: LOGICAL.width - MARGIN - SIZE / 2,
-        // 技能栏顶部在 492，再往上留一点
-        y: LOGICAL.height - MARGIN - SIZE - 66,
+        x: LAYOUT.player.x + LAYOUT.player.w + MARGIN + HIT / 2,
+        y: LAYOUT.player.y + LAYOUT.player.h / 2,
       },
       /**
        * 需求："设置按钮，Esc 在 icon 的左边……这个设计不对，

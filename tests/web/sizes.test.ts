@@ -54,58 +54,26 @@ describe('applyStageSize', () => {
     canvas = makeCanvas();
   });
 
-  it('写 CSS 尺寸，并要求内部缓冲 = CSS × DPR', () => {
-    /**
-     * ⚠️ 这条断言在"全屏糊"修复时**反过来了**。
-     *
-     * 旧契约是"内部永远是 960×540、只改 CSS" —— 那正是糊的根源：
-     * 一张 960×540 的图被浏览器拉伸 1.3×（视网膜屏等效 2.6×）。
-     * 新契约是"内部缓冲跟着 CSS 与 DPR 走"。
-     */
-    canvas.width = 1920;
-    canvas.height = 1080;
-    applyStageSize(canvas, {
-      width: 960,
-      height: 540,
-      scale: 1,
-      bufferWidth: 1920,
-      bufferHeight: 1080,
-      dpr: 2,
-      padX: 0,
-      padY: 0,
-    });
-    expect(canvas.style.width).toBe('960px');
-    expect(canvas.style.height).toBe('540px');
+  it('只写 CSS 尺寸，不动内部尺寸', () => {
+    applyStageSize(canvas, { width: 1920, height: 1080, scale: 2, padX: 0, padY: 0 });
+    expect(canvas.style.width).toBe('1920px');
+    expect(canvas.style.height).toBe('1080px');
+    // 关键断言：内部尺寸不变
+    expect(canvas.width).toBe(LOGICAL_W);
+    expect(canvas.height).toBe(LOGICAL_H);
   });
 
-  it('内部缓冲与 CSS×DPR 不符就抛错（防止退回"只改 CSS"）', () => {
-    // canvas 内部还是 960×540，而按 DPR=2 应该是 1920×1080
+  it('内部尺寸被改动过就抛错（防止有人用 renderer.resize 走回老路）', () => {
+    canvas.width = 1920;
     expect(() =>
-      applyStageSize(canvas, {
-        width: 960,
-        height: 540,
-        scale: 1,
-        bufferWidth: 1920,
-        bufferHeight: 1080,
-        dpr: 2,
-        padX: 0,
-        padY: 0,
-      }),
-    ).toThrow(/backing size must be/);
+      applyStageSize(canvas, { width: 1920, height: 1080, scale: 2, padX: 0, padY: 0 }),
+    ).toThrow(/backing size must stay 960x540/);
   });
 });
 
 describe('observeStage', () => {
-  /**
-   * ⚠️ `observeStage` 现在**要求 canvas 的内部缓冲已经是 CSS×DPR**
-   * （真实运行时由 Pixi 的 `renderer.resize()` 保证，见 `main.ts` 的
-   * `syncRenderer`）。测试里要先把 canvas 摆成合法状态，
-   * 否则 `applyStageSize` 的断言会按设计抛错。
-   */
   it('首次调用立即应用一次尺寸', () => {
     const canvas = makeCanvas();
-    canvas.width = 1280;
-    canvas.height = 720;
     const { dispose } = observeStage(makeStage(1280, 720), canvas, 'fit');
     expect(canvas.style.width).toBe('1280px');
     expect(canvas.style.height).toBe('720px');
@@ -114,8 +82,6 @@ describe('observeStage', () => {
 
   it('refresh() 用当前视口重测（面板尺寸变化后可手动触发）', () => {
     const canvas = makeCanvas();
-    canvas.width = 1280;
-    canvas.height = 720;
     const handle = observeStage(makeStage(1280, 720), canvas, 'fit');
     expect(canvas.style.width).toBe('1280px');
     handle.refresh();

@@ -1,4 +1,6 @@
 import {
+  LOGICAL_H,
+  LOGICAL_W,
   computeCanvasCssSize,
   type ScalingMode,
 } from './scaling';
@@ -6,13 +8,9 @@ import {
 /**
  * 缩放里的 DOM 操作部分。
  *
- * ⚠️ 原设计是"只改 CSS、绝不改内部尺寸"，理由是 resize 廉价
- * （不触发 framebuffer 重建）。**那个决定正是"全屏糊"的根源** ——
- * 内部永远是 960×540，却被 CSS 拉伸 1.3×（视网膜屏等效 2.6×）。
- *
- * 现在内部缓冲跟着 CSS 与 DPR 走（见 `computeCanvasCssSize`）。
- * 代价是 resize 会重建 framebuffer，但 resize 是**低频**操作
- * （拖窗口 / 转屏），而清晰度是每一帧都在看的。
+ * **这里只改 canvas 的 CSS 尺寸，绝不改 canvas 的内部尺寸。**
+ * 这样 resize 是廉价的（浏览器重排），不触发 Pixi 的 framebuffer / 纹理重建
+ * （architecture 规范 §10.2 / §10.4）。
  */
 
 export interface StageSize {
@@ -20,21 +18,12 @@ export interface StageSize {
   width: number;
   height: number;
   scale: number;
-  /**
-   * canvas 的**内部缓冲**宽高 = CSS 尺寸 × 有效 DPR。
-   *
-   * 渲染层拿它去 `renderer.resize()` —— 这样一张逻辑画面用足物理像素，
-   * 不再被浏览器拉伸（见 `computeCanvasCssSize` 的说明）。
-   */
-  bufferWidth: number;
-  bufferHeight: number;
-  /** 实际生效的设备像素比（已钳到 [1,2]） */
-  dpr: number;
   /** letterbox 的单侧留白，供 HUD 安全区判断用（§10.5） */
   padX: number;
   padY: number;
 }
 
+/** 计算当前视口下 canvas 应有的 CSS 尺寸与黑边。 */
 /**
  * 计算当前视口下 canvas 应有的 CSS 尺寸与黑边。
  *
@@ -42,25 +31,16 @@ export interface StageSize {
  * 设置里的"UI 缩放"只作用于 UI 部件（`ui/uiLayout.ts`），
  * 不改变画布 —— 需求明确要求"战斗画面保持不变"。
  */
-export function measureStage(
-  stage: HTMLElement,
-  mode: ScalingMode,
-  /** 设备像素比；渲染层之外不要传别的（见 `computeCanvasCssSize`） */
-  devicePixelRatio = 1,
-): StageSize {
-  const { width, height, scale, bufferWidth, bufferHeight, dpr } = computeCanvasCssSize(
+export function measureStage(stage: HTMLElement, mode: ScalingMode): StageSize {
+  const { width, height, scale } = computeCanvasCssSize(
     stage.clientWidth,
     stage.clientHeight,
     mode,
-    devicePixelRatio,
   );
   return {
     width,
     height,
     scale,
-    bufferWidth,
-    bufferHeight,
-    dpr,
     padX: Math.max(0, Math.round((stage.clientWidth - width) / 2)),
     padY: Math.max(0, Math.round((stage.clientHeight - height) / 2)),
   };
@@ -76,21 +56,11 @@ export function applyStageSize(
   canvas: HTMLCanvasElement,
   size: StageSize,
 ): void {
-  /**
-   * ⚠️ 断言内部缓冲 = **CSS 尺寸 × DPR**，不再是固定的 960×540。
-   *
-   * 原先这里是"内部必须永远是 960×540"，那个决定正是"全屏糊"的
-   * 根源：它把 960×540 的一张图交给浏览器拉伸 1.3×（视网膜屏上
-   * 等效 2.6×）。现在内部缓冲跟着 CSS 与 DPR 走，**世界坐标仍然是
-   * 960×540 逻辑单位**（由 Pixi 的 resolution 映射），所以游戏逻辑
-   * 一行没改。
-   */
-  if (canvas.width !== size.bufferWidth || canvas.height !== size.bufferHeight) {
+  if (canvas.width !== LOGICAL_W || canvas.height !== LOGICAL_H) {
     // 开发者错误，不是面向玩家的文案 —— 所以用英文，不进 i18n 表。
     throw new Error(
-      `canvas backing size must be ${size.bufferWidth}x${size.bufferHeight} ` +
-        `(css ${size.width}x${size.height} @ dpr ${size.dpr}), got ` +
-        `${canvas.width}x${canvas.height}.`,
+      `canvas backing size must stay ${LOGICAL_W}x${LOGICAL_H}, got ` +
+        `${canvas.width}x${canvas.height}. Scaling must only change CSS size.`,
     );
   }
   canvas.style.width = `${size.width}px`;
@@ -105,10 +75,9 @@ export function observeStage(
   canvas: HTMLCanvasElement,
   mode: ScalingMode,
   onResize?: (size: StageSize) => void,
-  devicePixelRatio = 1,
 ): { dispose: () => void; refresh: () => void } {
   const update = () => {
-    const size = measureStage(stage, mode, devicePixelRatio);
+    const size = measureStage(stage, mode);
     applyStageSize(canvas, size);
     onResize?.(size);
   };
