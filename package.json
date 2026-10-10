@@ -17,7 +17,8 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:core": "vitest run --project core",
-    "verify:e2e": "node tools/verify-e2e.mjs"
+    "verify:e2e": "node tools/verify-e2e.mjs",
+    "verify:e2e:touch": "node tools/verify-e2e-touch.mjs"
   },
   "dependencies": {
     "pixi.js": "^8.22.0"

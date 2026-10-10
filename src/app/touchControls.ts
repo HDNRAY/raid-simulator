@@ -94,6 +94,13 @@ export interface TouchControls {
   readonly frame: (view: BattleSnapshotView) => void;
   /** 键位表变了 → 按钮跟着变（这是"监听变化"的落点之一）。 */
   readonly setBindings: (bindings: readonly { readonly key: string; readonly skillId: string }[]) => void;
+  /**
+   * 按 `skillId` 反查按钮圆心（端到端脚本用）。
+   *
+   * ⚠️ 放在这里而不是 `main.ts`：几何的唯一真相是 `TouchLayout`，而它由
+   * 本模块持有。脚本要是自己复制一份几何，布局一调就会静默失效。
+   */
+  readonly centerOfSkill: (skillId: string) => { readonly x: number; readonly y: number } | null;
   readonly dispose: () => void;
 }
 
@@ -170,6 +177,10 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
     layer,
     input,
 
+    centerOfSkill(skillId) {
+      const idx = layout.current().findIndex((b) => b.skillId === skillId);
+      return idx < 0 ? null : (touchButtonCenter(idx) ?? null);
+    },
     onPointerDown(pointerId, px, py) {
       /**
        * 设置面板打开时**不放技能** —— 与键盘的捕获模式同理。

@@ -244,8 +244,16 @@ addEventListener: (type, listener) =>
 
 ```
 pnpm run typecheck   →   npx eslint .   →   pnpm run test:run
-                     →   pnpm run build  →   node tools/verify-e2e.mjs
+                     →   pnpm run build
+                     →   node tools/verify-e2e.mjs        （键盘）
+                     →   node tools/verify-e2e-touch.mjs  （触屏）
 ```
+
+⚠️ **两个 e2e 都要跑。** `verify-e2e.mjs` **只按键盘**，所以"触屏坏了、
+键盘没事"这一类 bug 它**完全看不见** —— 实测踩过：`restartBattle()`
+重建 `BattleLoop` 时漏了接触屏输入源，于是**任何一次重开之后触屏永久断开**
+（Action 全堆进没人 drain 的数组），键盘正常。那个 bug 活了很久就是因为
+没有触屏覆盖。触屏脚本固定约 5 秒。
 
 `verify-e2e.mjs` 需要开发服务器在 <http://localhost:5273/>。
 若脚本挂住，先 `pkill -f "Google Chrome.*headless"`（残留的 headless

@@ -323,6 +323,10 @@ async function bootstrap(): Promise<void> {
       focus: () => settings.focusState,
       trace: () => [...settings.settingsTrace],
     },
+    /** 重开一局（端到端脚本用；见 `global.d.ts` 的说明）。 */
+    restart: () => restartBattle(),
+    /** 触屏按钮圆心（端到端脚本用）。⚠️ 函数转调：`touch` 声明在下面（TDZ）。 */
+    touchButtonCenter: (skillId: string) => touch.centerOfSkill(skillId),
     probe: () => {
       const state = loop.engineState.snapshot;
       const player = state.combatants.find((c) => c.side === 'ally');

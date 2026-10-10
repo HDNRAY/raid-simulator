@@ -18,6 +18,21 @@ declare global {
       bindings(): readonly { readonly key: string; readonly skillId: string }[];
       /** 设定 UI 缩放（端到端脚本用） */
       setUiScale(value: number): void;
+      /**
+       * 重开一局（端到端脚本用）。
+       *
+       * ⚠️ 触屏 e2e 必须验证"重开之后触屏仍然生效"——那正是
+       * "重开后触屏永久失效"那个 bug 的形态。没有这个入口，脚本只能
+       * 等玩家被打死（~11 秒）才能触发重开。
+       */
+      restart(): void;
+      /**
+       * 触屏按钮的圆心（端到端脚本用；按 `skillId` 反查）。
+       *
+       * ⚠️ 让脚本问页面要几何，而不是复制一份 —— 否则布局一调，
+       * 触屏测试就会静默失效。
+       */
+      touchButtonCenter(skillId: string): { readonly x: number; readonly y: number } | null;
       /** Pixi 根容器（调试用：读取渲染层实际写入的文本） */
       stage: unknown;
       /** 设置界面（调试用：headless 下模拟点击不可靠） */
