@@ -17,7 +17,8 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:core": "vitest run --project core",
-    "bench": "node tools/bench.mjs"
+    "bench": "node tools/bench.mjs",
+    "shot": "node tools/shot.mjs"
   },
   "dependencies": {
     "pixi.js": "^8.22.0"
