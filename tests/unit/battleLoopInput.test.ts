@@ -154,3 +154,68 @@ describe('两路输入合并不产生重复动作（不变量）', () => {
     expect(spent.length).toBeGreaterThan(0);
   });
 });
+
+describe('触屏输入源的接线（重开后不能断）', () => {
+  /**
+   * ⚠️ 这条**是真正的回归测试** —— 它能抓住那个"重开后触屏永久失效"的根因。
+   *
+   * 根因（实测，在 `BattleLoop.step()` 断点直接读到）：`restartBattle()`
+   * 重建 `BattleLoop` 时漏了重新接线 → 新循环的触屏源是 `undefined`，
+   * Action 全堆进一个**没人 drain 的数组**（实测 20 次按压 = 40 条 Action
+   * 只涨不消）；键盘因为新循环会重新 new 一个源所以不受影响，于是表现成
+   * "只有触屏坏"。
+   *
+   * 修法是让 `touchInput` 接受 **getter** —— 接线只写一次，每局重建都读到
+   * 同一个源。这条测试断言 getter **每帧都被求值**（而不是构造时取一次）。
+   */
+  it('【关键】`touchInput` 传 getter 时每帧都会被求值', () => {
+    let resolved = 0;
+    const source = heldInputSource('attack');
+    const loop = new BattleLoop({
+      engineOptions: makeGoldenEngineOptions(),
+      bindings: [{ key: 'q', skillId: 'attack' }],
+      slots: slotsFromBindings([{ key: 'q', skillId: 'attack' }]),
+      translate: (key) => key,
+      stopOnEnd: false,
+      /**
+       * getter 形态：`main.ts` 就是这么传的。
+       * 若实现只在构造时取一次（当初的 bug 形态），`resolved` 会停在 1 且
+       * 之后拿不到任何触屏 Action。
+       */
+      touchInput: () => {
+        resolved += 1;
+        return source;
+      },
+      /**
+       * ⚠️ 必须也传键盘源：不传时 `BattleLoop` 会去 `createKeyboardInput(window, …)`，
+       * 而 core project 是 **node 环境**（没有 `window`）—— 实测报
+       * `ReferenceError: window is not defined`。
+       */
+      input: heldInputSource('attack'),
+    });
+    let now = 1000;
+    for (let i = 0; i < 4; i += 1) {
+      now += 200;
+      loop.frame(now);
+    }
+    /**
+     * ⚠️ 断言"被求值多次"。只断言"能拿到 source"抓不到 bug ——
+     * 构造时取一次也能拿到。这里要钉的是**每帧重新解析**。
+     */
+    expect(resolved).toBeGreaterThan(1);
+  });
+
+  it('传 undefined（非触屏）也不炸', () => {
+    const loop = new BattleLoop({
+      engineOptions: makeGoldenEngineOptions(),
+      bindings: [{ key: 'q', skillId: 'attack' }],
+      slots: slotsFromBindings([{ key: 'q', skillId: 'attack' }]),
+      translate: (key) => key,
+      stopOnEnd: false,
+      touchInput: () => undefined,
+      input: heldInputSource('attack'),
+    });
+    expect(() => loop.frame(1000)).not.toThrow();
+    expect(() => loop.frame(1200)).not.toThrow();
+  });
+});

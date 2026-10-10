@@ -118,19 +118,7 @@ async function bootstrap(): Promise<void> {
 
   const { Application, Container, Graphics, Sprite, Text } = await import('pixi.js');
 
-  /**
-   * 注册 SVG 图标解码器。
-   *
-   * 图标源是 `src/render/icons/*.svg` 独立文件（Vite `?raw` 构建时内联），
-   * 解码走 Pixi 的 `Assets`。
-   *
-   * ⚠️ 必须用 `Assets.load`：Pixi v8 的 `Texture.from(svg)`
-   * 会返回 1×1 的 EMPTY 纹理（并警告"不在 Assets 缓存里"），
-   * 因为 SVG 要先经资源系统光栅化。
-   *
-   * 必须在创建任何 `Icon` 之前注册 —— `SettingsButton` 在 bootstrap
-   * 中构造，所以这行要放在它前面。
-   */
+    /** 注册 SVG 图标解码器（Pixi v8 里 `Texture.from(svg)` 拿不到图形）。 */
   setIconDecoder(createAssetsDecoder());
 
   const app = new Application();
@@ -203,6 +191,15 @@ async function bootstrap(): Promise<void> {
       slots: slotsFromBindings(bindings),
       timeLimitMs: TIME_LIMIT_MS,
       stopOnEnd: true,
+      /**
+       * ⚠️ **传 getter，不要传 `touch.input` 本身。**
+       * 踩过的坑（实测）：`restartBattle()` 重建循环时漏了重新接线 →
+       * **任何一次重开之后触屏永久断开**（Action 堆进没人 drain 的数组，
+       * 按钮还在、点了没反应；键盘不受影响 → 表现成"只有触屏坏"）。
+       * 传 getter 后接线只此一处；`touch` 虽在下面声明，但 getter 只在
+       * 每帧被调用，那时它已初始化（无 TDZ）。
+       */
+      touchInput: () => touch.input,
     });
 
   /**
@@ -528,8 +525,6 @@ async function bootstrap(): Promise<void> {
   touchPreviewSource.read = () =>
     touch.layout.current().map((b) => registry.skill(b.skillId)?.nameKey ?? b.skillId);
   touchPreviewSource.showKeyHints = touch.caps.showKeyHints;
-  /** ⚠️ 必须接上，否则触屏产出的 Action 被直接丢掉（只画按钮、点了没反应）。 */
-  loop.setTouchInput(touch.input);
   touch.setBindings(bindings);
   scene.setShowKeyHints(touch.caps.showKeyHints);
   settingsButton.setShowShortcut(touch.caps.showKeyHints);
@@ -538,21 +533,26 @@ async function bootstrap(): Promise<void> {
   app.canvas.addEventListener('pointerdown', (event) => {
     const { px, py } = pointerAt(event);
     /**
+     * **结算中：点屏幕任意处 = 重开**（需求："'enter' 再来一次也改成
+     * 点击屏幕再来一次之类的"）。
+     *
+     * ⚠️ 必须**先于**按钮层与设置判断，且整体 `return`：
+     *   - 放在按钮层之后：按钮会 `return true` 吃掉点击 → 玩家点在按钮弧里
+     *     **永远重开不了**（实测点「攻」不重开、点空白才重开）
+     *   - 不 `return`：会同时满足 `settingsButton.hitTest` → 一次点击
+     *     **既开设置又静默重开**（实测 tick 663 → 43）
+     */
+    if (!touch.caps.showKeyHints && loop.engineState.snapshot.status !== 'running') {
+      restartBattle();
+      return;
+    }
+    /**
      * **触屏按钮优先**，但它自己在"设置打开"时会拒绝消费
      * （见 `touchControls.ts` 的点击路由说明）。
      */
     if (touch.onPointerDown(event.pointerId, px, py)) return;
     if (!settingsOpen) {
       if (settingsButton.hitTest(px, py)) openSettings();
-      /**
-       * 结算中**点屏幕任意处 = 重开**（需求："包括 'enter' 再来一次
-       * 也改成点击屏幕再来一次之类的"）。
-       *
-       * ⚠️ 只在触屏模式下这样 —— 桌面上"点哪里都重开"会让人误触。
-       */
-      if (!touch.caps.showKeyHints && loop.engineState.snapshot.status !== 'running') {
-        restartBattle();
-      }
       return;
     }
     const onSlider = settings.hitTest(px, py) && settings.isOnScaleSlider(px, py);

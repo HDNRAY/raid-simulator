@@ -44,7 +44,18 @@ export interface BattleLoopOptions {
    * 它由 `app/touchControls.ts` 创建，生命周期比单个 `BattleLoop` 长
    * （重开一局不该把按钮布局丢掉）。
    */
-  readonly touchInput?: InputSource;
+  /**
+   * 触屏输入源。
+   *
+   * ⚠️ **可以传 getter**，而且强烈建议这么做 —— 踩过的坑：
+   * `main.ts` 的 `restartBattle()` 重建 `BattleLoop` 时漏了重新接线，
+   * 于是**任何一次重开之后触屏永久断开**（Action 全堆进一个没人 drain
+   * 的数组；键盘因为新 new 了一个源所以不受影响 → 表现成"只有触屏坏"）。
+   *
+   * 传 getter 之后，接线只在构造时写一次，每局重建都读到同一个源 ——
+   * **这类"漏补一行"的 bug 从结构上不可能再发生**。
+   */
+  readonly touchInput?: InputSource | (() => InputSource | undefined);
   /** 是否在引擎结束后自动停止推进 */
   readonly stopOnEnd?: boolean;
   /**
@@ -79,6 +90,16 @@ export class BattleLoop {
   private hitStopMs = 0;
   private lastRealNow: number | undefined;
   private options: BattleLoopOptions;
+  /**
+   * 解析触屏输入源（兼容直接传源与传 getter 两种形态）。
+   *
+   * ⚠️ 每个使用点都必须走这里 —— 直接读 `options.touchInput` 会拿到
+   * getter 本身而不是源。
+   */
+  private get touchInput(): InputSource | undefined {
+    const t = this.options.touchInput;
+    return typeof t === 'function' ? t() : t;
+  }
   private ownedInput = false;
   /** 最近一帧的渲染快照 */
   private view: BattleSnapshotView | undefined;
@@ -215,7 +236,7 @@ export class BattleLoop {
     const state = this.engine.snapshot;
     if (this.options.stopOnEnd !== false && state.status !== 'running') {
       // 战斗已结束：仍消费输入（让重开生效），但不推进引擎
-      const tail = [...(this.input?.drain() ?? []), ...(this.options.touchInput?.drain() ?? [])];
+      const tail = [...(this.input?.drain() ?? []), ...(this.touchInput?.drain() ?? [])];
       if (tail.some((a) => a.type === 'restart')) this.restartRequested = true;
       return;
     }
@@ -231,7 +252,7 @@ export class BattleLoop {
      */
     const fromInput = [
       ...(this.input?.drain() ?? []),
-      ...(this.options.touchInput?.drain() ?? []),
+      ...(this.touchInput?.drain() ?? []),
     ];
     /**
      * ⚠️ **这一 tick 刚被请求过的技能**，不让连发逻辑再补一发。
@@ -270,10 +291,10 @@ export class BattleLoop {
             (skillId) => this.engine.skillOf(skillId)?.holdDrain !== undefined,
           )
         : []),
-      ...(this.options.touchInput
+      ...(this.touchInput
         ? repeatHeld(
-            this.options.touchInput,
-            this.options.touchInput.bindings(),
+            this.touchInput,
+            this.touchInput.bindings(),
             state.tick,
             usableNow,
             (skillId) => this.engine.skillOf(skillId)?.holdDrain !== undefined,
@@ -352,10 +373,6 @@ export class BattleLoop {
    * **比一局长得多** —— 重开一局不该把按钮布局丢掉。主循环在创建
    * 触屏控件后立刻接上它。
    */
-  setTouchInput(touchInput: InputSource | undefined): void {
-    this.options = { ...this.options, ...(touchInput === undefined ? {} : { touchInput }) };
-  }
-
   /**
    * 改键位表。
    *
