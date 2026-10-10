@@ -2,6 +2,15 @@ import { BattleLoop } from './app/battleLoop';
 import { createTouchControls, derivedOfSnapshot } from './app/touchControls';
 import { buildKeyRows } from './app/keyRows';
 import { rebindWithSwap, swapSlots } from './app/bindingActions';
+import { buildProbe, collectRuntimeErrors } from './app/debugProbe';
+import {
+  SettingsStore,
+  browserStorage,
+  parseBindings,
+  parseUiScale,
+  type InputMode,
+} from './app/settingsStore';
+import { detectBrowserPlatform } from './render/platform';
 /**
  * ⚠️ **静态导入 pixi，不要写 `await import('pixi.js')`。**
  *
@@ -28,7 +37,14 @@ import { BOSS_HP_DISPLAY } from './data/entities/bossHp';
 import { DEFAULT_BINDINGS, type KeyBinding } from './input/keyboard';
 import { flattenCatalog, translator } from './i18n/translator';
 import { zhCN } from './i18n/locales/zh-CN';
-import { LOGICAL_H, LOGICAL_W, clampUiScale, type ScalingMode } from './render/scaling';
+import {
+  LOGICAL_H,
+  LOGICAL_W,
+  UI_SCALE_MAX,
+  UI_SCALE_MIN,
+  clampUiScale,
+  type ScalingMode,
+} from './render/scaling';
 import { observeStage } from './render/sizes';
 import { BattleScene } from './render/BattleScene';
 import type { Combatant, StatKey } from './core/types';
@@ -219,7 +235,20 @@ async function bootstrap(): Promise<void> {
    * 放在这里而不是塞进 loop：`startBattle()` 每次重开都会重建 loop，
    * 而玩家的改键不该因为重开一局就被重置。
    */
-  let bindings: readonly KeyBinding[] = DEFAULT_BINDINGS;
+  /**
+   * **用户设置的持久化**（键位表 + UI 缩放）。
+   *
+   * ⚠️ 必须在 `startBattle()` **之前**定好键位表 —— 它决定战斗里的技能栏
+   * 槽位与触屏按钮，晚一步就会先按默认跑一局。
+   *
+   * ⚠️ 用 `detectBrowserPlatform().touch` 而不是 `touch.caps.touch`：
+   * 后者要等 `createTouchControls`（在下面），而 `SettingsPanel` 也是用
+   * `detectBrowserPlatform()` 判定的 —— **同源，不会出现两套判定**。
+   */
+  const inputMode: InputMode = detectBrowserPlatform().touch ? 'touch' : 'keyboard';
+  const settingsStore = new SettingsStore(browserStorage(), inputMode);
+  const validSkillIds = new Set(registry.skills.keys());
+  let bindings: readonly KeyBinding[] = parseBindings(settingsStore.bindings, validSkillIds);
 
   let loop = startBattle();
 
@@ -230,7 +259,8 @@ async function bootstrap(): Promise<void> {
    * 都是"比自动适配再大 20%"。改它之后要手动 `refresh()` 一次：
    * `ResizeObserver` 不会因为"视口尺寸没变"而重新回调。
    */
-  let uiScale = 1;
+  const savedScale = parseUiScale(settingsStore.uiScaleRaw, UI_SCALE_MIN, UI_SCALE_MAX);
+  let uiScale = savedScale ?? 1;
   const stageObserver = observeStage(stage, app.canvas, SCALING_MODE, () => {});
 
   /* ---------- 主循环 ---------- */
@@ -267,24 +297,11 @@ async function bootstrap(): Promise<void> {
    * M7 起会被真正的调试面板与回放录制取代。
    */
   /** 捕获运行期异常，供端到端验证读取（否则会被静默吞掉）。 */
-  const runtimeErrors: string[] = [];
-  window.addEventListener('error', (event) => {
-    runtimeErrors.push(String(event.message));
-  });
-  window.addEventListener('unhandledrejection', (event) => {
-    runtimeErrors.push(`unhandled rejection: ${String(event.reason)}`);
-  });
+  const runtimeErrors = collectRuntimeErrors(window);
 
   let frameCount = 0;
 
   window.__raidBattle = {
-    /**
-     * 直接注入一个动作（调试用）。
-     *
-     * 存在的理由：headless 环境下 rAF 会被降频，所以"按键 → 等技能进冷却"
-     * 这条路在自动验证里不可靠。这个入口让验证脚本能精确地
-     * 把游戏推到某个状态（例如"某个技能正在冷却"）再截图。
-     */
     act: (skillId: string, actorId?: string) => {
       loop.engineState.tick([
         { type: 'useSkill', skillId, atTick: loop.engineState.snapshot.tick },
@@ -338,28 +355,7 @@ async function bootstrap(): Promise<void> {
     restart: () => restartBattle(),
     /** 触屏按钮圆心（端到端脚本用）。⚠️ 函数转调：`touch` 声明在下面（TDZ）。 */
     touchButtonCenter: (skillId: string) => touch.centerOfSkill(skillId),
-    probe: () => {
-      const state = loop.engineState.snapshot;
-      const player = state.combatants.find((c) => c.side === 'ally');
-      const boss = state.combatants.find((c) => c.side === 'enemy');
-      const view = loop.snapshot;
-      return {
-        tick: state.tick,
-        status: state.status,
-        playerHp: player?.resources.hp ?? -1,
-        playerHpCap: player?.caps.hp ?? -1,
-        playerDouqi: player?.resources.douqi ?? -1,
-        playerCooldowns: player?.cooldowns ?? {},
-        playerCasts: player?.casts.length ?? -1,
-        bossHp: boss?.resources.hp ?? -1,
-        bossHpCap: boss?.caps.hp ?? -1,
-        bossCasts: boss?.casts.length ?? -1,
-        skillCount: view.skills.length,
-        floatingCount: view.floatingText.length,
-        frameCount,
-        errors: [...runtimeErrors],
-      };
-    },
+    probe: () => buildProbe(loop.engineState, loop.snapshot, frameCount, runtimeErrors),
   };
 
   /* ---------- 设置界面 ---------- */
@@ -398,17 +394,22 @@ async function bootstrap(): Promise<void> {
       }),
     onRebind: (skillId, key) => {
       bindings = [...rebindWithSwap(bindings, skillId, key)];
+      /** 改键立刻持久化（只存**当前设备**那份，见 `settingsStore`）。 */
+      settingsStore.saveBindings(bindings);
       loop.setBindings(bindings);
       touch.setBindings(bindings);
     },
     /** 触屏换位（与改键分开：那个换键、这个换**位置**）。 */
     onSwapSlots: (from, to) => {
       bindings = [...swapSlots(bindings, from, to)];
+      settingsStore.saveBindings(bindings);
       loop.setBindings(bindings);
       touch.setBindings(bindings);
     },
     onResetKeys: () => {
       bindings = DEFAULT_BINDINGS;
+      /** 恢复默认**也覆盖存储**，否则刷新之后又变回玩家改过的键位。 */
+      settingsStore.saveBindings(bindings);
       loop.setBindings(bindings);
       touch.setBindings(bindings);
     },
@@ -429,6 +430,7 @@ async function bootstrap(): Promise<void> {
     getUiScale: () => uiScale,
     onUiScale: (value) => {
       uiScale = clampUiScale(value);
+      settingsStore.saveUiScale(uiScale);
       /**
        * ⚠️ **不重测画布**（`stageObserver.refresh()`）。
        *
