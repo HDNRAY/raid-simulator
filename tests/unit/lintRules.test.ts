@@ -222,6 +222,47 @@ describe('AGENTS.md 硬规则：禁止类型断言逃生舱', () => {
     expect(offenders, `发现 ${offenders.length} 处违规：\n${offenders.join('\n')}`).toEqual([]);
   });
 
+  it('【关键】src/ 里没有 `process` —— 浏览器里它不存在', async () => {
+    /**
+     * ================================================================
+     * 为什么要有这条
+     * ================================================================
+     *
+     * 我在 `triggers.ts` 里留了一句临时调试日志
+     * `if (process.env.DBG) console.log(...)`，**忘了删**。
+     *
+     * 它**过了所有自动检查**：
+     *   - `tsc` 通过（有 `@types/node`，`process` 有类型）
+     *   - 711 个单测通过（**vitest 跑在 Node 里，`process` 存在**）
+     *   - Vite dev 也正常（dev 环境有 `process` 兜底）
+     *
+     * 只有**浏览器里的生产代码**会崩：
+     *   `Uncaught ReferenceError: process is not defined`
+     *   → 之后**每一次受伤结算都抛异常**，战斗直接废掉。
+     *
+     * 是用户实测「色欲」时发现的。这类"只在真实运行环境炸"的问题
+     * 必须由**这种源码扫描**兜住，测试跑在 Node 里天然看不见。
+     *
+     * ⚠️ 只扫 `src/`：`tests/` 与 `tools/` 本来就跑在 Node 里，
+     * `process.env` 在那里是**正确用法**。
+     */
+    const { readFileSync, globSync } = await import('node:fs');
+    const offenders: string[] = [];
+    for (const file of globSync('src/**/*.{ts,tsx,mts,cts}')) {
+      const code = stripCommentsAndStrings(readFileSync(file, 'utf8'));
+      code.split('\n').forEach((line, i) => {
+        /** ⚠️ 匹配真实的 `process.xxx` 用法，不匹配注释与字符串里的提及。 */
+        if (/\bprocess\./.test(line)) {
+          offenders.push(`${file}:${i + 1} → ${line.trim().slice(0, 80)}`);
+        }
+      });
+    }
+    expect(
+      offenders,
+      `src/ 里出现 \`process\`（浏览器不存在，会抛 ReferenceError）：\n${offenders.join('\n')}`,
+    ).toEqual([]);
+  });
+
   it('单文件不超过 700 行（已超限的走棘轮：不许再变大）', async () => {
     const { readFileSync, globSync } = await import('node:fs');
 

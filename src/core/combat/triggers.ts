@@ -103,7 +103,6 @@ export function runTriggers(
       if (trigger === undefined || trigger.on !== hook) continue;
 
       const key = triggerKey(trigger, i);
-      if (process.env.DBG) console.log("[t]", ownerId, hook, buff.defId, key, "cd", buff.triggerCooldowns[key] ?? 0, "tick", tick, "hasMark", ctx.current(ownerId).buffs.some(b=>b.defId==="lust-mark"));
       /** 内建 CD：防抖（设计里反伤给 1s）。 */
       if ((buff.triggerCooldowns[key] ?? 0) > tick) continue;
       /** 整场次数上限。 */

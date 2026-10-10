@@ -270,6 +270,52 @@ describe('眩晕：锁死行动 + 打断施法', () => {
   });
 });
 
+describe('眩晕结束后的第一次攻击（用户实测的崩溃路径）', () => {
+  /**
+   * ⚠️ 用户实测报的：**眩晕恢复后第一次攻击直接崩**
+   *
+   *   「被眩晕 好了之后，第一次攻击 → triggers.ts:106
+   *    Uncaught ReferenceError: process is not defined」
+   *
+   * 根因不是机制，而是我在 `triggers.ts` 里留的一句临时调试日志
+   * `if (process.env.DBG) ...` 忘了删 —— 浏览器里没有 `process`，于是
+   * **每一次受伤结算都抛异常**（`runTriggers` 在 `resolveHit` 末尾），
+   * 整场战斗废掉。
+   *
+   * 两层防护：
+   *   1. `lintRules.test.ts` 的**源码扫描**：`src/` 里不许出现 `process`
+   *      （静态，能拦在提交前）
+   *   2. 这条用例守**行为**：被晕 → 恢复 → 攻击，结算照常走完
+   *
+   * ⚠️ 这条**不测反伤时序**：那是 `runTriggers` 的另一组用例的事。
+   * 我一度在这里堆了一串反伤断言，调不动（触发顺序受同 tick 内多条
+   * 结算影响），而那与"崩溃"无关 —— 把不相关的断言塞进来只会让这条
+   * 用例变脆。
+   */
+  it('被眩晕 → 恢复 → 攻击：受伤结算照常走完（原来在这里崩）', () => {
+    const engine = makeEngine([strike('p-hit', 10)]);
+    grant(engine, 'player', LUST_STUN);
+
+    /** 眩晕期间走完（3s = 180 tick）。 */
+    for (let i = 0; i < 190; i += 1) engine.tick([]);
+    expect(buffsOf(engine, 'player')).not.toContain('lust-stun');
+
+    /**
+     * **眩晕后的第一次攻击** —— 这一下会走到 `resolveHit` 末尾的
+     * `runTriggers`，也就是原来抛异常的那一行。
+     *
+     * 只要它不抛、且伤害正常结算，这条用例就完成了它的职责。
+     */
+    const bossBefore = hpOf(engine, 'lust');
+    engine.applyActions([{ type: 'useSkill', skillId: 'p-hit', atTick: 0 }], 'player');
+    expect(() => engine.tick([])).not.toThrow();
+    expect(hpOf(engine, 'lust')).toBe(bossBefore - 10);
+
+    /** 而且`onHitTaken` 真的派发了（挂上了印记）—— 证明没被静默跳过。 */
+    expect(buffsOf(engine, 'lust')).toContain('lust-mark');
+  });
+});
+
 describe('内容注册：新 Boss 的技能与 buff 都在注册表里', () => {
   it('「轻吟」「缠绕」「魅惑」都注册了', () => {
     for (const id of ['lust-hum', 'lust-entangle', 'lust-charm']) {
