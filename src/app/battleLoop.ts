@@ -233,13 +233,40 @@ export class BattleLoop {
       ...(this.input?.drain() ?? []),
       ...(this.options.touchInput?.drain() ?? []),
     ];
+    /**
+     * ⚠️ **这一 tick 刚被请求过的技能**，不让连发逻辑再补一发。
+     *
+     * 踩过的坑（实测）：`drain()` 与 `repeatHeld()` 是**同一份 tick 前状态**
+     * 上的两个独立求值 —— `drain()` 拿到本次按下产生的 `hold`，紧接着
+     * `repeatHeld()` 看到"该键仍被按住 且 `isUsable` 仍为真（引擎还没
+     * tick，`casts` 还是空的）"，于是**同 tick 又补一个 `useSkill`**。
+     * 两个动作进同一个 `engine.tick()`，第一个启动读条、第二个撞
+     * `checkGate` 的 `casting` 被拒 → 玩家看到「攻 · 正在施放中」。
+     *
+     * 后果**不止多一句提示**：瞬发技能会**双执行、双扣资源**
+     * （实测「破」一个 tick 内两条 `energy:-10`、两次 `interruptSuccess`）。
+     *
+     * 修在这里而不是输入层：`touchInput` 那边早已只发 `hold`（上一轮修过），
+     * 重复是在**循环层**产生的 —— 键盘单按 `Q` 同样中招。
+     * `repeatHeld` 的语义是"**按住**才连发"，而"这一 tick 刚按下的那一次"
+     * 已经由 `drain()` 投递了，首 tick 不该再由它补。
+     * 后续 tick 的按住连发完全不受影响。
+     */
+    const requestedThisTick = new Set(
+      fromInput
+        .filter((a) => a.type === 'useSkill' || a.type === 'hold')
+        .map((a) => a.skillId),
+    );
+    const usableNow = (skillId: string): boolean =>
+      this.isUsable(skillId) && !requestedThisTick.has(skillId);
+
     const held = [
       ...(this.input
         ? repeatHeld(
             this.input,
             this.bindings,
             state.tick,
-            (skillId) => this.isUsable(skillId),
+            usableNow,
             (skillId) => this.engine.skillOf(skillId)?.holdDrain !== undefined,
           )
         : []),
@@ -248,7 +275,7 @@ export class BattleLoop {
             this.options.touchInput,
             this.options.touchInput.bindings(),
             state.tick,
-            (skillId) => this.isUsable(skillId),
+            usableNow,
             (skillId) => this.engine.skillOf(skillId)?.holdDrain !== undefined,
           )
         : []),
