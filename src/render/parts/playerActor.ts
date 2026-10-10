@@ -8,10 +8,32 @@
  * 放进场景会让"这个字段是谁的"变得含糊。
  */
 
-import type { Container, Graphics } from 'pixi.js';
+import { Assets, Sprite, type Container, type Graphics, type Texture } from 'pixi.js';
 import { PALETTE } from '../theme';
 import { DODGE_PEAK_X } from '../actorLayout';
 import type { FrameContext, FramePart } from '../sceneTypes';
+
+/**
+ * 玩家"站立"的基准点 —— **与程序化绘制同一组数字**（`drawPlayer` 里的
+ * `cx = 300` / `base = 456`）。贴图与图形必须落在同一位置，否则切换
+ * 形象时会看到角色"跳"一下。
+ */
+const PLAYER_CX = 300;
+const PLAYER_BASE_Y = 456;
+/**
+ * 贴图缩放。
+ *
+ * 原图 202×232，而程序化玩家大约 134×105（`getBounds` 实测）。
+ * 0.42 让贴图高度约 97px，与原来同量级 —— 太大就会挡住 Boss。
+ */
+const SPRITE_SCALE = 0.42;
+/**
+ * 贴图路径。
+ *
+ * ⚠️ 在 `placeholder/` 下 —— 那是**不可分发的本地占位素材**（见该目录的
+ * README 与 `.gitignore`）。换成正式美术时只改这一个常量。
+ */
+const SPRITE_URL = '/placeholder/player-fd2-mirrored.png';
 
 /** 玩家角色部件。 */
 export class PlayerActorPart implements FramePart {
@@ -36,10 +58,66 @@ export class PlayerActorPart implements FramePart {
    */
   private lastPose: number | null = null;
 
+
+  /**
+   * 贴图版玩家（有纹理时用它；没有时回退到程序化绘制）。
+   *
+   * ⚠️ **纹理是异步加载的**，所以 `playerAnim`（程序化）必须留着当回退
+   * —— 否则加载完成之前会什么都不画。这正是"玩家看不到"那个 bug 的
+   * 同类：**任何时刻都必须有一份可见的东西**。
+   */
+  private sprite: Sprite | undefined;
+
   constructor(
     private readonly playerRoot: Container,
     private readonly playerAnim: Graphics,
-  ) {}
+    /**
+     * 是否异步加载贴图形象。
+     *
+     * ⚠️ 默认 `false`：测试与无贴图环境（线上没有 `placeholder/` 里的
+     * 占位素材）都该走程序化绘制 —— 那不会发起任何网络请求。
+     */
+    loadTexture = false,
+  ) {
+    if (loadTexture) this.loadSprite();
+  }
+
+  /**
+   * **加载贴图形象（异步）**。
+   *
+   * ⚠️ 必须容错：拿不到纹理时**保留程序化绘制**，而不是画一片空白
+   * （那就是"玩家看不到"那个 bug 的同类 —— 任何时刻都要有可见的东西）。
+   * ⚠️ 贴图在 `public/placeholder/`（**不可分发的本地占位素材**，
+   * 已 gitignore），所以线上构建里不存在 —— 那时回退就是唯一显示。
+   */
+  private loadSprite(): void {
+    void Assets.load<Texture>(SPRITE_URL)
+      .then((texture) => {
+        this.setTexture(texture);
+      })
+      .catch(() => {
+        // 故意吞掉：没有贴图是**预期**情况，程序化回退已就位
+      });
+  }
+
+  /** 换成贴图形象（纹理就绪后调用；程序化图形隐藏但**不销毁**）。 */
+  setTexture(texture: Texture): void {
+    if (this.sprite === undefined) {
+      this.sprite = new Sprite(texture);
+      /**
+       * 锚点放**底部中心**：玩家"站在"基地线上，缩放/下沉都绕脚下，
+       * 与程序化绘制的 `base` 语义一致。
+       */
+      this.sprite.anchor.set(0.5, 1);
+      this.sprite.x = PLAYER_CX;
+      this.sprite.y = PLAYER_BASE_Y;
+      this.sprite.scale.set(SPRITE_SCALE);
+      this.playerRoot.addChild(this.sprite);
+    } else {
+      this.sprite.texture = texture;
+    }
+    this.playerAnim.visible = false;
+  }
 
   /**
    * 玩家背影。`pose`：1 = 站姿，0.85 = 下沉（防御）。
@@ -50,8 +128,8 @@ export class PlayerActorPart implements FramePart {
   private drawPlayer(pose: number): void {
     const g = this.playerAnim;
     const P = PALETTE;
-    const cx = 300;
-    const base = 456 + (1 - pose) * 12;
+    const cx = PLAYER_CX;
+    const base = PLAYER_BASE_Y + (1 - pose) * 12;
     const h = 84 * pose;
     g.clear();
 
@@ -89,7 +167,18 @@ export class PlayerActorPart implements FramePart {
       this.drawPlayer(pose);
     }
 
-    this.playerAnim.tint = dodging ? 0x9ad8ff : guarding ? 0xc8d0e8 : 0xffffff;
+    const tint = dodging ? 0x9ad8ff : guarding ? 0xc8d0e8 : 0xffffff;
+    this.playerAnim.tint = tint;
+    /**
+     * 贴图走**同一套反馈**：
+     *   - 着色与程序化一致（闪避偏蓝、防御偏冷）
+     *   - 防御的"下沉"用**纵向压缩**表达（贴图锚点在脚下，压 scale.y
+     *     就是"矮下去"）—— 与程序化那边 `base` 下移 12px 是同一个意思
+     */
+    if (this.sprite !== undefined) {
+      this.sprite.tint = tint;
+      this.sprite.scale.set(SPRITE_SCALE, SPRITE_SCALE * pose);
+    }
 
     const dodge = buffs.find((b) => b.id.startsWith('dodge') && b.remainingMs > 0);
     if (!dodge) {

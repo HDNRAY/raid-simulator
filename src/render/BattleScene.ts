@@ -1,16 +1,11 @@
 /**
  * 战斗场景（M5）。
  *
- * ------------------------------------------------------------------
- * 设计要点
- * ------------------------------------------------------------------
- *
- * 1. **不画地面预警扇形**。本作没有位移 —— 玩家不能走出去，
- *    所以"范围"这个概念不存在。判断压力全部来自**读条结束的时机**
- *    （该躲 / 该挡 / 该打断），表达它的地方是顶部那条预警条，不是地面。
- *
- * 2. **HUD 让路**：画面中央只放角色，不放任何面板。
- *
+ * 设计要点：
+ * 1. **不画地面预警扇形** —— 本作没有位移，所以"范围"不存在。判断压力
+ *    全部来自**读条结束的时机**（该躲 / 该挡 / 该打断），表达它的是顶部
+ *    那条预警条。
+ * 2. **HUD 让路**：画面中央只放角色，不放面板。
  * 3. **元素小、信息密度高**：技能格 48、buff 图标 26、字号 11–20。
  *
  * 数据流单向：`update(view)` 只读传入的快照。
@@ -79,6 +74,8 @@ export class BattleScene {
 
   private readonly boss: BossSprite;
   private readonly playerAnim: Graphics;
+  /** 玩家部件（构造时自己决定是否加载贴图形象）。 */
+  private playerActor: PlayerActorPart | undefined;
   /** 玩家图形的外层容器（只用于闪避位移） */
   private readonly playerRoot: Container;
   private readonly flashOverlay: Graphics;
@@ -501,7 +498,9 @@ export class BattleScene {
       playerBuffs: this.playerBuffs,
     }));
     this.registry.add(new PlayerCastBarPart(this.playerCastBar));
-    this.registry.add(new PlayerActorPart(this.playerRoot, this.playerAnim));
+    // 第 3 参 = 加载贴图形象（拿不到就回退到程序化绘制）
+    this.playerActor = new PlayerActorPart(this.playerRoot, this.playerAnim, true);
+    this.registry.add(this.playerActor);
     this.registry.add(this.skillBar);
     this.registry.add(this.floating);
     this.registry.add(new StatusLinePart(this.statusLabel, this.statusSub));
