@@ -29,6 +29,17 @@ export interface KeyGridState {
   readonly focusIndex: number;
   /** 正在等按键的技能 id（那一格显示「…」） */
   readonly capturingSkillId: string | undefined;
+  /**
+   * 是否显示键名。
+   *
+   * 需求："移动端就不用显示快捷键信息了，无论是技能按钮还是其他的
+   * 功能按钮。"
+   *
+   * ⚠️ 触屏上「按键」页会因此变成"只有技能名的列表" —— 那是**预期**
+   * 的：触屏玩家没有键可改，页面还在是因为"技能全集"由它承载。
+   * 真正该做的是给触屏一个不同的设置页，那是后续任务。
+   */
+  readonly showKeyHints?: boolean | undefined;
 }
 
 export class KeyGrid {
@@ -109,7 +120,11 @@ export class KeyGrid {
       cell.name.set(this.translate(row.nameKey));
       // 按键名统一大写显示，与技能栏上的提示一致
       cell.key.set(
-        capturing ? '…' : formatKey(row.key, this.translate('settings.keyUnbound')),
+        state.showKeyHints === false
+          ? ''
+          : capturing
+            ? '…'
+            : formatKey(row.key, this.translate('settings.keyUnbound')),
       );
       cell.key.setColor(capturing || focused ? PALETTE.douqi.bright : PALETTE.text);
 

@@ -1,4 +1,5 @@
 import { BattleLoop } from './app/battleLoop';
+import { createTouchControls } from './app/touchControls';
 import { DEFAULT_SLOTS } from './app/viewAdapter';
 import { createRegistry } from './core/content/registry';
 import { VERROT_BEHAVIORS } from './core/ai';
@@ -221,16 +222,25 @@ async function bootstrap(): Promise<void> {
     frameCount += 1;
     loop.frame(performance.now());
     scene.update(loop.snapshot, loop.logEntries);
+    /** 触屏按钮的文本要跟着快照更新（冷却数字会变）。 */
+    touch.frame(loop.snapshot);
     settingsButton.update();
     settings.update();
   });
 
   /* ---------- 重开 ----------
-   * 战斗结束后按 Enter 重开（而不是 R —— R 是技能键之一）。 */
+   * 战斗结束后：**键盘 Enter** 或 **触屏点屏幕** 都重开。
+   *
+   * ⚠️ 两条路径**共用这一个函数** —— 否则很容易出现"桌面能重开、
+   * 触屏不行"这种只在一边坏掉的问题。 */
+  const restartBattle = (): void => {
+    loop.dispose();
+    loop = startBattle();
+    touch.setBindings(bindings);
+  };
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && loop.engineState.snapshot.status !== 'running') {
-      loop.dispose();
-      loop = startBattle();
+      restartBattle();
     }
   });
 
@@ -360,7 +370,18 @@ async function bootstrap(): Promise<void> {
    */
   let handlingKeyDown = false;
 
+  /**
+   * 触屏预览的数据源持有者。
+   *
+   * ⚠️ 设置面板**必须先于** `touch` 构造（它要接收 `touch` 的能力值），
+   * 但预览数据又来自 `touch.layout`。用一个**常量对象**当转交点：
+   * `const` 符合 lint，且不依赖"首次渲染足够晚"这种隐含前提。
+   */
+  const touchPreviewSource: { read: () => readonly string[] } = { read: () => [] };
+
   const settings = new SettingsPanel({
+    /** 触屏按钮的只读预览 —— 从布局读（唯一真相）。 */
+    getTouchSkills: () => touchPreviewSource.read(),
     pixi: { Container, Graphics, Sprite, Text },
     translate: (key) => translateSafe(key),
     getRows: () =>
@@ -403,10 +424,12 @@ async function bootstrap(): Promise<void> {
         b.skillId === skillId ? { ...b, key } : b.key === key ? { ...b, key: '' } : b,
       );
       loop.setBindings(bindings);
+      touch.setBindings(bindings);
     },
     onResetKeys: () => {
       bindings = DEFAULT_BINDINGS;
       loop.setBindings(bindings);
+      touch.setBindings(bindings);
     },
     /**
      * 把捕获回调包一层：**主监听器正在处理这次按键时直接跳过**。
@@ -503,10 +526,38 @@ async function bootstrap(): Promise<void> {
    */
   let draggingSlider = false;
 
+  /** 触屏控件（能力探测 + 布局 + 输入源 + 双弧按钮层）。与键盘**并存**。 */
+  const touch = createTouchControls({
+    pixi: { Container, Graphics, Sprite, Text },
+    translate: translateSafe,
+    bindings,
+    currentTick: () => loop.engineState.snapshot.tick,
+    isSettingsOpen: () => settingsOpen,
+  });
+  touchPreviewSource.read = () =>
+    touch.layout.current().map((b) => registry.skill(b.skillId)?.nameKey ?? b.skillId);
+  scene.setShowKeyHints(touch.caps.showKeyHints);
+  settingsButton.setShowShortcut(touch.caps.showKeyHints);
+  app.stage.addChild(touch.layer.root);
+
   app.canvas.addEventListener('pointerdown', (event) => {
     const { px, py } = pointerAt(event);
+    /**
+     * **触屏按钮优先**，但它自己在"设置打开"时会拒绝消费
+     * （见 `touchControls.ts` 的点击路由说明）。
+     */
+    if (touch.onPointerDown(event.pointerId, px, py)) return;
     if (!settingsOpen) {
       if (settingsButton.hitTest(px, py)) openSettings();
+      /**
+       * 结算中**点屏幕任意处 = 重开**（需求："包括 'enter' 再来一次
+       * 也改成点击屏幕再来一次之类的"）。
+       *
+       * ⚠️ 只在触屏模式下这样 —— 桌面上"点哪里都重开"会让人误触。
+       */
+      if (!touch.caps.showKeyHints && loop.engineState.snapshot.status !== 'running') {
+        restartBattle();
+      }
       return;
     }
     const onSlider = settings.hitTest(px, py) && settings.isOnScaleSlider(px, py);
@@ -533,8 +584,22 @@ async function bootstrap(): Promise<void> {
   const endDrag = (): void => {
     draggingSlider = false;
   };
-  app.canvas.addEventListener('pointerup', endDrag);
-  app.canvas.addEventListener('pointerleave', endDrag);
+  app.canvas.addEventListener('pointerup', (event) => {
+    touch.onPointerUp(event.pointerId);
+    endDrag();
+  });
+  /**
+   * ⚠️ `pointercancel` 必须转发：手指划出画布 / 系统手势打断时，
+   * 不释放会让引擎一直按那个技能的代价扣资源。
+   */
+  app.canvas.addEventListener('pointercancel', (event) => {
+    touch.onPointerCancel(event.pointerId);
+    endDrag();
+  });
+  app.canvas.addEventListener('pointerleave', (event) => {
+    touch.onPointerCancel(event.pointerId);
+    endDrag();
+  });
 
   /**
    * 设置相关的键盘处理。

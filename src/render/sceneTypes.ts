@@ -51,6 +51,17 @@ export interface FrameContext {
   readonly translate: TranslateFn;
   /** 当前 UI 缩放系数 */
   readonly uiScale: number;
+  /**
+   * 是否显示**键盘快捷键提示**。
+   *
+   * 需求："移动端就不用显示快捷键信息了，无论是技能按钮还是其他的
+   * 功能按钮，包括 'enter' 再来一次也改成点击屏幕再来一次之类的。"
+   *
+   * ⚠️ 与 `uiScale` 一样放进**每帧的上下文**，而不是构造参数：
+   * 它是一个"当前该不该画键名"的开关，放这里将来还能做运行时切换
+   * （例如玩家插了键盘）。来源是 `render/platform.ts` 的能力探测。
+   */
+  readonly showKeyHints: boolean;
 }
 
 /**

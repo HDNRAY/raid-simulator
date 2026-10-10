@@ -117,6 +117,8 @@ export class BattleScene {
   private readonly playerBuffs: IconStrip;
   /** UI 缩放系数（默认 1）——只影响 UI 部件，不影响画布与战斗画面 */
   private uiScale = 1;
+  /** 是否显示键名（触屏隐藏）。见 `FrameContext.showKeyHints`。 */
+  private showKeyHints = true;
 
   private readonly skillBar: SkillBarView;
   private readonly floating: FloatingTextLayer;
@@ -469,14 +471,10 @@ export class BattleScene {
   }
 
   /**
-   * **注册帧部件**（需求："ui 的各个部分注册在 tick 上，tick 直接通知
-   * 大家就好了"）。
+   * **注册帧部件**（需求："ui 的各个部分注册在 tick 上"）。
    *
-   * ⚠️ **注册顺序 = 绘制顺序**，所以这里必须按视觉层叠排：
-   *   背景/角色 → HUD 面板 → 读条 → 技能栏 → 飘字 → 闪光 → 结算
-   *
-   * 顺序是有语义的（飘字要盖在面板上、结算要盖在所有东西上），
-   * 所以 `FrameRegistry` 保序、这里也按人的阅读顺序排列。
+   * ⚠️ **注册顺序 = 绘制顺序**：背景/角色 → HUD → 读条 → 技能栏 →
+   * 飘字 → 闪光 → 结算。飘字要盖在面板上、结算要盖在所有东西上。
    */
   private registerFrameParts(): void {
     this.registry.add(new BossTopBarPart({
@@ -532,26 +530,20 @@ export class BattleScene {
    */
   private renderResult(ctx: {
     view: BattleSnapshotView;
-    /**
-     * ⚠️ 必须收 `params` —— 结算的胜因文案带插值（Boss 的名字）。
-     * 只声明一个参数会让"带参数翻译"在类型上被拒。
-     */
+    /** ⚠️ 收 `TranslateFn` 而不是 `(k: string) => string` —— 胜因文案带插值。 */
     translate: TranslateFn;
+    /** 是否显示键名（触屏传 false）—— 决定重开提示用哪一句。 */
+    showKeyHints: boolean;
   }): void {
-    const { view, translate } = ctx;
+    const { view, translate, showKeyHints } = ctx;
     const result = view.result;
     this.resultLayer.visible = result !== undefined;
     if (!result) return;
     this.resultTitle.set(translate(result.titleKey));
     this.resultTitle.setColor(result.victory ? 0xffd870 : PALETTE.danger.bright);
     /**
-     * 胜因文案带**插值参数**（如 Boss 的名字）。
-     *
      * ⚠️ 参数值可能是**另一个 i18n key**（`boss.name`）—— 适配器只给
-     * key，翻译在渲染层做（i18n 规范 I1：渲染层不持有可显示文案）。
-     *
-     * 这里的"再翻一次"是有意的：如果适配器直接给译好的名字，
-     * `viewAdapter` 就得持有语言包，那一层就不再是纯数据映射了。
+     * key，翻译在渲染层做（i18n 规范 I1）。这里的"再翻一次"是有意的。
      */
     const reasonParams = result.reasonParams;
     this.resultReason.set(
@@ -567,7 +559,10 @@ export class BattleScene {
             ),
           ),
     );
-    this.resultHint.set(translate('screen.hintRestart'));
+    /** 重开提示按模式分流。⚠️ 两条文案都走 i18n（规范 I1）。 */
+    this.resultHint.set(
+      translate(showKeyHints ? 'screen.hintRestart' : 'screen.hintRestartTap'),
+    );
 
     // 统计用等宽对齐的"标签  值"，比堆一串数字好读
     const rows: Array<[string, string]> = [
@@ -582,15 +577,21 @@ export class BattleScene {
 
 
   /**
+   * 是否显示键名（触屏传 `false`）。见 `FrameContext.showKeyHints`。
+   *
+   * ⚠️ 触屏时**整条技能栏都隐藏**：双弧按钮承担了它的全部职责
+   * （技能字 + 冷却 + 代价），同时显示会重叠。
+   */
+  setShowKeyHints(show: boolean): void {
+    this.showKeyHints = show;
+    this.skillBar.root.visible = show;
+  }
+
+  /**
    * **UI 缩放**（需求："缩放游戏 UI……战斗画面和战斗文字保持不变"）。
    *
-   * 只作用于 UI 部件，**不碰画布尺寸** —— 画布仍是 960×540 的逻辑
-   * 分辨率，所以角色、场景、飘字都不受影响。这与"整体缩放画布"是
-   * 两回事，后者会把战斗画面一起放大。
-   *
-   * 目前作用范围：技能栏 + 玩家面板（含三根资源条与它们的文字）。
-   * 其它部件（顶栏、日志面板）暂不缩放 —— 它们贴屏幕边缘，
-   * 缩放收益小，而改动的风险不小。
+   * 只作用于 UI 部件，**不碰画布尺寸**（仍是 960×540 逻辑分辨率），
+   * 所以角色、场景、飘字不受影响。目前作用于技能栏 + 玩家面板。
    */
   setUiScale(scale: number): void {
     if (scale === this.uiScale) return;
@@ -689,6 +690,7 @@ export class BattleScene {
       logEntries,
       translate: this.options.translate,
       uiScale: this.uiScale,
+      showKeyHints: this.showKeyHints,
     });
   }
 }

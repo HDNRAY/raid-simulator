@@ -86,6 +86,11 @@ export class SettingsButton {
   }
 
   /** 命中测试（逻辑像素）。 */
+  /** 隐藏快捷键提示（触屏设备）。见 `IconButton.setShowShortcut`。 */
+  setShowShortcut(show: boolean): void {
+    this.button.setShowShortcut(show);
+  }
+
   hitTest(px: number, py: number): boolean {
     return this.button.hitTest(px, py);
   }

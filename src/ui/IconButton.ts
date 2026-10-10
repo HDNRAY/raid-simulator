@@ -313,6 +313,21 @@ export class IconButton {
   }
 
   /** 指针悬停。 */
+  /**
+   * 显示/隐藏快捷键提示。
+   *
+   * 用途：触屏设备上没有任何键可按，画 `Esc` 只会误导
+   * （需求："移动端就不用显示快捷键信息了，无论是技能按钮还是
+   * 其他的功能按钮"）。
+   *
+   * ⚠️ 只是隐藏提示，**不影响可点区域** —— `rect` 是按提示算出来的，
+   * 重算会让按钮在两种模式下命中范围不同，反而更难用。
+   */
+  setShowShortcut(show: boolean): void {
+    if (this.hint === undefined) return;
+    this.hint.root.visible = show;
+  }
+
   setHovered(hovered: boolean): void {
     this.hovered = hovered;
     this.update();

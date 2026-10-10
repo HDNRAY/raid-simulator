@@ -291,6 +291,13 @@ export const zhCN = {
     /** 通用 tab 暂时没有可调项 */
     /** 通用页：UI 缩放 slider */
     uiScale: 'UI 缩放',
+    /**
+     * 触屏按钮的**只读预览**（需求："暂时就不给玩家自由编辑了"）。
+     *
+     * 既然不给编辑，这里只告诉玩家"现在是什么样" ——
+     * 按钮由键位表推导，所以它同时也解释了"为什么这些技能在场上"。
+     */
+    touchButtons: '触屏按钮',
     generalHint: '← → 调整，↑ ↓ 切换项',
     generalEmpty: '暂时还没有可调项',
     generalEmptyHint: '音量、画面与体验相关的选项之后加在这里',
@@ -329,6 +336,13 @@ export const zhCN = {
     detailCostPerSecond: '{value} {resource}/秒',
     detailCd: '冷却 {seconds} 秒',
     keysHint: '方向键选择，Enter 改键，Esc 返回',
+    /**
+     * 触屏版的按键页提示。
+     *
+     * 触屏玩家改不了键（没有键），所以这里只说"点技能看详情"——
+     * 页面还在是因为"技能全集"由它承载（见 `KeyGridState.showKeyHints`）。
+     */
+    keysHintTap: '点技能查看详情',
     keysCapturingHint: '按下想用的键（Esc 取消）',
     keysCapturing: '请按键…',
     keysConflict: '该键已被占用',
@@ -384,6 +398,16 @@ export const zhCN = {
     statTotalDamage: '造成伤害',
     statDps: '每秒伤害',
     hintRestart: '按 Enter 再来一次',
+    /**
+     * 触屏版的重开提示。
+     *
+     * 需求："包括 'enter' 再来一次也改成点击屏幕再来一次之类的。"
+     *
+     * ⚠️ 触屏没有 Enter，所以说"按 Enter"是错的；而且触屏上**点屏幕
+     * 任意处**都能重开（见 `main.ts` 的 pointerdown 路由），所以文案
+     * 要写"点击屏幕"而不是"点这个按钮"。
+     */
+    hintRestartTap: '点击屏幕再来一次',
     settings: '设置',
     quit: '退出',
     rebind: '按键设置',

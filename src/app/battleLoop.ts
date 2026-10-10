@@ -29,6 +29,16 @@ export interface BattleLoopOptions {
   readonly onRestart?: () => void;
   /** 注入输入源（测试用）；不给则绑定到 window。 */
   readonly input?: InputSource;
+  /**
+   * 触屏输入源（可选）。
+   *
+   * ⚠️ **与 `input` 并存**，不是替换 —— 触屏笔记本这类混合设备上
+   * 鼠标键盘与手指都要能用。所以两条来源的 `drain()` 会合并。
+   *
+   * 它由 `app/touchControls.ts` 创建，生命周期比单个 `BattleLoop` 长
+   * （重开一局不该把按钮布局丢掉）。
+   */
+  readonly touchInput?: InputSource;
   /** 是否在引擎结束后自动停止推进 */
   readonly stopOnEnd?: boolean;
   /**
@@ -161,21 +171,44 @@ export class BattleLoop {
     const state = this.engine.snapshot;
     if (this.options.stopOnEnd !== false && state.status !== 'running') {
       // 战斗已结束：仍消费输入（让重开生效），但不推进引擎
-      const tail = this.input?.drain() ?? [];
+      const tail = [...(this.input?.drain() ?? []), ...(this.options.touchInput?.drain() ?? [])];
       if (tail.some((a) => a.type === 'restart')) this.restartRequested = true;
       return;
     }
 
-    const fromInput = this.input?.drain() ?? [];
-    const held = this.input
-      ? repeatHeld(
-          this.input,
-          this.bindings,
-          state.tick,
-          (skillId) => this.isUsable(skillId),
-          (skillId) => this.engine.skillOf(skillId)?.holdDrain !== undefined,
-        )
-      : [];
+    /**
+     * **两条输入来源合并**（键鼠 + 触屏）。
+     *
+     * `repeatHeld` 遍历的是各自的绑定表：
+     *   - 键盘：`q` / `w` / … 这些真按键
+     *   - 触屏：`touch:attack` 这类**合成 key**（见 `touchInput.ts`）
+     *
+     * 两边的 key 空间不重叠，所以合并很安全。
+     */
+    const fromInput = [
+      ...(this.input?.drain() ?? []),
+      ...(this.options.touchInput?.drain() ?? []),
+    ];
+    const held = [
+      ...(this.input
+        ? repeatHeld(
+            this.input,
+            this.bindings,
+            state.tick,
+            (skillId) => this.isUsable(skillId),
+            (skillId) => this.engine.skillOf(skillId)?.holdDrain !== undefined,
+          )
+        : []),
+      ...(this.options.touchInput
+        ? repeatHeld(
+            this.options.touchInput,
+            this.options.touchInput.bindings(),
+            state.tick,
+            (skillId) => this.isUsable(skillId),
+            (skillId) => this.engine.skillOf(skillId)?.holdDrain !== undefined,
+          )
+        : []),
+    ];
 
     const actions: Action[] = [...fromInput, ...held];
     this.engine.tick(actions);

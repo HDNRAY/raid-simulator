@@ -25,7 +25,8 @@
  */
 
 import type { Container, Graphics } from 'pixi.js';
-import { LOGICAL } from '../layout';
+import { FONT, LOGICAL } from '../layout';
+import { PALETTE } from '../../render/theme';
 import { isReservedKey, reservedKeyLabel } from '../../input/keyboard';
 import { KeyGrid } from './KeyGrid';
 import { SkillDetail } from './SkillDetail';
@@ -69,6 +70,18 @@ export interface SettingsPanelOptions {
   readonly onCapture: (handler: ((key: string) => void) | undefined) => void;
   /** 关闭弹窗 */
   readonly onClose: () => void;
+  /**
+   * 是否显示键名（触屏设备传 `false`）。
+   *
+   * 需求："移动端就不用显示快捷键信息了，无论是技能按钮还是其他的
+   * 功能按钮。" 见 `KeyGridState.showKeyHints`。
+   */
+  readonly showKeyHints?: boolean;
+  /**
+   * 触屏按钮上场的技能名 key（只读预览用）。**由主循环从
+   * `TouchLayout` 读出** —— 设置面板不持有布局，与"唯一真相"一致。
+   */
+  readonly getTouchSkills?: (() => readonly string[]) | undefined;
   /** 读当前 UI 缩放倍数（1 = 自动适配） */
   readonly getUiScale: () => number;
   /** UI 缩放变了（调用方负责把它应用到画布尺寸上） */
@@ -98,6 +111,8 @@ export class SettingsPanel {
    */
   /** 选中技能的详情（独立组件，见 `SkillDetail`） */
   private readonly detail: SkillDetail;
+  /** 触屏按钮的只读预览（需求："暂时就不给玩家自由编辑了"）。 */
+  private readonly touchPreview: InstanceType<PixiCtor['Text']>;
 
   /** 外框：底板 + 标题 + 「关闭」 + tab 按钮（独立组件） */
   private readonly frame: SettingsFrame;
@@ -161,6 +176,12 @@ export class SettingsPanel {
     this.body.addChild(this.footer.root);
 
     /* ---------- 通用页：UI 缩放滑块 ---------- */
+    this.touchPreview = new pixi.Text({
+      text: '',
+      style: { fontFamily: 'sans-serif', fontSize: FONT.small, fill: PALETTE.text },
+    });
+    this.touchPreview.visible = false;
+    this.body.addChild(this.touchPreview);
     this.detail = new SkillDetail(pixi, (key) => this.options.translate(key));
     this.body.addChild(this.detail.root);
 
@@ -429,14 +450,10 @@ export class SettingsPanel {
 
   /** 激活当前焦点（Enter / 空格）。 */
   /**
-   * 助记键直达（G 通用 / K 按键 / R 恢复默认 / S UI 缩放）。
+   * 助记键直达（G / K / R / S）。
    *
-   * 需求："这几个按钮，都需要增加『通用(G)』这样的按键支持，
-   * 而不是只能依赖 tab，包括 UI 缩放。"
-   *
-   * ⚠️ 每个分支都**同时移动焦点**（不只是执行动作）——
-   * 否则按完 G 之后，`Enter` / 方向键还会作用在原来的位置上，
-   * 玩家会觉得"键没生效"。
+   * ⚠️ 每个分支都**同时移动焦点** —— 否则按完 G 之后 `Enter` 还会
+   * 作用在原位置上，玩家会觉得"键没生效"。
    */
   private applyMnemonic(target: 'tabGeneral' | 'tabKeys' | 'resetKeys' | 'slider'): void {
     switch (target) {
@@ -495,33 +512,11 @@ export class SettingsPanel {
     this.settingsTrace.push(`startCapture(${skillId})`);
     this.capturingSkill = skillId;
     /**
-     * 跳过**触发改键的那一次按键**。
-     *
-     * ------------------------------------------------------------------
-     * 为什么必须有这个标记
-     * ------------------------------------------------------------------
-     *
-     * 输入层的 keydown 监听器比主监听器**先注册**（它在 `startBattle()`
-     * 里、主监听器在 bootstrap 末尾），所以一次 keydown 的事件顺序是：
-     *
-     *   1. 输入层 `onKeyDown` 开始执行 —— 此时还没有捕获回调，它什么也没做
-     *   2. 主监听器调用 `SettingsPanel.handleKey` → 进入改键模式 →
-     *      **当场**把捕获回调注册给输入层
-     *   3. 输入层 `onKeyDown` 的执行**还没结束**，它继续走到
-     *      "有捕获回调吗" 那一步 —— 现在有了 —— 于是把
-     *      **同一个按键**喂给了 `finishCapture`
-     *
-     * 表现就是"按 Enter 进入改键，技能被静默绑成了 Enter"。
-     *
-     * 试过但**不管用**的两种修法：
-     *   - 在组件里比时间戳（"同一瞬间的按键忽略"）：用阈值猜事件归属，
-     *     会误吞玩家的真实连按。
-     *   - 在主监听器里标记"这次按键我处理了"：输入层先跑，
-     *     标记设置得太晚。
-     *
-     * 所以只能由**改键协议自己**表达："进入改键后的第一个回调作废"。
-     * 它与时序无关，并且每次进入/退出改键都会被重置。
-     */
+   * 跳过**触发改键的那一次按键**。
+   *
+   * 进捕获模式的那个 keydown 本身不该被当成"新绑定的键" ——
+   * 否则按 Enter 改键会立刻把技能绑到 Enter 上。
+   */
     this.skipNextCapture = true;
     /**
      * 时序守卫：记录改键开始的时刻，**同一瞬间到达的按键一律忽略**。
@@ -656,6 +651,7 @@ export class SettingsPanel {
        */
       this.scaleSlider.setVisible(true);
       this.scaleSlider.setFocused(this.focus.zone === 'slider');
+      this.drawTouchPreview();
       this.scaleSlider.redraw();
       return;
     }
@@ -673,9 +669,22 @@ export class SettingsPanel {
     this.keyGrid.update(rows, {
       focusIndex: this.focus.zone === 'grid' ? this.focus.index : -1,
       capturingSkillId: this.capturingSkill,
+      showKeyHints: this.options.showKeyHints,
     }, (row) => this.drawDetail(row));
 
     this.footer.updateKeys(this.capturingSkill !== undefined, this.focus.zone === 'reset');
+  }
+
+  /** 只读预览。⚠️ 无触屏按钮时隐藏（桌面上画它只会让人困惑）。 */
+  private drawTouchPreview(): void {
+    const skills = this.options.getTouchSkills?.() ?? [];
+    const rect = uiScaleSliderRect();
+    const names = skills.map((k) => this.options.translate(k)).join(' ');
+    this.touchPreview.text =
+      skills.length === 0 ? '' : `${this.options.translate('settings.touchButtons')}: ${names}`;
+    this.touchPreview.x = rect.x;
+    this.touchPreview.y = rect.y + rect.h + 10;
+    this.touchPreview.visible = skills.length > 0;
   }
 
   /** 空 tab 的占位：一行主文案 + 一行提示，避免一片空白让人以为坏了。 */

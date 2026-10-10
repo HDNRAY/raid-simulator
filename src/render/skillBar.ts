@@ -236,10 +236,10 @@ export class SkillBarView implements FramePart {
    * 变成部件自己取。这一行就是"注册机制"与"场景逐个调用"的分界。
    */
   render(ctx: FrameContext): void {
-    this.draw(ctx.view.skills);
+    this.draw(ctx.view.skills, ctx.showKeyHints);
   }
 
-  private draw(skills: readonly SkillSlotView[]): void {
+  private draw(skills: readonly SkillSlotView[], showKeyHints: boolean): void {
     this.ensure(skills.length);
 
     for (let i = 0; i < this.slots.length; i += 1) {
@@ -314,7 +314,16 @@ export class SkillBarView implements FramePart {
        * 而 32px 的图标是格子的主角 —— 压暗它只会让整条技能栏显得脏。
        * 冷却状态由白色遮罩 + 左下角数字表达，足够了。
        */
-      s.key.set(view.key.toUpperCase());
+      /**
+       * 键位提示。**触屏设备不画** ——
+       *
+       * 需求："移动端就不用显示快捷键信息了，无论是技能按钮还是
+       * 其他的功能按钮。"
+       *
+       * 触屏上那些技能由右下角的圆形按钮承担，画个 `Q` / `W` 在那里
+       * 只会让人以为"要按键盘"。
+       */
+      s.key.set(showKeyHints ? view.key.toUpperCase() : '');
       /**
        * **键位提示也要跟着状态变。**
        *
