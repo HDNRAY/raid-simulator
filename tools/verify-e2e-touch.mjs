@@ -107,7 +107,8 @@ await send('Page.addScriptToEvaluateOnNewDocument', {
     window.matchMedia = (q) => (q === '(pointer: coarse)' || q === '(hover: none)')
       ? { matches: true, media: q, addEventListener() {}, removeEventListener() {} } : o(q);`,
 });
-await send('Page.navigate', { url: 'http://localhost:5273/' });
+/** 跳过备战界面的入口（与键盘脚本同一个；见 `main.ts` 的 `skipPrepare`）。 */
+await send('Page.navigate', { url: 'http://localhost:5273/?prepare=skip' });
 await send('Page.bringToFront').catch(() => {});
 
 const evalPage = async (expr) => {

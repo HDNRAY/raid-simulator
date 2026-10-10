@@ -29,6 +29,8 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+/** 跳过备战界面的入口（见 `main.ts` 的 `skipPrepare` 说明）。 */
+const BATTLE_URL = 'http://localhost:5273/?prepare=skip';
 const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const PORT=9377; const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const profile=mkdtempSync(join(tmpdir(),'v-')), home=mkdtempSync(join(tmpdir(),'vh-'));
@@ -44,7 +46,7 @@ ws.addEventListener('message',e=>{const m=JSON.parse(e.data); if(m.id&&pend.has(
  if(m.method==='Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.exception?.description||m.params.exceptionDetails.text);});
 const send=(m,p={})=>new Promise(r=>{const i=id++;pend.set(i,r);ws.send(JSON.stringify({id:i,method:m,params:p}));});
 await send('Runtime.enable'); await send('Page.enable');
-await send('Page.navigate',{url:'http://localhost:5273/'});
+await send('Page.navigate',{url:BATTLE_URL});
 /**
  * ⚠️ **必须把页面拉到前台**，否则下面的合成按键会让页面失焦。
  *
@@ -92,6 +94,22 @@ async function press(key, code, keyCode) {
 }
 const a = await probe();
 if (!a) { console.log('✗ 探针不可用'); process.exit(1); }
+/**
+ * ⚠️ 先断言"确实跳过了备战界面"。
+ *
+ * `?prepare=skip` 这个入口本身也会坏（参数名写错、被 URL 编码、只对某一
+ * 条路径生效）。如果不单独断言，坏掉时的表现是"等 tick 超时" —— 看起来
+ * 像战斗坏了，实际是入口坏了，排查方向会完全跑偏。
+ */
+if (a.status !== 'running') {
+  console.log(`✗ ?prepare=skip 没有直接进战斗（status=${a.status}）`);
+  child.kill('SIGKILL');
+  await sleep(200);
+  rmSync(profile, { recursive: true, force: true });
+  rmSync(home, { recursive: true, force: true });
+  process.exit(1);
+}
+console.log('✓ ?prepare=skip 直接进战斗（跳过了选人）');
 console.log('初始:', JSON.stringify(a));
 /**
  * 键位从默认表里取，**不要在这里写死**。

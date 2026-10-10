@@ -271,6 +271,15 @@ async function bootstrap(): Promise<void> {
   /** 当前阶段：备战界面 or 战斗中。 */
   let phase: 'prepare' | 'battle' = 'prepare';
 
+  /**
+   * **跳过备战界面直接进战斗**：`?prepare=skip`（端到端脚本用）。
+   *
+   * ⚠️ 用 URL 参数而不是"再加一个调试方法"：后者是**旁路**，而备战界面是
+   * 真实入口的一部分（"点开始"本身也会坏）。走参数则与玩家同一条路。
+   * ⚠️ 只有显式带这个参数才生效 —— 线上地址没有它，玩家路径一字未变。
+   */
+  const skipPrepare = new URLSearchParams(globalThis.location.search).get('prepare') === 'skip';
+
   /** 当前选中的出战单位（备战界面的选择，进战斗时读到）。 */
   const selection = {
     playerId: resolvePlayerId(settingsStore.playerIdRaw),
@@ -344,6 +353,12 @@ async function bootstrap(): Promise<void> {
    */
   scene.root.visible = false;
   prepare.setVisible(true);
+
+  /**
+   * ⚠️ 放在 `prepare` 构造**之后**：`enterBattle` 会用到 `prepare.setVisible`，
+   * 早一步调用会碰到 TDZ。
+   */
+  if (skipPrepare) enterBattle(selection.playerId, selection.bossId);
 
   /**
    * **UI 缩放**（设置里的 slider）。
