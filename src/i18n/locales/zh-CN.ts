@@ -121,11 +121,19 @@ export const zhCN = {
    * 这些文案由**状态提示区**统一显示（技能格 48px 放不下），
    * 格式是「技能名 · 原因」。
    */
+  /**
+   * ⚠️ 用词统一到「**施放**」，不用「施法」。
+   *
+   * 需求："我点击攻，显示『攻 · 正在施法中』……这个招式应该用 施放中"
+   *
+   * 早先这里是"施法中"，而 `reject.casting` 又是"正在施法" ——
+   * 同一个概念两种说法。技能是"招式"，玩家做的是"施放"。
+   */
   block: {
     comboWindow: '派生窗口未开启',
     cost: '炁或缠不足',
     cooldown: '冷却中',
-    casting: '正在施法中',
+    casting: '正在施放中',
     locked: '被限制',
     condition: '条件不满足',
     target: '没有目标',
@@ -137,7 +145,7 @@ export const zhCN = {
     iframe: 'I-FRAME',
     combo: '派生',
     level: '等级',
-    casting: '施法中',
+    casting: '施放中',
     interrupted: '被打断',
     dodged: '闪躲',
     immune: '免疫',
@@ -147,7 +155,7 @@ export const zhCN = {
   reject: {
     cooldown: '技能冷却中',
     cost: '资源不足',
-    casting: '正在施法',
+    casting: '正在施放',
     condition: '条件不满足',
     locked: '当前无法行动',
     target: '目标无效',

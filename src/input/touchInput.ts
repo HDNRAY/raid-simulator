@@ -173,13 +173,24 @@ export function createTouchInput(options: TouchInputOptions): TouchInputSource {
        */
       if (active.has(pointerId)) return true;
       active.set(pointerId, area);
-      const tick = options.currentTick();
-      pending.push({ type: 'useSkill', skillId: area.skillId, atTick: tick });
       /**
-       * 同时发 `hold`：按住型技能立刻进入按住状态；非按住型会退化成
-       * 普通施放（引擎里的兜底）。这样这里不必区分两种技能。
+       * ⚠️ **只发 `hold`，不要同时发 `useSkill`。**
+       *
+       * `hold` 对非按住型技能会**自己发一次 `useSkill`**（`holds.ts` 的
+       * 兜底），所以再补一个 `useSkill` 就是同一 tick 重复施放 ——
+       * 第二次必然撞上"正在施法中"而被拒，玩家看到
+       * 「攻 · 正在施法中」这条**莫名其妙的报错**（他明明按对了）。
+       *
+       * 实测（同一个 tick）：
+       *   只发 useSkill         → skillUsed=2  rejected=0
+       *   只发 hold             → skillUsed=2  rejected=0
+       *   **两个都发（原来的写法）→ skillUsed=2  rejected=1 [casting]**
+       *
+       * 所以语义上 `hold` 已经包含了 `useSkill`，只发它就够了：
+       *   - 按住型（「防」）→ 进入按住状态，引擎每逻辑步扣资源
+       *   - 非按住型（「攻」等）→ 退化成一次普通施放
        */
-      pending.push({ type: 'hold', skillId: area.skillId, atTick: tick });
+      pending.push({ type: 'hold', skillId: area.skillId, atTick: options.currentTick() });
       return true;
     },
 

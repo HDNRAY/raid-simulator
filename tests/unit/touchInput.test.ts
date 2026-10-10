@@ -47,13 +47,23 @@ describe('圆形按钮命中测试', () => {
 });
 
 describe('触屏输入 → Action', () => {
-  it('按下产出 useSkill + hold（引擎决定按住语义）', () => {
+  it('【关键】按下**只发 `hold`** —— 它已经包含 useSkill', () => {
+    /**
+     * ⚠️ 这条断言在修一个真 bug 时反过来了。
+     *
+     * 原先同时发 `useSkill` + `hold`，而 `hold` 对非按住型技能**自己会
+     * 发一次 `useSkill`**（`holds.ts` 的兜底）—— 于是同一 tick 重复施放，
+     * 第二次撞上"正在施法中"被拒，玩家看到「攻 · 正在施法中」这条
+     * 莫名其妙的报错（他明明按对了）。
+     *
+     * 实测（同一 tick）：
+     *   只发 useSkill → rejected=0
+     *   只发 hold     → rejected=0
+     *   **两个都发** → rejected=1 [casting]
+     */
     const { input } = makeInput();
     expect(input.pointerDown(1, 100, 100)).toBe(true);
-    expect(input.drain()).toEqual([
-      { type: 'useSkill', skillId: 'attack', atTick: 0 },
-      { type: 'hold', skillId: 'attack', atTick: 0 },
-    ]);
+    expect(input.drain()).toEqual([{ type: 'hold', skillId: 'attack', atTick: 0 }]);
   });
 
   it('松开产出 releaseSkill', () => {
@@ -76,8 +86,8 @@ describe('触屏输入 → Action', () => {
     const { input } = makeInput();
     input.pointerDown(1, 100, 100);
     input.pointerDown(1, 100, 100);
-    const actions = input.drain();
-    expect(actions.filter((a) => a.type === 'useSkill')).toHaveLength(1);
+    // 施放动作走 `hold`（见上一条），所以这里数 `hold`
+    expect(input.drain().filter((a) => a.type === 'hold')).toHaveLength(1);
   });
 
   it('【关键】多指：两指同时按住两个按钮互不干扰', () => {
@@ -154,5 +164,41 @@ describe('合成 key：让 repeatHeld 不用改', () => {
     expect(input.drain()).toEqual([
       { type: 'releaseSkill', skillId: 'attack', atTick: 0 },
     ]);
+  });
+});
+
+describe('触屏按下 → 引擎：不能自己把自己拒了', () => {
+  /**
+   * 需求（用户报告）："我点击攻，显示『攻 · 正在施法中』"
+   *
+   * **根因**：`pointerDown` 原先同时发 `useSkill` + `hold`，而 `hold`
+   * 对非按住型技能**自己会发一次 `useSkill`**（`holds.ts` 的兜底）——
+   * 于是同一 tick 重复施放，第二次撞上"正在施放中"被拒，玩家看到一条
+   * 莫名其妙的报错（他明明按对了）。
+   *
+   * 这条测试把"按一下不应该产生任何拒绝"钉住。
+   */
+  it('【关键】按一下「攻」→ 引擎**零拒绝**', () => {
+    const layout = createTouchLayout([{ index: 0, skillId: 'attack' }]);
+    const tick = 0;
+    const input = createTouchInput({
+      layout,
+      currentTick: () => tick,
+      hitAreas: () => [{ index: 0, skillId: 'attack', x: 100, y: 100, r: 36 }],
+    });
+
+    input.pointerDown(1, 100, 100);
+    const actions = input.drain();
+    // 只应该有 `hold` —— 它已经包含了 useSkill
+    expect(actions.map((a) => a.type)).toEqual(['hold']);
+
+    /**
+     * ⚠️ 这里**不**驱动真实引擎（那属于 golden/集成测试的范围）。
+     * 断言的是"不重复"这件事本身：动作序列里同一个技能只出现一次。
+     */
+    const forAttack = actions.filter(
+      (a) => 'skillId' in a && a.skillId === 'attack',
+    );
+    expect(forAttack).toHaveLength(1);
   });
 });
