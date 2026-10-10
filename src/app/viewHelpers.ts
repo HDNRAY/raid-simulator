@@ -21,11 +21,15 @@ export function isDefensiveBuff(buffId: string): boolean {
  * 引擎内部用的标记 buff —— **不在 UI 上显示图标**。
  *
  * 它们不是"玩家应该看到的增益/减益"，而是引擎的状态标记：
- *   - `gcd`：公共冷却，UI 通过技能格变灰表达，不需要图标
  *   - `boss-telegraph`：前摇标记，UI 通过预警条表达
- *   - `combo-window`：派生窗口，UI 通过技能格高亮表达
+ *   - `combo-window`：派生窗口，UI 通过技能格高亮表达（机制未实现）
  *
  * 早期版本没做这个过滤，结果预警条上压着一个被裁掉的图标。
+ *
+ * ⚠️ 集合里的 `gcd` 是**历史遗留**：公共冷却后来被删掉了，现在限速靠
+ * 读条时长本身，所以不会有任何 buff 产生 `gcd` 这个 id。同一个死分支
+ * 还留在 `blockKeyOf` 与 `buffShort.gcd` 文案里（一并清理要动几处，
+ * 这里先记着）。
  */
 const INTERNAL_BUFF_IDS = new Set(['gcd', 'boss-telegraph-active', 'boss-telegraph']);
 

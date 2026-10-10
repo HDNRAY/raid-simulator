@@ -9,13 +9,18 @@
  * 本模块是"用 buff 实现判定窗口"那一套的落地处
  * ------------------------------------------------------------------
  *
- * 闪避 / 格挡 / 派生 / GCD 全部是 buff（§6.3）：
+ * **已实现**（全部落在这里，零新引擎机制）：
  *   闪避   duration:300  + flags.invulnerable
  *   格挡   duration:1500 + flags.damageReduce:0.6
- *   派生   技能 A 挂 comboWindow buff；技能 B 的 requires 检查它
- *   GCD    施放后挂 gcd buff；gcd:true 的技能 requires notHasBuff('gcd')
+ *   限制   倒地用 flags.restrictToTags（只能闪避）
  *
- * **没有一条需要新引擎机制。** 这是数据模型一般性的最有说服力的证据。
+ * ⚠️ **下面两条是设计意图，目前没做**，别把它们当成已有能力：
+ *   派生   技能 A 挂 comboWindow buff；技能 B 的 requires 检查它
+ *          （`content.ts` 里 `requires:` 0 处、没有 buff 定义 comboWindow）
+ *   GCD    施放后挂 gcd buff —— **这条已经过时**：公共冷却后来被删掉了，
+ *          现在限速靠**读条时长**本身（见 `castPipeline` 里的说明）。
+ *          `viewHelpers` 里还留着 `gcd` 的死分支（`INTERNAL_BUFF_IDS`
+ *          与 `blockKeyOf`），因为没有任何 buff 会再产生那个 id。
  *
  * ------------------------------------------------------------------
  * 数值纪律：过期用**截止 tick**，不用已过时长
@@ -276,7 +281,9 @@ export function buffRemainingMs(
  * 汇总所有生效 buff 的判定旗标。
  *
  * **这是判定层的输入**：hit 结算时看 `invulnerable` / `damageReduce`，
- * 施法时看 `actionLock`，派生时看 `comboWindow`。
+ * 施法时看 `actionLock` 与 `restrictToTags`。
+ *
+ * ⚠️ `comboWindow`（派生）**还没有使用者** —— 见文件头。
  *
  * 多个来源的 `damageReduce` 用"取最大值"而不是相加：
  * 相加会让两层 60% 减伤变成 120%（超过免疫），而且玩家无法预期。
@@ -323,7 +330,10 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
 /**
  * 某个技能是否在派生窗口内可用。
  *
- * 派生 = buff 存在性判断，不需要新机制（§6.3）。
+ * ⚠️ **机制未实现，这个函数目前只有测试在调**（生产代码零调用）。
+ *
+ * 保留它是为了固定设计意图：**派生 = buff 存在性判断，不需要新引擎
+ * 机制** —— 真正做派生时，技能 B 加一个 `requires: hasBuff(...)` 即可。
  */
 export function isInComboWindow(combatant: Combatant, skillId: string): boolean {
   return aggregateFlags(combatant).comboWindow?.includes(skillId) ?? false;

@@ -246,29 +246,41 @@ export type StackingRule =
 /**
  * 判定旗标。
  *
- * **闪避 / 格挡 / 派生全部落在这里，零新引擎机制**：
+ * **已实现的**（零新引擎机制）：
  *   闪避   duration:300  + invulnerable
  *   格挡   duration:1500 + damageReduce:0.6
- *   精防   再叠一层更短、减伤更高的（不需要单独的"精防"概念）
+ *   限制   倒地用 restrictToTags（只能闪避）
+ *
+ * **尚未实现的**（只是设计意图，别当成已有能力）：
  *   派生   技能 A 挂 comboWindow buff；技能 B 的 requires 检查它
+ *          —— 目前 `content.ts` 里 `requires:` 0 处、没有 buff 定义
+ *             `comboWindow`，`isInComboWindow()` 在生产代码零调用
  */
 export interface BuffFlags {
   readonly invulnerable?: boolean;
   readonly damageReduce?: number;
   readonly ccImmune?: boolean;
   readonly interruptImmune?: boolean;
-  /** 派生窗口：在此期间这些技能可用 */
+  /** 派生窗口（**机制未实现**，见 `BuffFlags` 头部的说明）。 */
   readonly comboWindow?: readonly SkillId[];
   /** 动作锁：期间不能施放任何技能（施法僵直） */
   readonly actionLock?: boolean;
   /**
-   * **技能 tag 白名单**：期间只能施放带这些 tag 之一的技能（多个来源取并集）。
+   * **技能 tag 白名单（限制）**：期间**只能**施放带这些 tag 之一的技能。
+   * 多个来源取并集。见 `KNOCKDOWN`（「倒地」）。
    *
-   * 需求："给 伪名一郎 的 横扫，增加倒地效果……2s内只能按 带有 闪避
-   * tag的技能。" 见 `KNOCKDOWN`。
+   * ⚠️ **这是「限制」，与「派生」是两种机制**（用户纠正过）：
    *
-   * ⚠️ 不复用 `actionLock`：那是"完全不能动"（施法僵直），而倒地要的是
-   * "**只能翻滚**" —— 那是玩家的一条出路，不该被堵死。
+   *   限制（本字段 / `actionLock`）— **负向、排除**、**全局**
+   *     "除了白名单里的，其它都不行"（倒地时「攻」被排除）
+   *   派生（`comboWindow` + `requires`）— **正向、激活**、**单技**
+   *     "只有这个 buff 在时，这个技能才被激活"（平时它根本不可用）
+   *
+   * ⚠️ 我曾在注释里把两者说成"同一类机制的两个粒度" —— **错了**：
+   * 方向写反（正/负）、作用面也写错（全局/单技）。
+   *
+   * ⚠️ **派生还没做**（`content.ts` 里 `requires:` 0 处、没有 buff 定义
+   * `comboWindow`），所以 `comboWindow` 目前**没有使用者**。
    */
   readonly restrictToTags?: readonly SkillTag[];
 }
