@@ -30,7 +30,14 @@ export type SkillRejectReason =
   | 'casting'
   | 'condition'
   | 'locked'
-  | 'target';
+  | 'target'
+  /**
+   * 被限制只能使用某类技能（如倒地时只能用「闪避」类）。
+   *
+   * 与 `locked` 分开：`locked` 是"完全不能动"，这条是"**只能做某类
+   * 动作**" —— 玩家需要知道"我还能按什么"，而不是"我什么都做不了"。
+   */
+  | 'tagRestricted';
 
 export type EventDef =
   | {

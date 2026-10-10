@@ -102,6 +102,8 @@ export function blockKeyOf(reason: string): string {
       return 'casting';
     case 'locked':
       return 'locked';
+    case 'tagRestricted':
+      return 'tagRestricted';
     case 'target':
       return 'target';
     default:

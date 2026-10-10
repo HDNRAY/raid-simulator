@@ -25,7 +25,7 @@
  * 这里存 `expiresAtTick`，判断是整数比较，永不漂移。
  */
 
-import type { BuffDef, BuffFlags, BuffId, BuffInstance, Combatant } from '../types';
+import type { BuffDef, BuffFlags, BuffId, BuffInstance, Combatant, SkillTag } from '../types';
 
 /** 施加 buff 的结果：新的 buff 列表 + 发生了哪种变化（供发事件）。 */
 export interface ApplyBuffResult {
@@ -288,6 +288,13 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
   let interruptImmune = false;
   let actionLock = false;
   const comboWindow: string[] = [];
+  /**
+   * 技能 tag 白名单 —— 多个来源取**并集**。
+   *
+   * 并集而不是交集：两层限制叠加时，玩家能按的技能应该是"任一条允许
+   * 的"，否则会出现"两个 buff 各自放行一批，结果一个都按不了"。
+   */
+  const restrictToTags: SkillTag[] = [];
 
   for (const buff of combatant.buffs) {
     const def = buff.def;
@@ -299,6 +306,7 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
     if (f.interruptImmune) interruptImmune = true;
     if (f.actionLock) actionLock = true;
     if (f.comboWindow) comboWindow.push(...f.comboWindow);
+    if (f.restrictToTags) restrictToTags.push(...f.restrictToTags);
   }
 
   return {
@@ -308,6 +316,7 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
     ...(interruptImmune ? { interruptImmune: true } : {}),
     ...(actionLock ? { actionLock: true } : {}),
     ...(comboWindow.length > 0 ? { comboWindow } : {}),
+    ...(restrictToTags.length > 0 ? { restrictToTags } : {}),
   };
 }
 

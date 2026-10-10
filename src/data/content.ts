@@ -43,6 +43,7 @@ import {
   BOSS_ARMOR,
   BOSS_CLEAVE_ARMOR,
   BOSS_ENRAGE,
+  KNOCKDOWN,
   BOSS_SKILLS,
   BOSS_TELEGRAPH,
 } from './bossSkills';
@@ -51,6 +52,7 @@ import {
  * Boss 的 buff 与技能从 `./bossSkills` **转发**，外部 import 路径不变。
  */
 export {
+  KNOCKDOWN,
   BOSS_ARMOR,
   BOSS_ARMOR_SKILL,
   BOSS_CLEAVE,
@@ -286,7 +288,16 @@ const DODGE: SkillDef = {
   cost: [{ resource: 'energy', value: S(30) }],
   targeting: { mode: 'self' },
   hits: [],
-  tags: ['defensive'],
+  /**
+   * ⚠️ **`dodge` 是"被控时的出路"**：Boss 的「横扫」会造成倒地，倒地
+   * 期间（`BuffFlags.restrictToTags`）只有带 `dodge` 的技能可按 ——
+   * 也就是"被打倒了还能翻滚躲开下一击"。
+   *
+   * 与 `defensive` 并存不冲突：`defensive` 是"减伤类"的机械分类
+   * （「防」也是它），`dodge` 特指**位移闪避** —— 倒地时按「防」
+   * 不合理（你正躺着）。
+   */
+  tags: ['defensive', 'dodge'],
   school: 'physical',
   interruptible: false,
 };
@@ -323,7 +334,16 @@ const FLASH: SkillDef = {
   cost: [],
   targeting: { mode: 'self' },
   hits: [],
-  tags: ['defensive'],
+  /**
+   * ⚠️ **`dodge` 是"被控时的出路"**：Boss 的「横扫」会造成倒地，倒地
+   * 期间（`BuffFlags.restrictToTags`）只有带 `dodge` 的技能可按 ——
+   * 也就是"被打倒了还能翻滚躲开下一击"。
+   *
+   * 与 `defensive` 并存不冲突：`defensive` 是"减伤类"的机械分类
+   * （「防」也是它），`dodge` 特指**位移闪避** —— 倒地时按「防」
+   * 不合理（你正躺着）。
+   */
+  tags: ['defensive', 'dodge'],
   school: 'physical',
   interruptible: false,
 };
@@ -500,6 +520,13 @@ export const ALL_BUFFS: readonly BuffDef[] = [
   BOSS_ENRAGE,
   BOSS_ARMOR,
   BOSS_CLEAVE_ARMOR,
+  /**
+   * 「倒地」（Boss 的「横扫」给玩家的）。
+   *
+   * ⚠️ 必须注册进 `ALL_BUFFS` —— 内容校验器与 `registry.buffs` 都读它，
+   * 漏了会导致"引擎认识这个 buff，但 hittest/校验看不到"。
+   */
+  KNOCKDOWN,
 ];
 
 void logicTicks;

@@ -123,7 +123,14 @@ export type RejectReason =
   | 'casting'
   | 'condition'
   | 'locked'
-  | 'target';
+  | 'target'
+  /**
+   * 被限制只能使用某类技能（倒地时只能用「闪避」类）。
+   *
+   * ⚠️ 与 `locked` 分开：`locked` 是"完全不能动"，这条是"**只能做
+   * 某类动作**" —— 玩家需要知道"我还能按什么"。
+   */
+  | 'tagRestricted';
 
 export interface GateResult {
   readonly ok: boolean;
@@ -230,6 +237,23 @@ export function checkGate(
 
   // 1. 动作锁
   if (flags.actionLock) return { ok: false, reason: 'locked' };
+
+  /**
+   * 1b. **技能 tag 白名单**（倒地时只能用「闪避」类）。
+   *
+   * 需求："2s内只能按 带有 闪避 tag的技能。"
+   *
+   * ⚠️ 放在 `casting` 之前：玩家被控时最该看到的提示是"你现在只能
+   * 翻滚"，而不是"你正在施法中"。否则按住「攻」会一直看到后者，
+   * 完全不知道有出路。
+   */
+  const allowed = flags.restrictToTags;
+  if (allowed !== undefined && allowed.length > 0) {
+    const skillTags = skill.tags ?? [];
+    if (!skillTags.some((t) => allowed.includes(t))) {
+      return { ok: false, reason: 'tagRestricted' };
+    }
+  }
 
   // 2. 正在读条 —— 默认不放行，由调用方决定是否要打断它
   if (combatant.casts.length > 0 && options.allowedWhileCasting !== true) {

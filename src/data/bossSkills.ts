@@ -99,6 +99,38 @@ export const BOSS_CLEAVE_ARMOR: BuffDef = {
 };
 
 /** 重斩：有前摇，可被打断 / 闪避 / 格挡。 */
+/**
+ * 「倒地」：**2 秒内只能按带 `dodge` tag 的技能**。
+ *
+ * 需求："给 伪名一郎 的 横扫，增加倒地效果，会给玩家 到底debuff，
+ * 2s内只能按 带有 闪避 tag的技能。"
+ *
+ * ⚠️ 用 `restrictToTags` 而不是 `actionLock`：
+ *   - `actionLock` 是"完全不能动"（施法僵直）
+ *   - 倒地要的是"**只能翻滚**" —— 那是玩家的一条出路，不该堵死
+ *
+ * 所以被打倒不是"挨打时什么都做不了"，而是"你只剩闪避这一手" ——
+ * 这正是把它挂在「横扫」上的意义：**看到横扫没躲掉，还有第二次机会**。
+ *
+ * ⚠️ 2 秒 ≈ 一个逻辑步的 20 倍。横扫的前摇是 2.2 秒，所以倒地结束时
+ * 下一发横扫还没读条完 —— 时间是够反应的，但不多。
+ */
+export const KNOCKDOWN: BuffDef = {
+  id: 'knockdown',
+  nameKey: 'debuff.knockdown.name',
+  icon: 'char_dodge',
+  polarity: 'debuff',
+  color: C.debuff,
+  duration: logicMs(20),
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+  /**
+   * 只放行「闪避」类技能。名单由 `SkillTag` 的 `dodge` 决定，
+   * 所以以后新增闪避技不需要改这里。
+   */
+  flags: { restrictToTags: ['dodge'] },
+};
+
 export const BOSS_CLEAVE: SkillDef = {
   id: 'boss-cleave',
   kind: 'activeSkill',
@@ -196,6 +228,21 @@ export const BOSS_SWEEP: SkillDef = {
            */
           damage: { base: S(36), school: 'fire', canCrit: false, countsAsHit: true },
         },
+        /**
+         * **倒地** —— 横扫命中后玩家 2 秒内只能按「闪」/「避」。
+         *
+         * 需求："给 伪名一郎 的 横扫，增加倒地效果。"
+         *
+         * ⚠️ 放在 `effects` 里与伤害**同一个 hit**，所以"闪掉了就不会
+         * 倒地" —— 这是有意的：倒地是**挨到**这招的后果，不是招式自带
+         * 的场地效果。
+         */
+        /**
+         * ⚠️ **不写 `target`** —— 省略时默认作用于"被命中的人"（玩家）。
+         * `targeting.mode` 里没有 "target" 这个值（它描述的是**施法者
+         * 朝谁放**，不是"这一击打中了谁"）。
+         */
+        { kind: 'grantBuff', buff: KNOCKDOWN },
       ],
     },
   ],

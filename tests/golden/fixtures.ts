@@ -126,12 +126,27 @@ export const GOLDEN_OUTCOME = {
   /**
    * 当前平衡下"会闪避"的玩家获胜。
    *
-   * 实测（规范策略）：
-   *   - 用时 746 tick ≈ 12.4 秒
-   *   - 玩家剩 **22 血**
-   *   - **只按「攻」（完美进攻、零防御）：败**，Boss 还剩 10 血
+   * 实测（规范策略）—— **2026-10-10 加了「倒地」重新标定**：
+   *   - 用时 **926** tick ≈ 15.4 秒
+   *   - 玩家剩 **65 血**
+   *   - 只按「攻」（完美进攻、零防御）：**败**，Boss 还剩 30 血
    *
    * 也就是需求要的"不防御就算完美进攻也打不过"。
+   *
+   * ⚠️ **「倒地」让会闪避的玩家变强了**（22 血 → 65 血）。
+   * A/B 实测（同一策略，只把「横扫」的倒地效果摘掉做对照）：
+   *
+   *   | | ticks | 玩家 hp | 玩家造成 | 玩家**承受** | 闪避次数 |
+   *   | 有倒地 | 926 | 65 | 210 | **35** | **2** |
+   *   | 无倒地 | 746 | 22 | 210 | **78** | 1 |
+   *
+   * **玩家总伤害完全相同（210）** —— 因为「攻」是瞬发，
+   * 2 秒的倒地窗口不影响输出；变的是**承受伤害减半**：
+   * 倒地窗口让「避」（0.5s 无敌）的时机正好对上横扫，多闪掉一次。
+   *
+   * 这是「倒地」的**副作用**，不是设计意图。要不要调（例如让倒地也
+   * 延长横扫的间隔、或给「避」加冷却）需要产品决策 —— 见
+   * `docs/plans` 里的记录。
    *
    * Boss 数值（2026-10-09 末次）：
    *   重斩 前摇 1.8s / 伤害 28 / 冷却 6s / 轮转间隔 2.2s
@@ -149,7 +164,7 @@ export const GOLDEN_OUTCOME = {
   status: 'victory' as const,
   endReason: 'hpZero' as const,
   /** 通关用时（tick）。连续量，对数值改动敏感。 */
-  ticks: 746,
+  ticks: 926,
   /**
    * 当前内容没有暴击判定，所以随机数一次都不被消耗。
    *
@@ -159,7 +174,7 @@ export const GOLDEN_OUTCOME = {
    */
   finalRngSeed: 20261009,
   combatants: {
-    player: { alive: true, hp: 22, energy: 5, douqi: 43, damageDealt: 0, damageTaken: 0 },
+    player: { alive: true, hp: 65, energy: 5, douqi: 53, damageDealt: 0, damageTaken: 0 },
     meiichiro: { alive: false, hp: 0, energy: 0, douqi: 0, damageDealt: 0, damageTaken: 0 },
   },
 } satisfies Omit<RunOutcome, 'ticks'> & { readonly ticks: number };

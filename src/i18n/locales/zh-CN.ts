@@ -60,7 +60,7 @@ export const zhCN = {
     haste: '急速',
     armor: '护甲',
     tenacity: '韧性',
-    castSpeed: '施法速度',
+    castSpeed: '施放速度',
     cooldownRate: '冷却速率',
     damageBoost: '伤害加成',
     damageMult: '最终伤害',
@@ -134,6 +134,13 @@ export const zhCN = {
     cost: '炁或缠不足',
     cooldown: '冷却中',
     casting: '正在施放中',
+    /**
+     * 「倒地」：被限制只能用闪避类技能。
+     *
+     * ⚠️ 说的是"**只能闪避**"而不是"被限制" —— 玩家需要立刻知道
+     * **出路是什么**（按「闪」或「避」），而不是知道自己动不了。
+     */
+    tagRestricted: '倒地 · 只能闪避',
     locked: '被限制',
     condition: '条件不满足',
     target: '没有目标',
@@ -240,9 +247,15 @@ export const zhCN = {
     },
   },
 
-  /** 玩家施加的 debuff */
+  /**
+   * debuff 名称。
+   *
+   * `knockdown` = 「倒地」：Boss 的「横扫」命中后玩家 2 秒内只能按
+   * 带「闪避」tag 的技能（「闪」/「避」）。
+   */
   debuff: {
     sunder: { name: '裂' },
+    knockdown: { name: '倒地' },
   },
 
   /** Boss 技能与本体 */

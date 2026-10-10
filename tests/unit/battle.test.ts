@@ -507,3 +507,106 @@ describe('引擎：确定性与可序列化', () => {
     expect(a.snapshot.tick).toBe(b.snapshot.tick);
   });
 });
+
+describe('引擎：「倒地」（Boss 的「横扫」）', () => {
+  /**
+   * 需求："给 伪名一郎 的 横扫，增加倒地效果，会给玩家 到底debuff，
+   * 2s内只能按 带有 闪避 tag的技能。"
+   *
+   * 机制：`BuffFlags.restrictToTags` = 技能 **tag 白名单**。
+   * 与 `actionLock`（完全不能动）分开 —— 倒地要的是"**只能翻滚**"，
+   * 那是玩家的一条出路，不该被堵死。
+   */
+  const knockdown = makeBuffDef({
+    id: 'knockdown',
+    nameKey: 'debuff.knockdown.name',
+    polarity: 'debuff',
+    duration: 120,
+    flags: { restrictToTags: ['dodge'] },
+  });
+
+  const mkEngine = (): BattleEngine => {
+    const attack = makeSkillDef({
+      id: 'attack',
+      castTime: 500,
+      tags: ['melee'],
+      hits: [{ at: 500, effects: [{ kind: 'damage', damage: { base: 10, school: 'physical', canCrit: false, countsAsHit: true } }] }],
+    });
+    const dodge = makeSkillDef({ id: 'dodge', castTime: 0, tags: ['defensive', 'dodge'] });
+    const heavy = makeSkillDef({ id: 'heavy', castTime: 0, tags: ['spell'] });
+    const sweep = makeSkillDef({
+      id: 'sweep',
+      castTime: 0,
+      tags: ['spell'],
+      hits: [
+        {
+          at: 0,
+          effects: [
+            { kind: 'damage', damage: { base: 1, school: 'physical', canCrit: false, countsAsHit: true } },
+            { kind: 'grantBuff', buff: knockdown },
+          ],
+        },
+      ],
+    });
+    return new BattleEngine({
+      seed: 1,
+      bossId: 'boss',
+      combatants: [
+        makeCombatant({ id: 'player', side: 'ally' }),
+        makeCombatant({ id: 'boss', side: 'enemy' }),
+      ],
+      skills: new Map([attack, dodge, heavy, sweep].map((s) => [s.id, s])),
+      buffs: new Map([[knockdown.id, knockdown]]),
+      baseStats: new Map(),
+      passiveModifiers: new Map(),
+    });
+  };
+
+  it('横扫命中后玩家挂上倒地', () => {
+    const e = mkEngine();
+    e.tick([{ type: 'useSkill', skillId: 'sweep', atTick: 0 }], 'boss');
+    const applied = e.drainEvents().some((ev) => ev.kind === 'buffApplied' && ev.buffId === 'knockdown');
+    expect(applied).toBe(true);
+    const player = e.snapshot.combatants.find((c) => c.id === 'player')!;
+    expect(player.buffs.some((b) => b.defId === 'knockdown')).toBe(true);
+  });
+
+  it('【关键】倒地期间：带 dodge tag 的能用，没带的一律被拒', () => {
+    const e = mkEngine();
+    e.tick([{ type: 'useSkill', skillId: 'sweep', atTick: 0 }], 'boss');
+    e.drainEvents();
+
+    // 「攻」没带 dodge → 被拒，且原因是**专门的 tagRestricted**
+    // （不是 `locked` —— 玩家需要知道"我还能按什么"）
+    e.tick([{ type: 'useSkill', skillId: 'attack', atTick: 1 }]);
+    const rejected = e.drainEvents().filter((ev) => ev.kind === 'skillRejected');
+    expect(rejected).toHaveLength(1);
+    if (rejected[0]?.kind === 'skillRejected') {
+      expect(rejected[0].reason).toBe('tagRestricted');
+      expect(rejected[0].skillId).toBe('attack');
+    }
+  });
+
+  it('【关键】倒地期间「避」（带 dodge tag）仍然放得出来', () => {
+    const e = mkEngine();
+    e.tick([{ type: 'useSkill', skillId: 'sweep', atTick: 0 }], 'boss');
+    e.drainEvents();
+    e.tick([{ type: 'useSkill', skillId: 'dodge', atTick: 1 }]);
+    const used = e.drainEvents().filter((ev) => ev.kind === 'skillUsed');
+    expect(used.some((ev) => ev.kind === 'skillUsed' && ev.skillId === 'dodge')).toBe(true);
+  });
+
+  it('倒地过期后「攻」恢复可用', () => {
+    const e = mkEngine();
+    e.tick([{ type: 'useSkill', skillId: 'sweep', atTick: 0 }], 'boss');
+    e.drainEvents();
+    // 倒地 120 tick，跑过去
+    for (let t = 1; t <= 125; t += 1) {
+      e.tick([], 'boss');
+      e.drainEvents();
+    }
+    e.tick([{ type: 'useSkill', skillId: 'attack', atTick: 126 }]);
+    const rejected = e.drainEvents().filter((ev) => ev.kind === 'skillRejected');
+    expect(rejected).toHaveLength(0);
+  });
+});
