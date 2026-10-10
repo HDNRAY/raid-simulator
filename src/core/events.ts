@@ -18,7 +18,10 @@
  * 事件是**输出**，让输出独立成一层是它的自然位置。
  */
 
-import type { BuffId, CombatantId, EndReason, ResourceKey, School, SkillId } from './types';
+import type { BuffId, CombatantId, SkillId } from './types/ids';
+import type { ResourceKey } from './types/resources';
+import type { School } from './types/triggers';
+import type { EndReason } from './types/runtime';
 
 /* ================================================================== *
  * 13. 事件（慢通道，给渲染层 / 日志）

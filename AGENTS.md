@@ -151,12 +151,8 @@ addEventListener: (type, listener) =>
 
 ### 已超限的文件（基线）
 
-规则生效时的情况（口径：`content.split('\n').length`，比 `wc -l` 多 1），
-与测试里的 `GRANDFATHERED` 表必须一致：
-
-| 文件 | 天花板 |
-|---|---|
-| `src/core/types.ts` | 973 |
+**当前为空 —— 所有文件都在 700 行以内**（口径：`content.split('\n').length`，
+比 `wc -l` 多 1），与测试里的 `GRANDFATHERED` 表一致。
 
 ✅ 已拆到 700 以下、**从表里移除**的：
 
@@ -165,22 +161,39 @@ addEventListener: (type, listener) =>
 | `src/render/BattleScene.ts` | 1421 | **668** | `skillBar` / `IconStrip` / `FloatingTextLayer` / `background` / `sceneTypes` / `hudUtils` / `actorLayout` + `parts/` 下 7 个帧部件 |
 | `src/ui/settings/SettingsPanel.ts` | 938 | **646** | `KeyGrid` / `SkillDetail` / `SettingsFrame` / `KeysFooter` / `ScaleSlider` / `rows` |
 | `src/core/combat/battleState.ts` | 1580 | **694** | `castPipeline` / `hitResolution` / `stats` / `holds` / `runAi` / `battleStateTypes` |
+| `src/core/types.ts` | **973**（棘轮上限） | **拆成目录** | `core/types/` 下 13 个文件：`ids` / `resources` / `stats` / `buffs` / `triggers` / `effects` / `abilities` / `skills` / `loadout` / `behavior` / `runtime` / `encounter` / `index`（各 21–162 行） |
 
-### ⚠️ `src/core/types.ts` 是特例：类型图是"中心辐射"的
+### ✅ `src/core/types.ts` 已按**横向切割**拆成目录（原来以为不能拆）
 
-它已经拆出了两个**干净的叶子**（`core/events.ts`、`core/actions.ts`），
-但**再切下去会造出类型层的 import 环**：核心类型被 8 个以上的段落
-互相引用（第 9 段 `GameEntity` 就被 8 个段引用）。
+**原先的判断是错的。** 这里曾写着"类型图是中心辐射的，再切下去会造出
+类型层的 import 环"——**那个顾虑被夸大了**：
 
-想继续拆只有一条路：把第 1–3 段（基础标识 / 资源 / 属性）抽成
-`baseTypes`，再把其余段也各自拆开、全部从 `baseTypes` import。
-那是**几百行、跨 10 个文件的搬迁**，收益只是"一个类型文件的行数"。
+- `import type` 在编译期**完全擦除**，运行期没有环，不会有"import 是
+  undefined"
+- 本仓库真踩过的两次环（`data/scale.ts`、`settingsGeometry.ts`）都是
+  **值导入**（`const` / 函数），不是类型
+- 而且 `events.ts` / `actions.ts` **早就是先例**：它们反向 `import type`
+  标识类型，一直没问题
 
-**所以这里停在 973 行并保留了棘轮** —— 在需要动它时再决定，
-而不是为了行数去做一次高风险的大搬迁（这正是 §3 说"拆不拆由用户
-决定"的场景）。
+所以按**横向切割**（按概念分段各一个文件）拆成了 `src/core/types/`：
 
-改这些文件时**必然触线**，所以每次都要走上面的"问一句"流程。
+| 文件 | 行数 |
+|---|---|
+| `stats.ts`（属性与修正） | 162 |
+| `buffs.ts` | 137 |
+| `skills.ts`（技能 + 内容基类） | 133 |
+| `effects.ts` | 109 |
+| `abilities.ts` | 103 |
+| `triggers.ts` | 99 |
+| `runtime.ts` | 86 |
+| `loadout.ts` / `behavior.ts` | 59 / 50 |
+| `resources.ts` | 45 |
+| `index.ts`（转发） | 32 |
+| `ids.ts` / `encounter.ts` | 22 / 21 |
+
+⚠️ **`index.ts` 转发全部**，所以 `from '../core/types'` 这种整体导入**照旧
+可用**（模块解析会走到 `types/index.ts`）。真要按需引用时可以改成直接引
+具体文件，但那是可选的。
 
 ---
 

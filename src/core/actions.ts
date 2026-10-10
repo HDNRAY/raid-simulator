@@ -14,7 +14,7 @@
  * 它是链路的**起点**，独立成文件正好对应这个位置。
  */
 
-import type { CombatantId, SkillId } from './types';
+import type { CombatantId, SkillId } from './types/ids';
 
 export type Action =
   | { readonly type: 'useSkill'; readonly skillId: SkillId; readonly atTick: number }

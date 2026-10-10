@@ -236,19 +236,19 @@ describe('AGENTS.md 硬规则：禁止类型断言逃生舱', () => {
      * 去做一次大重构（那正是 AGENTS.md §3 说要先问用户的事）。
      * 拆小之后请把对应条目从这张表里删掉。
      */
-    const GRANDFATHERED: Record<string, number> = {
-      // ⚠️ 口径是 `content.split('\n').length`（末行没有换行符时比 `wc -l` 多 1）
-      // ✅ `src/render/BattleScene.ts` 已拆到 700 以下（1421 → 669），
-      //    条目已移除 —— 棘轮只往一个方向转。
-      /**
-       * ⚠️ `src/core/types.ts` 是**唯一**还没拆到 700 以下的大文件，
-       * 原因是它的引用图是"中心辐射"的：`GameEntity`（9 段）被 8 个段
-       * 引用，硬拆会造出类型层的 import 环。见 AGENTS.md §3 的说明。
-       *
-       * 已经拆出去的：事件（`core/events.ts`）、输入（`core/actions.ts`）。
-       */
-      'src/core/types.ts': 973,
-    };
+    /**
+     * ⚠️ 口径是 `content.split('\n').length`（末行没有换行符时比 `wc -l` 多 1）
+     *
+     * **当前为空** —— 所有文件都在 700 行以内。
+     * ✅ 已移除的条目（棘轮只往一个方向转）：
+     *   - `src/render/BattleScene.ts`（1421 → 669）
+     *   - `src/core/types.ts`（973 → 拆成 `core/types/` 目录，13 个文件
+     *     各 21–162 行）
+     *
+     * 保留这张空表是因为它**将来还会用到**：真出现拆不动的大文件时，
+     * 按 AGENTS.md §3 的流程登记天花板，而不是去删注释。
+     */
+    const GRANDFATHERED: Record<string, number> = {};
 
     const overLimit: string[] = [];
     const ratchetBreaks: string[] = [];
