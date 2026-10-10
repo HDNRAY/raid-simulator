@@ -275,7 +275,13 @@ export const LUST_HUM: SkillDef = {
   icon: 'lust_hum',
   abilities: [],
   castTime: logicMs(9),
-  cooldown: logicMs(40),
+  /**
+   * 冷却 **40 → 20 逻辑步（4s → 2s）**（需求："轻吟 1 2 秒吧"）。
+   *
+   * ⚠️ `LUST_BEHAVIORS` 里的 `gapMs` 必须跟着降（必须**短于**冷却，
+   * 否则轮转空转 → Boss 站着不动）。
+   */
+  cooldown: logicMs(20),
   cost: [],
   hits: [
     {
@@ -327,7 +333,13 @@ export const LUST_CHARM: SkillDef = {
   icon: 'lust_charm',
   abilities: [],
   castTime: logicMs(14),
-  cooldown: logicMs(140),
+  /**
+   * 冷却 **140 → 60 逻辑步（14s → 6s）**（需求："魅惑6秒"）。
+   *
+   * 眩晕 3s / CD 6s ⇒ **有一半时间在挨晕**。这是用户明确要的强度
+   * （眩晕没有递减，所以强度**完全由 CD 控制** —— 见 `LUST_STUN`）。
+   */
+  cooldown: logicMs(60),
   cost: [],
   hits: [{ at: logicMs(14), effects: [{ kind: 'stun', buff: LUST_STUN }] }],
   targeting: { mode: 'primaryEnemy' },
@@ -385,11 +397,19 @@ export const LUST_BEHAVIORS: readonly Behavior[] = [
        * 「受到 12 伤害」全是「轻吟」，**「魅惑」一次都没放出来** ——
        * 而它才是这个 Boss 的辨识点。
        *
-       * CD：魅惑 140 逻辑步 > 缠绕 90 > 轻吟 40。
+       * CD：魅惑 60 逻辑步(6s) > 缠绕 90(9s) …
+       * ⚠️ 顺序按"**优先出更稀有的招**"：魅惑(眩晕，最有辨识度)在前，
+       * 缠绕次之，轻吟(填充)最后。
+       *
+       * ⚠️ `gapMs` **必须短于各自的冷却**，否则那一步永远不满足条件、
+       * 轮转空转（记在 `VERROT_BEHAVIORS` 的坑）：
+       *   魅惑 CD 6s → gap 5s
+       *   缠绕 CD 9s → gap 8s
+       *   轻吟 CD 2s → gap 1.5s
        */
-      { skillId: 'lust-charm', gapMs: 12_000 },
+      { skillId: 'lust-charm', gapMs: 5_000 },
       { skillId: 'lust-entangle', gapMs: 8_000 },
-      { skillId: 'lust-hum', gapMs: 3_000 },
+      { skillId: 'lust-hum', gapMs: 1_500 },
     ],
   },
 ];
