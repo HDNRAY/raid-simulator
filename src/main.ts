@@ -2,6 +2,18 @@ import { BattleLoop } from './app/battleLoop';
 import { createTouchControls, derivedOfSnapshot } from './app/touchControls';
 import { buildKeyRows } from './app/keyRows';
 import { rebindWithSwap, swapSlots } from './app/bindingActions';
+/**
+ * ⚠️ **静态导入 pixi，不要写 `await import('pixi.js')`。**
+ *
+ * 这里原先是个动态导入，想"延迟加载引擎"。但它**完全无效** ——
+ * `render/icons.ts`、`ui/CastBar.ts`、`render/parts/playerActor.ts` 都
+ * **值导入**了 pixi（`Assets` / `Sprite` / `Text`），打包器必然把它放进
+ * 主 chunk。构建时 Vite 直接警告 `INEFFECTIVE_DYNAMIC_IMPORT`。
+ *
+ * 所以它唯一的效果是：多一层 `await` + 让人误以为"pixi 是按需加载的"。
+ * 真要拆分就得把所有渲染模块都改成动态导入，那是另一件事。
+ */
+import { Application, Container, Graphics, Sprite, Text } from 'pixi.js';
 import { slotsFromBindings } from './app/viewAdapter';
 import { createRegistry } from './core/content/registry';
 import { VERROT_BEHAVIORS } from './core/ai';
@@ -116,7 +128,6 @@ async function bootstrap(): Promise<void> {
   const stage = document.querySelector<HTMLElement>('#stage');
   if (!stage) throw new Error('index.html is missing the #stage container');
 
-  const { Application, Container, Graphics, Sprite, Text } = await import('pixi.js');
 
     /** 注册 SVG 图标解码器（Pixi v8 里 `Texture.from(svg)` 拿不到图形）。 */
   setIconDecoder(createAssetsDecoder());
