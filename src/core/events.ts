@@ -51,6 +51,16 @@ export type EventDef =
       readonly crit: boolean;
       readonly absorbed: number;
       readonly overkill: number;
+      /**
+       * 造成这次伤害的**招式**。
+       *
+       * ⚠️ `''` 表示**不是技能打的**（触发器的产出，例如「污堕印记」的反伤）。
+       * 用空串而不是可选字段：日志要按它取招式名，"有没有值"和"值是空"
+       * 在调用点应该只有一种处理方式。
+       */
+      readonly skillId: SkillId;
+      /** 是**反伤**（由触发器产出）。日志要据此标注"反伤"。 */
+      readonly reflect?: boolean;
     }
   | {
       readonly kind: 'heal';

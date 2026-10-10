@@ -120,7 +120,16 @@ export class BattleLoop {
      * 与否完全不影响战斗快照的构建（低耦合的具体含义：加/删日志
      * 不需要动 ViewAdapter）。
      */
-    this.logFormatter = new LogFormatter();
+    /**
+     * ⚠️ 传进技能名映射：日志要写"**被「重斩」打了 28**"而不是光一个
+     * 数字 —— 有反伤 / 多来源之后，"这一下是谁打的"必须看得出来。
+     * 给的是 **i18n key**，翻译由渲染层做（规范 I1）。
+     */
+    this.logFormatter = new LogFormatter({
+      skillNameKeys: new Map(
+        [...options.engineOptions.skills].map(([id, skill]) => [id, skill.nameKey]),
+      ),
+    });
     this.attachInput(options.input);
   }
 

@@ -107,7 +107,14 @@ export function triggerContextFor(host: TriggerHost, roll: () => number): Trigge
           aggregateFlags(target),
           { crit: false, multiplier: 1 },
         );
-        const applied = applyDamage(target, result, actorId, '', host.combat.currentTick());
+        /**
+         * ⚠️ 最后两个参数：`skillId: ''`（**不是技能打的**）+
+         * `reflect: true`（日志要标注"反伤"）。
+         *
+         * 不标的话日志里反伤和普通伤害长得一样（都是"受到 18 伤害"），
+         * 玩家会以为 Boss 有个自己不知道的 18 点技能。
+         */
+        const applied = applyDamage(target, result, actorId, '', host.combat.currentTick(), true);
         host.replaceCombatant(applied.combatant);
         host.events.push(...applied.events);
       }

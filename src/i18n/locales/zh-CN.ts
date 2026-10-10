@@ -305,8 +305,8 @@ export const zhCN = {
   lust: {
     name: '色欲',
     mark: {
-      name: '欲望印记',
-      short: '印记',
+      name: '污堕印记',
+      short: '污堕',
     },
     stun: {
       name: '眩晕',
@@ -484,8 +484,21 @@ export const zhCN = {
    */
   log: {
     title: '战斗日志',
-    damage: '造成 {amount} 伤害',
-    takeDamage: '受到 {amount} 伤害',
+    /**
+     * ⚠️ 都带 `{skill}`（招式名），并有一个"反伤"分支。
+     *
+     * 需求："反伤的log里，要注明是反伤，所有的 受到**伤害，都注明一下
+     * 招式，造成 也是。"
+     *
+     * 不注明招式时，玩家分不清这一下是谁打的 —— 有了反伤与多来源之后
+     * 尤其明显（会以为 Boss 有个自己不知道的技能）。
+     */
+    damage: '{skill} · 造成 {amount}',
+    takeDamage: '{skill} · 受到 {amount}',
+    /** 反伤（触发器产出，不是技能打的）。 */
+    reflect: '反伤',
+    /** 找不出招式名时的兜底（不能让 `{skill}` 漏到界面上）。 */
+    unknownSource: '未知来源',
     avoided: '闪躲',
     missed: '未命中',
     castInterrupted: '读条被打断（{reason}）',

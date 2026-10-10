@@ -54,6 +54,7 @@ function damage(over: Partial<DamageEvent> = {}): DamageEvent {
     crit: false,
     absorbed: 0,
     overkill: 0,
+    skillId: 'blast',
     ...over,
   };
 }
@@ -65,7 +66,12 @@ describe('LogFormatter：事件 → 条目', () => {
     const [entry] = f.all();
     expect(entry).toBeDefined();
     expect(entry!.key).toBe('log.damage');
-    expect(entry!.params).toEqual({ amount: 12 });
+    /**
+     * ⚠️ `skill` 也是**一个 i18n key**（不是文案）—— 需求要求日志注明招式
+     * （"所有的 受到**伤害，都注明一下招式，造成 也是"）。
+     * `LogPanel.resolveParams` 会把它翻掉，所以这里仍然只有 key。
+     */
+    expect(entry!.params).toEqual({ amount: 12, skill: 'log.unknownSource' });
     // 整条里不能出现任何中文 —— 文案在 i18n 里，不在数据里
     expect(JSON.stringify(entry)).not.toMatch(/[\u4e00-\u9fff]/);
   });

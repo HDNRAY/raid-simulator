@@ -469,6 +469,8 @@ export function applyDamage(
   sourceId: string,
   skillId: string,
   tick: number,
+  /** 是否由触发器产出的**反伤**（日志要标注）。 */
+  reflect = false,
 ): { readonly combatant: Combatant; readonly events: readonly EventDef[] } {
   if (result.avoided) {
     return {
@@ -501,6 +503,8 @@ export function applyDamage(
       crit: result.crit,
       absorbed: result.absorbed,
       overkill,
+      skillId,
+      ...(reflect ? { reflect: true } : {}),
     },
   ];
 

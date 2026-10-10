@@ -124,6 +124,28 @@ export class LogPanel {
    * `VISIBLE_LINES` 条**，并让**越旧越暗** —— 不用动画，靠透明度
    * 表达"这条正在变旧"，既便宜又不会让画面动个不停。
    */
+  /**
+   * 把参数里**值为 i18n key** 的那些先翻译掉。
+   *
+   * ⚠️ 为什么需要：日志的 `params` 允许"值是另一个 key"（例如
+   * `skill: 'boss.cleave.name'`，见 `logFormat` 的 `damageSource`），
+   * 而 `translate` **不会递归**它自己的 params —— 不处理的话屏幕上会
+   * 直接出现 `boss.cleave.name` 这串 key（同 `hud.stunned` 那个坑）。
+   *
+   * ⚠️ 只翻**字符串**：数字（`amount`）必须原样留着当插值。
+   */
+  private resolveParams(
+    params: Readonly<Record<string, string | number>> | undefined,
+  ): Readonly<Record<string, string | number>> | undefined {
+    if (params === undefined) return undefined;
+    return Object.fromEntries(
+      Object.entries(params).map(([k, v]) => [
+        k,
+        typeof v === 'string' ? this.options.translate(v) : v,
+      ]),
+    );
+  }
+
   update(entries: readonly LogEntry[]): void {
     const visible = entries.slice(-VISIBLE_LINES);
     // 内容没变就整段跳过（每帧调用的东西，能省则省）
@@ -140,7 +162,7 @@ export class LogPanel {
         label.set('');
         continue;
       }
-      label.set(this.options.translate(entry.key, entry.params));
+      label.set(this.options.translate(entry.key, this.resolveParams(entry.params)));
       label.setColor(CATEGORY_COLORS[entry.category]);
       // 越旧越暗：最旧的一行约 0.45
       label.root.alpha = 1 - (i / Math.max(1, visible.length - 1)) * 0.55;

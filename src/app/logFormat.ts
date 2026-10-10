@@ -72,6 +72,14 @@ export interface LogFormatterOptions {
    * 在那里截断最省事，也避免渲染层拿到一个无限长的数组。
    */
   readonly limit?: number;
+  /**
+   * 技能 id → 名称的 i18n key。
+   *
+   * ⚠️ 日志要写"**被「重斩」打了 28**"，而不是光一个数字 —— 否则玩家
+   * 分不清这一下是谁打的（尤其有反伤 / 多来源之后）。
+   * 这里给的是 **key**（不是文案），翻译由渲染层做（i18n 规范 I1）。
+   */
+  readonly skillNameKeys?: ReadonlyMap<string, string>;
 }
 
 const DEFAULT_LIMIT = 60;
@@ -91,9 +99,31 @@ export class LogFormatter {
   private entries: LogEntry[] = [];
   private nextId = 1;
   private readonly limit: number;
+  private readonly skillNameKeys: ReadonlyMap<string, string>;
 
   constructor(options: LogFormatterOptions = {}) {
     this.limit = Math.max(1, options.limit ?? DEFAULT_LIMIT);
+    this.skillNameKeys = options.skillNameKeys ?? new Map();
+  }
+
+  /**
+   * 这次伤害是哪来的（日志的 `skill` 参数）。
+   *
+   * - 触发器产出的反伤 → `log.reflect`（**标注"反伤"而不是招式名**，
+   *   否则玩家会以为 Boss 有个自己不知道的技能）
+   * - 技能打的 → 招式的 i18n key
+   * - 两者都不是（理论上不会有）→ 不传参数，文案回落
+   */
+  private damageSource(event: { readonly skillId: string; readonly reflect?: boolean }): {
+    readonly skill?: string;
+  } {
+    if (event.reflect === true) return { skill: 'log.reflect' };
+    /**
+     * ⚠️ 回落不能是 `{}`：文案里有 `{skill}`，缺参数会**原样显示
+     * `{skill}`**（`i18n.test.ts` 的"占位符参数齐全"就是守这个的）。
+     * 未知来源统一叫「未知」，至少读得通。
+     */
+    return { skill: this.skillNameKeys.get(event.skillId) ?? 'log.unknownSource' };
   }
 
   /** 消费一批引擎事件，追加日志。 */
@@ -141,7 +171,7 @@ export class LogFormatter {
           tick,
           category: onBoss ? 'deal' : 'take',
           key: onBoss ? 'log.damage' : 'log.takeDamage',
-          params: { amount: event.amount },
+          params: { amount: event.amount, ...this.damageSource(event) },
         };
       }
       case 'avoided': {
