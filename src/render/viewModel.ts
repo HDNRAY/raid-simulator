@@ -47,6 +47,8 @@ export interface BuffView {
   readonly isDefensive: boolean;
 }
 
+import { IDLE_FEEDBACK, type FeedbackState } from './feedback';
+
 export interface CombatantView {
   readonly id: string;
   readonly nameKey: string;
@@ -56,6 +58,14 @@ export interface CombatantView {
   readonly energy: ResourceView;
   readonly douqi: ResourceView;
   readonly buffs: readonly BuffView[];
+  /**
+   * **本帧的受击反馈**（受击 / 眩晕 / 被击共用同一套通道）。
+   *
+   * ⚠️ 由 `viewAdapter` 从引擎事件算出并衰减 —— 渲染层**只读它**，
+   * 不自己判断"发生了什么"。这样加一种状态只需要改适配器 + 一个纯函数。
+   * 见 `render/feedback.ts` 的设计说明。
+   */
+  readonly feedback: FeedbackState;
   /** 正在读条：技能 id 与进度 0..1。没有则为 undefined */
   readonly cast?: {
     readonly skillId: string;
@@ -223,6 +233,7 @@ export type RenderAction =
 
 /** 空快照，用于首帧之前。 */
 export const EMPTY_COMBATANT: CombatantView = {
+  feedback: IDLE_FEEDBACK,
   id: '',
   nameKey: 'hud.level',
   side: 'ally',

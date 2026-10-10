@@ -167,7 +167,21 @@ export class PlayerActorPart implements FramePart {
       this.drawPlayer(pose);
     }
 
-    const tint = dodging ? 0x9ad8ff : guarding ? 0xc8d0e8 : 0xffffff;
+    const fb = ctx.view.player.feedback;
+    /**
+     * **受击反馈**（统一四通道里的色 + 形 + 位）。
+     *
+     * ⚠️ 优先级：受击 > 防御 > 闪避。受击是**瞬间**事件，必须压过
+     * 持续状态，否则"防御中被打"会看不出被打。
+     */
+    const hit = fb.recoilX !== 0 || fb.squashY !== 1;
+    const tint = hit
+      ? 0xffd0d0
+      : dodging
+        ? 0x9ad8ff
+        : guarding
+          ? 0xc8d0e8
+          : 0xffffff;
     this.playerAnim.tint = tint;
     /**
      * 贴图走**同一套反馈**：
@@ -177,18 +191,25 @@ export class PlayerActorPart implements FramePart {
      */
     if (this.sprite !== undefined) {
       this.sprite.tint = tint;
-      this.sprite.scale.set(SPRITE_SCALE, SPRITE_SCALE * pose);
+      // 受击的挤压**叠在**防御的下沉上（两者可以同时发生）
+      this.sprite.scale.set(SPRITE_SCALE, SPRITE_SCALE * pose * fb.squashY);
     }
 
     const dodge = buffs.find((b) => b.id.startsWith('dodge') && b.remainingMs > 0);
-    if (!dodge) {
-      this.playerRoot.x = 0;
-      return;
+    /**
+     * 位移 = 闪避位移 + **受击反冲**。
+     *
+     * ⚠️ 两者可以同时发生（闪避中被打），所以是**相加**而不是二选一 ——
+     * 这也是"四通道"设计的好处：通道之间不抢彼此。
+     * 反冲方向取负（被打是**向后**退，而闪避是向右冲）。
+     */
+    let base = 0;
+    if (dodge !== undefined) {
+      const total = Math.max(1, dodge.durationMs);
+      const progress = 1 - Math.min(1, dodge.remainingMs / total);
+      // 三角波：0 → 1 → 0
+      base = DODGE_PEAK_X * (1 - Math.abs(progress * 2 - 1));
     }
-    const total = Math.max(1, dodge.durationMs);
-    const progress = 1 - Math.min(1, dodge.remainingMs / total);
-    // 三角波：0 → 1 → 0
-    const wave = 1 - Math.abs(progress * 2 - 1);
-    this.playerRoot.x = Math.round(DODGE_PEAK_X * wave);
+    this.playerRoot.x = Math.round(base - fb.recoilX);
   }
 }

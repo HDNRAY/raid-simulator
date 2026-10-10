@@ -18,6 +18,7 @@
 import type { Container, Graphics } from 'pixi.js';
 import { PALETTE } from '../theme';
 import type { PixiCtor } from '../../ui/primitives';
+import { IDLE_FEEDBACK, type FeedbackState } from '../feedback';
 
 /** Boss 精灵的绘制原点：脚底中心。 */
 export interface BossViewOptions {
@@ -35,6 +36,9 @@ export interface BossViewOptions {
  */
 export class BossSprite {
   readonly root: Container;
+  /** 基准位置/缩放 —— 受击反馈是**叠加**在它们之上的偏移，所以要先记住。 */
+  private readonly baseX: number;
+  private readonly baseScale: number;
   private readonly body: Graphics;
   private readonly telegraphOverlay: Graphics;
   /** 霸体光晕：多层放大的单色形体叠加，营造柔和的彩色外发光。 */
@@ -47,13 +51,15 @@ export class BossSprite {
 
   constructor(pixi: PixiCtor, options: BossViewOptions) {
     this.root = new pixi.Container();
+    this.baseX = options.x;
+    this.baseScale = options.scale ?? 0.72;
     this.root.x = options.x;
     this.root.y = options.y;
     /**
      * 整体缩放。绘制定在"原始尺寸"上（便于按像素调形），
      * 由这里统一缩到场景里合适的比例 —— 改比例不用重画。
      */
-    this.root.scale.set(options.scale ?? 0.72);
+    this.root.scale.set(this.baseScale);
 
     this.body = new pixi.Graphics();
     this.telegraphOverlay = new pixi.Graphics();
@@ -198,7 +204,19 @@ export class BossSprite {
    * @param flash 受击闪白强度 0..1（0 = 不闪）
    * @param armored 是否处于霸体（彩色流动描边）
    */
-  update(telegraphing: boolean, flash = 0, armored = false): void {
+  update(
+    telegraphing: boolean,
+    flash = 0,
+    armored = false,
+    /**
+     * 受击反馈（与玩家**共用同一套通道**，见 `render/feedback.ts`）。
+     *
+     * ⚠️ 与 `flash` 分工：`flash` 是**提亮**（原有），`feedback` 提供
+     * **位移 + 挤压**。两者都保留是因为提亮已经在用了，而"被打退一步"
+     * 与"被打扁一下"是新的、更重的信息。
+     */
+    feedback: FeedbackState = IDLE_FEEDBACK,
+  ): void {
     // 前摇：白描边 + 红边光（不是整体染红 —— 那样会把形体糊成一坨）
     if (telegraphing !== this.lastTelegraph) {
       this.lastTelegraph = telegraphing;
@@ -240,6 +258,16 @@ export class BossSprite {
       this.lastFlash = flash;
       this.body.tint = flash > 0 ? mixWhite(flash) : 0xffffff;
     }
+
+    /**
+     * **受击位移 + 挤压**（统一反馈的"位/形"通道）。
+     *
+     * ⚠️ 位移取**负**：Boss 在右、玩家在左，所以受击是**向右**退。
+     * 与玩家的反冲方向相反 —— 这才是"沿受力方向退"，不是"都往一边"。
+     */
+    const baseX = this.baseX;
+    this.root.x = Math.round(baseX + feedback.recoilX);
+    this.root.scale.set(this.baseScale, this.baseScale * feedback.squashY);
   }
 
   /**

@@ -66,6 +66,17 @@ export class BattleLoop {
   private readonly logFormatter: LogFormatter;
   private input: InputSource | undefined;
   private accumulator = 0;
+  /**
+   * **顿帧**剩余毫秒（打击感）。
+   *
+   * 受击那一瞬间冻结引擎推进，但**继续渲染** —— 于是画面"卡"在
+   * 被打中的姿态上，而反冲/挤压这些形变仍在推进。
+   *
+   * ⚠️ 与 `paused` 一样必须重置 `lastRealNow` 基准：否则顿帧结束时
+   * `elapsed` 会含顿帧时长，引擎会**补跑**那几个 tick —— 那就不是
+   * "冻结一下"，而是"冻结完快速追帧"，观感完全相反。
+   */
+  private hitStopMs = 0;
   private lastRealNow: number | undefined;
   private options: BattleLoopOptions;
   private ownedInput = false;
@@ -167,6 +178,17 @@ export class BattleLoop {
       return;
     }
 
+    /**
+     * 顿帧：冻结引擎推进，但**不丢弃本帧的渲染**（下面的 `build` 照跑）
+     * —— 反冲与挤压要继续动，否则"顿帧"看起来就是掉帧。
+     */
+    if (this.hitStopMs > 0) {
+      this.hitStopMs = Math.max(0, this.hitStopMs - elapsed);
+      this.accumulator = 0;
+      this.view = this.adapter.build(this.engine, this.options.slots, this.timeLimitMsOption);
+      return;
+    }
+
     this.accumulator += elapsed;
     const maxMs = MAX_CATCHUP_TICKS * MS_PER_TICK;
     if (this.accumulator > maxMs) this.accumulator = maxMs;
@@ -244,8 +266,15 @@ export class BattleLoop {
     const events = this.engine.drainEvents();
     const snapshot = this.engine.snapshot;
     const playerId = snapshot.combatants.find((c) => c.side === 'ally')?.id ?? 'player';
-    this.adapter.consume(events, snapshot.tick, playerId);
+    this.adapter.consume(events, snapshot.tick, playerId, (id) => {
+      return snapshot.combatants.find((c) => c.id === id)?.caps.hp ?? 0;
+    });
     this.logFormatter.consume(events);
+    /**
+     * 取本次事件带来的顿帧（取**最大**而不是累加：同一 tick 里被打两下
+     * 不该冻两倍时长，那会明显卡住）。
+     */
+    this.hitStopMs = Math.max(this.hitStopMs, this.adapter.pendingHitStopMs());
   }
 
   /** 当前战斗日志（只读，供渲染层画右侧面板）。 */

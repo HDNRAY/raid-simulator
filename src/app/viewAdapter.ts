@@ -1,20 +1,20 @@
 /**
  * 引擎状态 → 渲染 view-model 的适配器。
  *
- * 这是**唯一**允许同时知道引擎与渲染两侧的文件（它住在 `app/`，
- * 不属于任何一侧）。两边的耦合被限制在这一个文件里，
- * 所以换渲染库或换引擎时改动范围可控。
+ * 这是**唯一**允许同时知道引擎与渲染两侧的文件（它住在 `app/`，不属于
+ * 任何一侧），所以两边的耦合被限制在这里 —— 换渲染库或换引擎时改动
+ * 范围可控。
  *
- * 它还负责把引擎的**事件流**变成渲染需要的东西：
- *   - 飘字（伤害数字）
- *   - 屏幕闪白
- *   - 状态提示（"闪避！"/"被打断"）
+ * 它把引擎的**事件流**变成渲染需要的东西：飘字、屏幕闪白、状态提示、
+ * 受击反馈（后者交给 `./hitFeedback`）。
  */
 
 import type { BattleEngine } from '../core/combat/battleState';
 import type { SkillDef, EventDef } from '../core/types';
 import { PALETTE } from '../render/theme';
 import { deriveSlots, type SlotBinding } from './derivedSlots';
+import { IDLE_FEEDBACK, type FeedbackState } from '../render/feedback';
+import { HitFeedbackTracker } from './hitFeedback';
 /**
  * 槽位相关的两个导出**搬到了 `./derivedSlots`**（那里才是内聚的位置：
  * 派生技的槽位推导与基础槽位推导是一件事）。这里**转发**，外部
@@ -58,6 +58,16 @@ export class ViewAdapter {
   private nextFloatingId = 1;
   private playerFlash = 0;
   private bossFlash = 0;
+  /**
+   * **受击反馈**（跨帧老化 + 曲线）。
+   *
+   * ⚠️ 这里只记"发生了什么"，"现在该显示什么"由 `feedback.ts` 的纯函数
+   * 算 —— 所以曲线可以单测，事件分支里也不用手写衰减。
+   */
+  private readonly hitFeedback = new HitFeedbackTracker();
+  /** 最近一次 `consume` 见过的两个角色 id（`pendingHitStopMs` 要用）。 */
+  private lastPlayerId = '';
+  private lastBossId = '';
   private statusLine = '';
   private statusLineTtl = 0;
 
@@ -70,16 +80,7 @@ export class ViewAdapter {
   private damageDealt = 0;
   /** 累计承受的总伤害 */
   private damageTaken = 0;
-  /**
-   * 最近一次被拒的「技能 + 原因」与它的 tick。
-   *
-   * 用途：**不让同一件事重复刷屏**。
-   *
-   * 输入层已经用"与引擎共用的 GCD 判据"把绝大部分误报消掉了，
-   * 但预测毕竟是在动作生效**之前**做的 —— 状态在那一瞬间变化时
-   * 仍可能漏一次。这层去重保证即使漏了，玩家也不会看到
-   * 同一行提示连续闪动。
-   */
+  /** 最近一次被拒的「技能 + 原因」与它的 tick（用于 1 秒内去重）。 */
   private lastReject: { readonly key: string; readonly tick: number } | undefined;
 
   /**
@@ -101,7 +102,33 @@ export class ViewAdapter {
    * ⚠️ `playerId` 不是装饰：`skillRejected` 不区分是谁在施放，Boss 的
    * 冷却拒绝会写进玩家状态区（显示"我的技能在冷却中"，可他刚放出来）。
    */
-  consume(events: readonly EventDef[], tick: number, playerId: string): void {
+  /**
+   * 本帧事件要求的**顿帧时长**（ms）—— 主循环读它来冻结推进。
+   *
+   * ⚠️ 由适配器"算好、报出来"，而不是主循环自己判断事件：判断依据与
+   * 反冲/挤压同源（都是 `feedback.ts` 的曲线），分两处必然漂移。
+   */
+  pendingHitStopMs(): number {
+    return Math.max(
+      this.hitFeedback.of(this.lastPlayerId).hitStopMs,
+      this.hitFeedback.of(this.lastBossId).hitStopMs,
+    );
+  }
+
+  consume(
+    events: readonly EventDef[],
+    tick: number,
+    playerId: string,
+    /**
+     * 取某个角色的**最大生命**（强度分频用）。
+     *
+     * ⚠️ 由调用方注入而不是适配器自己存快照：适配器已经只依赖
+     * "事件 + tick"，自己缓存一份快照会变成**第二个真相**
+     * （引擎状态与缓存不一致时，反馈强度会算错且很难查）。
+     */
+    capsOf: (id: string) => number = () => 0,
+  ): void {
+    this.lastPlayerId = playerId;
     for (const event of events) {
       switch (event.kind) {
         case 'damage': {
@@ -117,6 +144,10 @@ export class ViewAdapter {
             baseX,
             baseY,
           );
+          /**
+           * 强度用**比例**（伤害 ÷ 最大生命），于是暴击/重击自然更重，
+           * 不需要为它们单独写反馈。见 `feedback.ts` 的说明。
+           */
           if (onBoss) {
             this.bossFlash = 1;
             this.damageDealt += event.amount;
@@ -124,6 +155,18 @@ export class ViewAdapter {
             this.playerFlash = 1;
             this.damageTaken += event.amount;
           }
+          /**
+           * 受击反馈按**比例**给强度（暴击/重击自然更重），
+           * 见 `feedback.ts`。两个角色走同一条路 —— 这就是"统一设计"。
+           */
+          this.hitFeedback.note(
+            event.targetId,
+            event.amount,
+            capsOf(event.targetId),
+            event.crit,
+          );
+          // 记下 Boss 的 id（顿帧查询要用；不能假设它叫某个固定名字）
+          if (onBoss) this.lastBossId = event.targetId;
           break;
         }
         case 'heal': {
@@ -133,16 +176,7 @@ export class ViewAdapter {
         }
         case 'avoided': {
           this.setStatus(event.reason === 'immune' ? 'hud.immune' : 'hud.dodged', 90);
-          /**
-           * 完全免伤时飘的是"闪躲"而不是数字 `0`。
-           *
-           * 需求："闪避现在飘的战斗文字是'免疫'？改成闪躲"。
-           * 确实原来是 `immune`（免疫）—— 那是"伤害被豁免"的机制词，
-           * 而玩家做的是"闪躲"这个动作，用动作词更自然。
-           *
-           * ⚠️ 这里**只改满免伤（immune）**；被其他原因避免的
-           * （如目标已死）仍然走 `0`，因为它不是玩家闪出来的。
-           */
+          // 满免伤飘「闪躲」（动作词），不是机制词「免疫」
           const label =
             event.reason === 'immune' ? this.text('hud.dodged') : '0';
           this.pushFloating(label, PALETTE.iframe.bright, 300, LAYOUT.combatTextY.player);
@@ -208,17 +242,7 @@ export class ViewAdapter {
         }
         case 'skillUsed': {
           this.lastUsed.set(event.skillId, event.tick);
-          /**
-           * **玩家成功放出技能 → 立刻清掉"被拒"提示。**
-           *
-           * 那条提示回答的是"我刚才那一下为什么没生效"。既然这一下
-           * 生效了，答案就过期了 —— 让它继续挂着只会变成噪音，
-           * 尤其是玩家已经改了操作（例如从按「破」改成按「攻」）之后，
-           * 屏幕上还留着上一件事的提示。
-           *
-           * ⚠️ 同时清 `lastReject`：否则下次再被同一个原因拒绝时会被
-           * 当成"同一件事"而**不再提示**，玩家就永远看不到反馈了。
-           */
+          // 成功放出技能 → 立刻清掉被拒提示（否则会残留到超时）
           if (event.sourceId === playerId) {
             this.lastReject = undefined;
             this.statusLine = '';
@@ -235,6 +259,7 @@ export class ViewAdapter {
     // 衰减
     this.playerFlash = Math.max(0, this.playerFlash - 0.08);
     this.bossFlash = Math.max(0, this.bossFlash - 0.12);
+    this.hitFeedback.advance();
     if (this.statusLineTtl > 0) {
       this.statusLineTtl -= 1;
       if (this.statusLineTtl === 0) {
@@ -252,16 +277,9 @@ export class ViewAdapter {
   }
 
   /**
-   * 加一条飘字。
-   *
-   * 位置带**确定性随机**（需求："战斗文字 位置随机一点"）。
-   *
-   * 为什么不用 `Math.random`：core 与视图都要能在 Node 里复现 ——
-   * 引擎的纪律是"所有随机走 `rngSeed`"，视图沿用同一套思路，
-   * 用一个自增的 id 做散列即可（视觉上足够随机，且完全可复现）。
-   *
-   * 原来的做法是 `(floating.length % 5) * 18`：那会让**相邻几条**
-   * 严格排在 5 个固定位置上，连打时看起来像一列整齐的队列。
+   * 加一条飘字，位置带**确定性随机**（需求："战斗文字 位置随机一点"）。
+   * 不用 `Math.random` 是为了可在 Node 里复现 —— 用自增 id 做散列即可。
+   * 原先的 `(length % 5) * 18` 会让相邻几条排成整齐一列。
    */
   private pushFloating(text: string, color: number, x: number, y: number): void {
     const seed = this.nextFloatingId * 2654435761;
@@ -309,8 +327,18 @@ export class ViewAdapter {
     if (!playerRaw || !bossRaw) return emptyView(state.tick);
 
     const playerStats = engine.statsOf(playerRaw.id);
-    const player = toCombatantView(engine, playerRaw.id, state.tick);
-    const boss = toCombatantView(engine, bossRaw.id, state.tick);
+    const player = toCombatantView(
+      engine,
+      playerRaw.id,
+      state.tick,
+      this.hitFeedback.of(playerRaw.id),
+    );
+    const boss = toCombatantView(
+      engine,
+      bossRaw.id,
+      state.tick,
+      this.hitFeedback.of(bossRaw.id),
+    );
 
     const remainingMs =
       options.timeLimitMs === undefined
@@ -520,7 +548,13 @@ export class ViewAdapter {
 }
 
 /** 从引擎状态构建一个单位的渲染视图。 */
-function toCombatantView(engine: BattleEngine, id: string, tick: number): CombatantView {
+function toCombatantView(
+  engine: BattleEngine,
+  id: string,
+  tick: number,
+  /** 本帧的受击反馈（由调用方按"事件 + 老化帧数"算好）。 */
+  feedback: FeedbackState,
+): CombatantView {
   const raw = engine.snapshot.combatants.find((c) => c.id === id);
   if (!raw) return emptyCombatant(id);
   const stats = engine.statsOf(id);
@@ -599,12 +633,14 @@ function toCombatantView(engine: BattleEngine, id: string, tick: number): Combat
     energy: { current: raw.resources.energy, cap: raw.caps.energy },
     douqi: { current: raw.resources.douqi, cap: raw.caps.douqi },
     buffs,
+    feedback,
     ...(castView ? { cast: castView } : {}),
   } satisfies CombatantView & { _stats?: typeof stats };
 }
 
 function emptyCombatant(id: string): CombatantView {
   return {
+    feedback: IDLE_FEEDBACK,
     id,
     nameKey: 'hud.level',
     side: 'ally',

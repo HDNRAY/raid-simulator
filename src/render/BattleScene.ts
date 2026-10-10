@@ -324,16 +324,7 @@ export class BattleScene {
     });
 
     // 每条左侧一个单字标签（生/精/炁），右侧数值
-    /**
-     * 三根条上的文字**垂直居中**。
-     *
-     * 踩过的坑：早期写的是 `barY(n) + 1` —— 那等于"贴着条的顶边往下 1px"，
-     * 看起来字明显偏上。而中文单字的可见字框比 Pixi 报的 `height`
-     * 还高一点，靠 `+1`、`+2` 这种偏移猜是猜不准的。
-     *
-     * 现在用 `anchorY: 0.5` + 条的中线：无论字号怎么调，
-     * 文字都会落在条的中间，不必再改偏移值。
-     */
+         /** 三根条上的文字垂直居中（原先贴着条顶边，偏上）。 */
     const textMidY = (row: number): number => barY(row) + barH / 2;
     const lbl = (row: number, color: number): Label =>
       new Label(pixi, { x: barX + 4, y: textMidY(row), size: FONT.small, color, kai: true, anchorY: 0.5 });
@@ -512,7 +503,12 @@ export class BattleScene {
     this.registry.add({
       name: 'bossActor',
       render: (ctx) =>
-        this.boss.update(ctx.view.telegraphing, ctx.view.bossFlash, ctx.view.armored),
+        this.boss.update(
+          ctx.view.telegraphing,
+          ctx.view.bossFlash,
+          ctx.view.armored,
+          ctx.view.boss.feedback,
+        ),
     });
     this.registry.add({
       name: 'result',
@@ -670,19 +666,7 @@ export class BattleScene {
    * 数据流（各自消费同一批引擎事件），所以不该硬塞进 `view` 里。
    * 这样"要不要显示日志"就只是调用方传不传数组的问题。
    */
-  /**
-   * 每帧广播。
-   *
-   * ⚠️ **这里不再逐个 update 部件**（需求："tick 对 ui 的更新，应该是
-   * 注册机制，ui 的各个部分注册在 tick 上，tick 直接通知大家就好了"）。
-   *
-   * 原先这个方法是一个 **202 行的顺序调用清单**：场景知道每个部件
-   * 需要 `view` 里的哪个字段（`bossHpBar.update(ratioOf(view.boss.hp))`），
-   * 每加一个部件都要回来改这里。
-   *
-   * 现在只有一件事：**组装这一帧的上下文，然后广播**。
-   * 部件自己去 `ctx` 里取它要的字段 —— 场景不再知道任何部件的内部。
-   */
+    /** 每帧广播（部件自己从 ctx 取字段，场景不逐个 update）。 */
   update(view: BattleSnapshotView, logEntries: readonly LogEntry[] = []): void {
     this.registry.notify({
       view,

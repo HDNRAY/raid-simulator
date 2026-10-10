@@ -364,10 +364,15 @@ describe('闪避位移（与防御区分）', () => {
      * 用三角波（0 → 峰值 → 0）而不是缓动状态机：无敌窗口本身就是
      * 这条动画的时间轴，跟着它走不会出现"动画还在播但无敌已结束"。
      */
-    expect(src).toMatch(/const wave = 1 - Math\.abs\(progress \* 2 - 1\)/);
-    expect(src).toMatch(/this\.playerRoot\.x = Math\.round\(DODGE_PEAK_X \* wave\)/);
-    // 没有闪避时必须复位（否则会停在偏移位置）
-    expect(src).toMatch(/this\.playerRoot\.x = 0;/);
+    expect(src).toMatch(/base = DODGE_PEAK_X \* \(1 - Math\.abs\(progress \* 2 - 1\)\)/);
+    /**
+     * ⚠️ 位移现在还要**叠加受击反冲**（`- fb.recoilX`）—— 这是
+     * "四通道"设计的一部分：闪避位移与受击反冲可以同时发生，所以相加
+     * 而不是二选一。断言为此更新，但"必须有闪避位移"这条没放松。
+     */
+    expect(src).toMatch(/this\.playerRoot\.x = Math\.round\(base - fb\.recoilX\)/);
+    // 没有闪避时 base 保持 0（否则会停在偏移位置）
+    expect(src).toMatch(/let base = 0;/);
   });
 
   it('防御**不**位移 —— 两者要在余光里也能区分', async () => {
