@@ -13,12 +13,9 @@ import { registry } from './fixtures';
 /**
  * 真实内容的集成测试。
  *
- * 与 `replay.test.ts` 的分工：
- *   - replay.test.ts     —— **一整场**固定战斗的黄金常量（防静默变化）
- *   - encounter.test.ts  —— 逐个机制"真的接线了"（Boss 会施法、会读条、
- *                           会造成伤害、玩家能打死它、超时判负、阶段触发）
- *
- * 后者不追求跑完整场，而是让失败**指向具体机制**：
+ * 与 `replay.test.ts` 的分工：前者是**一整场**的黄金常量（防静默变化），
+ * 本文件逐个机制验证"真的接线了"（Boss 会施法/读条/造成伤害、玩家能打死它、
+ * 超时判负、阶段触发）。它不跑完整场，而是让失败**指向具体机制** ——
  * "Boss 不施法"和"这一场输了"是两类完全不同的诊断。
  */
 
@@ -291,18 +288,22 @@ describe('真实内容：玩家招式都接线了', () => {
 
   it('破：打断 Boss 的任何读条（不看可打断性）', () => {
     const engine = makeEngine();
+    const boss = () => engine.snapshot.combatants.find((c) => c.side === 'enemy')!;
     // 先让 Boss 开始读条
     let guard = 0;
-    while (engine.snapshot.combatants.find((c) => c.side === 'enemy')!.casts.length === 0) {
+    while (boss().casts.length === 0) {
       engine.tick();
       engine.drainEvents();
       guard += 1;
       if (guard > 60 * 20) throw new Error('boss never started casting');
     }
+    // ⚠️ 断言"那一次读条被取消"，不是"Boss 此后不再出招"（AI 同一 tick 可再决策）
+    const interrupted = boss().casts[0]!.skillId;
     engine.tick([{ type: 'useSkill', skillId: 'break', atTick: engine.snapshot.tick }]);
     const events = engine.drainEvents();
     expect(events.some((e) => e.kind === 'interruptSuccess')).toBe(true);
-    expect(engine.snapshot.combatants.find((c) => c.side === 'enemy')!.casts).toHaveLength(0);
+    expect(events.some((e) => e.kind === 'castInterrupted' && e.skillId === interrupted)).toBe(true);
+    expect(boss().casts.map((c) => c.skillId)).not.toContain(interrupted);
   });
 
   it('防：按住期间减伤，松开即取消', () => {

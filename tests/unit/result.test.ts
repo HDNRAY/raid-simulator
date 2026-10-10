@@ -33,7 +33,7 @@ describe('战斗结算', () => {
     for (let i = 0; i < 60 * 200; i += 1) {
       if (engine2.snapshot.status !== 'running') break;
       engine2.tick(plan(engine2.snapshot.tick, engine2.snapshot));
-      a.consume(engine2.drainEvents(), engine2.snapshot.tick);
+      a.consume(engine2.drainEvents(), engine2.snapshot.tick, 'player');
     }
     const view = a.build(engine2, DEFAULT_SLOTS, { timeLimitMs: 180_000 });
     const result = view.result;
@@ -52,7 +52,7 @@ describe('战斗结算', () => {
     for (let i = 0; i < 60 * 200; i += 1) {
       if (engine.snapshot.status !== 'running') break;
       engine.tick(plan(engine.snapshot.tick, engine.snapshot));
-      a.consume(engine.drainEvents(), engine.snapshot.tick);
+      a.consume(engine.drainEvents(), engine.snapshot.tick, 'player');
     }
     const view = a.build(engine, DEFAULT_SLOTS, { timeLimitMs: 180_000 });
     const result = view.result!;
@@ -69,7 +69,7 @@ describe('战斗结算', () => {
     for (let i = 0; i < 60 * 200; i += 1) {
       if (engine.snapshot.status !== 'running') break;
       engine.tick(plan(engine.snapshot.tick, engine.snapshot));
-      a.consume(engine.drainEvents(), engine.snapshot.tick);
+      a.consume(engine.drainEvents(), engine.snapshot.tick, 'player');
     }
     const result = a.build(engine, DEFAULT_SLOTS, { timeLimitMs: 180_000 }).result!;
     const expected = Math.round(result.totalDamage / Number(result.seconds));
@@ -83,7 +83,7 @@ describe('战斗结算', () => {
     for (let i = 0; i < 200; i += 1) {
       if (engine.snapshot.status !== 'running') break;
       engine.tick();
-      a.consume(engine.drainEvents(), engine.snapshot.tick);
+      a.consume(engine.drainEvents(), engine.snapshot.tick, 'player');
     }
     const view = a.build(engine, DEFAULT_SLOTS, { timeLimitMs: 60 });
     expect(view.status).toBe('defeat');
@@ -101,7 +101,7 @@ describe('战斗结算', () => {
     for (let i = 0; i < 60 * 40; i += 1) {
       if (engine.snapshot.status !== 'running') break;
       engine.tick();
-      a.consume(engine.drainEvents(), engine.snapshot.tick);
+      a.consume(engine.drainEvents(), engine.snapshot.tick, 'player');
     }
     const view = a.build(engine, DEFAULT_SLOTS, { timeLimitMs: 180_000 });
     expect(view.status).toBe('defeat');

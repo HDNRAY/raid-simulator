@@ -187,7 +187,9 @@ export class BattleLoop {
      * `drainEvents` 是**排空**语义，所以只能调一次，必须在这里分发。
      */
     const events = this.engine.drainEvents();
-    this.adapter.consume(events, this.engine.snapshot.tick);
+    const snapshot = this.engine.snapshot;
+    const playerId = snapshot.combatants.find((c) => c.side === 'ally')?.id ?? 'player';
+    this.adapter.consume(events, snapshot.tick, playerId);
     this.logFormatter.consume(events);
   }
 

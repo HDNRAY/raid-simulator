@@ -132,8 +132,20 @@ export function runAi(
 ): void {
     const bossId = ctx.options.bossId;
     if (!bossId) return;
-    const self = ctx.state.combatants.find((c: Combatant) => c.id === bossId);
-    if (!self || !self.alive) return;
+    /**
+     * ⚠️ **必须从工作副本读**，不能读 `ctx.state.combatants`。
+     *
+     * 引擎在 `beginWork()` **之后**才调用 `runAi()`，而且同一个 tick 里
+     * 玩家的动作已经写进了工作副本（`replaceCombatant`）。
+     * 读 state 会拿到**上一 tick 的冷却**，于是 AI 以为技能好了、
+     * 真的去放，却被闸门按当前副本挡下 —— 表现为
+     * 「Boss 明明在冷却、却反复尝试并刷出『冷却中』」。
+     *
+     * `ctx.current()` 是 work-aware 的（先查工作副本、没有才回落
+     * state），与闸门读的是同一份数据。
+     */
+    const self = ctx.current(bossId);
+    if (!self.alive) return;
     const opponent = ctx.opponentOf(bossId);
     if (!opponent) return;
 

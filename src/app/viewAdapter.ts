@@ -194,8 +194,11 @@ export class ViewAdapter {
 
   /**
    * 消费引擎事件。**必须在引擎 tick 之后、渲染之前调用一次。**
+   *
+   * ⚠️ `playerId` 不是装饰：`skillRejected` 不区分是谁在施放，Boss 的
+   * 冷却拒绝会写进玩家状态区（显示"我的技能在冷却中"，可他刚放出来）。
    */
-  consume(events: readonly EventDef[], tick: number): void {
+  consume(events: readonly EventDef[], tick: number, playerId: string): void {
     for (const event of events) {
       switch (event.kind) {
         case 'damage': {
@@ -247,12 +250,19 @@ export class ViewAdapter {
           /**
            * 技能被拒时把「技能名 + 原因」放进状态区。
            *
-           * 为什么不写在技能格上：格子只有 44px，七个格子各挂一行
-           * 小字会糊成一片。集中一行反而读得更快。
-           *
-           * 同一个「技能 + 原因」在 1 秒内只提示一次 ——
-           * 见 `lastReject` 的说明。
+           * 为什么不写在技能格上：格子只有 44px，七个格子各挂一行小字
+           * 会糊成一片。集中一行反而读得更快。同一个「技能 + 原因」
+           * 在 1 秒内只提示一次（见 `lastReject`）。
            */
+          /**
+           * **只提示玩家自己的拒绝。**
+           *
+           * Boss 的招式冷却不该占用玩家的状态行 —— 那条线是
+           * "我刚才那一下为什么没生效"，只对玩家的输入负责。
+           * （Boss 在 CD 中尝试出手是它自己的轮转问题，见 `runAi` 的
+           * 工作副本修正。）
+           */
+          if (event.sourceId !== playerId) break;
           const key = `${event.skillId}:${event.reason}`;
           const suppressed =
             this.lastReject !== undefined &&
