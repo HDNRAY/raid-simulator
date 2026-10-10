@@ -29,7 +29,15 @@ body {
 
 #stage > canvas {
   display: block;
-  /* ① CSS 放大必须用最近邻，否则像素画会被线性插值糊掉 */
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
+  /**
+   * ⚠️ **不要写 `image-rendering: pixelated`**。
+   *
+   * 这条规则原先是为了"像素风"—— 让浏览器用**最近邻**放大，
+   * 保住像素的硬边。本作现在全部是**矢量绘制**（Graphics + 文字），
+   * 最近邻在 1.22× / 1.3× 这种非整数倍下会制造明显的锯齿与块状感，
+   * 那正是"全屏看着糊"的最直接原因。
+   *
+   * 改成默认的**线性插值**：canvas 内部缓冲已经按 DPR 布满物理像素
+   * （见 `computeCanvasCssSize`），再线性缩放一次几乎无损。
+   */
 }

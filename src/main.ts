@@ -13,7 +13,13 @@ import { BOSS_HP_DISPLAY } from './data/entities/bossHp';
 import { DEFAULT_BINDINGS, type KeyBinding } from './input/keyboard';
 import { flattenCatalog, translator } from './i18n/translator';
 import { zhCN } from './i18n/locales/zh-CN';
-import { LOGICAL_H, LOGICAL_W, clampUiScale, type ScalingMode } from './render/scaling';
+import {
+  LOGICAL_H,
+  LOGICAL_W,
+  clampDevicePixelRatio,
+  clampUiScale,
+  type ScalingMode,
+} from './render/scaling';
 import { observeStage } from './render/sizes';
 import { BattleScene } from './render/BattleScene';
 import type { Combatant, StatKey } from './core/types';
@@ -130,14 +136,34 @@ async function bootstrap(): Promise<void> {
    */
   setIconDecoder(createAssetsDecoder());
 
+  /**
+   * **渲染分辨率 = 设备像素比**（需求："全屏看着糊"）。
+   *
+   * 之前写死 `resolution: 1` + `autoDensity: false`，而 canvas 的 CSS
+   * 尺寸被放大到 1244×700 —— 于是 960×540 的一张图交给浏览器拉伸
+   * 1.3×，在 DPR=2 的屏幕上等效 **2.6×**：只用了 39% 的物理像素。
+   *
+   * 现在把 DPR 交给 Pixi：它的 `resolution` 决定"1 个逻辑单位用几个
+   * 物理像素画"，而 `app.screen` 仍是 960×540 逻辑单位 —— **世界坐标
+   * 与所有布局一行没改**，只是采样变密了。
+   *
+   * ⚠️ `autoDensity` 保持 `false`：canvas 的 CSS 尺寸由
+   * `observeStage` 统一管理（含 letterbox 留白），交给 Pixi 会互相覆盖。
+   */
   const app = new Application();
+  const effectiveDpr = clampDevicePixelRatio(window.devicePixelRatio);
   await app.init({
     width: LOGICAL_W,
     height: LOGICAL_H,
-    resolution: 1,
+    resolution: effectiveDpr,
     autoDensity: false,
-    antialias: false,
-    roundPixels: true,
+    /**
+     * 开抗锯齿。原先关着是"像素风"的取舍，但现在分辨率上去了，
+     * 锯齿主要出现在**文字与斜线描边**上，看着更糙。
+     * 代价是填充率，钳住 DPR ≤ 2 之后可以接受。
+     */
+    antialias: true,
+    roundPixels: false,
     background: 0x0a0a0f,
   });
   stage.appendChild(app.canvas);
@@ -214,7 +240,37 @@ async function bootstrap(): Promise<void> {
    * `ResizeObserver` 不会因为"视口尺寸没变"而重新回调。
    */
   let uiScale = 1;
-  const stageObserver = observeStage(stage, app.canvas, SCALING_MODE, () => {});
+  /**
+   * 让 **Pixi 跟着重建 framebuffer**，把内部缓冲对齐到"CSS × DPR"。
+   *
+   * ⚠️ 这是"全屏糊"修复的**另一半**，很容易漏：只把 `resolution`
+   * 交给 `app.init` 是不够的 —— canvas 的 `width`/`height` 属性由
+   * Pixi 拥有，`applyStageSize` 只写 CSS。不显式 resize 的话，
+   * 缓冲区会停在初始尺寸，而 `applyStageSize` 的断言会**当场抛错**
+   * （"canvas backing size must be …"）。
+   *
+   * ⚠️ 每次都要调，不能只在尺寸变化时调：Pixi 的 `resize()` 内部有
+   * `if (w === width && h === height) return` 的短路，只改 `resolution`
+   * 后再调同尺寸会被它直接忽略。
+   *
+   * 传的是**逻辑尺寸** 960×540：Pixi 自己乘 `resolution` 得到缓冲区，
+   * 所以世界坐标不变。
+   */
+  const syncRenderer = (): void => {
+    /**
+     * ⚠️ **不能调 `app.renderer.resize()`**。
+     *
+     * 它会经 `ViewSystem` 落到 canvas 元素上，把 CSS 尺寸也设成传入的
+     * 逻辑尺寸 —— 于是 `observeStage` 刚算好的 1173×660 被覆盖回
+     * 960×540（实测：`applyStageSize` 日志显示两次，最终样式是 960）。
+     *
+     * 直接调整**纹理源**：只重建 framebuffer，不碰任何 DOM 尺寸。
+     * CSS 由 `observeStage` 独占（它还负责 letterbox 留白）。
+     */
+    app.renderer.view.texture.source.resize(LOGICAL_W, LOGICAL_H, effectiveDpr);
+  };
+  const stageObserver = observeStage(stage, app.canvas, SCALING_MODE, syncRenderer, effectiveDpr);
+  syncRenderer();
 
   /* ---------- 主循环 ---------- */
   app.ticker.add(() => {
