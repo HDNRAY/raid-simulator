@@ -520,6 +520,16 @@ export type KeyAction =
   | { readonly kind: 'cancelCapture' }
   | { readonly kind: 'closePanel' }
   | { readonly kind: 'capture'; readonly key: string }
+  /**
+   * 助记键：**直达**某个控件（需求："这几个按钮，都需要增加『通用(G)』
+   * 这样的按键支持，而不是只能依赖 tab，包括 UI 缩放"）。
+   *
+   * 与 `cycle`（Tab 遍历）的分工：
+   *   cycle     线性遍历 —— 保证"没有只能用鼠标的地方"
+   *   mnemonic  一键直达 —— 熟练之后不必按六次
+   * 两者并存，互不替代。
+   */
+  | { readonly kind: 'mnemonic'; readonly target: 'tabGeneral' | 'tabKeys' | 'resetKeys' | 'slider' }
   | { readonly kind: 'move'; readonly direction: 'up' | 'down' | 'left' | 'right' }
   | { readonly kind: 'cycle'; readonly back: boolean }
   | { readonly kind: 'activate' }
@@ -533,11 +543,35 @@ const ARROWS: Readonly<Record<string, 'up' | 'down' | 'left' | 'right'>> = {
   arrowright: 'right',
 };
 
+/** 助记键表（需求给定的三个字母 + UI 缩放）。 */
+const MNEMONIC_KEYS: Readonly<Record<string, KeyAction>> = {
+  g: { kind: 'mnemonic', target: 'tabGeneral' },
+  k: { kind: 'mnemonic', target: 'tabKeys' },
+  r: { kind: 'mnemonic', target: 'resetKeys' },
+  // UI 缩放：需求要求它也能用键盘直达，而不只是 Tab 遍历
+  s: { kind: 'mnemonic', target: 'slider' },
+};
+
 export function resolveKeyAction(key: string, capturing: boolean): KeyAction {
   if (capturing) {
     // Esc 是唯一的退路，其余按键都当作"玩家想绑这个键"
     return key === 'escape' ? { kind: 'cancelCapture' } : { kind: 'capture', key };
   }
+
+  /**
+   * **助记键**（需求："这几个按钮，都需要增加『通用(G)』这样的按键支持，
+   * 而不是只能依赖 tab，包括 UI 缩放"）。
+   *
+   * 与 `Tab` / 方向键的区别：`Tab` 是**线性遍历**（要按很多次才到目标），
+   * 助记键是**直达**。两者并存 —— 遍历保证"没有只能用鼠标的地方"，
+   * 助记保证"熟练之后不用按六次"。
+   *
+   * ⚠️ 它们只在**非捕获模式**下生效（捕获模式在上面就 return 了），
+   * 所以改键时按 `g` 会把它绑给技能，而不是切 tab —— 这是对的：
+   * 玩家那一刻的意图就是"我要绑 g"。
+   */
+  const mnemonic = MNEMONIC_KEYS[key];
+  if (mnemonic !== undefined) return mnemonic;
 
   const arrow = ARROWS[key];
   if (arrow) return { kind: 'move', direction: arrow };

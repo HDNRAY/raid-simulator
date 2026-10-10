@@ -63,13 +63,20 @@ export class ScaleSlider {
       y: rect.y,
       size: FONT.body,
       color: PALETTE.text,
+      anchorY: 0.5,
     });
+    /**
+     * 百分比：**锚点在右**（`anchorX: 1`），所以它的右缘固定在
+     * 滑轨的右端。位数从 `100%` 变到 `50%` 时右缘不动 —— 这是
+     * "左右布局"该有的行为（值不会推着标题跑）。
+     */
     this.value = new Label(pixi, {
       x: rect.x + rect.w,
       y: rect.y,
       size: FONT.body,
       color: PALETTE.text,
       anchorX: 1,
+      anchorY: 0.5,
     });
 
     this.root.addChild(this.gfx, this.name.root, this.value.root);
@@ -112,17 +119,37 @@ export class ScaleSlider {
     this.value.set(`${Math.round(scale * 100)}%`);
     this.value.setColor(this.focused ? PALETTE.douqi.bright : PALETTE.text);
 
+    /**
+     * **一行左右布局**（需求："UI 缩放的 label 和 slider 改成左右布局，
+     * 100%（当前的缩放比例），也和他们保持水平"）。
+     *
+     * 横轴分为三段：
+     *   `[名称] --- [滑轨] --- [百分比]`
+     *
+     * 三者共用同一条**中线**（`midY`），所以它们是水平对齐的 ——
+     * 文字用 `anchorY: 0.5` 按中线摆，滑轨也以中线为中心。
+     */
     const g = this.gfx;
-    const trackY = rect.y + rect.h - 8;
-    const trackW = rect.w - 8;
+    const gap = 12;
+    const nameW = Math.ceil(this.name.root.width);
+    const valueW = Math.ceil(this.value.root.width);
+    const trackX = rect.x + nameW + gap;
+    const trackW = Math.max(24, rect.w - nameW - valueW - gap * 2);
+    const midY = rect.y + rect.h / 2;
+
+    this.name.root.x = rect.x;
+    this.name.root.y = midY;
+    this.value.root.x = rect.x + rect.w;
+    this.value.root.y = midY;
+
     g.clear();
-    g.rect(rect.x + 4, trackY, trackW, TRACK_H).fill({ color: 0x2a2c38, alpha: 1 });
-    g.rect(rect.x + 4, trackY, Math.round(trackW * t), TRACK_H).fill({
+    g.rect(trackX, midY - TRACK_H / 2, trackW, TRACK_H).fill({ color: 0x2a2c38, alpha: 1 });
+    g.rect(trackX, midY - TRACK_H / 2, Math.round(trackW * t), TRACK_H).fill({
       color: PALETTE.douqi.base,
       alpha: 1,
     });
-    const knobX = rect.x + 4 + Math.round(trackW * t) - KNOB_W / 2;
-    g.rect(knobX, trackY - 6, KNOB_W, KNOB_H).fill({
+    const knobX = trackX + Math.round(trackW * t) - KNOB_W / 2;
+    g.rect(knobX, midY - KNOB_H / 2, KNOB_W, KNOB_H).fill({
       color: this.focused ? PALETTE.douqi.bright : 0xd8d8e4,
       alpha: 1,
     });

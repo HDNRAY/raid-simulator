@@ -388,6 +388,9 @@ export class SettingsPanel {
       case 'capture':
         // 捕获模式下输入层直接回调，这里不重复处理
         return true;
+      case 'mnemonic':
+        this.applyMnemonic(action.target);
+        return true;
       case 'move': {
         /**
          * slider 焦点下，**左右是"调值"而不是"移动焦点"**。
@@ -425,6 +428,47 @@ export class SettingsPanel {
   }
 
   /** 激活当前焦点（Enter / 空格）。 */
+  /**
+   * 助记键直达（G 通用 / K 按键 / R 恢复默认 / S UI 缩放）。
+   *
+   * 需求："这几个按钮，都需要增加『通用(G)』这样的按键支持，
+   * 而不是只能依赖 tab，包括 UI 缩放。"
+   *
+   * ⚠️ 每个分支都**同时移动焦点**（不只是执行动作）——
+   * 否则按完 G 之后，`Enter` / 方向键还会作用在原来的位置上，
+   * 玩家会觉得"键没生效"。
+   */
+  private applyMnemonic(target: 'tabGeneral' | 'tabKeys' | 'resetKeys' | 'slider'): void {
+    switch (target) {
+      case 'tabGeneral':
+        this.setTab('general');
+        this.focus = { zone: 'tabs', index: 0 };
+        this.redraw();
+        return;
+      case 'tabKeys':
+        this.setTab('keys');
+        this.focus = { zone: 'tabs', index: 1 };
+        this.redraw();
+        return;
+      case 'resetKeys':
+        // 恢复默认属于按键页 —— 先切过去，玩家才看得到结果
+        this.setTab('keys');
+        this.options.onResetKeys();
+        this.setNotice(this.options.translate('settings.keysResetDone'));
+        this.redraw();
+        return;
+      case 'slider':
+        /**
+         * UI 缩放只在通用页存在，所以先切页 —— 否则焦点会落在一个
+         * 不可见的控件上（那正是之前「滑块漏到按键页」那类 bug 的温床）。
+         */
+        this.setTab('general');
+        this.focus = { zone: 'slider' };
+        this.redraw();
+        return;
+    }
+  }
+
   private activateFocus(): void {
     const action = resolveActivate(this.focus, this.options.getRows().map((r) => r.skillId));
     switch (action.kind) {

@@ -286,8 +286,8 @@ export const zhCN = {
     /** 完整说明（用在帮助文本里，不画在按钮旁） */
     openKeyHint: '按 Esc 或 , 打开设置；也可以 ↑ 选中后 Enter',
     close: '关闭',
-    tabGeneral: '通用',
-    tabKeys: '按键',
+    tabGeneral: '通用 (G)',
+    tabKeys: '按键 (K)',
     /** 通用 tab 暂时没有可调项 */
     /** 通用页：UI 缩放 slider */
     uiScale: 'UI 缩放',
@@ -317,6 +317,13 @@ export const zhCN = {
       highDamage: '高伤',
       interrupt: '打断',
     },
+    /**
+     * 助记键提示直接写进文案（"通用 (G)"）而不是另起一个 Label。
+     *
+     * 理由：这三处的键是**固定的助记字母**（一个字符），而技能格上
+     * 的键是**可改的**（所以那里必须单独渲染、还要能显示"未绑定"）。
+     * 固定值走文案更省事，也不会与技能格的渲染逻辑混淆。
+     */
     /** 详情区：代价（`{value}` + 资源名）与冷却（秒） */
     detailCost: '{value} {resource}',
     detailCostPerSecond: '{value} {resource}/秒',
@@ -333,7 +340,7 @@ export const zhCN = {
      */
     keysReserved: '{key} 是系统保留键，不能绑定',
     keysReservedHint: 'Esc / Tab / Enter / F1–F12 / 单独的 Shift、Ctrl、Alt 不能绑定',
-    keysReset: '恢复默认',
+    keysReset: '恢复默认 (R)',
     keysResetDone: '已恢复默认键位',
     /** 键位表的两列标题 */
     keyColumnAction: '技能',
