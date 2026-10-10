@@ -144,8 +144,19 @@ export const BADGE_OFFSET_RATIO = 0.6;
  * 环心到按钮圆心 `0.72·√2·r ≈ 1.02r` —— **刚好在按钮外**，于是
  * 环大部分露在按钮外面，点它还会先命中按钮边缘。实测发现后
  * 收到 0.6（`0.6·√2 ≈ 0.85r`，落在按钮内，视觉上像"贴一个角标"）。
+ *
+ * ⚠️ 需求："现在触屏的派生 好像有点小" —— 0.42 → **0.55**
+ * （直径 30px → 40px）。
+ *
+ * 依据是**命中区**而不是好看：命中半径 = `BADGE_RADIUS_RATIO × r × 1.4`，
+ * 于是直径从 **42px → 55px**，越过触屏可点下限（44px）。
+ * 0.42 时是 42px —— **差 2px 不达标**。
+ *
+ * 环**本来就该露出按钮**（它是"贴右上角的角标"，压在边缘才读得出是角标）。
+ * 真正的约束是**环心必须在按钮圆内**（`0.6·√2·r ≈ 0.85r < r`），
+ * 否则点它会先命中按钮边缘；这条有 `tests/unit/touchInput.test.ts` 钉着。
  */
-export const BADGE_RADIUS_RATIO = 0.42;
+export const BADGE_RADIUS_RATIO = 0.55;
 
 /** 某个按钮角标环的圆心（给命中测试用）。 */
 export function badgeCenter(button: { x: number; y: number }): { x: number; y: number } {
