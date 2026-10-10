@@ -1,28 +1,15 @@
 /**
  * 设置弹窗（全 canvas）。
  *
- * ==================================================================
- * 为什么也是 canvas 而不是 DOM
- * ==================================================================
+ * 为什么不用 DOM：架构规范要求所有 UI 走 canvas（便于移植）。设置界面是
+ * 最容易被"顺手用 DOM 做"的一块（表单/滚动/输入框浏览器都免费），但一旦
+ * 开口，以后移植就要重写它 —— 而它偏偏**交互最复杂**（改键要独占键盘、
+ * 要处理冲突）。所以连按键捕获都在 canvas 里做。
  *
- * 架构规范里定的是"所有 UI 走 canvas，方便以后移植小游戏"。
- * 设置界面是最容易被"顺手用 DOM 做"的一块（表单、滚动、输入框都是
- * 浏览器免费的），但一旦开了这个口子，以后再想移植就要重写它 ——
- * 而它偏偏是**交互最复杂**的一块（改键要独占键盘、要处理冲突）。
- *
- * 所以这里连按键捕获都在 canvas 里做。
- *
- * ==================================================================
- * 与引擎的关系
- * ==================================================================
- *
- * 设置界面**完全不碰引擎**：它只改两类东西 ——
- *   1. 键位表（通过回调交出去）
- *   2. 将来的通用选项（缩放模式等）
- *
- * 打开设置时必须**暂停战斗**，否则玩家在改键时会被 Boss 打死。
- * 这个决定交给调用方（`onOpen` / `onClose`），组件自己不假设。
+ * 与引擎的关系：**完全不碰引擎**，只通过回调改键位表与通用选项。
+ * 打开时是否暂停战斗由调用方（`onOpen`/`onClose`）决定。
  */
+
 
 import type { Container, Graphics } from 'pixi.js';
 import { FONT, LOGICAL } from '../layout';
@@ -34,6 +21,7 @@ import { SettingsFrame } from './SettingsFrame';
 import { KeysFooter } from './KeysFooter';
 import type { KeyRow } from './rows';
 import { ScaleSlider } from './ScaleSlider';
+import { detectBrowserPlatform } from '../../render/platform';
 import type { PixiCtor } from '../primitives';
 import {
   INITIAL_FOCUS,
@@ -45,6 +33,7 @@ import {
   contains,
   moveFocus,
   resolveActivate,
+  resolveRowTap,
   type SettingsFocus,
   type SettingsTab,
 } from './logic';
@@ -296,22 +285,32 @@ export class SettingsPanel {
         this.redraw();
         return true;
       case 'keyRow': {
-        /**
-         * ⚠️ 点技能格 = **选中**，不是直接改键（需求："方向键选中和鼠标
-         * 选中是两件事，应该合并"）。原先点格子会立刻进改键，而方向键
-         * 只移动焦点 —— 两套语义，且点完详情还显示上一个技能。
-         * 现在两者都只做"选中"，改键统一走 `Enter`。
-         */
+        const rows = this.options.getRows();
+        const action = resolveRowTap(
+          {
+            focusedSkillId:
+              this.focus.zone === 'grid' ? rows[this.focus.index]?.skillId : undefined,
+            capturingSkillId: this.capturingSkill,
+            isTouch: detectBrowserPlatform().touch,
+            touchedSkillId: target.skillId,
+          },
+        );
+        if (action.kind === 'bind') {
+          /** ⚠️ 绑到**那一格的键**（不是 `touch:技能id` —— 那会让两个技能挤在同一位置）。 */
+          const targetKey = rows.find((r) => r.skillId === action.skillId)?.key;
+          if (targetKey !== undefined) this.finishCapture(targetKey);
+          this.redraw();
+          return true;
+        }
         this.setFocusToSkill(target.skillId);
+        if (action.kind === 'capture') {
+          this.startCapture(target.skillId);
+          this.redraw();
+        }
         return true;
       }
       case 'close':
-        /**
-         * 需求："设置弹窗里的『关闭』点了没反应。"
-         *
-         * 根因：它只是个 Label，没有命中测试 —— 点它落到
-         * `hitTestLogic` 的 `none` 分支（"点在弹窗内空白处，消费掉"）。
-         */
+        // 曾经只是 Label、没有命中测试 → 点了没反应（已修）
         this.options.onClose();
         return true;
       case 'scaleSlider':

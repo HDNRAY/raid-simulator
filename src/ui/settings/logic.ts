@@ -486,12 +486,43 @@ const MNEMONIC_KEYS: Readonly<Record<string, KeyAction>> = {
 };
 
 /**
- * 某个助记目标的**实际按键**（如 `tabGeneral` → `'g'`）。
+ * **点一次技能格该做什么** —— 键盘与触屏共用一套语义。
  *
- * ⚠️ 从 `MNEMONIC_KEYS` **反查**，而不是在渲染处写死 `'G'` ——
- * 助记键是可改的，写死会让标签和实际能按的键不一致。
- * ⚠️ 触屏上**只用它来决定要不要显示**，不因此禁用按键行为
- * （外接键盘仍然该能用）。
+ * 需求："移动端和键盘的功能需要是一样的"（AGENTS.md §3b）。
+ *
+ * | 情形 | 结果 |
+ * |---|---|
+ * | 正在改键中 | `bind` —— 绑到这个格子 |
+ * | 点到**已选中**的格子，且触屏 | `capture` —— 进改键（对等键盘的 Enter） |
+ * | 其它 | `focus` —— 只选中 |
+ *
+ * ⚠️ "再点一次已选中的格子"**只在触屏**上生效：鼠标双击进改键会与
+ * "点=选中"的语义打架，而且鼠标本来就有键盘可用。
+ */
+export function resolveRowTap(input: {
+  readonly focusedSkillId: string | undefined;
+  readonly capturingSkillId: string | undefined;
+  readonly isTouch: boolean;
+  readonly touchedSkillId: string;
+}):
+  | { readonly kind: 'focus' }
+  | { readonly kind: 'capture' }
+  | { readonly kind: 'bind'; readonly skillId: string } {
+  if (input.capturingSkillId !== undefined) {
+    return { kind: 'bind', skillId: input.touchedSkillId };
+  }
+  if (input.isTouch && input.focusedSkillId === input.touchedSkillId) {
+    return { kind: 'capture' };
+  }
+  return { kind: 'focus' };
+}
+
+/**
+ * 某个助记目标的**实际按键**（`tabGeneral` → `'G'`）。
+ *
+ * ⚠️ 从 `MNEMONIC_KEYS` **反查**，不要在文案或渲染处写死 ——
+ * 助记键是运行期可变的，写死会让标签与实际能按的键不一致。
+ * 需求："改快捷键 害得改 i18n吗？" —— 所以键名**不进 i18n**。
  */
 export function mnemonicKeyOf(
   target: 'tabGeneral' | 'tabKeys' | 'resetKeys' | 'slider',

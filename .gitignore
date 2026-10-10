@@ -32,3 +32,6 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+
+# art generation (key 由上面的 .env 规则覆盖；产物不入库)
+artgen/out/

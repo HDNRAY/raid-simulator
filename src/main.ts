@@ -1,6 +1,7 @@
 import { BattleLoop } from './app/battleLoop';
 import { createTouchControls, derivedOfSnapshot } from './app/touchControls';
 import { buildKeyRows } from './app/keyRows';
+import { applyRebind } from './ui/settings/logic';
 import { slotsFromBindings } from './app/viewAdapter';
 import { createRegistry } from './core/content/registry';
 import { VERROT_BEHAVIORS } from './core/ai';
@@ -384,10 +385,30 @@ async function bootstrap(): Promise<void> {
         translate: translateSafe,
       }),
     onRebind: (skillId, key) => {
-      // 同一个键只能绑一个技能：先把旧占用者解绑，再绑新的
-      bindings = bindings.map((b) =>
-        b.skillId === skillId ? { ...b, key } : b.key === key ? { ...b, key: '' } : b,
-      );
+      /**
+       * ⚠️ 用**纯函数** `applyRebind`，不要在这里再写一份内联逻辑 ——
+       * 之前内联的那份丢掉了 `unbound`，两处语义就分了叉。
+       */
+      const first = applyRebind(bindings, skillId, key);
+      let next = first.bindings;
+      /**
+       * **把被顶掉的技能换到旧键上，而不是解绑。**
+       *
+       * 一个键只能绑一个技能，所以改键必然顶掉旧占用者（策略见
+       * `applyRebind` 的说明）。但**解绑的代价在触屏上是致命的**：
+       * 没键的技能不出现在触屏按钮上（`touchButtonsFromBindings`
+       * 只取 `key !== ''`），于是改一次键就会**少一个按钮** ——
+       * 实测「避」这样消失后，倒地（`restrictToTags: ['dodge']`）
+       * 就没有出路了。
+       *
+       * 换成"两位互换"：X 拿走 k，原来的占用者拿到 X 的旧键。
+       */
+      const previousKey = bindings.find((b) => b.skillId === skillId)?.key;
+      const victim = first.unbound === undefined ? undefined : bindings.find((b) => b.key === key);
+      if (victim !== undefined && previousKey !== undefined && previousKey !== '') {
+        next = applyRebind(next, victim.skillId, previousKey).bindings;
+      }
+      bindings = next;
       loop.setBindings(bindings);
       touch.setBindings(bindings);
     },

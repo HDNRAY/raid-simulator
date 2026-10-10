@@ -89,16 +89,11 @@ export class KeysFooter {
     // 通知（如"已恢复默认"）用暖红，比常规提示更该被看到
     this.hint.setColor(notice !== '' ? 0xff9080 : PALETTE.textDim);
 
-    /**
-     * 助记键**运行时拼** —— 触屏不显示（"移动端就不用显示快捷键信息了"），
-     * 而且显示的是实际生效的键而不是写死的 `R`。
-     */
-    const resetMnemonic = mnemonicKeyOf('resetKeys');
+    /** ⚠️ 助记键反查后拼上，不写进 i18n（改键不该动文案）。 */
     const resetText = this.translate('settings.keysReset');
+    const resetKey = mnemonicKeyOf('resetKeys');
     this.resetLabel.set(
-      showKeyHints && resetMnemonic !== undefined
-        ? `${resetText} (${resetMnemonic})`
-        : resetText,
+      showKeyHints && resetKey !== undefined ? `${resetText} (${resetKey})` : resetText,
     );
     this.resetLabel.setColor(resetFocused ? PALETTE.douqi.bright : PALETTE.text);
     const g = this.resetGfx;

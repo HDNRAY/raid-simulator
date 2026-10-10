@@ -124,10 +124,9 @@ export class SettingsFrame {
         button.tab === 'general' ? 'settings.tabGeneral' : 'settings.tabKeys',
       );
       /**
-       * 助记键**运行时拼**，而不是写死在文案里 —— 两个理由：
-       *   1. 触屏要能按模式隐藏（需求："移动端就不用显示快捷键信息了"）
-       *   2. 显示的是**实际生效的键**（`mnemonicKeyOf` 反查），
-       *      不是写死的 G/K
+       * ⚠️ 助记键从 `MNEMONIC_KEYS` **反查并拼上**，不写进 i18n ——
+       * 否则改快捷键就得改文案（需求："改快捷键 害得改 i18n吗？"）。
+       * 触屏不拼（"移动端就不用显示快捷键信息了"）。
        */
       const mnemonic = mnemonicKeyOf(button.tab === 'general' ? 'tabGeneral' : 'tabKeys');
       button.label.set(
