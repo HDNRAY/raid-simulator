@@ -219,7 +219,7 @@ const dodge: SkillDef = {
   cost: [{ resource: 'energy', value: 30 }],
   targeting: { mode: 'self' },
   hits: [],
-  tags: ['defensive', 'movement'],
+  tags: ['defensive', 'dodge'],
   school: 'physical',
   interruptible: false,
 };

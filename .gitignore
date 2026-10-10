@@ -35,3 +35,7 @@ pnpm-debug.log*
 
 # art generation (key 由上面的 .env 规则覆盖；产物不入库)
 artgen/out/
+
+# 临时占位素材（含第三方版权素材，绝不入库）
+public/placeholder/
+artgen/placeholder-fd2/

@@ -534,7 +534,13 @@ const BREAK: SkillDef = {
       ],
     },
   ],
-  tags: ['interrupt'],
+  /**
+   * ⚠️ 空数组是**有意**的：原先这里是 `['interrupt']`，但引擎并不需要
+   * 这个分类 —— 打断靠 `hits[].effects` 里的 `interrupt` 效果实现，
+   * 不是靠 tag 匹配。那份是纯冗余，且与 `hintTags` 的同名值各写一遍
+   * 会漂移。已按需求（"死值先删，以后需要再加回来"）删除。
+   */
+  tags: [],
   /** 提示玩家"这一招会打断目标" */
   hintTags: ['interrupt'],
   school: 'physical',

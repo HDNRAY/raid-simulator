@@ -473,7 +473,6 @@ describe('可扩展性：新增一件装备只需要写数据', () => {
     icon: 'test',
     slot: 'relic',
     rarity: 'rare',
-    tags: ['relic'],
     abilities: [
       {
         kind: 'modifier',

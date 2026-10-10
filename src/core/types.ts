@@ -5,14 +5,10 @@
  * ================================================================== */
 
 /**
- * 文案 key。
- *
- * **由 core 自己定义，而不是从 i18n 层 import** —— 这是 lint 约束（C1/I3）
- * 逼出来的正确分层：接口的形状由**消费者**声明，实现方负责满足它。
- * i18n 层有一个编译期断言证明 `MessageKey` 满足这个形状，
- * 所以内容作者写错 key 仍然会在编译期被拒。
- *
- * 引擎只**持有** key，不解析、不碰文案（i18n 规范 §2）。
+ * 文案 key（**由 core 自己定义，不从 i18n 层 import**，即 lint 约束
+ * C1/I3）：接口形状由消费者声明，实现方满足它 —— i18n 层有编译期断言
+ * 证明 `MessageKey` 满足该形状，所以写错 key 仍会在编译期被拒。
+ * 引擎只**持有** key，不解析文案。
  */
 export type LocaleKey = string;
 
@@ -382,13 +378,23 @@ export type Hook =
   | 'onEncounterEnd'
   | 'onPhaseChange';
 
+/**
+ * 技能的**机械分类**（给引擎判定用，不是给玩家看的提示）。
+ *
+ * ⚠️ 与 `HintTag` **分开、两边都要维护**：本类型是静态作者数据
+ * （消费者只有 `BuffFlags.restrictToTags` 的技能白名单）；`HintTag` 是
+ * 视图层的**计算集**（`viewAdapter` 把霸体等状态派生进去）。合并后
+ * "由状态推出的提示"就没地方放了。
+ *
+ * ⚠️ 取值要克制，标准是"**当前有消费者吗**"：`dot` / `movement` /
+ * `interrupt` 曾是零消费者或零声明的死值，已按需求（"死值先删，以后
+ * 需要再加回来"）删除。尤其别把 `interrupt` 加回来 —— `HintTag` 里有
+ * 同名值（给玩家看的「打断」），两个 union 各写一遍必然漂移。
+ */
 export type SkillTag =
   | 'melee'
   | 'spell'
-  | 'dot'
   | 'defensive'
-  | 'movement'
-  | 'interrupt'
   /**
    * 「闪避」类招式（需求："给『闪』和『避』加上『闪避』tag"）。
    *
@@ -583,15 +589,10 @@ export interface GrantSkillAbility {
 }
 
 /**
- * 增减资源。
+ * 增减资源（**一次性**变动）。
  *
- * 为什么需要它（而不是用 modifier 加 `douqiRegen`）：
- * "产生 12 点炁"是**一次性**的资源变动，而 `douqiRegen` 修正表达的是
- * **持续回复速率**。两者语义不同 —— 用后者表达前者会变成"每秒 12 点"
- * 而不是"这一次 12 点"。
- *
- * 这是本引擎唯一为"资源"单独开口的能力类型，因为资源变动确实是
- * 与"修正 / 触发 / 授予"并列的第五种基本发生方式。
+ * ⚠️ 不能用 `modifier` 加 `douqiRegen` 代替：那表达的是**持续回复速率**，
+ * 于是"产生 12 点炁"会变成"每秒 12 点"。语义不同。
  */
 export interface ResourceAbility {
   readonly kind: 'resource';
@@ -692,11 +693,13 @@ export interface GameEntity {
   readonly pool?: ResourcePool;
   readonly rarity?: Rarity;
   readonly requires?: readonly Condition[];
-  readonly tags?: readonly string[];
   /**
    * 玩法提示标签（显示在读条/技能格上）。
    *
-   * 与 `tags`（机械分类）**分开** —— 理由见 `HintTag` 的说明（生命周期不同）。
+   * ⚠️ 与 `SkillDef.tags`（机械分类）是**两个字段、两套取值，都要维护**
+   * —— 理由见 `HintTag` / `SkillTag` 的说明。
+   * ⚠️ 这里曾有个无类型约束的 `tags?: readonly string[]`（零消费者），
+   * 已按"死值先删"删除。
    */
   readonly hintTags?: readonly HintTag[];
 }
@@ -954,14 +957,9 @@ export interface EncounterDef {
  * ================================================================== */
 
 /**
- * 事件的类型定义搬到了 `./events.ts`（见那里的说明：它是干净的叶子，
- * 只依赖标识类型）。
- *
- * ⚠️ 这里**转发**它们，所以 `import type { EventDef } from '../core/types'`
- * 依然可用 —— 拆文件不该是个破坏性改动。
- *
- * ⚠️ 不要在这两段里再写事件定义：`events.ts` 反向 import 本文件的
- * 标识类型，如果本文件再定义事件，就会形成两个模块互相 import 的环。
+ * 事件定义在 `./events.ts`，这里**转发**（拆文件不该是破坏性改动）。
+ * ⚠️ 别在本文件再写事件定义 —— `events.ts` 反向 import 本文件的标识
+ * 类型，会形成两个模块互相 import 的环。
  */
 export type { EventDef, EventKind, SkillRejectReason } from './events';
 

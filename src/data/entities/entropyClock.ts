@@ -48,7 +48,8 @@ export const ENTROPY_CLOCK: EquipmentEntity = {
   rarity: 'legendary',
   // 可同时装备多份 —— 用来验证"多份同内容各自贡献"（G4）
   multiEquip: true,
-  tags: ['relic'],
+  // ⚠️ 原先这里有 `tags: ['relic']` —— 全仓零消费者（`GameEntity.tags`
+  // 已按"死值先删"删除），所以连同声明一起去掉。
   abilities: [
     // ── 效果 1：被动 +2 智力 / +2 精神 ──────────────────────────
     {
