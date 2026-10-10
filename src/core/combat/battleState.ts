@@ -55,6 +55,8 @@ import {
   type StatsContext,
 } from './stats';
 import { nextRandom, type RngState } from '../rng';
+import { triggerContextFor } from './triggerContext';
+import { deathEvent, timeoutEvent } from './encounterEnd';
 import type {
   Action,
   BattleState,
@@ -144,6 +146,7 @@ export class BattleEngine {
   buffDef(buffId: string): BuffDef | undefined {
     return this.options.buffs.get(buffId);
   }
+
 
   /** 全部技能 id（UI 构建技能栏用）。 */
   get skillIds(): readonly string[] {
@@ -279,6 +282,30 @@ export class BattleEngine {
       opponentOf: (id) => this.opponentOf(id),
       statsOf: (id) => this.statsOf(id),
       rollCrit: (stats, damage) => this.rollCrit(stats, damage),
+      /**
+       * 触发器需要的能力（解析定义 + 三类落地动作）。
+       *
+       * ⚠️ 实现抽到了 `triggerContext.ts` —— 那一块是**触发器专用**的，
+       * 与战斗状态机无关；留在这里会把这个文件顶过 700 行上限
+       * （AGENTS.md §3），而且每加一种能力都会再顶一次。
+       */
+      /**
+       * 触发器引擎的落地动作（反伤等）。
+       *
+       * ⚠️ 显式**转发**而不是把 `this` 传出去：`current` /
+       * `replaceCombatant` 是 private，传 `this` 过不了类型（那会誘人写成
+       * `as never` 绕过去，见 AGENTS.md §1）。
+       */
+      ...triggerContextFor(
+        {
+          current: (id) => this.current(id),
+          replaceCombatant: (updated) => this.replaceCombatant(updated),
+          statsOf: (id) => this.statsOf(id),
+          events: this.events,
+          combat: this.ctx,
+        },
+        () => this.roll(),
+      ),
       gainDouqiFromDamage: (id, damage, tick) => gainDouqiFromDamage(this.holds(), id, damage, tick),
       pushBuffApplied: (id, buffId, stacks) => {
         this.events.push({
@@ -309,13 +336,19 @@ export class BattleEngine {
   }
 
   private get ctx(): CombatContext {
-    const ctx: CombatContext = {
+    /**
+     * ⚠️ 这个本地的 `ctx` 是给 `evaluateCondition` / 技能门禁用的，
+     * 与上面 `hitContext()` 里那份**不是同一个**（那份带触发器落地动作）。
+     * 两者都要满足 `CombatContext` 的形状 —— 曾经误删过这里的
+     * `buffDef` / `currentTick`，表现是 81 个测试报
+     * `ctx.currentTick is not a function`，而类型检查只报一条。
+     */
+    return {
       statsOf: (id: string) => this.statsOf(id),
       buffDef: (buffId: string) => this.options.buffs.get(buffId),
       skillDef: (skillId: string) => this.options.skills.get(skillId),
       currentTick: () => this.state.tick,
     };
-    return ctx;
   }
 
 
@@ -474,12 +507,12 @@ export class BattleEngine {
     // 2. 读条推进
     advanceCasts(this.castPipeline());
 
-    // 3. 持续效果（DoT / HoT）到点触发
-    this.tickOverTimeEffects();
+    // ⚠️ 原 `tickOverTimeEffects()`（"DoT 到点触发"）循环体是**空的**，只看名字会
+    // 以为 DoT 已支持。DoT 应由 `onTick` 触发器表达（见 `triggers.ts`），别恢复空壳。
 
-    // 4. buff 过期
+    // 3. buff 过期
     this.expireBuffs();
-    // 5. 资源回复
+    // 4. 资源回复
     this.regenerateResources();
 
     // 5b. 按住型技能的持续消耗（按逻辑步）
@@ -518,23 +551,6 @@ export class BattleEngine {
    * 持续效果、buff 过期、资源回复、死亡
    * ---------------------------------------------------------------- */
 
-  /**
-   * DoT / HoT 到点触发。
-   *
-   * 用 buff 的 `appliedAtTick` 与固定间隔算"应该触发了几次"，
-   * 而不是每 tick 累加计时器 —— 后者会漂移（架构规范 §12.2）。
-   */
-  private tickOverTimeEffects(): void {
-    for (const combatant of this.mutableAll()) {
-      for (const buff of combatant.buffs) {
-        const def = buff.def ?? this.options.buffs.get(buff.defId);
-        if (!def) continue;
-        // DoT 效果的实现：buff 的 modifiers 影响属性，而"每跳伤害"
-        // 由内容层的 trigger（onTick）表达。M1 阶段先只处理属性类 buff。
-      }
-    }
-  }
-
   private expireBuffs(): void {
     for (const combatant of this.mutableAll()) {
       const { buffs, expired } = expireBuffs(combatant.buffs, this.state.tick);
@@ -565,37 +581,27 @@ export class BattleEngine {
   }
 
   private checkTimeLimit(): void {
-    const limitMs = this.options.timeLimitMs;
-    if (limitMs === undefined) return;
-    const elapsedMs = (this.state.tick - this.state.startedAtTick) * (1000 / 60);
-    if (elapsedMs >= limitMs) {
-      this.state = { ...this.state, status: 'defeat', endReason: 'timeout' };
-      this.events.push({
-        kind: 'encounterEnd',
-        tick: this.state.tick,
-        result: 'defeat',
-        reason: 'timeout',
-      });
-    }
+    const event = timeoutEvent({
+      timeLimitMs: this.options.timeLimitMs,
+      tick: this.state.tick,
+      startedAtTick: this.state.startedAtTick,
+    });
+    if (event === undefined) return;
+    this.state = { ...this.state, status: 'defeat', endReason: 'timeout' };
+    this.events.push(event);
   }
 
   private checkDeaths(): void {
-    const dead = this.state.combatants.filter((c: Combatant) => !c.alive);
-    if (dead.length === 0) return;
-
-    const playerDead = dead.some((c: Combatant) => c.side === 'ally');
-    const bossDead = dead.some((c: Combatant) => c.side === 'enemy');
-    if (!playerDead && !bossDead) return;
-
-    const result = playerDead ? 'defeat' : 'victory';
-    this.state = { ...this.state, status: result, endReason: 'hpZero' };
-    this.events.push({
-      kind: 'encounterEnd',
-      tick: this.state.tick,
-      result,
-      reason: 'hpZero',
-    });
+    const event = deathEvent(this.state.combatants, this.state.tick);
+    if (event === undefined) return;
+    this.state = {
+      ...this.state,
+      status: event.result,
+      endReason: 'hpZero',
+    };
+    this.events.push(event);
   }
+
 
   /* ---------------------------------------------------------------- *
    * 状态更新辅助

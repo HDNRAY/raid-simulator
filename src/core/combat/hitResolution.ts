@@ -26,6 +26,7 @@
  */
 
 import type {
+  BuffDef,
   CastInstance,
   Combatant,
   EventDef,
@@ -36,6 +37,7 @@ import type {
   StatKey,
 } from '../types';
 import { aggregateFlags, applyBuff } from '../buffs';
+import { runTriggers } from './triggers';
 import { applyDamage, applyHeal, changeResource, computeDamage, computeHeal } from './index';
 import type { BattleState } from '../types';
 
@@ -52,6 +54,50 @@ export interface HitResolutionContext {
   rollCrit(stats: Readonly<Record<StatKey, number>>, damage: DamageSpec): boolean;
   gainDouqiFromDamage(combatantId: string, damage: number, tick: number): void;
   pushBuffApplied(targetId: string, buffId: string, stacks: number): void;
+
+  /* ---- 触发器引擎需要的能力（见 `triggers.ts`） ---- */
+
+  /**
+   * 概率判定（走种子化 RNG）。
+   *
+   * ⚠️ 与 `rollCrit` 一样，调用方要在**确定要消耗**时才调 ——
+   * `chance >= 1` 会短路，不消耗随机数，这样重放的随机数消耗只由内容决定。
+   */
+  rollChance(): number;
+  /**
+   * 解析 buff / 技能定义，以及当前 tick。
+   *
+   * ⚠️ 这三项是 `CombatContext` 要求的形状（`evaluateCondition` 要它）。
+   * 触发器判 `when` 时会把自己的 ctx 直接传进去，所以必须满足该接口 ——
+   * 与其在触发器里造一个适配器对象（每帧分配），不如让 ctx 本身满足它。
+   */
+  buffDef(buffId: string): BuffDef | undefined;
+  skillDef(skillId: string): SkillDef | undefined;
+  currentTick(): number;
+  /** 按 id 挂一个 buff（复用 `applyBuff` 的语义）。 */
+  grantBuffFromTrigger(target: Combatant, def: BuffDef, sourceId: string): void;
+  /** 一次性资源变动。 */
+  changeResourceFromTrigger(target: Combatant, resource: string, delta: number): void;
+  /**
+   * 由触发器造成一次伤害。
+   *
+   * ⚠️ 它会**再派发一次** `onHitTaken`（设计决定：反伤算受击、要进日志与
+   * 飘字）。终止靠"内容不构成环" + `triggers.ts` 的 `DEPTH_LIMIT`。
+   */
+  dealDamageFromTrigger(actorId: string, targetId: string, hit: HitDef): void;
+}
+
+/**
+ * 派发 hook 时携带的载荷。
+ *
+ * 只带**触发器判条件真的用得上**的字段（谁打的、打了多少、哪个技能），
+ * 不是把整个 `HitDef` 塞进来 —— 载荷越大，"哪些字段在哪个 hook 上有值"
+ * 越难说清。
+ */
+export interface HitPayload {
+  readonly sourceId?: string;
+  readonly amount?: number;
+  readonly skillId?: string;
 }
 
 export function resolveHit(
@@ -65,6 +111,9 @@ export function resolveHit(
 
     const casterStats = ctx.statsOf(actor.id);
     const victimFlags = aggregateFlags(target);
+
+    /** 本次命中实际扣掉的血（用于判断"是否算受伤"，见函数末尾）。 */
+    let taken = 0;
 
     for (const effect of hit.effects) {
       switch (effect.kind) {
@@ -98,6 +147,7 @@ export function resolveHit(
           );
           ctx.replaceCombatant(applied.combatant);
           ctx.events.push(...applied.events);
+          taken += Math.max(0, result.amount);
 
           /**
            * 炁按伤害换算：**造成伤害的人**与**受到伤害的人**各得一份。
@@ -121,6 +171,22 @@ export function resolveHit(
           applyHitEffects(ctx, actor, target, effect, skill.id);
           break;
       }
+    }
+
+    /**
+     * **整次命中结算完成后**派发 `onHitTaken`（见 `triggers.ts` 顶部
+     * "为什么只在结算已完成处派发"）。
+     *
+     * ⚠️ 条件是"**真的掉血了**"（`taken > 0`）：被闪避 / 被免伤的命中
+     * **不算受伤** —— 否则"闪避"反而会白送对手一个印记，与直觉相反
+     * （设计 §3.3）。
+     */
+    if (taken > 0) {
+      runTriggers(ctx, target.id, 'onHitTaken', {
+        sourceId: actor.id,
+        amount: taken,
+        skillId: skill.id,
+      });
     }
   }
 

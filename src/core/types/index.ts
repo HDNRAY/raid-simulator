@@ -27,5 +27,5 @@ export * from './runtime';
 export * from './encounter';
 
 /** 事件 / 输入的定义在各自的叶子里（见其文件头）。 */
-export type { EventDef, EventKind, SkillRejectReason } from '../events';
+export type { EncounterEndEvent, EventDef, EventKind, SkillRejectReason } from '../events';
 export type { Action, ActionType } from '../actions';

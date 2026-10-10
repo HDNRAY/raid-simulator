@@ -145,3 +145,12 @@ readonly reason?: 'interrupted' | 'sourceLost' | 'death' | 'replaced';
     };
 
 export type EventKind = EventDef['kind'];
+
+/**
+ * **结束事件**（超时 / 死亡）的精确类型。
+ *
+ * ⚠️ 单独命名是给 `encounterEnd.ts` 的两个工厂当返回类型用：
+ * 若它们返回宽泛的 `EventDef`，调用方取 `.result` 就要先 narrow —— 而
+ * "narrow 一下"在调用点很容易被写成类型断言（AGENTS.md §1 禁止）。
+ */
+export type EncounterEndEvent = Extract<EventDef, { kind: 'encounterEnd' }>;
