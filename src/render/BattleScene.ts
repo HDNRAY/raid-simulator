@@ -32,7 +32,7 @@ import { PlayerActorPart } from './parts/playerActor';
 import { StatusLinePart } from './parts/statusLine';
 import { FlashPart } from './parts/flash';
 import { FrameRegistry } from './sceneTypes';
-import type { BattleSceneOptions } from './sceneTypes';
+import type { BattleSceneOptions, TranslateFn } from './sceneTypes';
 import { FONT, LAYOUT, LOGICAL } from '../ui/layout';
 import { UiLayout } from '../ui/uiLayout';
 
@@ -530,14 +530,43 @@ export class BattleScene {
    * （标题/原因/统计/提示），字段太多不值得为它单独开一个文件传 6 个引用。
    * 闭包把它留在场景里，同时仍然走注册机制 —— 顺序照样由注册决定。
    */
-  private renderResult(ctx: { view: BattleSnapshotView; translate: (k: string) => string }): void {
+  private renderResult(ctx: {
+    view: BattleSnapshotView;
+    /**
+     * ⚠️ 必须收 `params` —— 结算的胜因文案带插值（Boss 的名字）。
+     * 只声明一个参数会让"带参数翻译"在类型上被拒。
+     */
+    translate: TranslateFn;
+  }): void {
     const { view, translate } = ctx;
     const result = view.result;
     this.resultLayer.visible = result !== undefined;
     if (!result) return;
     this.resultTitle.set(translate(result.titleKey));
     this.resultTitle.setColor(result.victory ? 0xffd870 : PALETTE.danger.bright);
-    this.resultReason.set(translate(result.reasonKey));
+    /**
+     * 胜因文案带**插值参数**（如 Boss 的名字）。
+     *
+     * ⚠️ 参数值可能是**另一个 i18n key**（`boss.name`）—— 适配器只给
+     * key，翻译在渲染层做（i18n 规范 I1：渲染层不持有可显示文案）。
+     *
+     * 这里的"再翻一次"是有意的：如果适配器直接给译好的名字，
+     * `viewAdapter` 就得持有语言包，那一层就不再是纯数据映射了。
+     */
+    const reasonParams = result.reasonParams;
+    this.resultReason.set(
+      reasonParams === undefined
+        ? translate(result.reasonKey)
+        : translate(
+            result.reasonKey,
+            Object.fromEntries(
+              Object.entries(reasonParams).map(([k, v]) => [
+                k,
+                typeof v === 'string' ? translate(v) : v,
+              ]),
+            ),
+          ),
+    );
     this.resultHint.set(translate('screen.hintRestart'));
 
     // 统计用等宽对齐的"标签  值"，比堆一串数字好读

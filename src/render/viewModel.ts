@@ -153,6 +153,19 @@ export interface ResultView {
   readonly titleKey: string;
   /** 副文案（说明为什么赢/输）的本地化 key */
   readonly reasonKey: string;
+  /**
+   * 副文案的**插值参数**。
+   *
+   * 需求："wonByKill 里的名字，应该用参数···"
+   *
+   * 胜因文案里要出现 **Boss 的名字**。名字写死在文案里会漂移 ——
+   * 实测 `wonByKill` 写的是"伪名一郎"，而 Boss 的实际名字是
+   * "伪·明显一郎"（`boss.name`），两个都对不上。
+   *
+   * ⚠️ 这里给的是**另一个 i18n key**（`boss.name`），不是译好的文字：
+   * 渲染层不持有可显示文案（i18n 规范 I1），由渲染层自己再翻一次。
+   */
+  readonly reasonParams?: Readonly<Record<string, string | number>>;
   /** 用时（秒，1 位小数） */
   readonly seconds: string;
   readonly remainingHp: number;

@@ -377,7 +377,7 @@ export const zhCN = {
     defeatedByTimeout: '时间耗尽',
     defeatedByDeath: '你倒下了',
     defeatedByEnrage: '被狂暴的 Boss 击溃',
-    wonByKill: '击败了伪名一郎',
+    wonByKill: '击败了{name}',
     /** 结算面板上的统计标签 */
     statTime: '用时',
     statRemainingHp: '剩余生命',

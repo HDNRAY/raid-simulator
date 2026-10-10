@@ -359,10 +359,21 @@ export class ViewAdapter {
             ? 'screen.defeatedByEnrage'
             : 'screen.defeatedByDeath';
 
+    /**
+     * 胜因里的 Boss 名走**参数**，不写死在文案里。
+     *
+     * ⚠️ 传的是**名字的 i18n key**（`boss.name`），不是译好的文字 ——
+     * 渲染层拿到 key 自己再翻一次，符合"适配器不产文案"的分层。
+     */
+    const bossNameKey = state.combatants.find((c) => c.side === 'enemy')?.nameKey;
+
     return {
       victory,
       titleKey: victory ? 'screen.victory' : 'screen.defeat',
       reasonKey,
+      ...(reasonKey === 'screen.wonByKill' && bossNameKey !== undefined
+        ? { reasonParams: { name: bossNameKey } }
+        : {}),
       seconds: seconds.toFixed(1),
       remainingHp: Math.ceil(player?.resources.hp ?? 0),
       remainingHpCap: Math.ceil(player?.caps.hp ?? 1),
