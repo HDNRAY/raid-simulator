@@ -244,43 +244,36 @@ export type StackingRule =
   | { readonly mode: 'extend'; readonly maxDurationMs: number };
 
 /**
- * 判定旗标。
- *
- * **已实现的**（零新引擎机制）：
- *   闪避   duration:300  + invulnerable
- *   格挡   duration:1500 + damageReduce:0.6
- *   限制   倒地用 restrictToTags（只能闪避）
- *
- * **尚未实现的**（只是设计意图，别当成已有能力）：
- *   派生   技能 A 挂 comboWindow buff；技能 B 的 requires 检查它
- *          —— 目前 `content.ts` 里 `requires:` 0 处、没有 buff 定义
- *             `comboWindow`，`isInComboWindow()` 在生产代码零调用
+ * 判定旗标。闪避/格挡/限制/派生**全部落在数据上**，零新引擎机制：
+ * `invulnerable` · `damageReduce` · `restrictToTags` · `comboWindow`。
  */
 export interface BuffFlags {
   readonly invulnerable?: boolean;
   readonly damageReduce?: number;
   readonly ccImmune?: boolean;
   readonly interruptImmune?: boolean;
-  /** 派生窗口（**机制未实现**，见 `BuffFlags` 头部的说明）。 */
+  /**
+   * 派生窗口：**只有这个 buff 在时，列表里的技能才被激活**（与
+   * `restrictToTags` 方向相反，见本接口头部）。
+   */
   readonly comboWindow?: readonly SkillId[];
+  /**
+   * **这次派生是从哪个技能来的** —— UI 靠它把派生技画在原技能上方。
+   *
+   * ⚠️ 记在 buff 上而不是技能的静态字段：同一个派生技可能由多个源
+   * 技能派生，而"后派生的顶掉先派生的"意味着**源是动态的** ——
+   * buff 刷新时 flags 一起被覆盖，顶掉是天然的。
+   */
+  readonly comboWindowSource?: SkillId;
   /** 动作锁：期间不能施放任何技能（施法僵直） */
   readonly actionLock?: boolean;
   /**
-   * **技能 tag 白名单（限制）**：期间**只能**施放带这些 tag 之一的技能。
+   * **技能 tag 白名单（限制）**：期间**只能**施放带这些 tag 之一的技能，
    * 多个来源取并集。见 `KNOCKDOWN`（「倒地」）。
    *
-   * ⚠️ **这是「限制」，与「派生」是两种机制**（用户纠正过）：
-   *
-   *   限制（本字段 / `actionLock`）— **负向、排除**、**全局**
-   *     "除了白名单里的，其它都不行"（倒地时「攻」被排除）
-   *   派生（`comboWindow` + `requires`）— **正向、激活**、**单技**
-   *     "只有这个 buff 在时，这个技能才被激活"（平时它根本不可用）
-   *
-   * ⚠️ 我曾在注释里把两者说成"同一类机制的两个粒度" —— **错了**：
-   * 方向写反（正/负）、作用面也写错（全局/单技）。
-   *
-   * ⚠️ **派生还没做**（`content.ts` 里 `requires:` 0 处、没有 buff 定义
-   * `comboWindow`），所以 `comboWindow` 目前**没有使用者**。
+   * ⚠️ 与「派生」是**两种机制**：限制是**负向、排除、全局**
+   * （"除了白名单都不行"），派生是**正向、激活、单技**
+   * （"只有 buff 在时这个技能才被激活"）。
    */
   readonly restrictToTags?: readonly SkillTag[];
 }
@@ -481,7 +474,12 @@ export type EffectKind =
   | 'resource'
   | 'interrupt'
   | 'dispel'
-  | 'applyDebuffStack';
+  | 'applyDebuffStack'
+  /**
+   * 调整某个技能的冷却（负数为退还）。⚠️ 直接改 `combatant.cooldowns`
+   * 而不是挂 buff —— 后者会让冷却状态分裂成两处，UI 显示不对。
+   */
+  | 'cooldown';
 
 /** 效果 = 一次结算里发生的事。技能 `hits[].effects` 与独立 ability 共用它。 */
 export interface Effect {
@@ -493,6 +491,22 @@ export interface Effect {
   readonly buffId?: BuffId;
   /** resource 用 */
   readonly resource?: { readonly key: ResourceKey; readonly delta: number | Expr };
+  /**
+   * `kind: 'cooldown'` 用：调整**哪个**技能的冷却（不填 = 当前技能自己，
+   * 那是「截」"成功不进 CD"的用法；填了供"被控时加 CD"用）。
+   */
+  readonly skillId?: SkillId;
+  /** `kind: 'cooldown'` 用：加/减多少毫秒（负数 = 退还）。 */
+  readonly cooldownMs?: number;
+  /**
+   * **只在"这个效果真的生效了"时，再结算这些效果**（需求：「截」的
+   * "如果成功，不进入 cd"）。
+   *
+   * ⚠️ 需要它是因为 `interrupt` 可能什么都没打断（目标没读条 / 带
+   * `interruptImmune`），而技能**先扣 CD 再结算命中** —— "成功才退 CD"
+   * 只能等运行期知道结果之后决定，静态的 `abilities` 表达不了。
+   */
+  readonly onSuccess?: readonly Effect[];
   /** 不填则取所在 ability / hit 的目标 */
   readonly target?: TargetRule;
   readonly when?: Condition;
@@ -605,18 +619,8 @@ export interface ConsumeAbility {
  * **不需要新的 kind**，只需要新的 StatKey / Expr 节点 / Hook。
  */
 /**
- * 能力在**读条的哪个时刻**结算。
- *
- *   - `'castFinish'`（默认）：读条走完才生效 —— 绝大多数能力（伤害、增伤）
- *     都该在这个时刻
- *   - `'castStart'`：**起手就生效**，整个前摇期间都在
- *
- * 需求逼出来的：重斩要"自带霸体"，而霸体的意义就是"整个前摇打不断"。
- * 如果它跟其它能力一样在读条完成时才挂上，前摇期间照样能被「破」
- * 打断 —— 霸体等于没有。
- *
- * 一个技能可以同时有两组能力：`castStart` 用于"施法期间的状态"
- * （霸体、施法光环），默认的 `castFinish` 用于"结算结果"。
+ * 能力在**读条的哪个时刻**结算。默认 `'castFinish'`（读条结束）。
+ * 传 `'castStart'` 用于"施法期间的状态"（霸体、施法光环）。
  */
 export type AbilityTiming = 'castStart' | 'castFinish';
 

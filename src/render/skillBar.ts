@@ -41,6 +41,13 @@ export class SkillBarView implements FramePart {
     cost: Label;
     skillCd: Label;
     rect: { x: number; y: number; w: number; h: number };
+    /**
+     * 派生技专用：它**不占自己的槽位**，而是画在源技能的上方。
+     *
+     * 需求："键盘派生技能显示在**原技能的上方**。"
+     * `undefined` = 正常槽位（按 index 排）。
+     */
+    overrideRect?: { x: number; y: number; w: number; h: number };
   }> = [];
   /**
    * UI 缩放系数（默认 1）。
@@ -98,11 +105,20 @@ export class SkillBarView implements FramePart {
     this.slotCount = 0;
   }
 
-  private ensure(count: number): void {
+  /**
+   * @param count 要画的槽位总数
+   * @param overlayCount 其中**派生技**的个数（它们不占正常槽位，
+   *   而是画在源技能上方）—— 布局按 `count - overlayCount` 排，
+   *   否则右对齐会整体错位。
+   */
+  private ensure(count: number, overlayCount = 0): void {
     const target = Math.min(count, LAYOUT.skillBar.max);
+    /** 参与常规排布的槽位数（派生技不算）。 */
+    const baseCount = Math.max(1, target - overlayCount);
     while (this.slots.length < target) {
       const i = this.slots.length;
-      const rect = skillSlotRect(i, target, this.uiScale);
+      // 派生技的位置由 `overrideRect` 决定，这里给个占位矩形即可
+      const rect = skillSlotRect(i, baseCount, this.uiScale);
       const pos = skillSlotLabels(rect);
       const gfx = new this.pixi.Graphics();
 
@@ -210,7 +226,8 @@ export class SkillBarView implements FramePart {
       this.slotCount = target;
       // 右对齐：槽位数变化时整条栏向左延展
       for (let i = 0; i < this.slots.length; i += 1) {
-        const rect = skillSlotRect(i, target, this.uiScale);
+        // 同上：重排也只按核心槽位数，派生技走 overrideRect
+        const rect = skillSlotRect(i, baseCount, this.uiScale);
         const pos = skillSlotLabels(rect);
         const s = this.slots[i];
         if (!s) continue;
@@ -240,7 +257,7 @@ export class SkillBarView implements FramePart {
   }
 
   private draw(skills: readonly SkillSlotView[], showKeyHints: boolean): void {
-    this.ensure(skills.length);
+    this.ensure(skills.length, skills.filter((s) => s.derivedFrom !== undefined).length);
 
     for (let i = 0; i < this.slots.length; i += 1) {
       const s = this.slots[i];
@@ -257,7 +274,14 @@ export class SkillBarView implements FramePart {
         continue;
       }
 
-      const { x, y, w, h } = s.rect;
+      /**
+       * 派生技画在**源技能的上方**（需求）。覆盖矩形只在有 `derivedFrom`
+       * 时才算，所以普通槽位零开销、行为完全不变。
+       */
+      const rect = view.derivedFrom === undefined
+        ? s.rect
+        : derivedRect(s.rect, view.key, skills);
+      const { x, y, w, h } = rect;
       const g = s.gfx;
       g.clear();
 
@@ -379,4 +403,34 @@ export class SkillBarView implements FramePart {
       }
     }
   }
+}
+
+/**
+ * 派生技的显示矩形：**源技能格的正上方**，缩到 70%。
+ *
+ * 需求："键盘派生技能显示在原技能的上方。"
+ *
+ * ⚠️ 缩到 70% 是为了视觉上"挂在"源技能上（而不是像一个独立槽位）——
+ * 玩家一眼能看出它是从下面那个技能派生出来的。
+ *
+ * ⚠️ 找不到源槽位时**退回原矩形**：宁可画在自己位置上，
+ * 也不要画到画布外或跟别人重叠。
+ */
+function derivedRect(
+  own: { x: number; y: number; w: number; h: number },
+  sourceKey: string,
+  skills: readonly SkillSlotView[],
+): { x: number; y: number; w: number; h: number } {
+  const sourceIndex = skills.findIndex(
+    (s) => s.derivedFrom === undefined && s.key === sourceKey,
+  );
+  if (sourceIndex < 0) return own;
+  const source = skillSlotRect(sourceIndex, Math.min(skills.length, LAYOUT.skillBar.max), 1);
+  const size = Math.round(own.w * 0.7);
+  return {
+    x: source.x + Math.round((source.w - size) / 2),
+    y: source.y - size - 4,
+    w: size,
+    h: size,
+  };
 }

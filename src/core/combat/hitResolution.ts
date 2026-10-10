@@ -88,7 +88,7 @@ export function resolveHit(
             { crit, multiplier: crit ? 1 + (casterStats.critDamage ?? 0) : 1 },
           );
           // 命中本身也会触发"授予 buff"类效果（例如 Boss 给自己挂前摇标记）
-          applyHitEffects(ctx, actor, target, effect);
+          applyHitEffects(ctx, actor, target, effect, skill.id);
           const applied = applyDamage(
             ctx.current(target.id),
             result,
@@ -119,7 +119,7 @@ export function resolveHit(
           break;
         }
         default:
-          applyHitEffects(ctx, actor, target, effect);
+          applyHitEffects(ctx, actor, target, effect, skill.id);
           break;
       }
     }
@@ -131,6 +131,8 @@ export function applyHitEffects(
   actor: Combatant,
   target: Combatant,
   effect: Effect,
+  /** 触发这个效果的技能 —— `cooldown` 效果默认调它自己的冷却。 */
+  skillId?: string,
 ): void {
     if (effect.kind === 'grantBuff' && effect.buff) {
       const who = effect.target?.mode === 'self' ? actor : target;
@@ -183,6 +185,39 @@ export function applyHitEffects(
       const result = changeResource(ctx.current(actor.id), effect.resource.key, delta, ctx.state.tick);
       ctx.replaceCombatant(result.combatant);
       ctx.events.push(...result.events);
+      return;
+    }
+
+    if (effect.kind === 'cooldown') {
+      /**
+       * 调整某个技能的冷却。
+       *
+       * 需求（「截」）："如果成功，不进入 cd，失败则 cd 10 秒" ——
+       * 施放时已经扣了 10 秒，成功后这里**减去**同样的量即"不进 CD"。
+       *
+       * ⚠️ 直接改 `combatant.cooldowns` 而不是挂一个"加 CD"的 buff：
+       * 那样冷却状态会分裂成两处（真实 CD 与 buff），而 UI 的冷却圈
+       * 与 gate 的判定都读真实 CD，就会显示不一致。
+       *
+       * ⚠️ 下限钳到 `tick`：冷却语义是"`readyAt <= tick` 即可用"
+       * （见 `checkGate`），所以减到"现在"就是"已就绪"，再小没有意义
+       * —— 而且负值会让 UI 的剩余比例算出负数。
+       */
+      const who = ctx.current(actor.id);
+      const which = effect.skillId ?? skillId;
+      if (which !== undefined) {
+        const readyAt = who.cooldowns[which];
+        if (readyAt !== undefined) {
+          const delta = effect.cooldownMs ?? 0;
+          ctx.replaceCombatant({
+            ...who,
+            cooldowns: {
+              ...who.cooldowns,
+              [which]: Math.max(ctx.state.tick, readyAt + delta),
+            },
+          });
+        }
+      }
       return;
     }
 
@@ -245,7 +280,36 @@ export function applyHitEffects(
               skillId: cast.skillId,
             });
           }
+          /**
+           * **真打断到了** → 结算 `onSuccess`。
+           *
+           * 需求（「截」）："瞬发，打断 boss 技能，**如果成功**，不进入 cd"。
+           *
+           * ⚠️ 只有走到这里才算成功。上面两条早返回都是失败：
+           *   - `interruptImmune`（霸体）→ return
+           *   - 目标没在读条 / 读条不可打断 → 不进这个分支
+           * 正好对应需求里的"失败则 cd 10 秒"（CD 是施放时就扣的，
+           * 不退还就自然留着）。
+           */
+          applyEffects(ctx, actor, target, effect.onSuccess, skillId);
         }
       }
     }
+  }
+
+  /**
+   * 结算一组效果（供 `onSuccess` 链式递归用）。
+   *
+   * 抽出来是因为 `applyHitEffects` 里已经有一层 `if` 链，
+   * 再嵌一层 `for` + 递归会让那个函数难以阅读。
+   */
+  function applyEffects(
+    ctx: HitResolutionContext,
+    actor: Combatant,
+    target: Combatant,
+    effects: readonly Effect[] | undefined,
+    skillId: string | undefined,
+  ): void {
+    if (effects === undefined) return;
+    for (const next of effects) applyHitEffects(ctx, actor, target, next, skillId);
   }

@@ -195,6 +195,8 @@ export const zhCN = {
 
   /** 内容：buff */
   buff: {
+    /** 派生窗口：只有它在时，派生技（「击」）才被激活 */
+    comboWindow: { name: '派生' },
     entropySurge: { name: '势能涌动' },
   },
 
@@ -235,7 +237,11 @@ export const zhCN = {
     },
     break: {
       name: '破',
-      desc: '瞬发。打断目标的任何招式。固定 5 秒冷却。',
+      desc: '瞬发。打断目标的任何招式。打断成功则冷却归零并派生「击」；失败则 10 秒冷却。',
+    },
+    strike: {
+      name: '击',
+      desc: '派生技。伤害是「攻」的一半，无任何消耗。只在打断成功后出现，用掉即消失。',
     },
     blast: {
       name: '轰',

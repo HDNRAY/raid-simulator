@@ -145,6 +145,8 @@ export function normalizeKey(event: {
   readonly code?: string;
   readonly shiftKey?: boolean;
   readonly ctrlKey?: boolean;
+  /** Mac 的 Command。需求要求 ctrl/command 都支持。 */
+  readonly metaKey?: boolean;
   readonly altKey?: boolean;
 }): string {
   let base = event.key.toLowerCase();
@@ -156,6 +158,14 @@ export function normalizeKey(event: {
 
   const parts: string[] = [];
   if (event.ctrlKey) parts.push('ctrl');
+  /**
+   * ⚠️ `metaKey` = Mac 的 **Command**。
+   *
+   * 需求："快捷键是 ctrl/command + 原技能快捷键" —— 所以两个都要认。
+   * 原先没有这一行，于是 Mac 上按 Cmd 会被当成"没按修饰键"，
+   * `Cmd+Q` 与 `Q` 归一化成同一个 key，派生技永远触发不了。
+   */
+  if (event.metaKey) parts.push('meta');
   if (event.altKey) parts.push('alt');
   if (event.shiftKey && !/^[0-9]$/.test(base)) parts.push('shift');
   parts.push(base);
@@ -204,6 +214,20 @@ export interface InputOptions {
    * `releaseSkill` —— 引擎据此维护"按住"状态并每逻辑步扣资源。
    */
   readonly isHoldSkill?: (skillId: string) => boolean;
+  /**
+   * **派生技解析**：`Ctrl/Cmd + 原技能键` 时该放哪个技能。
+   *
+   * 需求："键盘派生技能显示在原技能的上方，快捷键是 ctrl/command +
+   * 原技能快捷键。"
+   *
+   * 入参是**归一化后的 base 键**（不含修饰前缀），返回派生技 id；
+   * 没有生效中的派生窗口时返回 `undefined` —— 那时按 `Ctrl+Q`
+   * 就什么都不做（而不是误放「攻」）。
+   *
+   * ⚠️ 交给调用方注入而不是在输入层硬编码：输入层不该知道
+   * "哪个 buff 派生了哪个技能"，那是内容/引擎的事。
+   */
+  readonly resolveDerived?: (baseKey: string) => string | undefined;
 }
 
 /**
@@ -262,7 +286,21 @@ export function createKeyboardInput(
     // 连发由引擎侧的"按住"逻辑处理（避免队列被刷爆）
     if (event.repeat) return;
 
-    const skillId = keyToSkill.get(key);
+    /**
+     * `Ctrl/Cmd + base` → 派生技。
+     *
+     * ⚠️ **只认 ctrl / meta**，不认 shift/alt：需求写的是
+     * "ctrl/command + 原技能快捷键"。而且这样 `Shift+Q` 这种
+     * 玩家自定义绑定不会被误当成派生。
+     */
+    const baseKey = key.replace(/^(ctrl|meta|alt|shift)\+/g, '');
+    const withModifier = key.includes('+');
+    const derived =
+      withModifier && (key.startsWith('ctrl+') || key.startsWith('meta+'))
+        ? options.resolveDerived?.(baseKey)
+        : undefined;
+
+    const skillId = derived ?? keyToSkill.get(key);
     if (skillId) {
       const atTick = options.currentTick();
       if (options.isHoldSkill?.(skillId)) {

@@ -1,6 +1,6 @@
 import { BattleLoop } from './app/battleLoop';
-import { createTouchControls } from './app/touchControls';
-import { DEFAULT_SLOTS } from './app/viewAdapter';
+import { createTouchControls, derivedOfSnapshot } from './app/touchControls';
+import { slotsFromBindings } from './app/viewAdapter';
 import { createRegistry } from './core/content/registry';
 import { VERROT_BEHAVIORS } from './core/ai';
 import {
@@ -192,7 +192,13 @@ async function bootstrap(): Promise<void> {
         passiveModifiers: new Map(),
       },
       bindings: bindings,
-      slots: DEFAULT_SLOTS,
+      /**
+       * ⚠️ 传的是**基础槽位**：派生技（「击」）的槽位由 `ViewAdapter`
+       * 每帧**插进来** —— 窗口开了才有、用掉就消失
+       * （需求："用掉就消失了"）。适配器是唯一在读派生窗口的地方，
+       * 在这里再求值一遍就会有两处真相。
+       */
+      slots: slotsFromBindings(bindings),
       timeLimitMs: TIME_LIMIT_MS,
       stopOnEnd: true,
     });
@@ -521,6 +527,8 @@ async function bootstrap(): Promise<void> {
     bindings,
     currentTick: () => loop.engineState.snapshot.tick,
     isSettingsOpen: () => settingsOpen,
+    /** 派生技从**快照**读（`ViewAdapter` 已经算好，带 `derivedFrom`）。 */
+    derivedSkill: () => derivedOfSnapshot(loop.snapshot),
   });
   touchPreviewSource.read = () =>
     touch.layout.current().map((b) => registry.skill(b.skillId)?.nameKey ?? b.skillId);

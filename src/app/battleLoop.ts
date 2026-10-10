@@ -24,7 +24,13 @@ const MAX_CATCHUP_TICKS = 5;
 export interface BattleLoopOptions {
   readonly engineOptions: CreateBattleOptions;
   readonly bindings: readonly KeyBinding[];
-  readonly slots: readonly SlotBinding[];
+  /**
+   * 技能栏槽位。可以传**函数** —— 派生技的槽位是每帧变的
+   * （派生窗口开了才有），所以由 `ViewAdapter` 每帧调一次算出来。
+   */
+  readonly slots:
+    | readonly SlotBinding[]
+    | ((engine: BattleEngine) => readonly SlotBinding[]);
   readonly timeLimitMs?: number;
   readonly onRestart?: () => void;
   /** 注入输入源（测试用）；不给则绑定到 window。 */
@@ -114,6 +120,22 @@ export class BattleLoop {
       bindings: this.bindings,
       currentTick: () => this.engine.snapshot.tick,
       isHoldSkill: (skillId) => this.engine.skillOf(skillId)?.holdDrain !== undefined,
+      /**
+       * **派生技**：`Ctrl/Cmd + 源技能键` → 放派生技。
+       *
+       * 需求："快捷键是 ctrl/command + 原技能快捷键。"
+       *
+       * ⚠️ 从**上一帧的快照**读（`this.snapshot` 是缓存的），因为
+       * 派生窗口的开合是 `ViewAdapter` 在读 —— 输入层不该自己去
+       * 翻 buff。`snapshot.skills` 里带 `derivedFrom` 的槽位就是
+       * 当前可用的派生技，它的 `key` 就是源技能的键。
+       */
+      resolveDerived: (baseKey) => {
+        const slot = this.snapshot.skills.find(
+          (s) => s.derivedFrom !== undefined && s.key.toLowerCase() === baseKey,
+        );
+        return slot?.skillId;
+      },
       /**
        * 界面按键不再由这里处理。
        *
@@ -288,7 +310,14 @@ export class BattleLoop {
   setBindings(next: readonly KeyBinding[]): void {
     this.bindings = next;
     this.input?.setBindings(next);
-    this.options = { ...this.options, slots: slotsFromBindings(next) };
+    /**
+     * ⚠️ 只在 `slots` **不是函数**时才重算：函数形态由 `ViewAdapter`
+     * 每帧自己算（它要读派生窗口），覆盖成静态数组会让派生技永远
+     * 不再出现。
+     */
+    if (typeof this.options.slots !== 'function') {
+      this.options = { ...this.options, slots: slotsFromBindings(next) };
+    }
     this.view = undefined;
   }
 

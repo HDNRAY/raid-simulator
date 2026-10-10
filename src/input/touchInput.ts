@@ -43,6 +43,7 @@
 import type { Action } from '../core/types';
 import type { InputSource, KeyBinding } from './keyboard';
 import type { TouchLayout } from './touchLayout';
+import { BADGE_OFFSET_RATIO, BADGE_RADIUS_RATIO } from '../render/touchButtonLayer';
 
 /** 合成 key 的前缀。不会与真按键撞名。 */
 export const TOUCH_KEY_PREFIX = 'touch:';
@@ -59,6 +60,14 @@ export interface TouchHitArea {
   readonly x: number;
   readonly y: number;
   readonly r: number;
+  /**
+   * 这个按钮上**当前挂着的派生技**（没有则空）。
+   *
+   * 需求："移动端则需要设计一下。" —— 派生技不占扇形槽位，而是画成
+   * 原按钮上的角标环。所以命中测试要在**同一个按钮**上再分一层：
+   * 点到环上 = 放派生技，点到圆内 = 放原技能。
+   */
+  readonly derivedSkillId?: string | undefined;
 }
 
 /**
@@ -77,6 +86,38 @@ export function hitTestButtons(
     const dx = px - area.x;
     const dy = py - area.y;
     if (dx * dx + dy * dy <= area.r * area.r) return area;
+  }
+  return undefined;
+}
+
+/**
+ * 角标环的命中测试。
+ *
+ * 只用"到环心的距离"，而**不复用渲染层的 `badgeCenter`** ——
+ * 那会把渲染层（Pixi）拖进输入层的依赖里。两边的几何靠
+ * `BADGE_OFFSET_RATIO` / `BADGE_RADIUS_RATIO` 两个导出常量对齐。
+ *
+ * ⚠️ 环心（`0.6·√2·r ≈ 0.85r`）**落在按钮圆内**，所以环与按钮的
+ * 命中区**一定重叠** —— 调用方必须先试环、再试圆（见 `pointerDown`）。
+ */
+export function hitTestBadge(
+  areas: readonly TouchHitArea[],
+  px: number,
+  py: number,
+): TouchHitArea | undefined {
+  for (const area of areas) {
+    if (area.derivedSkillId === undefined || area.derivedSkillId === '') continue;
+    const d = area.r * BADGE_OFFSET_RATIO;
+    const bx = area.x + d;
+    const by = area.y - d;
+    /**
+     * 命中半径比画出来的环**大一圈**（× 1.4）：手指比鼠标粗，
+     * 严格按视觉半径会让它很难点中。
+     */
+    const hitR = area.r * BADGE_RADIUS_RATIO * 1.4;
+    const dx = px - bx;
+    const dy = py - by;
+    if (dx * dx + dy * dy <= hitR * hitR) return area;
   }
   return undefined;
 }
@@ -165,8 +206,25 @@ export function createTouchInput(options: TouchInputOptions): TouchInputSource {
      */
     pointerDown(pointerId: number, px: number, py: number): boolean {
       if (options.isCapturing?.() === true) return false;
-      const area = hitTestButtons(options.hitAreas(), px, py);
+      const areas = options.hitAreas();
+      /**
+       * ⚠️ **先试角标环，再试按钮本体** —— 环压在圆的右上角，
+       * 两者有重叠区域。顺序反了的话，点环会放到原技能上。
+       */
+      const badge = hitTestBadge(areas, px, py);
+      const area = badge ?? hitTestButtons(areas, px, py);
       if (area === undefined) return false;
+      /**
+       * 命中角标 → 放**派生技**；否则放按钮自己的技能。
+       * 两者走同一条"按住"语义（派生技也可以是按住型）。
+       */
+      const useSkillId = badge !== undefined ? badge.derivedSkillId ?? badge.skillId : area.skillId;
+      if (badge !== undefined) {
+        const target = { ...area, skillId: useSkillId };
+        active.set(pointerId, target);
+        pending.push({ type: 'hold', skillId: useSkillId, atTick: options.currentTick() });
+        return true;
+      }
       /**
        * 同一个手指重复按下（有些浏览器会补发）→ 只认第一次，
        * 否则会重复扣一次施放代价。

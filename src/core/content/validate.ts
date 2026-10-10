@@ -36,7 +36,14 @@ export type ValidationCode =
   | 'DANGLING_NAMESPACE'
   | 'HARDCODED_TEXT'
   | 'UNKNOWN_STAT'
-  | 'EMPOWERED_ABILITY';
+  | 'EMPOWERED_ABILITY'
+  /**
+   * `onSuccess` 退还的冷却与自己扣的不相等。
+   *
+   * 「截」的"成功不进 CD"就是靠这两个数字相等实现的 —— 不等会静默
+   * 坏掉（退多了被钳住看不出来，退少了成功之后还剩一截 CD）。
+   */
+  | 'COOLDOWN_REFUND_MISMATCH';
 
 export interface ValidationIssue {
   readonly severity: 'error' | 'warning';
@@ -258,6 +265,40 @@ function validateSkill(
         path: at('abilities'),
         message: `grantSkill references unknown skill "${ability.skillId}"`,
       });
+    }
+  }
+
+  /**
+   * **退还的冷却不能超过自己扣的冷却**。
+   *
+   * 需求（「截」）："如果成功，不进入 cd，失败则 cd 10 秒" ——
+   * 实现是"施放时扣 10 秒，成功时退还 10 秒"。两者**必须相等**：
+   *
+   *   - 退多了 → 减到 `tick` 被钳住，**看起来对**，但掩盖了配置错误
+   *   - 退少了 → 成功之后还剩一截 CD，玩家会以为"怎么还在转"
+   *
+   * 这条断言就是防那两种。踩过的坑：这种"两个数字必须相等"的约定
+   * 只写在注释里，改一个忘一个就静默坏掉 —— 所以让它可执行。
+   */
+  for (const [hitIndex, hit] of skill.hits.entries()) {
+    for (const [effectIndex, effect] of hit.effects.entries()) {
+      for (const nested of effect.onSuccess ?? []) {
+        if (nested.kind !== 'cooldown') continue;
+        // 只校验"退自己"的情况（`skillId` 填了别人的属于另一回事）
+        const which = nested.skillId ?? skill.id;
+        if (which !== skill.id) continue;
+        const refund = -(nested.cooldownMs ?? 0);
+        if (refund > 0 && refund !== skill.cooldown) {
+          push({
+            severity: 'error',
+            code: 'COOLDOWN_REFUND_MISMATCH',
+            path: at(`hits[${hitIndex}].effects[${effectIndex}].onSuccess`),
+            message:
+              `refunds ${refund}ms but skill cooldown is ${skill.cooldown}ms — ` +
+              `"no cooldown on success" requires them to be equal`,
+          });
+        }
+      }
     }
   }
 }

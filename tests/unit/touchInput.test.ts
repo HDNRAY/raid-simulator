@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createTouchInput,
+  hitTestBadge,
   hitTestButtons,
   touchKeyOf,
   TOUCH_KEY_PREFIX,
@@ -200,5 +201,76 @@ describe('触屏按下 → 引擎：不能自己把自己拒了', () => {
       (a) => 'skillId' in a && a.skillId === 'attack',
     );
     expect(forAttack).toHaveLength(1);
+  });
+});
+
+describe('修饰键归一化（派生技靠 ctrl/command + 原技能键）', () => {
+  /**
+   * 需求："快捷键是 ctrl/command + 原技能快捷键。"
+   *
+   * ⚠️ `metaKey` = Mac 的 Command。原先归一化里**没有它**，于是
+   * `Cmd+Q` 被当成 `Q`，派生技永远触发不了。
+   */
+  it('Ctrl 与 Cmd 都进归一化，且与基础键区分开', async () => {
+    const { normalizeKey } = await import('../../src/input/keyboard');
+    const base = { key: 'q', code: 'KeyQ' };
+    expect(normalizeKey({ ...base })).toBe('q');
+    expect(normalizeKey({ ...base, ctrlKey: true })).toBe('ctrl+q');
+    expect(normalizeKey({ ...base, metaKey: true })).toBe('meta+q');
+    // 两者**不同**（Mac 与 Win 各认各的）
+    expect(normalizeKey({ ...base, ctrlKey: true })).not.toBe(
+      normalizeKey({ ...base, metaKey: true }),
+    );
+  });
+});
+
+describe('角标环（移动端的派生技）', () => {
+  /**
+   * 需求："移动端则需要设计一下。"
+   *
+   * 设计：派生技**不占扇形槽位**，而是画成**原按钮右上角的环**。
+   * 所以命中测试要在同一个按钮上再分一层：点环 = 放派生技，
+   * 点圆内 = 放原技能。
+   */
+  const withBadge: readonly TouchHitArea[] = [
+    { index: 0, skillId: 'break', x: 100, y: 100, r: 36, derivedSkillId: 'strike' },
+  ];
+
+  it('点到环上 → 命中角标（而不是原技能）', () => {
+    // 环心 = 按钮圆心 + (r*0.72, -r*0.72)
+    /**
+     * ⚠️ 这里用的是**新的** 0.6 偏移。原先 0.72 时环心到按钮圆心
+     * `0.72·√2·r ≈ 1.02r`，**落在按钮外** —— 环有一大半露在外面，
+     * 而且点它会先命中按钮边缘。这条断言当时就失败了，是个真问题。
+     */
+    const d = 36 * 0.6;
+    expect(hitTestBadge(withBadge, 100 + d, 100 - d)?.derivedSkillId).toBe('strike');
+    // 环心落在按钮圆内 —— 所以"先试环再试圆"这个顺序是必需的
+    expect(hitTestButtons(withBadge, 100 + d, 100 - d)?.skillId).toBe('break');
+  });
+
+  it('点到按钮正中 → 不命中环（放原技能）', () => {
+    expect(hitTestBadge(withBadge, 100, 100)).toBeUndefined();
+  });
+
+  it('没有派生技时不命中环', () => {
+    const noBadge: readonly TouchHitArea[] = [
+      { index: 0, skillId: 'break', x: 100, y: 100, r: 36 },
+    ];
+    const d = 36 * 0.6;
+    expect(hitTestBadge(noBadge, 100 + d, 100 - d)).toBeUndefined();
+  });
+
+  it('【关键】按下时点环 → 产出的是**派生技**的 hold', () => {
+    const layout = createTouchLayout([{ index: 0, skillId: 'break' }]);
+    let tick = 0;
+    const input = createTouchInput({
+      layout,
+      currentTick: () => tick++,
+      hitAreas: () => withBadge,
+    });
+    const d = 36 * 0.6;
+    expect(input.pointerDown(1, 100 + d, 100 - d)).toBe(true);
+    expect(input.drain()).toEqual([{ type: 'hold', skillId: 'strike', atTick: 0 }]);
   });
 });

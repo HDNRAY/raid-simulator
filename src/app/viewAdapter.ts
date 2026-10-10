@@ -14,6 +14,13 @@
 import type { BattleEngine } from '../core/combat/battleState';
 import type { SkillDef, EventDef } from '../core/types';
 import { PALETTE } from '../render/theme';
+import { deriveSlots, type SlotBinding } from './derivedSlots';
+/**
+ * 槽位相关的两个导出**搬到了 `./derivedSlots`**（那里才是内聚的位置：
+ * 派生技的槽位推导与基础槽位推导是一件事）。这里**转发**，外部
+ * import 路径不变。
+ */
+export { DEFAULT_SLOTS, slotsFromBindings, type SlotBinding } from './derivedSlots';
 import {
   blockKeyOf,
   damageColor,
@@ -32,13 +39,6 @@ import type {
   SkillSlotView,
   SlotCost,
 } from '../render/viewModel';
-
-/** 一条槽位绑定（键位 → 技能）。 */
-export interface SlotBinding {
-  readonly index: number;
-  readonly key: string;
-  readonly skillId: string;
-}
 
 /**
  * 适配器：持有"渲染侧的瞬时状态"（飘字、闪光），
@@ -300,7 +300,7 @@ export class ViewAdapter {
   /** 构建完整的渲染快照。 */
   build(
     engine: BattleEngine,
-    slots: readonly SlotBinding[],
+    slots: readonly SlotBinding[] | ((engine: BattleEngine) => readonly SlotBinding[]),
     options: { readonly timeLimitMs?: number } = {},
   ): BattleSnapshotView {
     const state = engine.snapshot;
@@ -320,9 +320,34 @@ export class ViewAdapter {
     const comboWindowOpen = player.buffs.some(
       (b) => b.id === 'combo-window' && b.remainingMs > 0,
     );
+    /**
+     * **派生窗口是从哪个技能来的** —— 需求要求把派生技画在源技能上方。
+     *
+     * ⚠️ 从 buff 的 flags 读而不是查技能的静态字段：源是**动态的**
+     * （"后派生的顶掉先派生的"），buff 刷新时 flags 一起被覆盖。
+     */
+    const derivedFrom = playerRaw.buffs.find(
+      (b) => b.defId === 'combo-window',
+    )?.def?.flags?.comboWindowSource;
 
-    const skills = slots
-      .map((slot) => this.buildSlot(engine, slot, state.tick, playerStats.haste ?? 0, comboWindowOpen))
+    /**
+     * ⚠️ `slots` 允许是**函数**：派生技的槽位是**每帧变**的
+     * （窗口开了才有、用掉就消失），提前算好会一直显示过期状态。
+     */
+    const resolvedSlots = typeof slots === 'function' ? slots(engine) : slots;
+    /**
+     * **派生技的槽位在这里动态插进来。**
+     *
+     * 它不在绑定表里（平时不可用、也不该出现在设置页），所以只能由
+     * "源技能有派生窗口"这一个事实推出来。而判定用的 `comboWindowOpen`
+     * 与 `derivedFrom` 是**同一个来源**（上面刚读的 buff），
+     * 所以不会出现"技能栏说能用、按下去被拒"。
+     */
+    const { slots: derivedSlots } = deriveSlots(resolvedSlots, playerRaw.buffs, this.skills);
+    const skills = derivedSlots
+      .map((slot) =>
+        this.buildSlot(engine, slot, state.tick, playerStats.haste ?? 0, comboWindowOpen, derivedFrom),
+      )
       .filter((s): s is SkillSlotView => s !== undefined);
 
     const result =
@@ -405,6 +430,8 @@ export class ViewAdapter {
     tick: number,
     haste: number,
     comboWindowOpen: boolean,
+    /** 派生窗口的源技能（没有窗口时为 undefined）。 */
+    derivedFrom: string | undefined,
   ): SkillSlotView | undefined {
     const skill = this.skills.get(slot.skillId);
     if (!skill) return undefined;
@@ -479,6 +506,13 @@ export class ViewAdapter {
       // 固有冷却（满值）—— 左下角显示的那个
       skillCdSec: skill.cooldown / 1000,
       comboReady: (skill.requires?.length ?? 0) > 0 && conditionOk,
+      /**
+       * 只有**派生技**才带 `derivedFrom` —— 判断依据是"它有 requires"。
+       * 渲染层据此把它画在源技能旁边，而不是占一个正常槽位。
+       */
+      ...((skill.requires?.length ?? 0) > 0 && comboWindowOpen && derivedFrom !== undefined
+        ? { derivedFrom }
+        : {}),
       ...(blockedKey === undefined ? {} : { blockedKey }),
     };
   }
@@ -598,41 +632,7 @@ function emptyView(tick: number): BattleSnapshotView {
   };
 }
 
-/**
- * 从**键位表**推导战斗画面右下角的技能格。
- *
- * ==================================================================
- * 为什么不让调用方手写 slots
- * ==================================================================
- *
- * 原先 `DEFAULT_SLOTS` 是一张**写死的 6 格表**，与键位表各说各话。
- * 于是改键之后画面不跟着变，而"新增一个默认不绑键的技能（「闪」）"
- * 也没法表达 —— 它要么强行占一格，要么根本不出现。
- *
- * 现在**键位表是唯一真相来源**：
- *   - 有键的技能才出现在战斗画面，顺序按 `index`
- *   - 没键的技能（「闪」默认如此）仍然在设置里可绑，但不占画面
- *
- * ⚠️ 需求："暂时不设置最大按键数量" —— 这里不做截断，
- * 技能栏自己按画布宽度收窄（见 `SkillBarView` 的 `max`）。
- */
-export function slotsFromBindings(
-  bindings: readonly { readonly key: string; readonly skillId: string }[],
-): readonly SlotBinding[] {
-  return bindings
-    .filter((b) => b.key !== '')
-    .map((b, i) => ({ index: i, key: b.key, skillId: b.skillId }));
-}
 
-/** 默认技能槽（= 默认键位表推导出的那一份）。 */
-export const DEFAULT_SLOTS: readonly SlotBinding[] = slotsFromBindings([
-  { key: 'q', skillId: 'attack' },
-  { key: 'w', skillId: 'blast' },
-  { key: 'e', skillId: 'focus' },
-  { key: 'r', skillId: 'break' },
-  { key: 'a', skillId: 'dodge' },
-  { key: 's', skillId: 'guard' },
-]);
 
 /** GCD 时长再导出，避免渲染层直接 import core/combat。 */
 

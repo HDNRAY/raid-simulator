@@ -43,6 +43,20 @@ import {
 import { detectBrowserPlatform, type PlatformCaps } from '../render/platform';
 import type { BattleSnapshotView } from '../render/viewModel';
 
+/**
+ * 从快照里挑出**生效中的派生技**。
+ *
+ * ⚠️ 放在这里而不是 `main.ts`：`main.ts` 已经贴着 700 行上限
+ * （AGENTS.md §3），而这个函数是触屏控件的一部分知识。
+ */
+export function derivedOfSnapshot(
+  view: BattleSnapshotView,
+): { readonly skillId: string; readonly sourceSkillId: string } | undefined {
+  const slot = view.skills.find((s) => s.derivedFrom !== undefined);
+  if (slot === undefined || slot.derivedFrom === undefined) return undefined;
+  return { skillId: slot.skillId, sourceSkillId: slot.derivedFrom };
+}
+
 export interface TouchControlsOptions {
   readonly pixi: PixiCtor;
   readonly translate: (key: string) => string;
@@ -51,6 +65,16 @@ export interface TouchControlsOptions {
   readonly currentTick: () => number;
   /** 设置面板是否打开（打开时触屏按钮让出输入权）。 */
   readonly isSettingsOpen: () => boolean;
+  /**
+   * 当前生效的派生技（没有则 `undefined`）。
+   *
+   * 需求："移动端则需要设计一下。" —— 派生技画成**原按钮上的角标环**，
+   * 所以命中测试要知道"哪个按钮上现在挂着什么"。
+   *
+   * ⚠️ 由主循环从**快照**读（那是渲染层已经算好的），
+   * 这里不自己去翻 buff —— 否则又是两处真相。
+   */
+  readonly derivedSkill: () => { readonly skillId: string; readonly sourceSkillId: string } | undefined;
 }
 
 export interface TouchControls {
@@ -103,11 +127,25 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
     if (!caps.touch) return [];
     const buttons = layout.current();
     const radius = TOUCH_BUTTON_DIAMETER / 2;
+    const derived = options.derivedSkill();
     return buttons
       .map((b) => {
         const center = touchButtonCenter(b.index);
         if (center === undefined) return undefined;
-        return { index: b.index, skillId: b.skillId, x: center.x, y: center.y, r: radius };
+        const attached =
+          derived !== undefined && derived.sourceSkillId === b.skillId
+            ? derived.skillId
+            : undefined;
+        const area: TouchHitArea = {
+          index: b.index,
+          skillId: b.skillId,
+          x: center.x,
+          y: center.y,
+          r: radius,
+          /** 派生技挂在**源**按钮上（画成角标环）。 */
+          ...(attached === undefined ? {} : { derivedSkillId: attached }),
+        };
+        return area;
       })
       .filter((a): a is TouchHitArea => a !== undefined);
   };
