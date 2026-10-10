@@ -64,11 +64,12 @@
  * 它同时导出**命中区域**给输入层 —— 因为"按钮画在哪"只有它知道。
  */
 
-import type { BattleSnapshotView, SkillSlotView } from './viewModel';
+import type { BattleSnapshotView, ResourceKeyName, SkillSlotView } from './viewModel';
 import type { PixiCtor } from '../ui/primitives';
 import { Label } from '../ui/primitives';
 import { FONT } from '../ui/layout';
 import { PALETTE } from './theme';
+import { RESOURCE_COLORS } from './skillBar';
 
 /* ------------------------------------------------------------------ *
  * 几何
@@ -180,6 +181,7 @@ interface ButtonView {
   readonly gfx: InstanceType<PixiCtor['Graphics']>;
   readonly glyph: Label;
   readonly cd: Label;
+  readonly skillCd: Label;
   readonly cost: Label;
   /**
    * **派生技的角标环**（画在原按钮上的小环）。
@@ -265,9 +267,27 @@ export class TouchButtonLayer {
         anchorX: 0.5,
         anchorY: 0.5,
       });
+      /**
+       * **固有 CD**（左下）与**代价**（右下）分居两角 —— 与桌面技能格
+       * 同一套位置语言（那里 `skillCd` 在左下、`cost` 在右下）。
+       *
+       * ⚠️ 原先触屏只有 `cost`、且居中在字形下方，所以：
+       *   1. 代价**没有按资源上色**（需求："代价没有按颜色显示"）
+       *   2. **看不到这一招的 CD 是多少**（需求："也没显示招式的 cd
+       *      是多少（不是实时那个）"）
+       * 两者都在这一版补上。
+       */
+      const skillCd = new Label(this.pixi, {
+        x: -Math.round(radius * 0.46),
+        y: Math.round(radius * 0.56),
+        size: FONT.tiny,
+        color: PALETTE.textDim,
+        anchorX: 0.5,
+        anchorY: 0.5,
+      });
       const cost = new Label(this.pixi, {
-        x: 0,
-        y: 18,
+        x: Math.round(radius * 0.46),
+        y: Math.round(radius * 0.56),
         size: FONT.tiny,
         color: PALETTE.text,
         anchorX: 0.5,
@@ -310,13 +330,14 @@ export class TouchButtonLayer {
       ringRoot.addChild(ring, ringGlyph.root);
       ringRoot.visible = false;
 
-      root.addChild(gfx, glyph.root, cd.root, cost.root, ringRoot);
+      root.addChild(gfx, glyph.root, cd.root, skillCd.root, cost.root, ringRoot);
       this.root.addChild(root);
       this.buttons.push({
         root,
         gfx,
         glyph,
         cd,
+        skillCd,
         cost,
         ring,
         ringGlyph,
@@ -360,6 +381,7 @@ export class TouchButtonLayer {
        */
       button.glyph.set('');
       button.cd.set('');
+      button.skillCd.set('');
       button.cost.set('');
       return;
     }
@@ -377,11 +399,25 @@ export class TouchButtonLayer {
     } else {
       button.cd.set('');
       button.cost.set(this.costText(slot));
+      /** ⚠️ **按资源上色**（与桌面技能格同一个色表）。 */
+      const resource = slot.cost?.resource;
+      if (resource !== undefined && resource in RESOURCE_COLORS) {
+        button.cost.setColor(RESOURCE_COLORS[resource as ResourceKeyName]);
+      } else {
+        button.cost.setColor(PALETTE.text);
+      }
     }
+    /**
+     * **固有 CD**（整数秒）—— 与实时冷却不同，它**常驻显示**，
+     * 让玩家在技能可用时也知道"这一招多久能再放"。
+     * 无冷却（CD = 0）则留空。
+     */
+    button.skillCd.set(slot.skillCdSec > 0 ? String(Math.round(slot.skillCdSec)) : '');
     const dim = !slot.usable;
     button.glyph.root.alpha = dim ? 0.62 : 1;
     button.cd.root.alpha = 1;
     button.cost.root.alpha = dim ? 0.62 : 1;
+    button.skillCd.root.alpha = dim ? 0.62 : 1;
   }
 
   /**

@@ -19,7 +19,7 @@ import type { FrameContext, FramePart, TranslateFn } from './sceneTypes';
  * **与资源条用的是同一个 base 色** —— 玩家不用学第二套映射：
  * 格子右上角那个绿"10"就是左下面板的炁。
  */
-const RESOURCE_COLORS: Readonly<Record<ResourceKeyName, number>> = {
+export const RESOURCE_COLORS: Readonly<Record<ResourceKeyName, number>> = {
   hp: PALETTE.hp.base,
   energy: PALETTE.energy.base,
   douqi: PALETTE.douqi.base,
