@@ -60,11 +60,15 @@ export const IDLE_FEEDBACK: FeedbackState = { hitStopMs: 0, recoilX: 0, squashY:
 /**
  * 顿帧时长。
  *
- * 上限 70ms 是**刻意**的：再长在触屏上会让"按键没反应"的感觉出现。
- * 基准 25ms 对应一次普通命中 —— 刚好能感觉到"卡了一下"。
+ * ⚠️ 需求："受击动画播放快一点，时间短一点。" 原为 `25 + 45×I`
+ * （上限 70ms），实测偏"拖"—— 连打时像是在卡顿而不是在打击。
+ * 收到 `14 + 26×I`（上限 40ms）：仍然能感觉到"卡了一下"，
+ * 但不再打断连击的节奏。
+ *
+ * 上限 40ms 也远低于"触屏按键像没反应"的阈值。
  */
-const HIT_STOP_BASE_MS = 25;
-const HIT_STOP_SCALE_MS = 45;
+const HIT_STOP_BASE_MS = 14;
+const HIT_STOP_SCALE_MS = 26;
 
 /** 反冲幅度：基准 4px + 强度部分 10px。 */
 const RECOIL_BASE_PX = 4;

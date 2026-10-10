@@ -44,11 +44,31 @@ describe('通道：伤害该产生哪些反馈', () => {
     expect(heavy.squashY).toBeLessThan(light.squashY);
   });
 
-  it('【关键】顿帧上限压在 70ms 以内（触屏上不能像"没反应"）', () => {
+  it('【关键】顿帧时长落在"有感但不拖"的区间里', () => {
+    /**
+     * 需求："受击动画播放快一点，时间短一点。"
+     *
+     * 上限 40ms：再长在触屏上会让"按键没反应"的感觉出现，连打时
+     * 也会像卡顿而不是打击。
+     * 下限 > 0：不然"顿帧"根本没发生（玩家感觉不到）。
+     */
     const max = feedbackForDamage(1, true);
-    expect(max.hitStopMs).toBeLessThanOrEqual(70);
-    // 下限也要有感知（不能是 0，否则"顿帧"没发生）
+    expect(max.hitStopMs).toBeLessThanOrEqual(40);
     expect(feedbackForDamage(0).hitStopMs).toBeGreaterThan(0);
+    /**
+     * 普通一击（强度 0.25 ≈ 一次平砍打在同血量目标上）实测 **21ms**
+     * —— 这是"快一点"的主要落点。断言写到 22 是因为留 1ms 余量，
+     * 不是随手取的（第一版写 22 刚好卡线上，很脆）。
+     */
+    expect(feedbackForDamage(0.25).hitStopMs).toBeLessThanOrEqual(22);
+    /**
+     * ⚠️ 暴击的加成在**高强度时会饱和**：`i=1` 时普通与暴击都是 40ms
+     * （因为先乘 1.35 再 clamp 到 1）。这是有意的 —— 已经"最重"的一击
+     * 不需要再更重。低强度下暴击仍然明显更重（0.5：27 → 32ms）。
+     */
+    expect(feedbackForDamage(0.5, true).hitStopMs).toBeGreaterThan(
+      feedbackForDamage(0.5).hitStopMs,
+    );
   });
 
   it('暴击比同强度非暴击更重', () => {

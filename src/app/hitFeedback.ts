@@ -33,8 +33,14 @@ import {
   type FeedbackState,
 } from '../render/feedback';
 
-/** 受击反馈持续多少帧（≈0.25 秒 @60fps）。 */
-export const HIT_FEEDBACK_FRAMES = 15;
+/**
+ * 受击反馈持续多少帧。
+ *
+ * ⚠️ 需求："受击动画播放快一点，时间短一点。" 原为 15 帧
+ * （≈0.25 秒 @60fps），实测"被打完之后还在晃"。
+ * 收到 **9 帧**（≈0.15 秒）—— 反冲该是"脆"的一下，不该是一段动画。
+ */
+export const HIT_FEEDBACK_FRAMES = 9;
 
 /** 一次受击的原始记录（"发生了什么"，不含"现在该显示什么"）。 */
 interface HitRecord {
