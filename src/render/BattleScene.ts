@@ -111,7 +111,11 @@ export class BattleScene {
 
   /* 图标条 */
   private readonly bossBuffs: IconStrip;
+  /** Boss 的减益条（右上）—— 与增益条分开，位置本身就是分类。 */
+  private readonly bossDebuffs: IconStrip;
   private readonly playerBuffs: IconStrip;
+  /** 玩家的减益条（在增益条上面一行）。 */
+  private readonly playerDebuffs: IconStrip;
   /** UI 缩放系数（默认 1）——只影响 UI 部件，不影响画布与战斗画面 */
   private uiScale = 1;
   /** 是否显示键名（触屏隐藏）。见 `FrameContext.showKeyHints`。 */
@@ -221,6 +225,8 @@ export class BattleScene {
 
     this.bossBuffs = new IconStrip(pixi, LAYOUT.bossBuffs, translate);
     hud.addChild(this.bossBuffs.root);
+    this.bossDebuffs = new IconStrip(pixi, LAYOUT.bossDebuffs, translate);
+    hud.addChild(this.bossDebuffs.root);
 
     /* 战斗日志（右侧）—— 画在 HUD 下层，避免压住技能栏与资源面板 */
     this.logPanel = new LogPanel({
@@ -362,6 +368,8 @@ export class BattleScene {
 
     this.playerBuffs = new IconStrip(pixi, LAYOUT.playerBuffs, translate);
     hud.addChild(this.playerBuffs.root);
+    this.playerDebuffs = new IconStrip(pixi, LAYOUT.playerDebuffs, translate);
+    hud.addChild(this.playerDebuffs.root);
 
     this.skillBar = new SkillBarView(pixi, translate);
     hud.addChild(this.skillBar.root);
@@ -473,6 +481,7 @@ export class BattleScene {
       bossHpText: this.bossHpText,
       enrageBadge: this.enrageBadge,
       bossBuffs: this.bossBuffs,
+      bossDebuffs: this.bossDebuffs,
     }));
     this.registry.add(new BossCastBarPart(this.castBar));
     this.registry.add(new PlayerPanelPart({
@@ -487,6 +496,7 @@ export class BattleScene {
       energyText: this.energyText,
       douqiText: this.douqiText,
       playerBuffs: this.playerBuffs,
+      playerDebuffs: this.playerDebuffs,
     }));
     this.registry.add(new PlayerCastBarPart(this.playerCastBar));
     // 第 3 参 = 加载贴图形象（拿不到就回退到程序化绘制）
@@ -650,6 +660,7 @@ export class BattleScene {
 
     // Boss 的 buff 条（图标方块 + 标签）也按系数走
     this.bossBuffs.setUiScale(scale, ui.bossBuffs);
+    this.bossDebuffs.setUiScale(scale, ui.bossDebuffs);
 
     // 两处读条（Boss 预警 + 玩家读条）
     this.castBar.setRect(ui.castBar, scale);

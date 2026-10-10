@@ -34,6 +34,14 @@ export class IconStrip {
       gap: number;
       readonly max: number;
       labelGap?: number;
+      /**
+       * 从哪一端开始排。
+       *
+       * ⚠️ 加它的原因：玩家侧要"buff 在左、debuff 在右"。右对齐的条目
+       * **必须从右往左**排，否则数量一变整排会左右跳
+       * （`right` 时以 `x` 作为**右缘**）。
+       */
+      readonly align?: 'left' | 'right';
     },
     private readonly translate: TranslateFn,
   ) {
@@ -96,7 +104,13 @@ export class IconStrip {
 
     const { x, y, size, gap } = this.strip;
     const labelGap = this.strip.labelGap ?? 4;
-    let cursor = x;
+    const rightAligned = this.strip.align === 'right';
+    /**
+     * 左对齐：`x` 是左缘，游标递增。
+     * 右对齐：`x` 是**右缘**，游标递减 —— 这样"最靠边的那个"始终贴边，
+     * 数量变化时其余条目向左生长，而不是整排左右跳。
+     */
+    let cursor = rightAligned ? x - size : x;
 
     for (let i = 0; i < this.items.length; i += 1) {
       const item = this.items[i];
@@ -114,17 +128,10 @@ export class IconStrip {
       const tight = isTightWindow(view);
       const edge = view.color;
 
-      const g = item.square;
-      g.visible = true;
-      g.clear();
-      // **单色方块占位**：一块纯色 + 深色描边。
-      // 接入正式图标后这一块会被贴图替换，布局不需要改。
-      g.rect(cursor, y, size, size).fill({ color: edge, alpha: tight ? 1 : 0.9 });
-      g.rect(cursor, y, size, size).stroke({ color: 0x05050a, width: 1 });
-      // 判定窗口且时间很紧：加一圈亮边提醒"就是现在"
-      if (tight) g.rect(cursor - 1, y - 1, size + 2, size + 2).stroke({ color: 0xffffff, width: 1 });
-
-      // 剩余时间：叠在方块内右下角（白字 + 黑描边，压在纯色上也读得清）
+      /**
+       * ⚠️ 先把**文本**设好再量宽度、最后定位 —— 反过来的话量到的是上一条
+       * 的长度（`Label` 的宽度随文本变化）。
+       */
       const seconds =
         view.stacks > 1
           ? `${view.stacks}`
@@ -133,15 +140,35 @@ export class IconStrip {
             : '';
       item.timer.set(seconds);
       item.timer.setColor(edge > 0x808080 ? 0x101014 : 0xffffff);
-      item.timer.root.x = cursor + size - 2;
-
-      // 标签在方块右侧，流式排布
       item.label.set(this.translate(view.shortLabelKey));
       item.label.setColor(0xd0d0dc);
-      item.label.root.x = cursor + size + labelGap;
 
       const labelW = Math.max(item.label.root.width, 16);
-      cursor += size + labelGap + labelW + gap;
+      /**
+       * 一个条目的总宽度 = 方块 + 间隙 + 标签。
+       * 左右两种排布宽度相同，只是**排布方向**与**标签落在方块的哪一侧**
+       * 不同 —— 右对齐时标签在方块左边，否则整排会向右溢出 `x` 右缘。
+       */
+      const itemW = size + labelGap + labelW;
+      /** 这一条方块的左缘（右对齐时从右缘反算）。 */
+      const boxX = rightAligned ? cursor - itemW : cursor;
+
+      const g = item.square;
+      g.visible = true;
+      g.clear();
+      // **单色方块占位**：一块纯色 + 深色描边。
+      // 接入正式图标后这一块会被贴图替换，布局不需要改。
+      g.rect(boxX, y, size, size).fill({ color: edge, alpha: tight ? 1 : 0.9 });
+      g.rect(boxX, y, size, size).stroke({ color: 0x05050a, width: 1 });
+      // 判定窗口且时间很紧：加一圈亮边提醒"就是现在"
+      if (tight) g.rect(boxX - 1, y - 1, size + 2, size + 2).stroke({ color: 0xffffff, width: 1 });
+
+      // 剩余时间：叠在方块内右下角（白字 + 黑描边，压在纯色上也读得清）
+      item.timer.root.x = boxX + size - 2;
+
+      item.label.root.x = rightAligned ? boxX - labelGap : boxX + size + labelGap;
+
+      cursor += rightAligned ? -(itemW + gap) : itemW + gap;
     }
   }
 }

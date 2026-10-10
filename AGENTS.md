@@ -282,49 +282,34 @@ addEventListener: (type, listener) =>
 ```
 pnpm run typecheck   →   npx eslint .   →   pnpm run test:run
                      →   pnpm run build
-                     →   node tools/verify-e2e.mjs        （键盘）
-                     →   node tools/verify-e2e-touch.mjs  （触屏）
 ```
 
-⚠️ **两个 e2e 都要跑。** `verify-e2e.mjs` **只按键盘**，所以"触屏坏了、
-键盘没事"这一类 bug 它**完全看不见** —— 实测踩过：`restartBattle()`
-重建 `BattleLoop` 时漏了接触屏输入源，于是**任何一次重开之后触屏永久断开**
-（Action 全堆进没人 drain 的数组），键盘正常。那个 bug 活了很久就是因为
-没有触屏覆盖。触屏脚本固定约 5 秒。
+**就这四条。没有端到端脚本。**
 
-`verify-e2e.mjs` 需要开发服务器在 <http://localhost:5273/>。
-若脚本挂住，先 `pkill -f "Google Chrome.*headless"`（残留的 headless
-Chrome 会让它一直等）。
+### ⚠️ e2e 已**删除**（用户要求）
 
-### ⚠️ e2e 不必每次改动都跑
+用户原话："你别跑e2e了，每次都卡住 浪费时间，删掉，逻辑保证ut没问题，
+ui截图 验证"
 
-**e2e 固定要 ~22 秒**（Chrome 启动 + 游戏跑 8 秒）。前四条
-（typecheck / eslint / test / build，合计约 3 秒）**每次都要跑**，
-e2e 按下面的规则降频。
+删掉的原因不是"不重要"，而是**成本收益不对**：那两个 CDP 脚本（键盘 /
+触屏）**反复卡住**（headless Chrome 残留、rAF 被节流、等待超时），每次
+排查都浪费一轮对话；而它们覆盖的东西可以用更便宜的方式覆盖。
 
-> **⚠️ AI 无法可靠判断"用户是否还有排队消息"。**
-> 不要把这当成可以自动执行的判据 —— 试过一次，判断错了，
-> 在用户明明还有消息时跳过了 e2e。
->
-> 实际做法：**每次回复末尾**主动说明"这次没跑 e2e（因为…）"，
-> 让用户能纠正。宁可多问一句，不要静默跳过。
+### 替代方案（这是现在的规范）
 
-降频依据（按可靠性排序）：
+| 要验证的 | 用什么 |
+|---|---|
+| **逻辑**（结算、触发器、条件、内容、状态机） | **单元测试**。`src/core/` 是零依赖纯 TS，能在 Node 里直接跑，所以逻辑**必须**有单测覆盖 |
+| **UI**（布局、位置、重叠、显隐、文案） | **截图**。用 CDP 脚本拍一张图，然后**自己看图**判断（`read_image`）—— 这比断言像素便宜，而且能发现"说起来对、看起来不对"的问题 |
 
-1. **改动是否触及浏览器边界** —— 动了 `src/render/`、`src/ui/`、
-   `src/input/`、`src/main.ts`、`index.html`、vite 配置，就跑；
-   纯 `src/core/` + 测试的改动，单测已经覆盖，可以跳。
-2. **距上次跑 e2e 过了几轮** —— 连续几轮小改后补一次。
+⚠️ **不要**把"截图脚本"发展成新的 e2e：它只负责**拍一张图**，不做一堆
+断言、不做长流程。拍完就退出。
 
-**无论跳不跳，都要在回复里写出来**，不要静默。
+### 截图脚本的用法
 
-### 清理 headless Chrome 时**必须**带限定
+- 开发服务器在 <http://localhost:5273/>（**不要**重启或杀掉用户的服务器）
+- 想**直接进战斗**（跳过备战界面）就用 `http://localhost:5273/?prepare=skip`
+  —— 见 `main.ts` 的 `skipPrepare`
+- 把图存到 `/tmp` 再 `read_image` 看。⚠️ 画布有 letterbox：
+  `clientY = rect.top + 逻辑Y × (rect.width / 960)`
 
-```
-pkill -9 -f "Google Chrome.*headless"     # ✓
-pkill -9 -f "Google Chrome"               # ✗ 会把用户自己的浏览器也杀掉
-```
-
-后者匹配的是完整命令行，而用户的浏览器路径就是
-`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` ——
-**完全匹配**，`-9` 还让它来不及保存会话。这个错误犯过一次，不要再犯。

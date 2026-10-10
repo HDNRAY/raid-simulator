@@ -17,7 +17,7 @@
 
 import type { Container } from 'pixi.js';
 import { IconButton } from '../IconButton';
-import { LAYOUT } from '../layout';
+import { LOGICAL } from '../layout';
 import type { PixiCtor } from '../primitives';
 
 export interface SettingsButtonOptions {
@@ -67,9 +67,23 @@ export class SettingsButton {
        * ⚠️ 用 `LAYOUT.player.y + LAYOUT.player.h` 表达而不是写 `532`：
        * 面板位置是布局表的事，这里只引用它（避免两处真相）。
        */
+      /**
+       * ⚠️ **从"玩家面板右侧"移到右上角**（需求："设置按钮换到别的地方"）。
+       *
+       * 原因：玩家面板右侧那一块要留给**玩家 buff / debuff 两行**
+       * （需求："玩家的都放面板右侧"），原位置与它们直接重叠。
+       *
+       * 为什么选右上角：
+       *   - `y < 40` 那一条右侧**没有别的元素**（Boss 血条只到 `y=36`，
+       *     Boss debuff 行从 `y=40` 开始），所以按钮**不压血条**
+       *   - 右上角是这类按钮的常规位置，比挤在左下更好点（尤其触屏）
+       *
+       * 底边贴 `y=45`：不与下面 `y=40..60` 的 Boss debuff 行在**视觉上**
+       * 挤在一起（`HIT/2 = 22`，中心 `y=23`）。
+       */
       anchor: {
-        x: LAYOUT.player.x + LAYOUT.player.w + MARGIN + HIT / 2,
-        y: LAYOUT.player.y + LAYOUT.player.h - HIT / 2,
+        x: LOGICAL.width - MARGIN - HIT / 2,
+        y: 23,
       },
       /**
        * 需求："设置按钮，Esc 在 icon 的左边……这个设计不对，

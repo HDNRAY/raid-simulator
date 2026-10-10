@@ -125,13 +125,27 @@ export class UiLayout {
    * 返回一个**缩放后的矩形**，strip 自己按它重排（见 `IconStrip.setUiScale`）。
    */
   get bossBuffs(): { readonly x: number; readonly y: number; readonly size: number; readonly gap: number } {
-    const base = LAYOUT.bossBuffs;
-    return {
-      x: base.x,
-      y: base.y,
-      size: this.len(base.size),
-      gap: this.len(base.gap),
-    };
+    return this.stripRect(LAYOUT.bossBuffs);
+  }
+
+  /** Boss 的减益条（右上，**右对齐** —— `x` 是右缘）。 */
+  get bossDebuffs(): { readonly x: number; readonly y: number; readonly size: number; readonly gap: number } {
+    return this.stripRect(LAYOUT.bossDebuffs, 'right');
+  }
+
+  /**
+   * buff 条的缩放后矩形。
+   *
+   * ⚠️ 右对齐的条 `x` 是**右缘**，缩放时要**贴着安全区反向**算：
+   * 直接乘系数会让它随缩放往右跑出画布。
+   */
+  private stripRect(
+    base: { readonly x: number; readonly y: number; readonly size: number; readonly gap: number },
+    align?: 'right',
+  ): { readonly x: number; readonly y: number; readonly size: number; readonly gap: number } {
+    const inset = this.len(8);
+    const x = align === 'right' ? LOGICAL.width - inset - this.len(LOGICAL.width - 8 - base.x) : base.x;
+    return { x, y: base.y, size: this.len(base.size), gap: this.len(base.gap) };
   }
 
   get logPanel(): Rect {

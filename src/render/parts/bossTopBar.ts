@@ -26,12 +26,13 @@ export class BossTopBarPart implements FramePart {
       readonly bossHpText: Label;
       readonly enrageBadge: Label;
       readonly bossBuffs: IconStrip;
+      readonly bossDebuffs: IconStrip;
     },
   ) {}
 
   render(ctx: FrameContext): void {
     const { view, translate } = ctx;
-    const { bossName, bossPhase, timerLabel, bossHpBar, bossHpText, enrageBadge, bossBuffs } =
+    const { bossName, bossPhase, timerLabel, bossHpBar, bossHpText, enrageBadge, bossBuffs, bossDebuffs } =
       this.refs;
     const bb = LAYOUT.bossBar;
     bossName.set(translate(view.boss.nameKey));
@@ -64,6 +65,12 @@ export class BossTopBarPart implements FramePart {
         `${display(view.boss.hp.current)} / ${display(view.boss.hp.cap)}   ${percentOf(view.boss.hp)}%`,
       );
     }
-    bossBuffs.update(view.boss.buffs);
+    /**
+     * ⚠️ 按 `polarity` **分流到两条**：增益在左上、减益在右上（需求）。
+     * `neutral` 归到增益侧 —— 它既不是好处也不是坏处，放左边与"引擎状态"
+     * 的语义一致（这类 buff 基本都是内部标记，通常还是 hidden）。
+     */
+    bossBuffs.update(view.boss.buffs.filter((b) => b.polarity !== 'debuff'));
+    bossDebuffs.update(view.boss.buffs.filter((b) => b.polarity === 'debuff'));
   }
 }

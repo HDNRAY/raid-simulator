@@ -188,9 +188,8 @@ pnpm install
 pnpm run dev            # 本地开发（http://localhost:5273）
 pnpm run typecheck      # tsc --noEmit
 pnpm run lint           # 含架构硬约束 C1-C5 / I1-I3
-pnpm run test:run       # 87 个单测（含 lint 反向用例）
+pnpm run test:run       # 全部单测（逻辑的唯一保障）
 pnpm run test:core      # 只跑纯逻辑，node 环境，不碰浏览器
-pnpm run verify:e2e     # CDP 端到端：验证 tick 真的在 60Hz 推进
 pnpm run build          # 产出 dist/（base 为 /raid/）
 ```
 

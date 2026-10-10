@@ -28,6 +28,7 @@ export class PlayerPanelPart implements FramePart {
       readonly energyText: Label;
       readonly douqiText: Label;
       readonly playerBuffs: IconStrip;
+      readonly playerDebuffs: IconStrip;
     },
   ) {}
 
@@ -45,6 +46,8 @@ export class PlayerPanelPart implements FramePart {
     r.hpText.set(`${display(view.player.hp.current)}/${display(view.player.hp.cap)}`);
     r.energyText.set(`${display(view.player.energy.current)}/${display(view.player.energy.cap)}`);
     r.douqiText.set(`${display(view.player.douqi.current)}/${display(view.player.douqi.cap)}`);
-    r.playerBuffs.update(view.player.buffs);
+    /** ⚠️ 按 `polarity` 分流：增益在下、减益在上（需求）。 */
+    r.playerBuffs.update(view.player.buffs.filter((b) => b.polarity !== 'debuff'));
+    r.playerDebuffs.update(view.player.buffs.filter((b) => b.polarity === 'debuff'));
   }
 }
