@@ -162,3 +162,35 @@ describe('两套存储按设备分开（需求："分2个key"）', () => {
     expect(() => store.saveUiScale(1.2)).not.toThrow();
   });
 });
+
+describe('出战选择（备战界面记下、进战斗时读）', () => {
+  it('存了能读回来', () => {
+    const st = memStorage();
+    const store = new SettingsStore(st, 'keyboard');
+    store.savePick('player', 'meiichiro');
+    expect(store.playerIdRaw).toBe('player');
+    expect(store.bossIdRaw).toBe('meiichiro');
+  });
+
+  it('没存过 → null', () => {
+    const store = new SettingsStore(memStorage(), 'touch');
+    expect(store.playerIdRaw).toBeNull();
+    expect(store.bossIdRaw).toBeNull();
+  });
+
+  it('【关键】选择**不分设备**（两种形态共用一份）', () => {
+    /**
+     * 与键位不同：键位分两份是为了"同机测两套配置"，而"上次选了谁"
+     * 与设备无关 —— 分成两份只会让触屏每次都要重选。
+     */
+    const st = memStorage();
+    new SettingsStore(st, 'keyboard').savePick('player', 'meiichiro');
+    expect(new SettingsStore(st, 'touch').playerIdRaw).toBe('player');
+  });
+
+  it('存储不可用时不炸', () => {
+    const store = new SettingsStore(undefined, 'keyboard');
+    expect(() => store.savePick('player', 'meiichiro')).not.toThrow();
+    expect(store.playerIdRaw).toBeNull();
+  });
+});

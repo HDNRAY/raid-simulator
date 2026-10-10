@@ -66,6 +66,14 @@ export interface TouchControlsOptions {
   /** 设置面板是否打开（打开时触屏按钮让出输入权）。 */
   readonly isSettingsOpen: () => boolean;
   /**
+   * 是否在**备战界面**（那时战斗场景整块隐藏，触屏按钮也要跟着藏）。
+   *
+   * ⚠️ 放在这个每帧回调里而不是新开一个 `setVisible`：显隐的**唯一写入点**
+   * 已经在这里（见 `frame` 的说明），再加一个写入点就会出现"两处都想控制
+   * 可见性"的经典打架。
+   */
+  readonly isPrepareOpen: () => boolean;
+  /**
    * 当前生效的派生技（没有则 `undefined`）。
    *
    * 需求："移动端则需要设计一下。" —— 派生技画成**原按钮上的角标环**，
@@ -212,7 +220,7 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
        * 是主循环的局部状态，没有变更事件，每帧读一次是最省事且不会
        * 漏的写法。
        */
-      const hidden = options.isSettingsOpen();
+      const hidden = options.isSettingsOpen() || options.isPrepareOpen();
       layer.root.visible = !hidden;
       if (hidden) return;
       layer.update(view);

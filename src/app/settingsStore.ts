@@ -59,6 +59,9 @@ const BINDING_KEYS: Readonly<Record<InputMode, string>> = {
   touch: 'raid.bindings.touch.v1',
 };
 const KEY_UI_SCALE = 'raid.uiScale.v1';
+/** 上次选的人物 / 对手（备战界面用）。 */
+const KEY_PLAYER = 'raid.pick.player.v1';
+const KEY_BOSS = 'raid.pick.boss.v1';
 
 /** 存储接口（注入以便测试，也为了在无 `localStorage` 时不炸）。 */
 export interface StorageLike {
@@ -195,10 +198,35 @@ export class SettingsStore {
     }
   }
 
+  /** 上次选的人物 id（原始字符串，交给 `resolvePlayerId` 校验）。 */
+  get playerIdRaw(): string | null {
+    return this.rawOf(KEY_PLAYER);
+  }
+
+  /** 上次选的对手 id。 */
+  get bossIdRaw(): string | null {
+    return this.rawOf(KEY_BOSS);
+  }
+
+  /** 记住这次的选择（备战界面用）。 */
+  savePick(playerId: string, bossId: string): void {
+    try {
+      this.storage?.setItem(KEY_PLAYER, playerId);
+      this.storage?.setItem(KEY_BOSS, bossId);
+    } catch {
+      /* 配额满 / 隐私模式：存不上就算了 */
+    }
+  }
+
   /** 原始字符串 —— 交给 `parseUiScale` 校验（不要在存取器里做数值解析）。 */
   get uiScaleRaw(): string | null {
+    return this.rawOf(KEY_UI_SCALE);
+  }
+
+  /** 读一个原始字符串（把 `try` 收在一处，避免每个 getter 各写一遍）。 */
+  private rawOf(key: string): string | null {
     try {
-      return this.storage?.getItem(KEY_UI_SCALE) ?? null;
+      return this.storage?.getItem(key) ?? null;
     } catch {
       return null;
     }

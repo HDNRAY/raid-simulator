@@ -91,3 +91,64 @@ export function collectRuntimeErrors(target: Window): string[] {
   });
   return errors;
 }
+
+/**
+ * 备战阶段的**零值探针**（那时还没有战斗可测）。
+ *
+ * ⚠️ 给零值而不是抛错：端到端脚本在"点了开始之前"抓一次探针是很自然的
+ * 操作，让它读到一份合法的空快照比让它崩掉好。用 `-1` 表示"没有这个值"，
+ * 与 `buildProbe` 里"缺角色"的表示一致。
+ */
+export function emptyProbe(frameCount: number, runtimeErrors: readonly string[]): ProbeSnapshot {
+  return {
+    tick: 0,
+    status: 'idle',
+    playerHp: -1,
+    playerHpCap: -1,
+    playerDouqi: -1,
+    playerCooldowns: {},
+    playerCasts: -1,
+    bossHp: -1,
+    bossHpCap: -1,
+    bossCasts: -1,
+    skillCount: 0,
+    floatingCount: 0,
+    frameCount,
+    errors: [...runtimeErrors],
+  };
+}
+
+/** 顶层调试对象的各个入口（全部由 `main.ts` 注入，保持惰性）。 */
+export interface RaidBattleApi {
+  readonly act: (skillId: string, actorId?: string) => void;
+  readonly bindings: () => readonly { readonly key: string; readonly skillId: string }[];
+  readonly stage: unknown;
+  readonly setUiScale: (value: number) => void;
+  readonly settings: {
+    readonly open: (tab?: 'general' | 'keys') => void;
+    readonly close: () => void;
+    readonly openIn: (px: number, py: number) => boolean;
+    readonly isOpen: () => boolean;
+    readonly capturing: () => string | undefined;
+    readonly focus: () => unknown;
+    readonly trace: () => readonly string[];
+  };
+  readonly restart: () => void;
+  readonly touchButtonCenter: (skillId: string) => { readonly x: number; readonly y: number } | null;
+  readonly probe: () => ProbeSnapshot;
+}
+
+/**
+ * 装上 `window.__raidBattle`。
+ *
+ * ⚠️ **整块抽出来**而不是留在 `main.ts`：它是"给外部脚本看的门面"，
+ * 与装配无关，而且它自己就有 60 行注释（那些注释解释"为什么需要这些
+ * 入口"，属于这一块的知识）。
+ *
+ * ⚠️ 各入口由调用方注入**函数**而不是值 —— 这样"惰性"仍然成立
+ * （例如 `touchButtonCenter` 依赖的 `touch` 在主流程里声明得较晚，
+ * 直接传值会遇到 TDZ）。
+ */
+export function installRaidBattleApi(api: RaidBattleApi): void {
+  (globalThis as { __raidBattle?: RaidBattleApi }).__raidBattle = api;
+}

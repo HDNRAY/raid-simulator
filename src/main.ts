@@ -1,8 +1,12 @@
 import { BattleLoop } from './app/battleLoop';
 import { createTouchControls, derivedOfSnapshot } from './app/touchControls';
-import { buildKeyRows } from './app/keyRows';
-import { rebindWithSwap, swapSlots } from './app/bindingActions';
-import { buildProbe, collectRuntimeErrors } from './app/debugProbe';
+import { wireCanvasPointer } from './app/canvasInput';
+import { wireSettingsKeys } from './app/settingsKeys';
+import { createSettingsToggle } from './app/settingsToggle';
+import { buildSettingsOptions } from './app/settingsPanelOptions';
+import { PrepareScreen } from './ui/PrepareScreen';
+import { BOSS_ROSTER, PLAYER_ROSTER, findEntry, resolveBossId, resolvePlayerId } from './data/roster';
+import { buildProbe, collectRuntimeErrors, emptyProbe } from './app/debugProbe';
 import {
   SettingsStore,
   browserStorage,
@@ -34,7 +38,7 @@ import {
   HP_MAX,
 } from './data/content';
 import { BOSS_HP_DISPLAY } from './data/entities/bossHp';
-import { DEFAULT_BINDINGS, type KeyBinding } from './input/keyboard';
+import { type KeyBinding } from './input/keyboard';
 import { flattenCatalog, translator } from './i18n/translator';
 import { zhCN } from './i18n/locales/zh-CN';
 import {
@@ -104,10 +108,11 @@ const PLAYER_CAPS = { hp: HP_MAX, energy: ENERGY_MAX, douqi: DOUQI_MAX };
  */
 const BOSS_CAPS = { hp: BOSS_HP_DISPLAY, energy: 0, douqi: 0 };
 
-function makePlayer(): Combatant {
+function makePlayer(id: string): Combatant {
   return {
-    id: 'player',
-    nameKey: 'hud.you',
+    id,
+    /** 显示名来自 roster（需求："这个人物目前就叫 林晚风"）。 */
+    nameKey: findEntry(PLAYER_ROSTER, id)?.nameKey ?? 'hud.you',
     side: 'ally',
     caps: { ...PLAYER_CAPS },
     resources: { hp: PLAYER_CAPS.hp, energy: PLAYER_CAPS.energy, douqi: 0 },
@@ -122,10 +127,10 @@ function makePlayer(): Combatant {
   };
 }
 
-function makeBoss(): Combatant {
+function makeBoss(id: string): Combatant {
   return {
-    id: 'meiichiro',
-    nameKey: 'boss.name',
+    id,
+    nameKey: findEntry(BOSS_ROSTER, id)?.nameKey ?? 'boss.name',
     side: 'enemy',
     caps: { ...BOSS_CAPS },
     resources: { hp: BOSS_CAPS.hp, energy: 0, douqi: 0 },
@@ -195,16 +200,20 @@ async function bootstrap(): Promise<void> {
         }
       },
       engineOptions: {
-        combatants: [makePlayer(), makeBoss()],
+        /**
+         * ⚠️ 出战单位来自**备战界面的选择**，不是写死的。
+         * 目前各只有一个，所以工厂按 id 挑词表；加第二个单位时在这里扩。
+         */
+        combatants: [makePlayer(selection.playerId), makeBoss(selection.bossId)],
         // 用真实时钟做种子：每次开局不同，但仍可复现（记录 seed 即可）
         seed: Date.now() >>> 0,
-        bossId: 'meiichiro',
+        bossId: selection.bossId,
         timeLimitMs: TIME_LIMIT_MS,
         buffs: registry.buffs,
         skills: registry.skills,
         baseStats: new Map<string, Partial<Record<StatKey, number>>>([
-          ['player', PLAYER_BASE],
-          ['meiichiro', {}],
+          [selection.playerId, PLAYER_BASE],
+          [selection.bossId, {}],
         ]),
         passiveModifiers: new Map(),
       },
@@ -250,7 +259,91 @@ async function bootstrap(): Promise<void> {
   const validSkillIds = new Set(registry.skills.keys());
   let bindings: readonly KeyBinding[] = parseBindings(settingsStore.bindings, validSkillIds);
 
-  let loop = startBattle();
+  /**
+   * ⚠️ **不再一启动就跑战斗**：先进备战界面（需求："选人物 和 选boss，
+   * 然后点开始才开始"）。所以 `loop` 是惰性的 —— 进战斗时才建。
+   *
+   * 因为它是可选的，所有访问点都走 `battle()` 并容忍 `undefined`
+   * （备战阶段调它们本该无害地什么都不做）。
+   */
+  let loop: BattleLoop | undefined;
+
+  /** 当前阶段：备战界面 or 战斗中。 */
+  let phase: 'prepare' | 'battle' = 'prepare';
+
+  /** 当前选中的出战单位（备战界面的选择，进战斗时读到）。 */
+  const selection = {
+    playerId: resolvePlayerId(settingsStore.playerIdRaw),
+    bossId: resolveBossId(settingsStore.bossIdRaw),
+  };
+
+  /**
+   * 取当前战斗循环（备战阶段为 `undefined`）。
+   */
+  const battle = (): BattleLoop | undefined => loop;
+
+  /**
+   * 备战界面的「开始」回调。
+   *
+   * ⚠️ **可变引用 + 延后回填**：`enterBattle` 定义在下面（它要读
+   * `selection`，而 `selection` 又要 `settingsStore`），但 `PrepareScreen`
+   * 得先构造出来才能显示。这个转交点让定义顺序不再互相牵制。
+   */
+  let onPrepareStart: (playerId: string, bossId: string) => void = () => {};
+
+  /**
+   * **进入战斗**：建一局新战斗、藏起备战界面。
+   *
+   * ⚠️ 与 `backToPrepare` 成对：两者各自负责好**场景 / 触屏层 / 面板**的
+   * 显隐，任何一条路径漏掉一个开关都会出现"两个界面同时可见"。
+   */
+  const enterBattle = (playerId: string, bossId: string): void => {
+    selection.playerId = resolvePlayerId(playerId);
+    selection.bossId = resolveBossId(bossId);
+    settingsStore.savePick(selection.playerId, selection.bossId);
+
+    loop?.dispose();
+    loop = startBattle();
+    phase = 'battle';
+    prepare.setVisible(false);
+    scene.root.visible = true;
+  };
+  onPrepareStart = (playerId: string, bossId: string): void => enterBattle(playerId, bossId);
+
+  /**
+   * 回到**备战界面**（而不是直接重开一局）。
+   *
+   * 需求："选人物 和 选boss，然后点开始才开始" —— 那"再来一次"自然也
+   * 该先回备战，让玩家有机会换对手。
+   */
+  const backToPrepare = (): void => {
+    loop?.dispose();
+    loop = undefined;
+    phase = 'prepare';
+    prepare.setVisible(true);
+    /**
+     * ⚠️ 战斗场景直接改 `root.visible`；触屏层的显隐由 `touch.frame`
+     * 每帧按 `isPrepareOpen()` 决定 —— 那里的**唯一写入点**不该被绕过。
+     */
+    scene.root.visible = false;
+    settingsButton.update();
+  };
+
+  const prepare = new PrepareScreen({
+    pixi: { Container, Graphics, Sprite, Text },
+    translate: (key: string) => translateSafe(key),
+    players: PLAYER_ROSTER,
+    bosses: BOSS_ROSTER,
+    initial: { playerId: selection.playerId, bossId: selection.bossId },
+    onStart: (playerId: string, bossId: string) => onPrepareStart(playerId, bossId),
+    onChange: (playerId: string, bossId: string) => settingsStore.savePick(playerId, bossId),
+  });
+  app.stage.addChild(prepare.root);
+  /**
+   * ⚠️ 开局默认在**备战**：战斗场景先藏起来，否则会从备战界面下面露出来。
+   */
+  scene.root.visible = false;
+  prepare.setVisible(true);
 
   /**
    * **UI 缩放**（设置里的 slider）。
@@ -266,10 +359,22 @@ async function bootstrap(): Promise<void> {
   /* ---------- 主循环 ---------- */
   app.ticker.add(() => {
     frameCount += 1;
-    loop.frame(performance.now());
-    scene.update(loop.snapshot, loop.logEntries);
+    if (phase === 'prepare') {
+      /**
+       * 备战阶段：**不碰战斗**（`loop` 还没建出来）。场景与触屏按钮整块
+       * 藏起来 —— 否则会从备战界面的透底处露出来。
+       */
+      prepare.frame();
+      settingsButton.update();
+      settings.update();
+      return;
+    }
+    const l = battle();
+    if (l === undefined) return; // 理论上到不了；防一手崩溃
+    l.frame(performance.now());
+    scene.update(l.snapshot, l.logEntries);
     /** 触屏按钮的文本要跟着快照更新（冷却数字会变）。 */
-    touch.frame(loop.snapshot);
+    touch.frame(l.snapshot);
     settingsButton.update();
     settings.update();
   });
@@ -279,14 +384,42 @@ async function bootstrap(): Promise<void> {
    *
    * ⚠️ 两条路径**共用这一个函数** —— 否则很容易出现"桌面能重开、
    * 触屏不行"这种只在一边坏掉的问题。 */
-  const restartBattle = (): void => {
-    loop.dispose();
-    loop = startBattle();
-    touch.setBindings(bindings);
-  };
   window.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && loop.engineState.snapshot.status !== 'running') {
-      restartBattle();
+    /**
+     * **备战阶段的键盘操作**（需求："记得支持键盘和 移动"）。
+     *
+     * | 键 | 作用 |
+     * |---|---|
+     * | ← → | 在当前槽位（人物 / 对手）里换选项 |
+     * | ↑ ↓ | 换槽位（人物 → 对手 → 开始） |
+     * | Enter | 开始战斗 |
+     *
+     * ⚠️ 设置面板打开时**不能抢键** —— 那时玩家可能正在改键，方向键是
+     * 移动焦点的。`settingsToggle.isOpen()` 的优先级高于备战。
+     */
+    if (phase === 'prepare' && !settingsToggle.isOpen()) {
+      switch (event.key) {
+        case 'ArrowLeft':
+          prepare.cycle(-1);
+          return;
+        case 'ArrowRight':
+          prepare.cycle(1);
+          return;
+        case 'ArrowUp':
+          prepare.moveFocus(-1);
+          return;
+        case 'ArrowDown':
+          prepare.moveFocus(1);
+          return;
+        case 'Enter':
+          prepare.start();
+          return;
+        default:
+          return;
+      }
+    }
+    if (phase === 'battle' && event.key === 'Enter' && battle()?.engineState.snapshot.status !== 'running') {
+      backToPrepare();
     }
   });
 
@@ -303,10 +436,10 @@ async function bootstrap(): Promise<void> {
 
   window.__raidBattle = {
     act: (skillId: string, actorId?: string) => {
-      loop.engineState.tick([
-        { type: 'useSkill', skillId, atTick: loop.engineState.snapshot.tick },
-      ], actorId);
-      loop.engineState.drainEvents();
+      const l = battle();
+      if (l === undefined) return;
+      l.engineState.tick([{ type: 'useSkill', skillId, atTick: l.engineState.snapshot.tick }], actorId);
+      l.engineState.drainEvents();
     },
     /**
      * 当前键位表（顶层探针）。
@@ -341,10 +474,10 @@ async function bootstrap(): Promise<void> {
      * 脚本能直接把界面推到某个状态再截图。
      */
     settings: {
-      open: (tab: 'general' | 'keys' = 'keys') => openSettings(tab),
-      close: () => closeSettings(),
+      open: (tab: 'general' | 'keys' = 'keys') => settingsToggle.open(tab),
+      close: () => settingsToggle.close(),
       openIn: (px: number, py: number) => settings.hitTest(px, py),
-      isOpen: () => settingsOpen,
+      isOpen: () => settingsToggle.isOpen(),
       /** 正在等待按键改键的技能 id（没有则为 null）。 */
       capturing: () => settings.capturingSkillId,
       /** 当前键盘焦点（调试用）。 */
@@ -352,10 +485,15 @@ async function bootstrap(): Promise<void> {
       trace: () => [...settings.settingsTrace],
     },
     /** 重开一局（端到端脚本用；见 `global.d.ts` 的说明）。 */
-    restart: () => restartBattle(),
+    restart: () => enterBattle(selection.playerId, selection.bossId),
     /** 触屏按钮圆心（端到端脚本用）。⚠️ 函数转调：`touch` 声明在下面（TDZ）。 */
     touchButtonCenter: (skillId: string) => touch.centerOfSkill(skillId),
-    probe: () => buildProbe(loop.engineState, loop.snapshot, frameCount, runtimeErrors),
+    probe: () => {
+      const l = battle();
+      /** 备战阶段没有战斗可测：给一份零值快照，而不是 crash。 */
+      if (l === undefined) return emptyProbe(frameCount, runtimeErrors);
+      return buildProbe(l.engineState, l.snapshot, frameCount, runtimeErrors);
+    },
   };
 
   /* ---------- 设置界面 ---------- */
@@ -379,80 +517,52 @@ async function bootstrap(): Promise<void> {
     showKeyHints: boolean;
   } = { read: () => [], showKeyHints: true };
 
-  const settings = new SettingsPanel({
-    /** 触屏按钮的只读预览 —— 从布局读（唯一真相）。 */
-    getTouchSkills: () => touchPreviewSource.read(),
-    getShowKeyHints: () => touchPreviewSource.showKeyHints,
-    pixi: { Container, Graphics, Sprite, Text },
-    translate: (key) => translateSafe(key),
-    getRows: () =>
-      buildKeyRows({
-        bindings,
-        registry,
-        snapshotOf: () => loop.snapshot,
-        translate: translateSafe,
-      }),
-    onRebind: (skillId, key) => {
-      bindings = [...rebindWithSwap(bindings, skillId, key)];
-      /** 改键立刻持久化（只存**当前设备**那份，见 `settingsStore`）。 */
-      settingsStore.saveBindings(bindings);
-      loop.setBindings(bindings);
-      touch.setBindings(bindings);
-    },
-    /** 触屏换位（与改键分开：那个换键、这个换**位置**）。 */
-    onSwapSlots: (from, to) => {
-      bindings = [...swapSlots(bindings, from, to)];
-      settingsStore.saveBindings(bindings);
-      loop.setBindings(bindings);
-      touch.setBindings(bindings);
-    },
-    onResetKeys: () => {
-      bindings = DEFAULT_BINDINGS;
-      /** 恢复默认**也覆盖存储**，否则刷新之后又变回玩家改过的键位。 */
-      settingsStore.saveBindings(bindings);
-      loop.setBindings(bindings);
-      touch.setBindings(bindings);
-    },
-    /**
-     * 把捕获回调包一层：**主监听器正在处理这次按键时直接跳过**。
-     *
-     * 否则那一次按键会被输入层重复投递，导致"一次按键进入改键并立刻
-     * 完成绑定"（详见上面 `handlingKeyDown` 的说明）。
-     */
-    onCapture: (handler) =>
-      loop.inputSource?.capture(
-        handler === undefined ? undefined : (key) => {
-          if (handlingKeyDown) return;
-          handler(key);
-        },
-      ),
-    onClose: () => closeSettings(),
-    getUiScale: () => uiScale,
-    onUiScale: (value) => {
-      uiScale = clampUiScale(value);
-      settingsStore.saveUiScale(uiScale);
-      /**
-       * ⚠️ **不重测画布**（`stageObserver.refresh()`）。
-       *
-       * 需求澄清过："我不是说缩放整个游戏画面，我是指，缩放游戏 UI，
-       * 比如面板、技能图标等，战斗画面和战斗文字保持不变。"
-       *
-       * 所以缩放系数**只传给渲染层的 UI 部件**，画布尺寸照旧（自动适配）。
-       * 之前那版调 `refresh()` 会把整个画面一起放大 —— 方向错了。
-       */
-      scene.setUiScale(uiScale);
-    },
-  });
+  /**
+   * 设置面板的选项装配（含"改键要同步到 loop / touch / 存储"）。
+   * ⚠️ 抽到了 `app/settingsPanelOptions.ts`（见那里的"三处同步"说明）。
+   */
+  const settings = new SettingsPanel(
+    buildSettingsOptions({
+      registry,
+      getBindings: () => bindings,
+      setBindings: (next) => {
+        bindings = next;
+        battle()?.setBindings(bindings);
+        touch.setBindings(bindings);
+      },
+      settingsStore,
+      getUiScale: () => uiScale,
+      setUiScale: (value) => {
+        uiScale = clampUiScale(value);
+        settingsStore.saveUiScale(uiScale);
+        /**
+         * ⚠️ **不重测画布**（`stageObserver.refresh()`）。
+         *
+         * 需求澄清过："我不是说缩放整个游戏画面，我是指，缩放游戏 UI，
+         * 比如面板、技能图标等，战斗画面和战斗文字保持不变。"
+         * 所以系数**只传给渲染层的 UI 部件**，画布尺寸照旧。
+         */
+        scene.setUiScale(uiScale);
+      },
+      snapshot: () => battle()?.snapshot,
+      translate: (key) => translateSafe(key),
+      getTouchSkills: () => touchPreviewSource.read(),
+      getShowKeyHints: () => touchPreviewSource.showKeyHints,
+      pixi: { Container, Graphics, Sprite, Text },
+      close: () => settingsToggle.close(),
+      capture: (handler) => battle()?.inputSource?.capture(handler),
+      isHandlingKeyDown: () => handlingKeyDown,
+    }),
+  );
   app.stage.addChild(settings.root);
 
   const settingsButton = new SettingsButton({
     pixi: { Container, Graphics, Sprite, Text },
     translate: (key) => translateSafe(key),
-    onClick: () => toggleSettings(),
+    onClick: () => settingsToggle.toggle(),
   });
   app.stage.addChild(settingsButton.root);
 
-  let settingsOpen = false;
   /**
    * 设置按钮是否被键盘选中。
    *
@@ -461,66 +571,35 @@ async function bootstrap(): Promise<void> {
    *   - 按 `,`（单键直达）
    *   - 按 `↑` 把焦点提到按钮上，再 Enter
    */
-  let settingsFocused = false;
   /**
-   * 打开设置前是否**本来就**处于暂停。
+   * 设置面板的开关（含"打开时暂停 / 关闭时恢复原状"的状态机）。
    *
-   * 关闭设置时要恢复原状，而不是无脑 `setPaused(false)` ——
-   * 否则"暂停中打开设置、关掉设置"会把玩家的暂停状态吞掉。
+   * ⚠️ 抽到了 `app/settingsToggle.ts` —— 那里写着"为什么要暂停"与
+   * "为什么不能无脑恢复"，不在这里重复。
    */
-  let pausedBeforeSettings = false;
-
-  const openSettings = (tab: 'general' | 'keys' = 'keys'): void => {
-    if (settingsOpen) return;
-    settingsOpen = true;
-    pausedBeforeSettings = loop.isPaused;
-    // 打开设置必须暂停战斗 —— 否则玩家改键时会被 Boss 打死
-    loop.setPaused(true);
-    /** 面板打开时隐藏齿轮 —— 否则它会从面板左下角露出来（看着还能点）。 */
-    settingsButton.setVisible(false);
-    settings.open(tab);
-  };
-  const closeSettings = (): void => {
-    settingsOpen = false;
-    settingsButton.setVisible(true);
-    settings.close();
-    // 恢复打开前的暂停状态
-    loop.setPaused(pausedBeforeSettings);
-  };
-  const toggleSettings = (): void => {
-    if (settingsOpen) closeSettings();
-    else openSettings();
-  };
+  const settingsToggle = createSettingsToggle({
+    settings,
+    settingsButton,
+    isPaused: () => battle()?.isPaused ?? false,
+    setPaused: (value) => battle()?.setPaused(value),
+  });
 
   /* 鼠标：canvas 里自己算坐标（不做逐对象事件绑定，便于测试驱动） */
   /** 把一次指针事件换算成逻辑坐标。 */
-  const pointerAt = (event: PointerEvent): { px: number; py: number } => {
-    const rect = app.canvas.getBoundingClientRect();
-    // CSS 尺寸 → 逻辑坐标（canvas 内部分辨率固定，靠 CSS 缩放）
-    return {
-      px: ((event.clientX - rect.left) / rect.width) * LOGICAL_W,
-      py: ((event.clientY - rect.top) / rect.height) * LOGICAL_H,
-    };
-  };
-
-  /**
-   * 是否正在拖滑块。
-   *
-   * 需求："ui 缩放的 slider 还是要支持鼠标。"
-   * 点一下就能调（`hitTest` 里按横坐标反算），而**拖动**需要额外
-   * 记住"这次手势从滑块开始" —— 否则鼠标划过面板时也会一直改数值。
-   */
-  let draggingSlider = false;
-
   /** 触屏控件（能力探测 + 布局 + 输入源 + 双弧按钮层）。与键盘并存。 */
   const touch = createTouchControls({
     pixi: { Container, Graphics, Sprite, Text },
     translate: translateSafe,
     bindings,
-    currentTick: () => loop.engineState.snapshot.tick,
-    isSettingsOpen: () => settingsOpen,
+    currentTick: () => battle()?.engineState.snapshot.tick ?? 0,
+    isSettingsOpen: () => settingsToggle.isOpen(),
+    /** 备战中触屏按钮也要藏（战斗场景整块隐藏）。 */
+    isPrepareOpen: () => phase === 'prepare',
     /** 派生技从**快照**读（`ViewAdapter` 已经算好，带 `derivedFrom`）。 */
-    derivedSkill: () => derivedOfSnapshot(loop.snapshot),
+    derivedSkill: () => {
+      const l = battle();
+      return l === undefined ? undefined : derivedOfSnapshot(l.snapshot);
+    },
   });
   touchPreviewSource.read = () =>
     touch.layout.current().map((b) => registry.skill(b.skillId)?.nameKey ?? b.skillId);
@@ -530,70 +609,23 @@ async function bootstrap(): Promise<void> {
   settingsButton.setShowShortcut(touch.caps.showKeyHints);
   app.stage.addChild(touch.layer.root);
 
-  app.canvas.addEventListener('pointerdown', (event) => {
-    const { px, py } = pointerAt(event);
-    /**
-     * **结算中：点屏幕任意处 = 重开**（需求："'enter' 再来一次也改成
-     * 点击屏幕再来一次之类的"）。
-     *
-     * ⚠️ 必须**先于**按钮层与设置判断，且整体 `return`：
-     *   - 放在按钮层之后：按钮会 `return true` 吃掉点击 → 玩家点在按钮弧里
-     *     **永远重开不了**（实测点「攻」不重开、点空白才重开）
-     *   - 不 `return`：会同时满足 `settingsButton.hitTest` → 一次点击
-     *     **既开设置又静默重开**（实测 tick 663 → 43）
-     */
-    if (!touch.caps.showKeyHints && loop.engineState.snapshot.status !== 'running') {
-      restartBattle();
-      return;
-    }
-    /**
-     * **触屏按钮优先**，但它自己在"设置打开"时会拒绝消费
-     * （见 `touchControls.ts` 的点击路由说明）。
-     */
-    if (touch.onPointerDown(event.pointerId, px, py)) return;
-    if (!settingsOpen) {
-      if (settingsButton.hitTest(px, py)) openSettings();
-      return;
-    }
-    const onSlider = settings.hitTest(px, py) && settings.isOnScaleSlider(px, py);
-    draggingSlider = onSlider;
-  });
-
-  app.canvas.addEventListener('pointermove', (event) => {
-    const { px, py } = pointerAt(event);
-    /**
-     * 拖滑块优先 —— 一次手势一旦从滑块开始，就不要再被悬停抢走。
-     */
-    if (draggingSlider) {
-      settings.dragScaleSlider(px);
-      return;
-    }
-    /**
-     * 鼠标悬停到技能格 = **选中它**（需求："方向键选中和鼠标选中，
-     * 应该合并"）。与方向键走同一条路径，所以高亮与详情完全一致。
-     */
-    settings.hoverSkill(px, py);
-  });
-
-  // 松开/离开画布就结束这次手势（否则会一直粘着）
-  const endDrag = (): void => {
-    draggingSlider = false;
-  };
-  app.canvas.addEventListener('pointerup', (event) => {
-    touch.onPointerUp(event.pointerId);
-    endDrag();
-  });
   /**
-   * ⚠️ `pointercancel` 必须转发：手指划出画布 / 系统手势打断时，
-   * 不释放会让引擎一直按那个技能的代价扣资源。
+   * 画布指针接线（备战 / 结算点击 / 触屏按钮 / 设置）。
+   *
+   * ⚠️ 抽到了 `app/canvasInput.ts` —— 那里集中写着"顺序即优先级"的
+   * 三条规则（都是实测踩出来的），不在这里重复。
    */
-  app.canvas.addEventListener('pointercancel', (event) => {
-    touch.onPointerCancel(event.pointerId);
-    endDrag();
-  });
-  app.canvas.addEventListener('pointerleave', (event) => {
-    touch.onPointerCancel(event.pointerId);
-    endDrag();
+  wireCanvasPointer({
+    canvas: app.canvas,
+    prepare,
+    settings,
+    settingsButton,
+    touch,
+    phase: () => phase,
+    settingsOpen: () => settingsToggle.isOpen(),
+    openSettings: () => settingsToggle.open('keys'),
+    battleEnded: () => loop?.engineState.snapshot.status !== 'running',
+    backToPrepare,
   });
 
   /**
@@ -602,70 +634,21 @@ async function bootstrap(): Promise<void> {
    * 用**捕获阶段**（第三个参数 `true`）：必须在输入层之前拿到按键，
    * 否则按 `,` 会被当成技能、按方向键会被战斗吃掉。
    */
-  window.addEventListener(
-    'keydown',
-    (event) => {
-      const key = event.key.toLowerCase();
-
-      if (settingsOpen) {
-        handlingKeyDown = true;
-        try {
-          // 捕获模式下输入层会独占键盘（见 `InputSource.capture`），
-          // 所以这里只需要把按键交给弹窗
-          if (settings.handleKey(key)) event.preventDefault();
-        } finally {
-          handlingKeyDown = false;
-        }
-        return;
-      }
-
-      // 战斗中：`↑` 把焦点提到设置按钮，再 Enter 打开
-      if (key === 'arrowup') {
-        settingsFocused = true;
-        settingsButton.setFocused(true);
-        event.preventDefault();
-        return;
-      }
-      /**
-       * **Esc 直接打开设置**（需求）。
-       *
-       * 顺带暂停 —— `openSettings` 里会 `setPaused(true)`。
-       * 旧行为是"Esc 切换暂停"，但那让玩家要先暂停、再按 `,`
-       * 才能进设置，多一次操作；而且常见游戏习惯就是 Esc 进设置。
-       */
-      if (key === 'escape') {
-        openSettings('keys');
-        event.preventDefault();
-        return;
-      }
-      if (key === 'arrowdown') {
-        if (settingsFocused) {
-          settingsFocused = false;
-          settingsButton.setFocused(false);
-          event.preventDefault();
-        }
-        return;
-      }
-      if (key === 'enter' && settingsFocused) {
-        settingsFocused = false;
-        settingsButton.setFocused(false);
-        openSettings('keys');
-        event.preventDefault();
-        return;
-      }
-      /**
-       * `,` 单键直达。
-       *
-       * 用 `event.code` 而不是 `event.key` 判断 —— `,` 在中文输入法下
-       * 可能给出全角字符，而物理键位是稳定的。
-       */
-      if (event.code === 'Comma') {
-        openSettings('keys');
-        event.preventDefault();
-      }
+  /**
+   * 设置界面的键盘接线（`Esc` / `,` / `↑` / `Enter`）。
+   *
+   * ⚠️ 抽到了 `app/settingsKeys.ts` —— 那里写着"必须用捕获阶段"与
+   * "弹窗打开时独占键盘"两条由来，不在这里重复。
+   */
+  wireSettingsKeys({
+    settings,
+    settingsButton,
+    settingsOpen: () => settingsToggle.isOpen(),
+    openSettings: () => settingsToggle.open('keys'),
+    setHandling: (value) => {
+      handlingKeyDown = value;
     },
-    true,
-  );
+  });
 
   /** 统一的翻译入口（缺 key 时回退到 key 本身，而不是抛错）。 */
   function translateSafe(
@@ -686,7 +669,7 @@ async function bootstrap(): Promise<void> {
 
   window.addEventListener('pagehide', () => {
     stageObserver.dispose();
-    loop.dispose();
+    loop?.dispose();
   });
 
 }
