@@ -33,12 +33,19 @@ export const BOSS_TELEGRAPH: BuffDef = {
   hidden: true,
 };
 
-/** Boss 狂暴：伤害翻倍。 */
+/**
+ * Boss 狂暴：伤害翻倍。
+ *
+ * ⚠️ `polarity` 是 **`'buff'`** —— 这是**从 Boss 自己的角度**看的。
+ * "狂暴对玩家是坏消息"是玩家的感受，而极性决定的是"它出现在哪一行"
+ * （`polarity: 'buff'` → 增益行）。把它标成 debuff 会让 Boss 的**增益**
+ * 显示在**减益行**上 —— 位置本身就是分类，标错了就是分类错了。
+ */
 export const BOSS_ENRAGE: BuffDef = {
   id: 'boss-enrage',
   nameKey: 'screen.defeatedByEnrage',
   icon: 'enrage',
-  polarity: 'debuff',
+  polarity: 'buff',
   color: 0xff3030,
   duration: Number.POSITIVE_INFINITY,
   maxStacks: 1,
@@ -266,7 +273,15 @@ export const BOSS_EMPOWER: SkillDef = {
         id: 'boss-empowered',
         nameKey: 'boss.empower.name',
         icon: 'boss_empower',
-        polarity: 'debuff',
+        /**
+         * ⚠️ **`'buff'`**（曾经错标成 `'debuff'`）。
+         *
+         * 它给自己 `damageBoost +30%` —— 是**它的增益**。极性是**持有者
+         * 视角**，不是玩家视角："这个 buff 对玩家不利"不等于"它是减益"。
+         * 标错的后果是它显示在 Boss 的**减益行**（右上），而它其实该在
+         * 增益行（左上）。
+         */
+        polarity: 'buff',
         color: C.boss,
         duration: logicMs(100),
         maxStacks: 1,
