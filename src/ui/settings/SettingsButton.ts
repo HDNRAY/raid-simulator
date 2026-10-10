@@ -86,6 +86,20 @@ export class SettingsButton {
   }
 
   /** 命中测试（逻辑像素）。 */
+  /**
+   * 显示/隐藏整个按钮。
+   *
+   * 用途：**设置面板打开时隐藏它**。按钮原先在面板打开后仍然可见
+   * （实测 `stage.children[1].visible === true`），于是齿轮和它的提示
+   * 从面板左下角露出来，既重叠又让人以为可以点。
+   *
+   * ⚠️ 面板的命中测试已经会拦下点击（`settingsOpen` 分支），所以
+   * 这只是**视觉**修正 —— 但不修就是假的"可点"暗示。
+   */
+  setVisible(visible: boolean): void {
+    this.root.visible = visible;
+  }
+
   /** 隐藏快捷键提示（触屏设备）。见 `IconButton.setShowShortcut`。 */
   setShowShortcut(show: boolean): void {
     this.button.setShowShortcut(show);

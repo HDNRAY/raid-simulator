@@ -59,10 +59,17 @@ export class KeysFooter {
    * 按键页：提示按优先级选一条（通知 > 改键中 > 常规），
    * 并画出「恢复默认」（含焦点表现）。
    */
-  updateKeys(capturing: boolean, resetFocused: boolean): void {
+  updateKeys(capturing: boolean, resetFocused: boolean, showKeyHints = true): void {
     const notice = this.notice();
+    /**
+     * ⚠️ 触屏上**不显示键盘操作说明**（需求："移动端就不用显示快捷键
+     * 信息了，无论是技能按钮还是其他的功能按钮"）。
+     *
+     * 但**通知仍然显示**（"已恢复默认"这类）—— 那是操作结果反馈，
+     * 与"怎么用键盘"无关；触屏上按助记键 `R` 也能触发它。
+     */
     this.hint.set(
-      notice !== ''
+      notice !== '' || !showKeyHints
         ? notice
         : capturing
           ? this.translate('settings.keysCapturingHint')

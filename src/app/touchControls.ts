@@ -152,6 +152,20 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
 
     frame(view) {
       if (!caps.touch) return;
+      /**
+       * ⚠️ **设置面板打开时隐藏按钮层。**
+       *
+       * 否则扇形按钮会画在设置面板**上面**（面板在 canvas 里居中，
+       * 高 500，而按钮占 `y 284..508` 那片）—— 实测在设置页能看到
+       * 六个圆按钮穿透出来，既难看又让人以为可以点。
+       *
+       * 放在这里（每帧判）而不是"打开时隐藏一次"：`settingsOpen`
+       * 是主循环的局部状态，没有变更事件，每帧读一次是最省事且不会
+       * 漏的写法。
+       */
+      const hidden = options.isSettingsOpen();
+      layer.root.visible = !hidden;
+      if (hidden) return;
       layer.update(view);
     },
 

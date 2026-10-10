@@ -358,11 +358,15 @@ async function bootstrap(): Promise<void> {
    * 但预览数据又来自 `touch.layout`。用一个**常量对象**当转交点：
    * `const` 符合 lint，且不依赖"首次渲染足够晚"这种隐含前提。
    */
-  const touchPreviewSource: { read: () => readonly string[] } = { read: () => [] };
+  const touchPreviewSource: {
+    read: () => readonly string[];
+    showKeyHints: boolean;
+  } = { read: () => [], showKeyHints: true };
 
   const settings = new SettingsPanel({
     /** 触屏按钮的只读预览 —— 从布局读（唯一真相）。 */
     getTouchSkills: () => touchPreviewSource.read(),
+    getShowKeyHints: () => touchPreviewSource.showKeyHints,
     pixi: { Container, Graphics, Sprite, Text },
     translate: (key) => translateSafe(key),
     getRows: () =>
@@ -474,10 +478,13 @@ async function bootstrap(): Promise<void> {
     pausedBeforeSettings = loop.isPaused;
     // 打开设置必须暂停战斗 —— 否则玩家改键时会被 Boss 打死
     loop.setPaused(true);
+    /** 面板打开时隐藏齿轮 —— 否则它会从面板左下角露出来（看着还能点）。 */
+    settingsButton.setVisible(false);
     settings.open(tab);
   };
   const closeSettings = (): void => {
     settingsOpen = false;
+    settingsButton.setVisible(true);
     settings.close();
     // 恢复打开前的暂停状态
     loop.setPaused(pausedBeforeSettings);
@@ -517,6 +524,7 @@ async function bootstrap(): Promise<void> {
   });
   touchPreviewSource.read = () =>
     touch.layout.current().map((b) => registry.skill(b.skillId)?.nameKey ?? b.skillId);
+  touchPreviewSource.showKeyHints = touch.caps.showKeyHints;
   /** ⚠️ 必须接上，否则触屏产出的 Action 被直接丢掉（只画按钮、点了没反应）。 */
   loop.setTouchInput(touch.input);
   touch.setBindings(bindings);

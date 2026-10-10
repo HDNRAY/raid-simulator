@@ -22,7 +22,7 @@ import {
   type SettingsFocus,
 } from '../../src/ui/settings/logic';
 import { UiLayout } from '../../src/ui/uiLayout';
-import { LAYOUT } from '../../src/ui/layout';
+import { FONT, LAYOUT } from '../../src/ui/layout';
 
 /**
  * 设置界面的判定逻辑。
@@ -546,5 +546,37 @@ describe('标签只出现在详情区，不占技能格', () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync(new URL('../../src/ui/settings/SettingsPanel.ts', import.meta.url), 'utf8');
     expect(src).not.toMatch(/function tagColor\(/);
+  });
+});
+
+describe('按键行的尺寸（需求："按键那一行 尺寸有问题"）', () => {
+  /**
+   * ⚠️ 这一条锁的是一个"被已经删掉的东西撑出来"的尺寸。
+   *
+   * `cellH` 当初从 44 加到 56 的理由是"**在技能名下放一行提示标签**"，
+   * 而那行标签后来被需求删掉了（见 `KeyGrid` 的说明）。于是 56 的下半截
+   * 变成空白：技能字在 `y+12`、按键在 `y+14`，下面 30px 什么都没有 ——
+   * 表现就是"每行虚高、尺寸不对"。
+   */
+  it('【关键】行高回到 44（不是被已删标签撑出来的 56）', () => {
+    expect(KEY_GRID.cellH).toBe(44);
+  });
+
+  it('行高容得下技能字（`FONT.warn` 实测占高约 1.5 倍字号）', () => {
+    expect(KEY_GRID.cellH).toBeGreaterThan(FONT.warn * 1.5);
+  });
+
+  it('行高不再虚高：格子下半截没有第二行内容', () => {
+    /**
+     * 现在格子里只有两样东西，都在**上半截**：
+     *   技能字 `y+12` / 按键 `y+14`
+     * 两行文字各占约 21px 高，所以 `12 + 21 = 33 < 44` —— 放得下。
+     *
+     * 如果以后又往格子里加第三行，`cellH` 必须重新算，
+     * 这一条会先失败提醒。
+     */
+    const first = keyCellRect(0);
+    expect(first.h).toBe(KEY_GRID.cellH);
+    expect(12 + FONT.warn * 1.5).toBeLessThan(first.h);
   });
 });

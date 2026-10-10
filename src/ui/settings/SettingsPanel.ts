@@ -71,16 +71,13 @@ export interface SettingsPanelOptions {
   /** 关闭弹窗 */
   readonly onClose: () => void;
   /**
-   * 是否显示键名（触屏设备传 `false`）。
+   * 是否显示键名（需求："移动端就不用显示快捷键信息了"）。
    *
-   * 需求："移动端就不用显示快捷键信息了，无论是技能按钮还是其他的
-   * 功能按钮。" 见 `KeyGridState.showKeyHints`。
+   * ⚠️ 是**函数**：它来自平台探测，而触屏控件在设置面板**之后**才
+   * 创建 —— 固定值会永远是 `undefined`（键名照样画出来）。
    */
-  readonly showKeyHints?: boolean;
-  /**
-   * 触屏按钮上场的技能名 key（只读预览用）。**由主循环从
-   * `TouchLayout` 读出** —— 设置面板不持有布局，与"唯一真相"一致。
-   */
+  readonly getShowKeyHints?: (() => boolean) | undefined;
+  /** 触屏按钮的技能名 key（只读预览）。**从 `TouchLayout` 读**，不留副本。 */
   readonly getTouchSkills?: (() => readonly string[]) | undefined;
   /** 读当前 UI 缩放倍数（1 = 自动适配） */
   readonly getUiScale: () => number;
@@ -219,8 +216,7 @@ export class SettingsPanel {
    */
   private skipNextCapture = false;
 
-  /**
-   * 按键轨迹（环形缓冲，供调试探针读取）。
+  /** 按键轨迹（环形缓冲，供调试探针读取）。
    *
    * 保留它是因为"按键没生效"这类问题**只能靠事件序列定位** ——
    * 我这次排查"一次 Enter 同时进入改键并完成绑定"就是靠它，
@@ -669,21 +665,25 @@ export class SettingsPanel {
     this.keyGrid.update(rows, {
       focusIndex: this.focus.zone === 'grid' ? this.focus.index : -1,
       capturingSkillId: this.capturingSkill,
-      showKeyHints: this.options.showKeyHints,
+      showKeyHints: this.options.getShowKeyHints?.() !== false,
     }, (row) => this.drawDetail(row));
 
-    this.footer.updateKeys(this.capturingSkill !== undefined, this.focus.zone === 'reset');
+    this.footer.updateKeys(
+      this.capturingSkill !== undefined,
+      this.focus.zone === 'reset',
+      this.options.getShowKeyHints?.() !== false,
+    );
   }
 
   /** 只读预览。⚠️ 无触屏按钮时隐藏（桌面上画它只会让人困惑）。 */
   private drawTouchPreview(): void {
     const skills = this.options.getTouchSkills?.() ?? [];
-    const rect = uiScaleSliderRect();
+    const r = uiScaleSliderRect();
     const names = skills.map((k) => this.options.translate(k)).join(' ');
     this.touchPreview.text =
       skills.length === 0 ? '' : `${this.options.translate('settings.touchButtons')}: ${names}`;
-    this.touchPreview.x = rect.x;
-    this.touchPreview.y = rect.y + rect.h + 10;
+    this.touchPreview.x = r.x;
+    this.touchPreview.y = r.y + r.h + 10;
     this.touchPreview.visible = skills.length > 0;
   }
 
