@@ -23,10 +23,23 @@ const PLAYER_BASE_Y = 456;
 /**
  * 贴图缩放。
  *
- * 原图 202×232，而程序化玩家大约 134×105（`getBounds` 实测）。
- * 0.42 让贴图高度约 97px，与原来同量级 —— 太大就会挡住 Boss。
+ * 原图 202×232。**取值要按"会不会失真"来想**，而直觉在这里是反的：
+ *
+ * | scale | 渲染尺寸 | 相对原生 | 观感 |
+ * |---|---|---|---|
+ * | 0.42（旧） | 85×97 | **0.42×** | **在缩小** → 像素被丢，才是糊的主因 |
+ * | 0.68（现在） | 137×158 | 0.68× | 仍略缩，但像素保留得更多 |
+ * | 1.00 | 202×232 | 1.00× | **最清晰**（1:1），但高约程序化玩家的 2 倍 |
+ *
+ * 所以"放大"**不会**让像素画更糊 —— 它在把渲染比例推向 1:1。
+ * 真正的模糊来自两处，都已处理：
+ *   1. 纹理过滤必须是 `nearest`（见 `setTexture`）
+ *   2. 别把比例压得太小（旧值 0.42 丢了 58% 的像素）
+ *
+ * 0.68 是折中：比原来大 62%（需求："人物可以稍微放大一点"），
+ * 又远小于 1:1，不至于盖过 Boss（Boss 视觉高度约 200）。
  */
-const SPRITE_SCALE = 0.42;
+const SPRITE_SCALE = 0.68;
 /**
  * 贴图路径。
  *
@@ -104,6 +117,12 @@ export class PlayerActorPart implements FramePart {
   setTexture(texture: Texture): void {
     if (this.sprite === undefined) {
       this.sprite = new Sprite(texture);
+      /**
+       * ⚠️ **最近邻过滤**：贴图是**像素画**，默认的线性插值会把像素糊成
+       * 一团（尤其是这里还要缩放）。像素画必须 `nearest`。
+       */
+      texture.source.scaleMode = 'nearest';
+      this.sprite.texture.source.scaleMode = 'nearest';
       /**
        * 锚点放**底部中心**：玩家"站在"基地线上，缩放/下沉都绕脚下，
        * 与程序化绘制的 `base` 语义一致。
