@@ -208,6 +208,23 @@ export class ViewAdapter {
         }
         case 'skillUsed': {
           this.lastUsed.set(event.skillId, event.tick);
+          /**
+           * **玩家成功放出技能 → 立刻清掉"被拒"提示。**
+           *
+           * 那条提示回答的是"我刚才那一下为什么没生效"。既然这一下
+           * 生效了，答案就过期了 —— 让它继续挂着只会变成噪音，
+           * 尤其是玩家已经改了操作（例如从按「破」改成按「攻」）之后，
+           * 屏幕上还留着上一件事的提示。
+           *
+           * ⚠️ 同时清 `lastReject`：否则下次再被同一个原因拒绝时会被
+           * 当成"同一件事"而**不再提示**，玩家就永远看不到反馈了。
+           */
+          if (event.sourceId === playerId) {
+            this.lastReject = undefined;
+            this.statusLine = '';
+            this.statusDetail = '';
+            this.statusLineTtl = 0;
+          }
           break;
         }
         default:
