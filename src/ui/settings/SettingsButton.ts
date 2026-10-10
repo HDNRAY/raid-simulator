@@ -55,14 +55,21 @@ export class SettingsButton {
       pixi,
       icon: 'gear',
       /**
-       * 图标 + 快捷键提示，整体居中在**玩家面板右侧**。
+       * 图标 + 快捷键提示，贴在**玩家面板右侧**。
        *
-       * 面板在 `x 8..236, y 452..532`（见 `LAYOUT.player`），
-       * 按钮贴在它右缘外 8px、与面板**垂直居中**。
+       * 面板在 `x 8..236, y 452..532`（见 `LAYOUT.player`）。
+       * 按钮在它右缘外 `MARGIN` px，并且**底边与面板底边对齐**
+       * （需求："设置icon，可以贴着底部和 人物面板底部对齐"）。
+       *
+       * ⚠️ 原先取的是面板**垂直中心**（`y = 452 + 40 = 492`），于是按钮
+       * 底边落在 512、比面板底(532)高 20px —— 看起来"吊在半空"。
+       * 改成 `y = 面板底 - HIT/2` 之后底边精确贴齐（532）。
+       * ⚠️ 用 `LAYOUT.player.y + LAYOUT.player.h` 表达而不是写 `532`：
+       * 面板位置是布局表的事，这里只引用它（避免两处真相）。
        */
       anchor: {
         x: LAYOUT.player.x + LAYOUT.player.w + MARGIN + HIT / 2,
-        y: LAYOUT.player.y + LAYOUT.player.h / 2,
+        y: LAYOUT.player.y + LAYOUT.player.h - HIT / 2,
       },
       /**
        * 需求："设置按钮，Esc 在 icon 的左边……这个设计不对，
