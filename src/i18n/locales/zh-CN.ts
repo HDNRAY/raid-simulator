@@ -193,9 +193,26 @@ export const zhCN = {
       name: '攻',
       desc: '普攻。消耗 10 炁，造成 10 点伤害。'
     },
+    /**
+     * 「避」= 原「闪」。
+     *
+     * ⚠️ **技能 id 仍是 `dodge`** —— 只改显示名。改 id 会连带打断
+     * buff 的 `dodge-*` 前缀判断（人物位移与变色都靠它）、默认键位、
+     * 以及既有绑定。
+     */
     dodge: {
-      name: '闪',
+      name: '避',
       desc: '消耗 30 炁，获得 0.5 秒完全无敌。瞬发，随时可按。'
+    },
+    /**
+     * 「闪」= 新增的**免费**短无敌。
+     *
+     * 与「避」的分工：避 30 炁 / 0.5 秒；闪 0 消耗 / 0.1 秒。
+     * 炁见底时仍有手段躲，代价是窗口窄得多。
+     */
+    flash: {
+      name: '闪',
+      desc: '不消耗任何资源，获得 0.1 秒无敌。瞬发，炁不足时的兜底。'
     },
     guard: {
       name: '防',
@@ -222,7 +239,7 @@ export const zhCN = {
 
   /** Boss 技能与本体 */
   boss: {
-    name: '伪·明显一郎',
+    name: '伪名一郎',
     cleave: { name: '重斩', desc: '1.8 秒前摇，造成 28 点物理伤害，冷却 6 秒。可打断、可闪避、可格挡。' },
     sweep: { name: '横扫', desc: '2.2 秒前摇，造成 36 点火焰伤害，冷却 10 秒。可打断、可闪避、可格挡。' },
     empower: { name: '蓄能', desc: '前摇后自身增伤，持续 16 秒。打断它可以免掉一轮爆发。' },
@@ -353,7 +370,7 @@ export const zhCN = {
     defeatedByTimeout: '时间耗尽',
     defeatedByDeath: '你倒下了',
     defeatedByEnrage: '被狂暴的 Boss 击溃',
-    wonByKill: '击败了伪·明显一郎',
+    wonByKill: '击败了伪名一郎',
     /** 结算面板上的统计标签 */
     statTime: '用时',
     statRemainingHp: '剩余生命',
