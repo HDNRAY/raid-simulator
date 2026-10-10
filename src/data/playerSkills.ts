@@ -140,7 +140,6 @@ export const JIE: SkillDef = {
   tags: [],
   /** 提示玩家"这一招会打断目标" */
   hintTags: ['interrupt'],
-  school: 'physical',
   interruptible: false,
 };
 
@@ -180,7 +179,7 @@ export const STRIKE: SkillDef = {
         {
           kind: 'damage',
           /** 「攻」是 `S(10)`，所以这里 `S(5)` —— "伤害比攻少一半"。 */
-          damage: { base: S(5), school: 'physical', canCrit: false, countsAsHit: true },
+          damage: { base: S(5), canCrit: false, countsAsHit: true },
         },
         /**
          * **用掉就消失**（需求）。
@@ -193,6 +192,5 @@ export const STRIKE: SkillDef = {
     },
   ],
   tags: ['melee'],
-  school: 'physical',
   interruptible: false,
 };

@@ -179,13 +179,12 @@ export const BOSS_CLEAVE: SkillDef = {
            * 单发 14 点看起来不重，但出招频率提到了约 1.1 秒一次 ——
            * "重"体现在**总压力**上，而不是非要一击半血。
            */
-          damage: { base: S(28), school: 'physical', canCrit: false, countsAsHit: true },
+          damage: { base: S(28), canCrit: false, countsAsHit: true },
         },
       ],
     },
   ],
   tags: ['melee'],
-  school: 'physical',
   /**
    * 「高伤」—— 单次 28 点，而玩家的「攻」只有 10。
    * 提示玩家：**闪避比防御更值**（闪避全免，防御只减 55%）。
@@ -226,7 +225,7 @@ export const BOSS_SWEEP: SkillDef = {
            * 前摇更长（长到能看清并闪避），命中更痛 —— 所以"看到横扫
            * 必须反应"是本作的核心节奏。
            */
-          damage: { base: S(36), school: 'fire', canCrit: false, countsAsHit: true },
+          damage: { base: S(36), canCrit: false, countsAsHit: true },
         },
         /**
          * **倒地** —— 横扫命中后玩家 2 秒内只能按「闪」/「避」。
@@ -247,7 +246,6 @@ export const BOSS_SWEEP: SkillDef = {
     },
   ],
   tags: ['spell'],
-  school: 'fire',
   /** 「高伤」—— 单次 36 点，全场最高的一击。 */
   hintTags: ['highDamage'],
   interruptible: true,
@@ -292,7 +290,6 @@ export const BOSS_EMPOWER: SkillDef = {
   targeting: { mode: 'self' },
   hits: [],
   tags: [],
-  school: 'physical',
   interruptible: true,
 };
 
@@ -318,7 +315,6 @@ export const BOSS_ARMOR_SKILL: SkillDef = {
   targeting: { mode: 'self' },
   hits: [],
   tags: ['defensive'],
-  school: 'arcane',
   /**
    * 「霸体」—— 提示玩家"无法被打断"，别浪费「破」。
    *

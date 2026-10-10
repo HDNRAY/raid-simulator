@@ -31,10 +31,6 @@ export type StatKey =
   // 伤害 / 治疗修饰
   | 'damageBoost'
   | 'damageMult'
-  | 'physicalBoost'
-  | 'spellBoost'
-  | 'dotBoost'
-  | 'directBoost'
   | 'critDamageBoost'
   | 'armorPen'
   | 'vulnerability'

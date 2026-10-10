@@ -175,7 +175,6 @@ const slashHits: readonly HitDef[] = [
         damage: {
           base: 100,
           scaling: [{ stat: 'strength', ratio: 0.8 }],
-          school: 'physical',
           canCrit: true,
           countsAsHit: true,
         },
@@ -185,9 +184,9 @@ const slashHits: readonly HitDef[] = [
 ];
 
 const heavyHits: readonly HitDef[] = [
-  { at: 500, effects: [{ kind: 'damage', damage: { base: 300, school: 'physical', canCrit: true, countsAsHit: true } }] },
-  { at: 1000, effects: [{ kind: 'damage', damage: { base: 300, school: 'physical', canCrit: true, countsAsHit: true } }] },
-  { at: 1500, effects: [{ kind: 'damage', damage: { base: 400, school: 'physical', canCrit: true, countsAsHit: true } }] },
+  { at: 500, effects: [{ kind: 'damage', damage: { base: 300, canCrit: true, countsAsHit: true } }] },
+  { at: 1000, effects: [{ kind: 'damage', damage: { base: 300, canCrit: true, countsAsHit: true } }] },
+  { at: 1500, effects: [{ kind: 'damage', damage: { base: 400, canCrit: true, countsAsHit: true } }] },
 ];
 
 const slash: SkillDef = {
@@ -204,7 +203,6 @@ const slash: SkillDef = {
   targeting: { mode: 'primaryEnemy' },
   hits: slashHits,
   tags: ['melee'],
-  school: 'physical',
   interruptible: false,
 };
 
@@ -220,7 +218,6 @@ const dodge: SkillDef = {
   targeting: { mode: 'self' },
   hits: [],
   tags: ['defensive', 'dodge'],
-  school: 'physical',
   interruptible: false,
 };
 
@@ -236,7 +233,6 @@ const guard: SkillDef = {
   targeting: { mode: 'self' },
   hits: [],
   tags: ['defensive'],
-  school: 'physical',
   interruptible: false,
 };
 
@@ -255,12 +251,11 @@ const arc: SkillDef = {
     {
       at: 0,
       effects: [
-        { kind: 'damage', damage: { base: 250, school: 'physical', canCrit: true, countsAsHit: true } },
+        { kind: 'damage', damage: { base: 250, canCrit: true, countsAsHit: true } },
       ],
     },
   ],
   tags: ['melee'],
-  school: 'physical',
   interruptible: false,
   // 派生条件 —— 注意 requires 用的是统一的 Condition
   requires: [requiresCombo, requiresNoGcd],
@@ -279,7 +274,6 @@ export const heavySkill: SkillDef = {
   targeting: { mode: 'primaryEnemy' },
   hits: heavyHits,
   tags: ['spell'],
-  school: 'arcane',
   interruptible: true,
 };
 
@@ -306,7 +300,6 @@ const passiveTalent: SkillDef = {
   targeting: { mode: 'self' },
   hits: [],
   tags: [],
-  school: 'physical',
   interruptible: false,
 };
 
@@ -339,12 +332,11 @@ export const crimsonArcSkill: SkillDef = {
       at: 1200,
       avoidable: true,
       effects: [
-        { kind: 'damage', damage: { base: 800, school: 'fire', canCrit: false, countsAsHit: true, avoidable: true } },
+        { kind: 'damage', damage: { base: 800, canCrit: false, countsAsHit: true, avoidable: true } },
       ],
     },
   ],
   tags: ['spell'],
-  school: 'fire',
   interruptible: true,
 };
 

@@ -63,7 +63,6 @@ export function makeSkillDef(
     targeting: { mode: 'primaryEnemy' },
     hits: [],
     tags: [],
-    school: 'physical',
     interruptible: false,
     ...overrides,
   };

@@ -64,10 +64,6 @@ export const zhCN = {
     cooldownRate: '冷却速率',
     damageBoost: '伤害加成',
     damageMult: '最终伤害',
-    physicalBoost: '物理加成',
-    spellBoost: '法术加成',
-    dotBoost: '持续伤害加成',
-    directBoost: '直接伤害加成',
     critDamageBoost: '暴击伤害加成',
     armorPen: '护甲穿透',
     vulnerability: '易伤',
@@ -289,8 +285,8 @@ export const zhCN = {
 
   boss: {
     name: '伪名一郎',
-    cleave: { name: '重斩', desc: '1.8 秒前摇，造成 28 点物理伤害，冷却 6 秒。可打断、可闪避、可格挡。' },
-    sweep: { name: '横扫', desc: '2.2 秒前摇，造成 36 点火焰伤害，冷却 10 秒。可打断、可闪避、可格挡。' },
+    cleave: { name: '重斩', desc: '1.8 秒前摇，造成 28 点伤害，冷却 6 秒。可打断、可闪避、可格挡。' },
+    sweep: { name: '横扫', desc: '2.2 秒前摇，造成 36 点伤害，冷却 10 秒。可打断、可闪避、可格挡。' },
     empower: { name: '蓄能', desc: '前摇后自身增伤，持续 16 秒。打断它可以免掉一轮爆发。' },
     /**
      * 霸体：Boss 的"不能被干扰"窗口。

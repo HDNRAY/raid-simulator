@@ -122,10 +122,6 @@ export const STAT_RULES: Record<StatKey, StatRule> = {
    * 由内容作者选，引擎不猜（数据模型规范 §9.4）。
    */
   damageMult: { combine: 'sum', kind: 'multiplier' },
-  physicalBoost: { combine: 'sum', kind: 'accumulator', percent: true },
-  spellBoost: { combine: 'sum', kind: 'accumulator', percent: true },
-  dotBoost: { combine: 'sum', kind: 'accumulator', percent: true },
-  directBoost: { combine: 'sum', kind: 'accumulator', percent: true },
   /** 暴击伤害加成：乘在暴击倍率上 */
   critDamageBoost: { combine: 'sum', kind: 'multiplier' },
   /** 护甲穿透：上限 100% */

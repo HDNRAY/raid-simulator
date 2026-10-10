@@ -136,7 +136,7 @@ describe('可扩展性：新增一个技能只需要写数据', () => {
         effects: [
           {
             kind: 'damage',
-            damage: { base: 50, school: 'arcane', canCrit: false, countsAsHit: true },
+            damage: { base: 50, canCrit: false, countsAsHit: true },
           },
         ],
       },
@@ -145,14 +145,13 @@ describe('可扩展性：新增一个技能只需要写数据', () => {
         effects: [
           {
             kind: 'damage',
-            damage: { base: 70, school: 'arcane', canCrit: false, countsAsHit: true },
+            damage: { base: 70, canCrit: false, countsAsHit: true },
           },
           { kind: 'grantBuff', target: { mode: 'primaryEnemy' }, buff: customBuff },
         ],
       },
     ],
     tags: ['spell'],
-    school: 'arcane',
     interruptible: false,
   };
 
@@ -234,13 +233,12 @@ describe('可扩展性：新增一个 Boss 只需要写数据', () => {
         effects: [
           {
             kind: 'damage',
-            damage: { base: 300, school: 'arcane', canCrit: false, countsAsHit: true },
+            damage: { base: 300, canCrit: false, countsAsHit: true },
           },
         ],
       },
     ],
     tags: ['spell'],
-    school: 'arcane',
     interruptible: false,
   };
 
@@ -256,7 +254,6 @@ describe('可扩展性：新增一个 Boss 只需要写数据', () => {
     targeting: { mode: 'self' },
     hits: [],
     tags: [],
-    school: 'physical',
     interruptible: false,
   };
 
@@ -349,12 +346,11 @@ describe('可扩展性：新增一个 Boss 只需要写数据', () => {
         {
           at: 0,
           effects: [
-            { kind: 'damage', damage: { base: 30_000, school: 'physical', canCrit: false, countsAsHit: true } },
+            { kind: 'damage', damage: { base: 30_000, canCrit: false, countsAsHit: true } },
           ],
         },
       ],
       tags: [],
-      school: 'physical',
       interruptible: false,
     };
     const withHeavy = createRegistry(
@@ -583,13 +579,12 @@ describe('可扩展性：全新内容也能跑完一整场战斗', () => {
         effects: [
           {
             kind: 'damage',
-            damage: { base: 900, school: 'physical', canCrit: false, countsAsHit: true },
+            damage: { base: 900, canCrit: false, countsAsHit: true },
           },
         ],
       },
     ],
     tags: [],
-    school: 'physical',
     interruptible: false,
   };
 
@@ -607,12 +602,11 @@ describe('可扩展性：全新内容也能跑完一整场战斗', () => {
       {
         at: 0,
         effects: [
-          { kind: 'damage', damage: { base: 400, school: 'physical', canCrit: false, countsAsHit: true } },
+          { kind: 'damage', damage: { base: 400, canCrit: false, countsAsHit: true } },
         ],
       },
     ],
     tags: [],
-    school: 'physical',
     interruptible: false,
   };
 

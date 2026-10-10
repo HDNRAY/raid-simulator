@@ -250,7 +250,6 @@ const ATTACK: SkillDef = {
           kind: 'damage',
           damage: {
             base: S(10),
-            school: 'physical',
             canCrit: false,
             countsAsHit: true,
           },
@@ -259,7 +258,6 @@ const ATTACK: SkillDef = {
     },
   ],
   tags: ['melee'],
-  school: 'physical',
   /** 读条 0.5 秒，所以会被打断 —— 这正是"轰要挑空档放"的博弈来源 */
   interruptible: true,
 };
@@ -299,7 +297,6 @@ const DODGE: SkillDef = {
    * 不合理（你正躺着）。
    */
   tags: ['defensive', 'dodge'],
-  school: 'physical',
   interruptible: false,
 };
 
@@ -345,7 +342,6 @@ const FLASH: SkillDef = {
    * 不合理（你正躺着）。
    */
   tags: ['defensive', 'dodge'],
-  school: 'physical',
   interruptible: false,
 };
 
@@ -370,7 +366,6 @@ const GUARD: SkillDef = {
   targeting: { mode: 'self' },
   hits: [],
   tags: ['defensive'],
-  school: 'physical',
   interruptible: false,
 };
 
@@ -426,7 +421,6 @@ const BREAK: SkillDef = {
   tags: [],
   /** 提示玩家"这一招会打断目标" */
   hintTags: ['interrupt'],
-  school: 'physical',
   interruptible: false,
 };
 
@@ -457,7 +451,6 @@ const BLAST: SkillDef = {
           kind: 'damage',
           damage: {
             base: S(30),
-            school: 'arcane',
             canCrit: false,
             countsAsHit: true,
           },
@@ -468,7 +461,6 @@ const BLAST: SkillDef = {
     },
   ],
   tags: ['spell'],
-  school: 'arcane',
   /** 读条 0.9 秒 —— 最高伤害的代价就是最容易被打断 */
   interruptible: true,
 };
@@ -493,7 +485,6 @@ const FOCUS: SkillDef = {
   targeting: { mode: 'self' },
   hits: [],
   tags: [],
-  school: 'arcane',
   interruptible: false,
 };
 

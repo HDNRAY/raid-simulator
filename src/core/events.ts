@@ -20,7 +20,6 @@
 
 import type { BuffId, CombatantId, SkillId } from './types/ids';
 import type { ResourceKey } from './types/resources';
-import type { School } from './types/triggers';
 import type { EndReason } from './types/runtime';
 
 /* ================================================================== *
@@ -50,7 +49,6 @@ export type EventDef =
       readonly targetId: CombatantId;
       readonly amount: number;
       readonly crit: boolean;
-      readonly school: School;
       readonly absorbed: number;
       readonly overkill: number;
     }

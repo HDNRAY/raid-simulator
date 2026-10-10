@@ -52,7 +52,6 @@ function damage(over: Partial<DamageEvent> = {}): DamageEvent {
     targetId: 'meiichiro',
     amount: 12,
     crit: false,
-    school: 'physical',
     absorbed: 0,
     overkill: 0,
     ...over,

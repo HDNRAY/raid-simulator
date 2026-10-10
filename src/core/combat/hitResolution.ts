@@ -94,7 +94,6 @@ export function resolveHit(
             result,
             actor.id,
             skill.id,
-            effect.damage.school,
             ctx.state.tick,
           );
           ctx.replaceCombatant(applied.combatant);

@@ -30,7 +30,6 @@ import type {
   Combatant,
   DamageSpec,
   EventDef,
-  School,
   SkillDef,
   StatKey,
 } from '../types';
@@ -469,7 +468,6 @@ export function applyDamage(
   result: DamageResult,
   sourceId: string,
   skillId: string,
-  school: School,
   tick: number,
 ): { readonly combatant: Combatant; readonly events: readonly EventDef[] } {
   if (result.avoided) {
@@ -501,7 +499,6 @@ export function applyDamage(
       targetId: target.id,
       amount: dealt,
       crit: result.crit,
-      school,
       absorbed: result.absorbed,
       overkill,
     },

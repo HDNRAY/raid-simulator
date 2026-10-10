@@ -4,7 +4,6 @@ import type { BuffId, SkillId } from './ids';
 import type { ResourceKey } from './resources';
 import type { Condition, Expr, StatKey, Who } from './stats';
 import type { BuffDef } from './buffs';
-import type { School } from './triggers';
 
 /* ================================================================== *
  * 6. 效果与伤害
@@ -26,7 +25,6 @@ export interface ScalingTerm {
 export interface DamageSpec {
   readonly base: number | Expr;
   readonly scaling?: readonly ScalingTerm[];
-  readonly school: School;
   readonly canCrit: boolean;
   /** 是否触发 onHitDealt / onCritDealt 等 hook */
   readonly countsAsHit: boolean;

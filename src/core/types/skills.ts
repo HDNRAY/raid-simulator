@@ -4,7 +4,7 @@ import type { EntityId, LocaleKey, SkillId } from './ids';
 import type { ResourceKey, ResourcePool } from './resources';
 import type { Condition, Expr } from './stats';
 import type { Ability } from './abilities';
-import type { HintTag, School, SkillTag } from './triggers';
+import type { HintTag, SkillTag } from './triggers';
 import type { HitDef, TargetRule } from './effects';
 
 /* ================================================================== *
@@ -127,6 +127,5 @@ export interface SkillDef extends GameEntity {
   readonly targeting: TargetRule;
   readonly hits: readonly HitDef[];
   readonly tags: readonly SkillTag[];
-  readonly school: School;
   readonly interruptible: boolean;
 }

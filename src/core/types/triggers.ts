@@ -73,13 +73,12 @@ export type HintTag =
   | 'highDamage'
   /** 「打断」：这一招会打断目标读条 */
   | 'interrupt';
-export type School = 'physical' | 'fire' | 'water' | 'arcane';
+
 
 export type HookFilter =
   | { readonly by: 'self' }
   | { readonly by: 'other' }
   | { readonly by: 'skill'; readonly skillId?: SkillId; readonly tag?: SkillTag }
-  | { readonly by: 'school'; readonly school: School }
   | { readonly by: 'buff'; readonly buffId: BuffId };
 
 export interface TriggerDef {

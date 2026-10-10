@@ -28,7 +28,7 @@ const SLASH = makeSkillDef({
       effects: [
         {
           kind: 'damage',
-          damage: { base: 100, school: 'physical', canCrit: false, countsAsHit: true },
+          damage: { base: 100, canCrit: false, countsAsHit: true },
         },
       ],
     },
@@ -47,7 +47,7 @@ const HEAVY = makeSkillDef({
       effects: [
         {
           kind: 'damage',
-          damage: { base: 400, school: 'physical', canCrit: false, countsAsHit: true },
+          damage: { base: 400, canCrit: false, countsAsHit: true },
         },
       ],
     },
@@ -85,7 +85,7 @@ const BOSS_SWING = makeSkillDef({
       effects: [
         {
           kind: 'damage',
-          damage: { base: 500, school: 'physical', canCrit: false, countsAsHit: true },
+          damage: { base: 500, canCrit: false, countsAsHit: true },
         },
       ],
     },
@@ -269,7 +269,7 @@ describe('引擎：判定层（M2 的核心）', () => {
           effects: [
             {
               kind: 'damage',
-              damage: { base: 500, school: 'physical', canCrit: false, countsAsHit: true },
+              damage: { base: 500, canCrit: false, countsAsHit: true },
             },
           ],
         },
@@ -341,7 +341,7 @@ describe('引擎：判定层（M2 的核心）', () => {
           effects: [
             {
               kind: 'damage',
-              damage: { base: 500, school: 'physical', canCrit: false, countsAsHit: true },
+              damage: { base: 500, canCrit: false, countsAsHit: true },
             },
           ],
         },
@@ -440,7 +440,7 @@ describe('引擎：时间限制与胜负', () => {
           effects: [
             {
               kind: 'damage',
-              damage: { base: 999_999, school: 'physical', canCrit: false, countsAsHit: true },
+              damage: { base: 999_999, canCrit: false, countsAsHit: true },
             },
           ],
         },
@@ -530,7 +530,7 @@ describe('引擎：「倒地」（Boss 的「横扫」）', () => {
       id: 'attack',
       castTime: 500,
       tags: ['melee'],
-      hits: [{ at: 500, effects: [{ kind: 'damage', damage: { base: 10, school: 'physical', canCrit: false, countsAsHit: true } }] }],
+      hits: [{ at: 500, effects: [{ kind: 'damage', damage: { base: 10, canCrit: false, countsAsHit: true } }] }],
     });
     const dodge = makeSkillDef({ id: 'dodge', castTime: 0, tags: ['defensive', 'dodge'] });
     const heavy = makeSkillDef({ id: 'heavy', castTime: 0, tags: ['spell'] });
@@ -542,7 +542,7 @@ describe('引擎：「倒地」（Boss 的「横扫」）', () => {
         {
           at: 0,
           effects: [
-            { kind: 'damage', damage: { base: 1, school: 'physical', canCrit: false, countsAsHit: true } },
+            { kind: 'damage', damage: { base: 1, canCrit: false, countsAsHit: true } },
             { kind: 'grantBuff', buff: knockdown },
           ],
         },

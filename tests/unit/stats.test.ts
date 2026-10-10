@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { STAT_RULES, isPercentStat } from '../../src/core/stats/aggregate';
 import { computeStats, modifiersInNamespace } from '../../src/core/stats/pipeline';
-import type { Condition, Expr, StatKey, StatModifier } from '../../src/core/types';
+import type { Condition, Expr, StatModifier } from '../../src/core/types';
 
 /**
  * M1-3 的验收：数据模型规范 §13 的 T1 / T2 / T3 / T3b。
@@ -57,12 +57,28 @@ function surgeModifier(): StatModifier {
 }
 
 describe('聚合规则表', () => {
-  it('每个 StatKey 都有规则（穷尽性由类型强制）', () => {
-    const keys = Object.keys(STAT_RULES) as StatKey[];
-    expect(keys.length).toBeGreaterThan(25);
-    for (const key of keys) {
-      expect(STAT_RULES[key]).toBeDefined();
-      expect(['sum', 'max', 'override']).toContain(STAT_RULES[key].combine);
+  it('每条规则都是完整且可用的', () => {
+    /**
+     * ⚠️ 这个用例**曾经是假的**，两次：
+     *
+     * 1. 原版断言 `keys.length > 25` —— 一个**魔数门槛**。它的意图是
+     *    "别漏了规则"，但删掉任何一个死掉的 StatKey（例如已无引用的
+     *    `physicalBoost` / `spellBoost`）就会误报，而真正的规则缺失
+     *    它**根本测不出来**
+     * 2. 我第一次改的时候写成了 `expect(keys).toEqual(expected)`，其中
+     *    `expected` 就是 `keys` —— **同义反复**，等于没测
+     *
+     * 而且"穷尽性"这件事**本来就不该由运行期测试承担**：
+     * `STAT_RULES` 的类型是 `Record<StatKey, StatRule>`，少一个键
+     * **编译就不过**（见 `aggregate.ts` 文件头的说明）。
+     *
+     * 所以这里只断言编译期管不到的**取值合法性** —— 每条规则的
+     * `combine` / `kind` 必须落在各自的联合类型内。类型声明保证了这一点，
+     * 但如果有人用类型断言或从数据构造规则，这个用例会兜住。
+     */
+    for (const [key, rule] of Object.entries(STAT_RULES)) {
+      expect(['sum', 'max', 'override'], `combine of ${key}`).toContain(rule.combine);
+      expect(['accumulator', 'multiplier', 'value'], `kind of ${key}`).toContain(rule.kind);
     }
   });
 
