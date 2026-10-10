@@ -13,6 +13,67 @@ import type { BuffView } from './viewModel';
 import { isTightWindow } from './viewModel';
 import type { TranslateFn } from './sceneTypes';
 
+/**
+ * 算出每条**方块的左缘**。
+ *
+ * ==================================================================
+ * 为什么抽成纯函数
+ * ==================================================================
+ *
+ * 这块排布数学被用户实测纠正过两次（空标签占宽度、标签跑到方块左边），
+ * 而它原本藏在 `IconStrip`（依赖 Pixi）的渲染循环里 —— **测不到**，
+ * 只能靠截图碰运气。抽出来之后可以在 Node 里直接断言坐标。
+ *
+ * ⚠️ 标签**永远在方块右边**（两种对齐一致）。
+ * 右对齐时右缘固定在 `x`：第 i 条的**方块右缘** = `x - Σ(右侧条目的
+ * 标签宽度)` —— 把自己和右侧所有条目的标签位置先让出来。
+ *
+ * @param labelTotals 每条"方块之后占的宽度"（`labelGap + 标签宽`；
+ *                    标签为空时 **0**，这一条是关键，见上）
+ */
+export function stripBoxX(options: {
+  readonly count: number;
+  /** 左对齐时是左缘；右对齐时是**右缘**。 */
+  readonly x: number;
+  readonly size: number;
+  readonly gap: number;
+  readonly align?: 'left' | 'right';
+  readonly labelTotals: readonly number[];
+}): readonly number[] {
+  const { count, x, size, gap, labelTotals } = options;
+  const right = options.align === 'right';
+  const out: number[] = [];
+
+  if (!right) {
+    /** 左对齐：游标从左缘往右推，简单直接。 */
+    let cursor = x;
+    for (let i = 0; i < count; i += 1) {
+      out.push(cursor);
+      cursor += size + (labelTotals[i] ?? 0) + gap;
+    }
+    return out;
+  }
+
+  /**
+   * 右对齐：**从右缘反算，闭式**。
+   *
+   * ⚠️ 不要用"游标递减"那种写法。我第一版就是这么写的，而它**漏算了
+   * 条目之间的 `gap`** —— 多条时右缘会算错（单测当场抓到：`x` 算出 730
+   * 而不是 952）。闭式把"右侧所有条目的总占宽"一次算清，不会漏项。
+   *
+   * 第 i 条的方块左缘 = `x` − 本条 `size + 标签宽` − 右侧所有条目的
+   * `(size + gap + 标签宽)`。
+   */
+  for (let i = 0; i < count; i += 1) {
+    let rightOfMe = 0;
+    for (let j = i + 1; j < count; j += 1) {
+      rightOfMe += size + gap + (labelTotals[j] ?? 0);
+    }
+    out.push(x - size - (labelTotals[i] ?? 0) - rightOfMe);
+  }
+  return out;
+}
+
 export class IconStrip {
   readonly root: Container;
   private readonly items: Array<{
@@ -105,12 +166,21 @@ export class IconStrip {
     const { x, y, size, gap } = this.strip;
     const labelGap = this.strip.labelGap ?? 4;
     const rightAligned = this.strip.align === 'right';
+
     /**
-     * 左对齐：`x` 是左缘，游标递增。
-     * 右对齐：`x` 是**右缘**，游标递减 —— 这样"最靠边的那个"始终贴边，
-     * 数量变化时其余条目向左生长，而不是整排左右跳。
+     * ================================================================
+     * ⚠️ 两遍：**先设文本量宽，再定位**
+     * ================================================================
+     *
+     * 右对齐时方块的 x 取决于"自己与右侧所有条目的标签宽度"，所以必须先
+     * 知道全部宽度才能开始摆。顺带解决了另一个坑：`Label` 的宽度**随文本
+     * 变化**，一边设文本一边量宽会量到上一条的长度。
      */
-    let cursor = rightAligned ? x - size : x;
+
+    /* ---------- 第一遍：文本 + 宽度 ---------- */
+
+    /** 每条"方块之后占的宽度"（空标签 → 0，见下面 `hasLabel` 的说明）。 */
+    const labelTotals: number[] = [];
 
     for (let i = 0; i < this.items.length; i += 1) {
       const item = this.items[i];
@@ -122,16 +192,11 @@ export class IconStrip {
         item.label.set('');
         item.timer.set('');
         item.square.visible = false;
+        labelTotals[i] = 0;
         continue;
       }
 
-      const tight = isTightWindow(view);
       const edge = view.color;
-
-      /**
-       * ⚠️ 先把**文本**设好再量宽度、最后定位 —— 反过来的话量到的是上一条
-       * 的长度（`Label` 的宽度随文本变化）。
-       */
       const seconds =
         view.stacks > 1
           ? `${view.stacks}`
@@ -143,15 +208,56 @@ export class IconStrip {
       item.label.set(this.translate(view.shortLabelKey));
       item.label.setColor(0xd0d0dc);
 
-      const labelW = Math.max(item.label.root.width, 16);
       /**
-       * 一个条目的总宽度 = 方块 + 间隙 + 标签。
-       * 左右两种排布宽度相同，只是**排布方向**与**标签落在方块的哪一侧**
-       * 不同 —— 右对齐时标签在方块左边，否则整排会向右溢出 `x` 右缘。
+       * ⚠️ **标签为空时不占宽度。**
+       *
+       * 踩过的坑（用户实测："裂 还是没好，你好像留了 2 个字的位置"）：
+       * 原来无条件按 `max(width, 16)` 预留标签位，于是没有标签的条目也会
+       * 凭空占 `labelGap + 16` ≈ **两个字**的宽度。右对齐时那个空隙正好在
+       * 最右边 → 整排**贴不到右缘**。
        */
-      const itemW = size + labelGap + labelW;
-      /** 这一条方块的左缘（右对齐时从右缘反算）。 */
-      const boxX = rightAligned ? cursor - itemW : cursor;
+      const hasLabel = item.label.root.text !== '';
+      labelTotals[i] = hasLabel ? labelGap + Math.max(item.label.root.width, 16) : 0;
+    }
+
+    /* ---------- 第二遍：定位 ---------- */
+
+    /**
+     * 左对齐：`x` 是左缘，游标递增。
+     * 右对齐：`x` 是**右缘**，游标递减。
+     *
+     * ⚠️ **标签永远在方块右边**（两种对齐都一样）。
+     *
+     * 用户实测纠正过我两次：
+     *   1. "裂 还是没好，你好像留了 2 个字的位置"（空标签位占了宽度）
+     *   2. "你的易伤 并没有写在 debuff 方块的右边"（我把它放到左边了）
+     *
+     * 我当时的做法是"右对齐时把标签甩到方块左边、整排从右往左长" ——
+     * 那样确实不溢出右缘，但**标签跑到方块左边**，与增益行不一致，
+     * 看起来就像写错了位置。
+     *
+     * 正确做法：**让方块的位置反过来依赖标签宽度**。右对齐时右缘固定，
+     * 第 i 个的**方块右缘** = `x - Σ(它右边那些条目的标签宽度)` ——
+     * 也就是把自己和右侧所有条目的标签位置先让出来。于是标签都在右边，
+     * 而最右那条的标签恰好落在 `x` 处，不溢出。
+     */
+    const boxes = stripBoxX({
+      count: this.items.length,
+      x,
+      size,
+      gap,
+      ...(rightAligned ? { align: 'right' as const } : {}),
+      labelTotals,
+    });
+
+    for (let i = 0; i < this.items.length; i += 1) {
+      const item = this.items[i];
+      const view = sorted[i];
+      if (!item || !view) continue;
+
+      const tight = isTightWindow(view);
+      const edge = view.color;
+      const boxX = boxes[i] ?? x;
 
       const g = item.square;
       g.visible = true;
@@ -165,10 +271,8 @@ export class IconStrip {
 
       // 剩余时间：叠在方块内右下角（白字 + 黑描边，压在纯色上也读得清）
       item.timer.root.x = boxX + size - 2;
-
-      item.label.root.x = rightAligned ? boxX - labelGap : boxX + size + labelGap;
-
-      cursor += rightAligned ? -(itemW + gap) : itemW + gap;
+      /** ⚠️ 标签始终在方块**右边**（两种对齐一致）。 */
+      item.label.root.x = boxX + size + labelGap;
     }
   }
 }
