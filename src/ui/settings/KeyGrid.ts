@@ -49,6 +49,16 @@ export class KeyGrid {
   private readonly cells: Array<{
     name: Label;
     key: Label;
+    /**
+     * **触屏的按钮位序号**（1、2、3…）。
+     *
+     * 需求："触屏依旧没有办法设置按键" —— 触屏按钮是由键位表**机械派生**
+     * 出来的（`touchButtonsFromBindings` = "有键的技能"，顺序即按钮顺序），
+     * 所以「按键」页**就是**按钮配置页；缺的只是**看出来**这是几号按钮位。
+     * 这个标签补上那点信息，配合已有的"点两格互换"就够了。
+     * 桌面不显示（那里有键名列）。
+     */
+    slot: Label;
     rect: { x: number; y: number; w: number; h: number };
   }> = [];
 
@@ -118,8 +128,19 @@ export class KeyGrid {
        *   - 玩家在这一页真正要确认的是"**哪个技能绑了哪个键**"，
        *     标签属于"这个技能是什么"，那是详情区的事
        */
-      this.root.addChild(name.root, key.root);
-      this.cells.push({ name, key, rect });
+      /**
+       * 按钮位序号：**左上角小字**（键名列在触屏上是空的，位置正好空着）。
+       */
+      const slot = new Label(this.pixi, {
+        x: rect.x + 8,
+        y: rect.y + 4,
+        size: FONT.tiny,
+        color: PALETTE.textDim,
+        anchorX: 0,
+        anchorY: 0,
+      });
+      this.root.addChild(name.root, key.root, slot.root);
+      this.cells.push({ name, key, slot, rect });
     }
   }
 
@@ -132,6 +153,8 @@ export class KeyGrid {
       cell.name.root.y = rect.y + 12;
       cell.key.root.x = rect.x + rect.w - 12;
       cell.key.root.y = rect.y + 14;
+      cell.slot.root.x = rect.x + 8;
+      cell.slot.root.y = rect.y + 4;
     }
   }
 
@@ -171,6 +194,7 @@ export class KeyGrid {
     for (const cell of this.cells) {
       cell.name.set('');
       cell.key.set('');
+      cell.slot.set('');
     }
 
     for (const [i, row] of rows.entries()) {
@@ -190,6 +214,12 @@ export class KeyGrid {
             : formatKey(row.key, this.translate('settings.keyUnbound')),
       );
       cell.key.setColor(capturing || focused ? PALETTE.douqi.bright : PALETTE.text);
+      /**
+       * 触屏：显示**按钮位序号**（1 起）。`i` 就是按钮顺序 ——
+       * `touchButtonsFromBindings` 是按绑定表顺序取"有键的技能"的。
+       * ⚠️ 只在触屏显示：桌面有键名列，再塞个序号会挤。
+       */
+      cell.slot.set(state.showKeyHints === false ? String(i + 1) : '');
 
       if (focused) onFocused(row);
 

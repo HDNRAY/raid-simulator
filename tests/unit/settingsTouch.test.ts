@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyRebind, resolveRowTap } from '../../src/ui/settings/logic';
+import { applyRebind, resolveRowTap, swapSlotSkills } from '../../src/ui/settings/logic';
 
 describe('触屏与键盘功能对等（AGENTS.md §3b）', () => {
   /**
@@ -112,5 +112,72 @@ describe('改键不能把技能"弄丢"（触屏上等于少一个按钮）', ()
     expect(after.find((b) => b.skillId === 'attack')?.key).toBe('z');
     // 「避」不受影响（'a' 不是被抢的键）
     expect(after.find((b) => b.skillId === 'dodge')?.key).toBe('a');
+  });
+});
+
+describe('触屏换位：必须真的改变**按钮顺序**', () => {
+  /**
+   * 需求（用户两次提出）："触屏依旧没有办法设置按键"、"选slot，再选技能
+   * 就换slot"。
+   *
+   * ⚠️ 核心是换**位置**，不是换**键**。
+   *
+   * 触屏按钮的顺序 = 绑定表里"有键的技能"的顺序
+   * （`touchButtonsFromBindings`：`filter(key !== '').map(index)`）。
+   * 而 `applyRebind` **只换键、不动数组顺序** —— 所以换完按钮顺序
+   * **一点变化都没有**，"选 slot 换 slot"是**假的**。
+   * （我第一版就是这么接的，这条测试就是为它写的。）
+   */
+  const base = [
+    { key: 'q', skillId: 'attack' },
+    { key: 'w', skillId: 'blast' },
+    { key: '', skillId: 'flash' },
+    { key: 'r', skillId: 'break' },
+  ];
+
+  /** 按钮顺序 = 有键的技能，按绑定表顺序。 */
+  const buttonOrder = (b: readonly { readonly key: string; readonly skillId: string }[]) =>
+    b.filter((x) => x.key !== '').map((x) => x.skillId);
+
+  it('换位后按钮顺序**确实变了**', () => {
+    const before = buttonOrder(base);
+    const after = buttonOrder(swapSlotSkills(base, 0, 1));
+    expect(before).toEqual(['attack', 'blast', 'break']);
+    expect(after).toEqual(['blast', 'attack', 'break']);
+    /** 断言"变了"而不是只看数组内容 —— 这正是那个假实现的失败点 */
+    expect(after).not.toEqual(before);
+  });
+
+  it('键留在原位、跟着技能一起走', () => {
+    const after = swapSlotSkills(base, 0, 1);
+    // 位置 0 现在放 blast，但它**带着原来的键 w**（键属于位置）
+    expect(after[0]).toEqual({ key: 'q', skillId: 'blast' });
+    expect(after[1]).toEqual({ key: 'w', skillId: 'attack' });
+  });
+
+  it('空键位（未上场技能）留在原位，不被挤走', () => {
+    const after = swapSlotSkills(base, 0, 2);
+    expect(after[2]).toEqual({ key: '', skillId: 'attack' });
+    /** 「闪」是空键 → 不上场，但它仍在表里、仍在原位 */
+    expect(buttonOrder(after)).toEqual(['flash', 'blast', 'break']);
+  });
+
+  it('越界 / 同位置不改动（不产生脏数据）', () => {
+    expect(swapSlotSkills(base, 0, 0)).toBe(base);
+    expect(swapSlotSkills(base, 0, 99)).toBe(base);
+    expect(swapSlotSkills(base, -1, 1)).toBe(base);
+  });
+
+  it('【对照】`applyRebind` **不能**用来做换位（它还丢一个按钮）', () => {
+    /**
+     * ⚠️ 这条是**反向证据**。实测比预期更糟：把 `attack` 改到 `w` 之后，
+     * 位置 0 的 `q` **没人占**了 → 触屏按钮从 **3 个变成 2 个**
+     * （`blast` 因为 `q` 空掉而不上场）。所以拿 `applyRebind` 做换位
+     * 不只是"顺序不变"，还会**少一个按钮**。
+     */
+    const rebound = applyRebind(base, 'attack', 'w').bindings;
+    expect(buttonOrder(rebound)).not.toEqual(buttonOrder(base));
+    expect(buttonOrder(rebound)).toHaveLength(2);
+    expect(buttonOrder(base)).toHaveLength(3);
   });
 });

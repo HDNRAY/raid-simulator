@@ -281,6 +281,43 @@ export function applyRebind(
   return unbound === undefined ? { bindings: next } : { bindings: next, unbound };
 }
 
+/**
+ * **交换两个按钮位的技能**（触屏配置用）。
+ *
+ * ==================================================================
+ * ⚠️ 为什么不能复用 `applyRebind`
+ * ==================================================================
+ *
+ * 触屏按钮的顺序 = 绑定表里"**有键的技能**"的**顺序**
+ * （见 `touchButtonsFromBindings`：`filter(key !== '').map(index)`）。
+ * 而 `applyRebind` **只交换键、不动数组顺序** —— 所以换完之后按钮顺序
+ * **一点变化都没有**，"选 slot 再选技能换 slot"是**假的**。
+ *
+ * 需求："有一个方案是把 双弧 缩小放在 按键设置的右下角，然后选slot，
+ * 再选技能就换slot" —— 核心诉求是**换位置**，不是换键。
+ *
+ * 这个函数直接**交换两个位置的技能**，于是：
+ *   - 按钮顺序跟着变（那正是玩家要的）
+ *   - 空键位（未上场的技能）也留在原位，不会被挤走
+ *
+ * @param from 源下标（`rowSkillIds` 里的位置）
+ * @param to   目标下标
+ */
+export function swapSlotSkills<T extends { readonly key: string; readonly skillId: string }>(
+  bindings: readonly T[],
+  from: number,
+  to: number,
+): readonly T[] {
+  if (from === to) return bindings;
+  const a = bindings[from];
+  const b = bindings[to];
+  if (a === undefined || b === undefined) return bindings;
+  const next = [...bindings];
+  next[from] = { ...a, skillId: b.skillId };
+  next[to] = { ...b, skillId: a.skillId };
+  return next;
+}
+
 /* ------------------------------------------------------------------ *
  * 键名显示
  * ------------------------------------------------------------------ */

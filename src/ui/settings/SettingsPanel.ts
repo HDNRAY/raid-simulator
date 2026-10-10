@@ -1,13 +1,10 @@
 /**
  * 设置弹窗（全 canvas）。
  *
- * 为什么不用 DOM：架构规范要求所有 UI 走 canvas（便于移植）。设置界面是
- * 最容易被"顺手用 DOM 做"的一块（表单/滚动/输入框浏览器都免费），但一旦
- * 开口，以后移植就要重写它 —— 而它偏偏**交互最复杂**（改键要独占键盘、
- * 要处理冲突）。所以连按键捕获都在 canvas 里做。
- *
+ * 不用 DOM：架构规范要求所有 UI 走 canvas。设置界面是最容易被"顺手用
+ * DOM 做"的一块，但它偏偏**交互最复杂**（改键要独占键盘、要处理冲突），
+ * 所以连按键捕获都在 canvas 里做。
  * 与引擎的关系：**完全不碰引擎**，只通过回调改键位表与通用选项。
- * 打开时是否暂停战斗由调用方（`onOpen`/`onClose`）决定。
  */
 
 
@@ -48,6 +45,8 @@ export interface SettingsPanelOptions {
   readonly getRows: () => readonly KeyRow[];
   /** 改键：把某个技能的键改成 `key` */
   readonly onRebind: (skillId: string, key: string) => void;
+  /** 交换两个按钮位的技能（触屏用；见 `app/bindingActions.ts` 的区别说明）。 */
+  readonly onSwapSlots: (from: number, to: number) => void;
   /** 恢复默认键位 */
   readonly onResetKeys: () => void;
   /**
@@ -245,19 +244,15 @@ export class SettingsPanel {
   }
 
   /**
-   * 点一下某个位置。
-   *
-   * 命中测试自己算（不做逐对象事件绑定）—— 弹窗只有十几个可点区域，
-   * 一个"从上到下第一个命中的"循环就够，而且比 Pixi 的事件系统
-   * 更容易在测试里驱动（直接传坐标即可）。
+   * 点一下某个位置。命中测试自己算（不做逐对象事件绑定）—— 弹窗只有
+   * 十几个可点区域，"第一个命中的"循环就够，也比 Pixi 的事件系统更容易
+   * 在测试里驱动。
    *
    * @returns 是否消费了这次点击
    */
   /**
    * 当前是否显示键名（决定网格度量）。
-   *
-   * ⚠️ **命中测试与渲染必须用同一个值** —— 否则可点区与画出来的位置错开
-   * （实测触屏「闪」只有 6.3% 能点中）。
+   * ⚠️ 命中测试与渲染必须用同一个值，否则可点区与画出的位置错开。
    */
   private get showKeyHintsNow(): boolean {
     return this.options.getShowKeyHints?.() !== false;
@@ -296,9 +291,16 @@ export class SettingsPanel {
           },
         );
         if (action.kind === 'bind') {
-          /** ⚠️ 绑到**那一格的键**（不是 `touch:技能id` —— 那会让两个技能挤在同一位置）。 */
-          const targetKey = rows.find((r) => r.skillId === action.skillId)?.key;
-          if (targetKey !== undefined) this.finishCapture(targetKey);
+          /**
+           * ⚠️ 触屏要的是**换位置**，不是换键 —— 触屏按钮顺序来自绑定表
+           * 顺序，而改键只换键、不动顺序。详见 `app/bindingActions.ts`。
+           */
+          const from = rows.findIndex((r) => r.skillId === this.capturingSkill);
+          const to = rows.findIndex((r) => r.skillId === action.skillId);
+          if (from >= 0 && to >= 0) {
+            this.stopCapture();
+            this.options.onSwapSlots(from, to);
+          }
           this.redraw();
           return true;
         }
