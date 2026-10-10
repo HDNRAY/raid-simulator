@@ -356,18 +356,45 @@ describe('内容注册：新 Boss 的技能与 buff 都在注册表里', () => {
     expect(LUST_PASSIVE.duration).toBe(Number.POSITIVE_INFINITY);
   });
 
-  it('⚠️ 挂印记那条用的是**叶子 def**，不是印记自己（否则依赖图爆栈）', () => {
+  it('⚠️ 挂印记挂的是**完整定义**（带触发器）—— 挂叶子会让反伤彻底失效', () => {
     /**
-     * `deps.ts` 的 `visitAbilities` 会**递归遍历 `grant` 内联的 buff**。
-     * 如果那条 `grant` 指向 `LUST_MARK` 自己就形成环 → 爆栈，而且
-     * **内容校验拦不住**（校验用的就是爆栈的那个 walker）。
+     * ================================================================
+     * 这条曾经写成**反的**，而且是用户实测报出来的 bug
+     * ================================================================
+     *
+     * 我原先为了绕开 `deps` 的递归爆栈，造了一个"叶子 def"（同 id、
+     * `triggers: []`），并让被动挂**它**。结果：
+     *
+     *   - 印记实例的 `def.triggers` 是**空的**
+     *   - 于是 `runTriggers` 遍历时**根本看不到反伤那条触发器**
+     *   - 表现：**反伤完全不生效**（印记挂上了、也消耗不掉）
+     *
+     * 而当时的测试断言的是"挂的是叶子"，**把 bug 当成需求锁住了**。
+     * 所以这条用例本身也要一起改 —— 断言"叶子"就是在断言"反伤不生效"。
+     *
+     * 正确做法：挂**完整**的 `LUST_MARK`。依赖图不会成环，因为
+     * 印记的触发器**不再挂印记**（挂它的是 `LUST_PASSIVE`）。
      */
     const grantStep = LUST_PASSIVE.triggers?.[0]?.then[0];
     expect(grantStep?.kind).toBe('grant');
     if (grantStep?.kind !== 'grant') throw new Error('unreachable');
-    expect(grantStep.buff.id).toBe('lust-mark');
-    /** 关键的断言：**不是同一个对象**，而且没有触发器（叶子）。 */
-    expect(grantStep.buff).not.toBe(LUST_MARK);
-    expect(grantStep.buff.triggers ?? []).toHaveLength(0);
+    expect(grantStep.buff).toBe(LUST_MARK);
+    /** 关键的断言：**必须带触发器**，否则反伤不生效。 */
+    expect(grantStep.buff.triggers?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it('【核心】反伤真的会打到玩家身上（用户实测报过"没效果"）', () => {
+    /**
+     * ⚠️ 用户实测："反伤确实没效果"。根因就是上一条（挂了叶子 def）。
+     * 这条从**行为**上锁住它：第 1 下挂印记、第 2 下反伤 18、第 3 下不反。
+     */
+    const engine = makeEngine([strike('p-hit', 10)]);
+    grant(engine, 'lust', { ...LUST_MARK });
+
+    const hp0 = hpOf(engine, 'player');
+    /** 第 1 下：印记已在 → 反伤。 */
+    engine.applyActions([{ type: 'useSkill', skillId: 'p-hit', atTick: 0 }], 'player');
+    engine.tick([]);
+    expect(hpOf(engine, 'player')).toBe(hp0 - 18);
   });
 });

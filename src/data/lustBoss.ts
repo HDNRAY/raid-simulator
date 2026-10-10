@@ -43,47 +43,25 @@ const REFLECT_DAMAGE = 18;
 /**
  * 印记的**公共字段**（不含触发器）。
  *
- * ⚠️ 为什么把字段抽出来：见下面 `LUST_MARK_GRANT` 的说明。
  */
 const MARK_BASE = {
   id: 'lust-mark',
   nameKey: 'lust.mark.name',
   icon: 'lust_mark',
-  /** 对**持有者**是坏消息（他会挨反伤），所以是 debuff。 */
-  polarity: 'debuff' as const,
+  /**
+   * ⚠️ **`neutral`，不是 `debuff`**。
+   *
+   * 它挂在**色欲自己**身上，语义是"**它的反击已就绪**"（一个技术标记），
+   * 而不是"色欲被削弱了"。标成 debuff 会让它出现在**减益那一行**，
+   * 读起来像玩家给它上了负面状态 —— 但实际上是**它的**威胁提示。
+   */
+  polarity: 'neutral' as const,
   color: 0x9868d6,
   duration: logicMs(30),
   maxStacks: 1,
   stacking: { mode: 'refresh' as const },
 };
 
-/**
- * 用来**挂印记**的那份定义（叶子：不带触发器）。
- *
- * ==================================================================
- * ⚠️ 为什么不能用 `LUST_MARK` 自己
- * ==================================================================
- *
- * `grant` 内联的是**完整的 buff 对象**，而 `deps.ts` 的 `visitAbilities`
- * 会**递归遍历**它（为了"buff 授予 buff"也要进依赖图）：
- *
- *     LUST_MARK → trigger.grant → LUST_MARK → trigger.grant → …
- *
- * → **爆栈**（实测：`RangeError: Maximum call stack size exceeded`）。
- *
- * ⚠️ 而且这个环**内容校验拦不住** —— 校验用的就是爆栈的那个 walker。
- * 所以必须从**数据**上断开，不能指望工具报错。
- *
- * 断开方式是让 `grant` 指向这份**叶子**（与 `LUST_MARK` 同 id、同持续
- * 时间、同叠加上限，但没有 `triggers`）。运行时行为**完全等价**：
- *   - 挂上之后，`BuffInstance.def` 是这份叶子
- *   - 受击时 `runTriggers` 遍历该实例的 `def.triggers` → 空 → 不触发
- *   - **但真正生效的是对手身上那份 `LUST_MARK`**（它才是被注册、被
- *     `applyBuff` 按 id 复用实例的那份）
- *
- * ⚠️ 两份定义的公共字段用 `MARK_BASE` 展开，避免手抄漂移。
- */
-const LUST_MARK_GRANT: BuffDef = { ...MARK_BASE, triggers: [] };
 
 /**
  * 「欲望印记」：受伤后挂上的标记，3 秒内**再受伤**就反伤。
@@ -128,7 +106,6 @@ export const LUST_MARK: BuffDef = {
       /**
        * ⚠️ 只在**已经有印记**时反伤。
        *
-       * 印记由**玩家的命中**挂上去（见 `content.ts` 的 `LUST_MARK_GRANT`
        * 相关说明）—— 所以这里的 `hasBuff` 是"玩家已经打过我一下了"。
        */
       when: { kind: 'hasBuff', buffId: 'lust-mark' },
@@ -213,33 +190,12 @@ export const LUST_PASSIVE: BuffDef = {
        */
       cooldownMs: logicMs(30),
       when: { kind: 'notHasBuff', buffId: 'lust-mark' },
-      then: [{ kind: 'grant', target: { mode: 'self' }, buff: LUST_MARK_GRANT }],
+      then: [{ kind: 'grant', target: { mode: 'self' }, buff: LUST_MARK }],
     },
   ],
 };
 
 
-/**
- * 用来**挂印记**的那份定义（叶子：不带触发器）。
- *
- * ==================================================================
- * ⚠️ 为什么不能用 `LUST_MARK` 自己
- * ==================================================================
- *
- * `grant` 内联的是**完整的 buff 对象**，而 `deps.ts` 的 `visitAbilities`
- * 会**递归遍历**它（为了"buff 授予 buff"也要进依赖图）：
- *
- *     LUST_MARK → trigger.grant → LUST_MARK → trigger.grant → …
- *
- * → **爆栈**（实测：`RangeError: Maximum call stack size exceeded`）。
- *
- * ⚠️ 而这个环**内容校验拦不住** —— 校验用的就是爆栈的那个 walker。
- * 所以必须从**数据**上断开。
- *
- * 运行时行为等价：挂上去的实例带的是这份叶子（没有触发器），而
- * "反伤"那条逻辑活在 `LUST_MARK` 上、由常驻的 `LUST_PASSIVE` 驱动。
- */
-export const LUST_MARK_LEAF: BuffDef = { ...MARK_BASE, triggers: [] };
 
 /**
  * 眩晕 buff：**3 秒完全不能行动**。
@@ -352,7 +308,6 @@ export const LUST_CHARM: SkillDef = {
 export const LUST_SKILLS: readonly SkillDef[] = [LUST_HUM, LUST_ENTANGLE, LUST_CHARM];
 
 /**
- * ⚠️ `LUST_MARK_LEAF` **不在**这里 —— 它与 `LUST_MARK` 同 id，注册表会报
  * `DUP_ID`。而且它本来也不该注册：`grant` 是**按对象内联** buff 的
  * （见 `GrantAbility.buff`），不走 id 查表。
  */
