@@ -94,6 +94,10 @@ export const zhCN = {
     enrage: '狂暴',
     empowered: '强化',
     telegraph: '前摇',
+    /** 眩晕：既是横幅文案，也是图标行短标签。 */
+    stunned: '眩晕',
+    /** 欲望印记的短标签。 */
+    lustMark: '印记',
     douqiFull: '炁满',
     sunder: '裂',
     bossArmor: '霸体',
@@ -146,6 +150,11 @@ export const zhCN = {
      * **出路是什么**（按「闪」或「避」），而不是知道自己动不了。
      */
     tagRestricted: '倒地 · 只能闪避',
+    /**
+     * ⚠️ 曾被笼统地叫作「被限制」，但眩晕是**完全不能动 3 秒** ——
+     * 需要玩家立刻明白发生了什么，而不是"我好像被什么限制住了"。
+     * 现在改由 `hud.stunned` 横幅承担主提示，这条是技能被拒时的短提示。
+     */
     locked: '被限制',
     condition: '条件不满足',
     target: '没有目标',

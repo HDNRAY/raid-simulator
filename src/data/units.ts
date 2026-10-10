@@ -89,7 +89,17 @@ export function behaviorsFor(id: string): readonly Behavior[] {
   return id === 'lust' ? LUST_BEHAVIORS : VERROT_BEHAVIORS;
 }
 
-export function makeBoss(id: string): Combatant {
+/**
+ * @param options.noAi 清空轮转（只留时限）—— **截图/调试用**。
+ *
+ *   ⚠️ 为什么需要它：Boss 的轮转会不停打玩家，几秒内就死，于是"等某个
+ *   特定机制发生"变得几乎不可能（实测想验眩晕，玩家 15 秒内就死了、
+ *   「魅惑」还没轮到）。关掉 AI 后场景是**静止**的，可以稳稳造状态再截图。
+ *
+ *   ⚠️ 用**参数**而不是在函数里读 `location.search`：本文件会被 Node 侧
+ *   的单测 import，而那里没有 `location` —— 读它会让测试**直接崩**。
+ */
+export function makeBoss(id: string, options?: { readonly noAi?: boolean }): Combatant {
   return {
     id,
     nameKey: findEntry(BOSS_ROSTER, id)?.nameKey ?? 'boss.name',
@@ -101,7 +111,7 @@ export function makeBoss(id: string): Combatant {
     cooldowns: {},
     casts: [],
     uses: {},
-    behaviors: behaviorsFor(id),
+    behaviors: options?.noAi === true ? behaviorsFor(id).filter((b) => b.kind === 'timeLimit') : behaviorsFor(id),
     alive: true,
     /**
      * ⚠️ **固有 buff**（常驻被动）在构造时就挂上。

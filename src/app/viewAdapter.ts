@@ -13,7 +13,8 @@ import type { BattleEngine } from '../core/combat/battleState';
 import type { SkillDef, EventDef } from '../core/types';
 import { PALETTE } from '../render/theme';
 import { deriveSlots, type SlotBinding } from './derivedSlots';
-import { IDLE_FEEDBACK, type FeedbackState } from '../render/feedback';
+import { emptyCombatant, emptyView } from '../render/emptyView';
+import type { FeedbackState } from '../render/feedback';
 import { HitFeedbackTracker } from './hitFeedback';
 import { isAttacking, lastUsedKey } from './attackFrame';
 /**
@@ -569,6 +570,14 @@ function toCombatantView(
   if (!raw) return emptyCombatant(id);
   const stats = engine.statsOf(id);
 
+  /**
+   * 是否**眩晕**（完全不能行动）。
+   *
+   * ⚠️ 判据是"有没有带 `actionLock` 的 buff"，**不是**写死 `lust-stun`
+   * 这个 id：以后任何"禁行动"的来源都自动获得同一个提示。
+   */
+  const stunned = raw.buffs.some((b) => engine.buffDef(b.defId)?.flags?.actionLock === true);
+
   const cast = raw.casts[0];
   let castView: CombatantView['cast'];
   if (cast) {
@@ -644,52 +653,12 @@ function toCombatantView(
     douqi: { current: raw.resources.douqi, cap: raw.caps.douqi },
     buffs,
     attacking,
+    stunned,
     feedback,
     ...(castView ? { cast: castView } : {}),
   } satisfies CombatantView & { _stats?: typeof stats };
 }
 
-function emptyCombatant(id: string): CombatantView {
-  return {
-    attacking: false,
-    feedback: IDLE_FEEDBACK,
-    id,
-    nameKey: 'hud.level',
-    side: 'ally',
-    alive: true,
-    hp: { current: 0, cap: 1 },
-    energy: { current: 0, cap: 1 },
-    douqi: { current: 0, cap: 1 },
-    buffs: [],
-  };
-}
-
-function emptyView(tick: number): BattleSnapshotView {
-  return {
-    tick,
-    status: 'idle',
-    enraged: false,
-    player: emptyCombatant('player'),
-    boss: { ...emptyCombatant('meiichiro'), side: 'enemy' },
-    skills: [],
-    floatingText: [],
-    telegraphing: false,
-    armored: false,
-    playerFlash: 0,
-    bossFlash: 0,
-  };
-}
-
-
-
-/** GCD 时长再导出，避免渲染层直接 import core/combat。 */
-
-/**
- * 把 core 的宽泛 `resource: string` 收敛成视图层的 `ResourceKeyName`。
- *
- * 用类型守卫而不是断言：未知资源名返回 `undefined`，
- * 渲染层就只是"这个格子没有代价可显示"，不会拿到一个它不认识的值。
- */
 function toSlotCost(resource: string, value: number, suffix?: string): SlotCost | undefined {
   if (resource === 'hp' || resource === 'energy' || resource === 'douqi') {
     return suffix === undefined ? { resource, value } : { resource, value, suffix };

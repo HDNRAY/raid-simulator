@@ -126,7 +126,10 @@ async function bootstrap(): Promise<void> {
          * ⚠️ 出战单位来自**备战界面的选择**，不是写死的。
          * 目前各只有一个，所以工厂按 id 挑词表；加第二个单位时在这里扩。
          */
-        combatants: [makePlayer(selection.playerId), makeBoss(selection.bossId)],
+        combatants: [
+          makePlayer(selection.playerId),
+          makeBoss(selection.bossId, { noAi: params.get('noai') === '1' }),
+        ],
         // 用真实时钟做种子：每次开局不同，但仍可复现（记录 seed 即可）
         seed: Date.now() >>> 0,
         bossId: selection.bossId,

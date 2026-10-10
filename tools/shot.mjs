@@ -84,7 +84,7 @@ const send = (m, p = {}) =>
 
 await send('Runtime.enable');
 await send('Page.enable');
-await send('Page.navigate', { url: 'http://localhost:5273/?prepare=skip&boss=lust' });
+await send('Page.navigate', { url: 'http://localhost:5273/?prepare=skip' });
 await sleep(3400);
 await send('Page.bringToFront').catch(() => {});
 

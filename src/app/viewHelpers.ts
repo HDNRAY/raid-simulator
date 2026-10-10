@@ -101,6 +101,9 @@ const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
   'boss-cleave-armor': 'buffShort.bossArmor',
   'combo-window': 'buffShort.comboWindow',
   knockdown: 'buffShort.knockdown',
+  /** 色欲的眩晕与印记（不登记就会显示中性兜底「？」）。 */
+  'lust-stun': 'buffShort.stunned',
+  'lust-mark': 'buffShort.lustMark',
 };
 
 /**

@@ -24,10 +24,11 @@ import { BossCastBarPart } from './parts/bossCastBar';
 import { PlayerPanelPart } from './parts/playerPanel';
 import { PlayerCastBarPart } from './parts/playerCastBar';
 import { PlayerActorPart } from './parts/playerActor';
-import { StatusLinePart } from './parts/statusLine';
+import { StatusLinePart, StunBannerPart } from './parts/statusLine';
 import { FlashPart } from './parts/flash';
 import { FrameRegistry } from './sceneTypes';
-import type { BattleSceneOptions, TranslateFn } from './sceneTypes';
+import { renderResultPanel, type ResultRefs } from './resultPanel';
+import type { BattleSceneOptions } from './sceneTypes';
 import { FONT, LAYOUT, LOGICAL } from '../ui/layout';
 import { UiLayout } from '../ui/uiLayout';
 
@@ -87,6 +88,8 @@ export class BattleScene {
   private readonly bossHpText: Label;
   private readonly timerLabel: Label;
   private readonly enrageBadge: Label;
+  /** 「眩晕中」横幅（玩家被完全锁死时）。 */
+  private readonly stunBanner: Label;
 
   /* 预警条 */
   /** 战斗日志（屏幕右侧） */
@@ -200,7 +203,16 @@ export class BattleScene {
       color: PALETTE.danger.bright,
       anchorX: 1,
     });
-    hud.addChild(this.bossName.root, this.bossPhase.root, this.timerLabel.root, this.enrageBadge.root);
+    this.stunBanner = new Label(pixi, {
+      x: LAYOUT.stunBanner.x,
+      y: LAYOUT.stunBanner.y,
+      size: FONT.warn,
+      color: 0xff70d0,
+      anchorX: 0.5,
+      anchorY: 0.5,
+      kai: true,
+    });
+    hud.addChild(this.bossName.root, this.bossPhase.root, this.timerLabel.root, this.enrageBadge.root, this.stunBanner.root);
 
     const bh = LAYOUT.bossHp;
     this.bossHpBar = new Bar(pixi, {
@@ -505,6 +517,7 @@ export class BattleScene {
     this.registry.add(this.skillBar);
     this.registry.add(this.floating);
     this.registry.add(new StatusLinePart(this.statusLabel, this.statusSub));
+    this.registry.add(new StunBannerPart(this.stunBanner));
     this.registry.add(new FlashPart(this.flashOverlay));
     this.registry.add({
       name: 'logPanel',
@@ -522,7 +535,12 @@ export class BattleScene {
     });
     this.registry.add({
       name: 'result',
-      render: (ctx) => this.renderResult(ctx),
+      /**
+       * ⚠️ 结算文案的装配在 `render/resultPanel.ts`（纯文字，不碰节点
+       * 生命周期）。这里只把需要写的标签交出去。
+       */
+      render: (ctx) =>
+        renderResultPanel(this.resultRefs(), ctx.view, ctx.translate, ctx.showKeyHints),
     });
   }
 
@@ -533,60 +551,23 @@ export class BattleScene {
    * （标题/原因/统计/提示），字段太多不值得为它单独开一个文件传 6 个引用。
    * 闭包把它留在场景里，同时仍然走注册机制 —— 顺序照样由注册决定。
    */
-  private renderResult(ctx: {
-    view: BattleSnapshotView;
-    /** ⚠️ 收 `TranslateFn` 而不是 `(k: string) => string` —— 胜因文案带插值。 */
-    translate: TranslateFn;
-    /** 是否显示键名（触屏传 false）—— 决定重开提示用哪一句。 */
-    showKeyHints: boolean;
-  }): void {
-    const { view, translate, showKeyHints } = ctx;
-    const result = view.result;
-    this.resultLayer.visible = result !== undefined;
-    if (!result) return;
-    this.resultTitle.set(translate(result.titleKey));
-    this.resultTitle.setColor(result.victory ? 0xffd870 : PALETTE.danger.bright);
-    /**
-     * ⚠️ 参数值可能是**另一个 i18n key**（`boss.name`）—— 适配器只给
-     * key，翻译在渲染层做（i18n 规范 I1）。这里的"再翻一次"是有意的。
-     */
-    const reasonParams = result.reasonParams;
-    this.resultReason.set(
-      reasonParams === undefined
-        ? translate(result.reasonKey)
-        : translate(
-            result.reasonKey,
-            Object.fromEntries(
-              Object.entries(reasonParams).map(([k, v]) => [
-                k,
-                typeof v === 'string' ? translate(v) : v,
-              ]),
-            ),
-          ),
-    );
-    /** 重开提示按模式分流。⚠️ 两条文案都走 i18n（规范 I1）。 */
-    this.resultHint.set(
-      translate(showKeyHints ? 'screen.hintRestart' : 'screen.hintRestartTap'),
-    );
-
-    // 统计用等宽对齐的"标签  值"，比堆一串数字好读
-    const rows: Array<[string, string]> = [
-      [translate('screen.statTime'), `${result.seconds}s`],
-      [translate('screen.statRemainingHp'), `${result.remainingHp}/${result.remainingHpCap}`],
-      [translate('screen.statTotalDamage'), `${result.totalDamage}`],
-      [translate('screen.statDps'), `${result.dps}`],
-    ];
-    const width = Math.max(...rows.map(([k]) => k.length));
-    this.resultStats.set(rows.map(([k, v]) => `${k.padEnd(width, ' ')}   ${v}`).join('\n'));
-  }
-
-
   /**
    * 是否显示键名（触屏传 `false`）。见 `FrameContext.showKeyHints`。
    *
    * ⚠️ 触屏时**整条技能栏都隐藏**：双弧按钮承担了它的全部职责
    * （技能字 + 冷却 + 代价），同时显示会重叠。
    */
+  /** 结算面板要写的那几个标签（交给 `renderResultPanel`）。 */
+  private resultRefs(): ResultRefs {
+    return {
+      resultLayer: this.resultLayer,
+      resultTitle: this.resultTitle,
+      resultReason: this.resultReason,
+      resultStats: this.resultStats,
+      resultHint: this.resultHint,
+    };
+  }
+
   setShowKeyHints(show: boolean): void {
     this.showKeyHints = show;
     this.skillBar.root.visible = show;

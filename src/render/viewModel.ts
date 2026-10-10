@@ -68,6 +68,16 @@ export interface CombatantView {
    */
   readonly attacking: boolean;
   /**
+   * 是否处于**眩晕**（完全不能行动）。
+   *
+   * ⚠️ 由 `viewAdapter` 从"有没有带 `actionLock` 的 buff"算出，渲染层只读。
+   *
+   * 为什么需要它而不是让玩家看 buff 图标行：图标行的短标签最多 2 个字、
+   * 20×20 的方块，而且和其它减益混在一起。"**连续 3 秒按什么都没反应**"
+   * 如果只能靠那种线索察觉，玩家会以为游戏卡死了。
+   */
+  readonly stunned: boolean;
+  /**
    * **本帧的受击反馈**（受击 / 眩晕 / 被击共用同一套通道）。
    *
    * ⚠️ 由 `viewAdapter` 从引擎事件算出并衰减 —— 渲染层**只读它**，
@@ -243,6 +253,7 @@ export type RenderAction =
 /** 空快照，用于首帧之前。 */
 export const EMPTY_COMBATANT: CombatantView = {
   attacking: false,
+  stunned: false,
   feedback: IDLE_FEEDBACK,
   id: '',
   nameKey: 'hud.level',
