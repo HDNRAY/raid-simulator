@@ -3,6 +3,7 @@ import { deriveSlots } from '../../src/app/derivedSlots';
 import { slotsFromBindings } from '../../src/app/derivedSlots';
 import { makeSkillDef } from './helpers';
 import type { SkillDef } from '../../src/core/types';
+import { createRegistry } from '../../src/core/content/registry';
 import { EMPTY_COMBATANT, type BattleSnapshotView } from '../../src/render/viewModel';
 
 /** 有名字的构造器：把"构造出来的 buff 列表"写在名字上（AGENTS.md §1）。 */
@@ -149,9 +150,16 @@ describe('设置页要能看到「闪避」tag（用户报告）', () => {
         { key: 'a', skillId: 'dodge' },
         { key: 'q', skillId: 'attack' },
       ],
-      registry: {
-        skill: (id: string) => (id === 'dodge' ? dodge : attack),
-      } as Parameters<typeof buildKeyRows>[0]['registry'],
+      /**
+       * ⚠️ 用**真实**的 `createRegistry`（校验关掉，测试不需要文案 key）——
+       * 比造一个假注册表更接近实际，也不用类型断言。
+       * ⚠️ 它现在会被喂**技能全集**（不再是绑定表）：否则没绑键的技能
+       * （如「截」）在设置页根本不出现。
+       */
+      registry: createRegistry(
+        { entities: [], skills: [attack, dodge], buffs: [] },
+        { validate: false },
+      ),
       // 空快照即可：这条测试只关心 tag，不关心代价/冷却
       snapshotOf: () => emptySnapshot,
       translate: (key: string) => key,

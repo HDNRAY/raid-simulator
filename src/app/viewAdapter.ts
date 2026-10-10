@@ -15,6 +15,7 @@ import { PALETTE } from '../render/theme';
 import { deriveSlots, type SlotBinding } from './derivedSlots';
 import { IDLE_FEEDBACK, type FeedbackState } from '../render/feedback';
 import { HitFeedbackTracker } from './hitFeedback';
+import { isAttacking, lastUsedKey } from './attackFrame';
 /**
  * 槽位相关的两个导出**搬到了 `./derivedSlots`**（那里才是内聚的位置：
  * 派生技的槽位推导与基础槽位推导是一件事）。这里**转发**，外部
@@ -72,6 +73,11 @@ export class ViewAdapter {
   private statusLineTtl = 0;
 
   /** 每个技能上次使用的 tick，用于在引擎不暴露 CD 时估算冷却显示。 */
+  /**
+   * 最近一次"谁在什么时候用了哪个技能"（键见 `lastUsedKey`）。
+   * ⚠️ 原先键只有 `skillId` 且只写不读（死字段）—— 必须带来源 id，
+   * 否则 Boss 放攻击技会让玩家也播攻击帧。
+   */
   private readonly lastUsed = new Map<string, number>();
   private readonly skillNameKeys = new Map<string, string>();
   /** 状态提示的副标题（例如"贯击 · 公共冷却"） */
@@ -241,7 +247,7 @@ export class ViewAdapter {
           break;
         }
         case 'skillUsed': {
-          this.lastUsed.set(event.skillId, event.tick);
+          this.lastUsed.set(lastUsedKey(event.sourceId, event.skillId), event.tick);
           // 成功放出技能 → 立刻清掉被拒提示（否则会残留到超时）
           if (event.sourceId === playerId) {
             this.lastReject = undefined;
@@ -332,12 +338,14 @@ export class ViewAdapter {
       playerRaw.id,
       state.tick,
       this.hitFeedback.of(playerRaw.id),
+      isAttacking(this.lastUsed, this.skills, playerRaw.id, state.tick),
     );
     const boss = toCombatantView(
       engine,
       bossRaw.id,
       state.tick,
       this.hitFeedback.of(bossRaw.id),
+      isAttacking(this.lastUsed, this.skills, bossRaw.id, state.tick),
     );
 
     const remainingMs =
@@ -554,6 +562,8 @@ function toCombatantView(
   tick: number,
   /** 本帧的受击反馈（由调用方按"事件 + 老化帧数"算好）。 */
   feedback: FeedbackState,
+  /** 刚放了攻击招式（见 `isAttacking`）。 */
+  attacking: boolean,
 ): CombatantView {
   const raw = engine.snapshot.combatants.find((c) => c.id === id);
   if (!raw) return emptyCombatant(id);
@@ -633,6 +643,7 @@ function toCombatantView(
     energy: { current: raw.resources.energy, cap: raw.caps.energy },
     douqi: { current: raw.resources.douqi, cap: raw.caps.douqi },
     buffs,
+    attacking,
     feedback,
     ...(castView ? { cast: castView } : {}),
   } satisfies CombatantView & { _stats?: typeof stats };
@@ -640,6 +651,7 @@ function toCombatantView(
 
 function emptyCombatant(id: string): CombatantView {
   return {
+    attacking: false,
     feedback: IDLE_FEEDBACK,
     id,
     nameKey: 'hud.level',

@@ -47,6 +47,16 @@ const SPRITE_SCALE = 0.68;
  * README 与 `.gitignore`）。换成正式美术时只改这一个常量。
  */
 const SPRITE_URL = '/placeholder/player-fd2-mirrored.png';
+/**
+ * **攻击帧**贴图。
+ *
+ * 需求："人物攻击，无论是那个攻击（tags实现）都播放 攻击帧（一帧就行了）。"
+ *
+ * ⚠️ 原图 442×234（比站姿 202×232 **宽一倍多**）—— 宽出来的部分是挥砍
+ * 特效与突刺。锚点同样是底部中心，所以更宽的一半会**朝右**延伸
+ * （玩家在左、Boss 在右），正好是挥向 Boss 的方向。
+ */
+const ATTACK_SPRITE_URL = '/placeholder/player-fd2-slash.png';
 
 /** 玩家角色部件。 */
 export class PlayerActorPart implements FramePart {
@@ -80,6 +90,14 @@ export class PlayerActorPart implements FramePart {
    * 同类：**任何时刻都必须有一份可见的东西**。
    */
   private sprite: Sprite | undefined;
+  /**
+   * 攻击帧贴图（拿到之后才可能切）。
+   *
+   * ⚠️ 加载失败时保持 `undefined` → 永远用站姿贴图，不会有一帧空白。
+   */
+  private attackTexture: Texture | undefined;
+  /** 站姿贴图（切回用）。 */
+  private idleTexture: Texture | undefined;
 
   constructor(
     private readonly playerRoot: Container,
@@ -106,10 +124,23 @@ export class PlayerActorPart implements FramePart {
   private loadSprite(): void {
     void Assets.load<Texture>(SPRITE_URL)
       .then((texture) => {
+        texture.source.scaleMode = 'nearest';
+        this.idleTexture = texture;
         this.setTexture(texture);
       })
       .catch(() => {
         // 故意吞掉：没有贴图是**预期**情况，程序化回退已就位
+      });
+    /**
+     * 攻击帧**独立加载**：它失败不该影响站姿（两张图是分开的资源）。
+     */
+    void Assets.load<Texture>(ATTACK_SPRITE_URL)
+      .then((texture) => {
+        texture.source.scaleMode = 'nearest';
+        this.attackTexture = texture;
+      })
+      .catch(() => {
+        // 没有攻击帧 → 一直用站姿，不报错
       });
   }
 
@@ -210,6 +241,17 @@ export class PlayerActorPart implements FramePart {
      */
     if (this.sprite !== undefined) {
       this.sprite.tint = tint;
+      /**
+       * **攻击帧**：换贴图，不换位置/锚点 —— 所以站姿与挥砍帧的
+       * 脚下基准完全一致，切换时不会跳。
+       *
+       * ⚠️ 只有拿到攻击贴图才切；否则保持站姿（不会出现空帧）。
+       */
+      const wantAttack = ctx.view.player.attacking && this.attackTexture !== undefined;
+      const target = wantAttack ? this.attackTexture : this.idleTexture;
+      if (target !== undefined && this.sprite.texture !== target) {
+        this.sprite.texture = target;
+      }
       // 受击的挤压**叠在**防御的下沉上（两者可以同时发生）
       this.sprite.scale.set(SPRITE_SCALE, SPRITE_SCALE * pose * fb.squashY);
     }

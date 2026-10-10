@@ -59,6 +59,15 @@ export interface CombatantView {
   readonly douqi: ResourceView;
   readonly buffs: readonly BuffView[];
   /**
+   * 这个角色**刚放了攻击招式**（用来切攻击帧）。
+   *
+   * 需求："人物攻击，无论是那个攻击（tags实现）都播放 攻击帧。"
+   *
+   * ⚠️ 判定依据是技能的 **`SkillTag`**（`melee` / `spell`），不是
+   * 写死技能 id 列表 —— 那样加新攻击技能就会漏。
+   */
+  readonly attacking: boolean;
+  /**
    * **本帧的受击反馈**（受击 / 眩晕 / 被击共用同一套通道）。
    *
    * ⚠️ 由 `viewAdapter` 从引擎事件算出并衰减 —— 渲染层**只读它**，
@@ -233,6 +242,7 @@ export type RenderAction =
 
 /** 空快照，用于首帧之前。 */
 export const EMPTY_COMBATANT: CombatantView = {
+  attacking: false,
   feedback: IDLE_FEEDBACK,
   id: '',
   nameKey: 'hud.level',

@@ -42,7 +42,42 @@ export interface BuildKeyRowsOptions {
  */
 export function buildKeyRows(options: BuildKeyRowsOptions): readonly KeyRow[] {
   const { registry, translate } = options;
-  return options.bindings.map((b) => {
+  /**
+   * ================================================================
+   * **列出全部玩家技能，不只是已绑定的那些**
+   * ================================================================
+   *
+   * 需求（用户两次提出）："我还是没在按键设置里看到『截』"。
+   *
+   * ⚠️ 根因：这里原先只遍历 `bindings`（**绑定表**），而没绑键的技能
+   * 根本不在里面 —— 于是「截」（需求："不绑"）**在设置页完全不存在**，
+   * 玩家也就**没法给它绑键**。这是个死循环：要绑它才出现，但它不出现
+   * 就没法绑。
+   *
+   * 现在遍历**技能全集**，没绑的排后面（已绑的在前，保持原有顺序）。
+   */
+  const boundOrder = new Map(options.bindings.map((b, i) => [b.skillId, i]));
+  /**
+   * ⚠️ 只列**玩家技能**：`registry.skills` 里也有 Boss 技能，那些不该让
+   * 玩家绑键。
+   * ⚠️ 排除派生技（带 `requires` 的，如「击」）：它靠派生出现，
+   * **不由玩家直接按**，列出来只会让人困惑。
+   */
+  const all = [...registry.skills.values()].filter(
+    (sk) => sk.id !== '' && (sk.requires?.length ?? 0) === 0 && !sk.id.startsWith('boss-'),
+  );
+  const ordered = all
+    .map((sk) => sk.id)
+    .sort((a, b) => {
+      const ai = boundOrder.get(a);
+      const bi = boundOrder.get(b);
+      if (ai !== undefined && bi !== undefined) return ai - bi;
+      if (ai !== undefined) return -1;
+      if (bi !== undefined) return 1;
+      return a.localeCompare(b);
+    });
+  return ordered.map((skillId) => {
+    const b = { skillId, key: options.bindings.find((x) => x.skillId === skillId)?.key ?? '' };
     const skill = registry.skill(b.skillId);
     const slot = options.snapshotOf().skills.find((x) => x.skillId === b.skillId);
     const costText =
