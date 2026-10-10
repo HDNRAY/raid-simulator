@@ -1,5 +1,6 @@
 import { BattleLoop } from './app/battleLoop';
 import { createTouchControls, derivedOfSnapshot } from './app/touchControls';
+import { buildKeyRows } from './app/keyRows';
 import { slotsFromBindings } from './app/viewAdapter';
 import { createRegistry } from './core/content/registry';
 import { VERROT_BEHAVIORS } from './core/ai';
@@ -376,38 +377,11 @@ async function bootstrap(): Promise<void> {
     pixi: { Container, Graphics, Sprite, Text },
     translate: (key) => translateSafe(key),
     getRows: () =>
-      bindings.map((b) => {
-        const skill = registry.skill(b.skillId);
-        const hintTags = skill.hintTags;
-        /**
-         * 详情区的数据。
-         *
-         * ⚠️ 代价与冷却**优先复用视图层已经算好的那套**
-         * （`loop.snapshot.skills`，含「防」的按住消耗换算）。
-         * 如果在这里重算一遍，两处的文案迟早会不一致
-         * —— 这类"同一件事两个真相来源"的问题很难查。
-         */
-        const slot = loop.snapshot.skills.find((x) => x.skillId === b.skillId);
-        const costText =
-          slot?.cost === undefined
-            ? ''
-            : translateSafe(slot.cost.suffix === undefined ? 'settings.detailCost' : 'settings.detailCostPerSecond', {
-                value: Math.round(slot.cost.value),
-                resource: translateSafe(`resource.${slot.cost.resource}`),
-              });
-        const cdText =
-          slot === undefined || slot.skillCdSec <= 0
-            ? ''
-            : translateSafe('settings.detailCd', { seconds: Math.round(slot.skillCdSec) });
-        return {
-          skillId: b.skillId,
-          nameKey: skill.nameKey,
-          key: b.key,
-          ...(skill.descKey === undefined ? {} : { descKey: skill.descKey }),
-          ...(costText === '' ? {} : { costText }),
-          ...(cdText === '' ? {} : { cdText }),
-          ...(hintTags === undefined || hintTags.length === 0 ? {} : { hintTags }),
-        };
+      buildKeyRows({
+        bindings,
+        registry,
+        snapshotOf: () => loop.snapshot,
+        translate: translateSafe,
       }),
     onRebind: (skillId, key) => {
       // 同一个键只能绑一个技能：先把旧占用者解绑，再绑新的

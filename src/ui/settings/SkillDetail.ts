@@ -63,7 +63,17 @@ export class SkillDetail {
   /** 显示某个技能的详情。 */
   render(row: KeyRow): void {
     const t = this.translate;
-    const tags = (row.hintTags ?? []).map((tag) => t(`settings.hintTags.${tag}`)).join(' · ');
+    /**
+     * 标签行 = **玩法提示** ∪ **机械 tag**（如「闪避」）。
+     *
+     * ⚠️ 两类分开取词（前缀不同）：`settings.hintTags.*` 是玩法提示，
+     * `settings.mechanicTags.*` 是机械分类里挑出来的。混用一个前缀
+     * 会让"某个 tag 是哪种"这件事在 i18n 里看不出来。
+     */
+    const tags = [
+      ...(row.hintTags ?? []).map((tag) => t(`settings.hintTags.${tag}`)),
+      ...(row.mechanicTags ?? []).map((tag) => t(`settings.mechanicTags.${tag}`)),
+    ].join(' · ');
     /**
      * 说明可能很长，而详情区是一行固定宽度 —— 超出就**截断加省略号**。
      * 不做换行：换行会让下面三行的位置随内容浮动，焦点移动时文字

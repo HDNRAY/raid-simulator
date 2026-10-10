@@ -18,6 +18,14 @@ export interface KeyRow {
    * 给的是**标签 id**，文案在 i18n 里（渲染层不持有可显示文字）。
    */
   readonly hintTags?: readonly string[];
+  /**
+   * **机械 tag**（`SkillTag`）里"玩家看得懂"的那几个，如 `dodge`。
+   *
+   * ⚠️ 与 `hintTags` 分开（后者是玩法提示，如「打断」）：
+   * `dodge` 对玩法有直接影响 —— 倒地时只有带它的技能能按 ——
+   * 所以它也该在设置里露出来。见 `app/keyRows.ts` 的白名单。
+   */
+  readonly mechanicTags?: readonly string[];
   /** 技能说明的 i18n key（详情区用） */
   readonly descKey?: string;
   /** 代价文案（已格式化，如 `10 炁` / `2 炁/秒`）；没有代价则为空 */

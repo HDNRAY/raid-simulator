@@ -3,6 +3,7 @@ import { deriveSlots } from '../../src/app/derivedSlots';
 import { slotsFromBindings } from '../../src/app/derivedSlots';
 import { makeSkillDef } from './helpers';
 import type { SkillDef } from '../../src/core/types';
+import { EMPTY_COMBATANT, type BattleSnapshotView } from '../../src/render/viewModel';
 
 /** 有名字的构造器：把"构造出来的 buff 列表"写在名字上（AGENTS.md §1）。 */
 function buffsOf(...defIds: readonly string[]): Array<{ defId: string }> {
@@ -102,5 +103,67 @@ describe('派生技的槽位推导', () => {
     expect(second.derived?.sourceSkillId).toBe('attack');
     // 同一个派生技，但挂到了另一个源下面
     expect(second.slots.find((s) => s.skillId === 'strike')?.key).toBe('q');
+  });
+});
+
+/**
+ * 一个只有 `skills: []` 的快照桩。
+ *
+ * ⚠️ 用**有名字的构造器**而不是 `as unknown as`（AGENTS.md §1）——
+ * 它把"这是一份刻意做得最小的桩"写在了名字上，而且只有这一处。
+ */
+const emptySnapshot: BattleSnapshotView = {
+  tick: 0,
+  status: 'running',
+  enraged: false,
+  // 玩家/ Boss 的字段这条测试用不到，留空对象即可（只读不写）
+  player: EMPTY_COMBATANT,
+  boss: EMPTY_COMBATANT,
+  skills: [],
+  floatingText: [],
+  telegraphing: false,
+  armored: false,
+  playerFlash: 0,
+  bossFlash: 0,
+};
+
+describe('设置页要能看到「闪避」tag（用户报告）', () => {
+  /**
+   * 需求（用户报告）："之前说 给 闪 和 避 加tag，我在设置里看不到啊"
+   *
+   * **根因**：`dodge` 当初只加成了**机械 `SkillTag`**，而设置页的
+   * 详情区只显示 **`hintTags`（玩法提示）** —— 两者在 `core/types.ts`
+   * 里是**刻意分开**的，所以 `dodge` 从来没进过 UI。
+   */
+  it('机械 tag 走白名单进设置页，且只挑玩家看得懂的', async () => {
+    const { buildKeyRows } = await import('../../src/app/keyRows');
+    const dodge = makeSkillDef({ id: 'dodge', tags: ['defensive', 'dodge'] });
+    const attack = makeSkillDef({ id: 'attack', tags: ['melee'] });
+    /**
+     * ⚠️ 依赖项**按真实形状构造**（不是类型断言）—— AGENTS.md §1 禁止
+     * `as unknown as`，而且这条测试要验的正是"真实注册表里的技能怎么会
+     * 传到行数据"，用假形状就验不到接线。
+     */
+    const rows = buildKeyRows({
+      bindings: [
+        { key: 'a', skillId: 'dodge' },
+        { key: 'q', skillId: 'attack' },
+      ],
+      registry: {
+        skill: (id: string) => (id === 'dodge' ? dodge : attack),
+      } as Parameters<typeof buildKeyRows>[0]['registry'],
+      // 空快照即可：这条测试只关心 tag，不关心代价/冷却
+      snapshotOf: () => emptySnapshot,
+      translate: (key: string) => key,
+    });
+    const dodgeRow = rows.find((r) => r.skillId === 'dodge');
+    const attackRow = rows.find((r) => r.skillId === 'attack');
+    // 「避」带 dodge → 要显示
+    expect(dodgeRow?.mechanicTags).toEqual(['dodge']);
+    /**
+     * ⚠️ `melee` 是给引擎看的（触发器的 filter），**不显示给玩家** ——
+     * 全画出来只会增加噪音。所以「攻」没有 mechanicTags。
+     */
+    expect(attackRow?.mechanicTags).toBeUndefined();
   });
 });
