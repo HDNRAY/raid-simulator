@@ -47,7 +47,22 @@ export type EffectKind =
    * 调整某个技能的冷却（负数为退还）。⚠️ 直接改 `combatant.cooldowns`
    * 而不是挂 buff —— 后者会让冷却状态分裂成两处，UI 显示不对。
    */
-  | 'cooldown';
+  | 'cooldown'
+  /**
+   * **眩晕**：目标在 buff 持续时间内**完全不能行动**。
+   *
+   * 语义等价于"挂一个带 `flags.actionLock` 的 buff"，并**打断当前施法**。
+   *
+   * ⚠️ 为什么单独一个 `kind` 而不是让内容直接写 `grantBuff` + `interrupt`：
+   *   - "眩晕"是一个**玩家会认得的机制**，内容里应该一眼看出是它，
+   *     而不是两行需要推理的 buff 字段
+   *   - 它保证了"挂 buff"与"打扰断"**永远同时发生** —— 分成两条效果时
+   *     很容易只写一条，那就会出现"不能动但读条还在走"这种半晕状态
+   *
+   * 用的是现成的 `actionLock`（施法门禁的**第一优先级**，拒绝原因
+   * `locked`），**没有新造输入状态**。
+   */
+  | 'stun';
 
 /** 效果 = 一次结算里发生的事。技能 `hits[].effects` 与独立 ability 共用它。 */
 export interface Effect {

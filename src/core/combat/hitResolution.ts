@@ -225,6 +225,14 @@ export function applyHitEffects(
        */
       const buffId = effect.buff?.id ?? effect.buffId;
       if (buffId) {
+        /**
+         * ⚠️ `effect.target` **要读**（这里曾经漏读，永远取"命中的目标"）。
+         *
+         * 踩过的坑：「欲望印记」的反伤里要"消耗**自己**的印记"，但那条
+         * 效果是在**反伤那一次命中**里结算的 —— 那次命中的目标**是玩家**。
+         * 漏读 `target` 于是去移除玩家身上的印记（不存在），Boss 的印记
+         * 留下来 → 印记永不消耗 → 反伤每次都触发，正好毁掉这个机制。
+         */
         const who = effect.target?.mode === 'self' ? actor : target;
         const current = ctx.current(who.id);
         if (current.buffs.some((b) => b.defId === buffId)) {
@@ -280,6 +288,77 @@ export function applyHitEffects(
               ...who.cooldowns,
               [which]: Math.max(ctx.state.tick, readyAt + delta),
             },
+          });
+        }
+      }
+      return;
+    }
+
+    if (effect.kind === 'stun') {
+      /**
+       * **眩晕** = 挂一个带 `actionLock` 的 buff（禁行动）+ 打扰断当前施法。
+       *
+       * ⚠️ 两件事**必须同时做**，所以合成一个 `kind` 而不是让内容写两行：
+       * 只挂 buff 不打打断 → "不能动但读条还在走"的半晕状态；
+       * 只打断不挂 buff → 打断完立刻又能出招。
+       *
+       * ⚠️ **打断不退冷却**（`casts` 直接移除即可，冷却本来就在施放时扣过）。
+       * 这是有意的：玩家在关键读条快完成时被晕，那个技能照样进 CD ——
+       * 退冷却会让眩晕变成"免费重置"，反而削弱这一击的分量。
+       */
+      const who = effect.target?.mode === 'self' ? actor : target;
+      const stunned = ctx.current(who.id);
+      const def = effect.buff;
+
+      /**
+       * ⚠️ **`ccImmune`（免控）在这里生效。**
+       *
+       * 这个 flag 早就定义了、`aggregateFlags` 也一直在算它，但
+       * **没有任何地方读它** —— 又一个"看起来支持但实际不生效"的字段
+       * （`interruptImmune` 也踩过同一个坑）。眩晕是它唯一合理的消费者，
+       * 所以在这里接上，而不是新造一个 flag。
+       */
+      if (aggregateFlags(stunned).ccImmune) {
+        ctx.events.push({
+          kind: 'interruptImmune',
+          tick: ctx.state.tick,
+          targetId: stunned.id,
+          skillId: stunned.casts[0]?.skillId ?? '',
+        });
+        return;
+      }
+
+      if (def !== undefined) {
+        const applied = applyBuff(stunned, def, actor.id, ctx.state.tick);
+        ctx.replaceCombatant({ ...ctx.current(who.id), buffs: applied.buffs });
+        ctx.events.push({
+          kind: 'buffApplied',
+          tick: ctx.state.tick,
+          targetId: who.id,
+          buffId: def.id,
+          stacks: applied.stacks,
+          sourceId: actor.id,
+        });
+      }
+
+      /** 打断它当前**所有**读条（眩晕不看可打断性 —— 人都动不了了）。 */
+      const casting = ctx.current(who.id);
+      if (casting.casts.length > 0) {
+        ctx.replaceCombatant({ ...casting, casts: [] });
+        for (const cast of casting.casts) {
+          ctx.events.push({
+            kind: 'castInterrupted',
+            tick: ctx.state.tick,
+            sourceId: who.id,
+            skillId: cast.skillId,
+            reason: 'interrupted',
+          });
+          ctx.events.push({
+            kind: 'interruptSuccess',
+            tick: ctx.state.tick,
+            sourceId: actor.id,
+            targetId: who.id,
+            skillId: cast.skillId,
           });
         }
       }

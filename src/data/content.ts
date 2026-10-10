@@ -38,6 +38,7 @@
 import { logicTicks, logicMs } from '../core/loopConstants';
 import type { BuffDef, SkillDef } from '../core/types';
 import { C, S } from './scale';
+import { LUST_BUFFS, LUST_SKILLS } from './lustBoss';
 import { COMBO_WINDOW, JIE, STRIKE } from './playerSkills';
 export { C, S } from './scale';
 import {
@@ -529,7 +530,18 @@ export const PLAYER_SKILLS: readonly SkillDef[] = [
 
 
 
-export const ALL_SKILLS: readonly SkillDef[] = [...PLAYER_SKILLS, ...BOSS_SKILLS];
+/**
+ * 全部技能。
+ *
+ * ⚠️ **两个 Boss 的技能都在这里**，各自由自己的 `Behavior` 轮转决定实际
+ * 放哪些（见 `LUST_BEHAVIORS` vs `VERROT_BEHAVIORS`）。所以"注册"不等于
+ * "会用"—— 这也是为什么加 Boss 只需要加它的轮转。
+ */
+export const ALL_SKILLS: readonly SkillDef[] = [
+  ...PLAYER_SKILLS,
+  ...BOSS_SKILLS,
+  ...LUST_SKILLS,
+];
 
 export const ALL_BUFFS: readonly BuffDef[] = [
   DODGE_IFRAME,
@@ -541,6 +553,7 @@ export const ALL_BUFFS: readonly BuffDef[] = [
   BOSS_ENRAGE,
   BOSS_ARMOR,
   BOSS_CLEAVE_ARMOR,
+  ...LUST_BUFFS,
   /**
    * 「倒地」（Boss 的「横扫」给玩家的）。
    *

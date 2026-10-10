@@ -5,7 +5,8 @@ import { wireSettingsKeys } from './app/settingsKeys';
 import { createSettingsToggle } from './app/settingsToggle';
 import { buildSettingsOptions } from './app/settingsPanelOptions';
 import { PrepareScreen } from './ui/PrepareScreen';
-import { BOSS_ROSTER, PLAYER_ROSTER, findEntry, resolveBossId, resolvePlayerId } from './data/roster';
+import { BOSS_ROSTER, PLAYER_ROSTER, resolveBossId, resolvePlayerId } from './data/roster';
+import { PLAYER_BASE, makeBoss, makePlayer } from './data/units';
 import { buildProbe, collectRuntimeErrors, emptyProbe } from './app/debugProbe';
 import {
   SettingsStore,
@@ -29,15 +30,10 @@ import { detectBrowserPlatform } from './render/platform';
 import { Application, Container, Graphics, Sprite, Text } from 'pixi.js';
 import { slotsFromBindings } from './app/viewAdapter';
 import { createRegistry } from './core/content/registry';
-import { VERROT_BEHAVIORS } from './core/ai';
 import {
   ALL_BUFFS,
   ALL_SKILLS,
-  DOUQI_MAX,
-  ENERGY_MAX,
-  HP_MAX,
 } from './data/content';
-import { BOSS_HP_DISPLAY } from './data/entities/bossHp';
 import { type KeyBinding } from './input/keyboard';
 import { flattenCatalog, translator } from './i18n/translator';
 import { zhCN } from './i18n/locales/zh-CN';
@@ -51,7 +47,7 @@ import {
 } from './render/scaling';
 import { observeStage } from './render/sizes';
 import { BattleScene } from './render/BattleScene';
-import type { Combatant, StatKey } from './core/types';
+import type { StatKey } from './core/types';
 import { SettingsButton } from './ui/settings/SettingsButton';
 import { SettingsPanel } from './ui/settings/SettingsPanel';
 import { createAssetsDecoder, setIconDecoder } from './render/icons';
@@ -70,80 +66,6 @@ const SCALING_MODE: ScalingMode = 'fit';
 
 /** 每场战斗的时限。超时判负。与 Boss 的 enrage 阈值一致。 */
 const TIME_LIMIT_MS = 180_000;
-
-/**
- * 玩家基础属性。
- *
- * 新刻度下**不需要**主属性参与伤害计算了 —— 6 个技能的伤害都是
- * 内容里写死的固定值（攻 10 / 轰 30）。所以这里只留最小的基础值，
- * 属性系统本身仍然可用（装备/增益可以往里加）。
- *
- * 缠回复**不走属性**：它是固定"每 0.1 秒 1 点"，
- * 由 `data/balance.ts` 的 `ENERGY_PER_LOGIC_TICK` 决定。
- */
-const PLAYER_BASE: Partial<Record<StatKey, number>> = {
-  strength: 10,
-  agility: 10,
-  intelligence: 10,
-  spirit: 10,
-};
-
-/**
- * 资源上限。
- *
- * 需求：双方都是 100 血，缠与炁上限也是 100。
- *
- * **直接用展示刻度**（不再乘 `DISPLAY_SCALE`）：内容的伤害值
- * （攻 10 / 轰 30）本身就是展示刻度，两边同刻度才能对上 ——
- * 早期把血量乘了 10 而伤害没乘，结果 10 点伤害变成打掉 1 点血，
- * 一场战斗要按上百次。
- */
-const PLAYER_CAPS = { hp: HP_MAX, energy: ENERGY_MAX, douqi: DOUQI_MAX };
-
-/**
- * Boss 资源上限。
- *
- * 血量取值依据见 `data/entities/bossHp.ts` —— 那是实测出来的
- * （玩家 214 DPS vs Boss 66 DPS），不是拍脑袋定的。
- */
-const BOSS_CAPS = { hp: BOSS_HP_DISPLAY, energy: 0, douqi: 0 };
-
-function makePlayer(id: string): Combatant {
-  return {
-    id,
-    /** 显示名来自 roster（需求："这个人物目前就叫 林晚风"）。 */
-    nameKey: findEntry(PLAYER_ROSTER, id)?.nameKey ?? 'hud.you',
-    side: 'ally',
-    caps: { ...PLAYER_CAPS },
-    resources: { hp: PLAYER_CAPS.hp, energy: PLAYER_CAPS.energy, douqi: 0 },
-    counters: {},
-    basePrimary: { strength: 120, agility: 100, intelligence: 110, spirit: 100 },
-    buffs: [],
-    cooldowns: {},
-    casts: [],
-    uses: {},
-    behaviors: [],
-    alive: true,
-  };
-}
-
-function makeBoss(id: string): Combatant {
-  return {
-    id,
-    nameKey: findEntry(BOSS_ROSTER, id)?.nameKey ?? 'boss.name',
-    side: 'enemy',
-    caps: { ...BOSS_CAPS },
-    resources: { hp: BOSS_CAPS.hp, energy: 0, douqi: 0 },
-    counters: {},
-    basePrimary: { strength: 400, agility: 200, intelligence: 300, spirit: 200 },
-    buffs: [],
-    cooldowns: {},
-    casts: [],
-    uses: {},
-    behaviors: VERROT_BEHAVIORS,
-    alive: true,
-  };
-}
 
 async function bootstrap(): Promise<void> {
   const stage = document.querySelector<HTMLElement>('#stage');
@@ -278,7 +200,17 @@ async function bootstrap(): Promise<void> {
    * 真实入口的一部分（"点开始"本身也会坏）。走参数则与玩家同一条路。
    * ⚠️ 只有显式带这个参数才生效 —— 线上地址没有它，玩家路径一字未变。
    */
-  const skipPrepare = new URLSearchParams(globalThis.location.search).get('prepare') === 'skip';
+  const params = new URLSearchParams(globalThis.location.search);
+  const skipPrepare = params.get('prepare') === 'skip';
+
+  /**
+   * `?boss=lust` —— 指定对手（截图 / 调试用）。
+   *
+   * ⚠️ 与 `?prepare=skip` 配合使用：`?prepare=skip&boss=lust` 直接开一局
+   * 打色欲。单独给 `?boss=` 只在跳过备战时才有意义（否则备战界面会按
+   * 存储里的选择走）。
+   */
+  const bossParam = params.get('boss');
 
   /** 当前选中的出战单位（备战界面的选择，进战斗时读到）。 */
   const selection = {
@@ -358,7 +290,7 @@ async function bootstrap(): Promise<void> {
    * ⚠️ 放在 `prepare` 构造**之后**：`enterBattle` 会用到 `prepare.setVisible`，
    * 早一步调用会碰到 TDZ。
    */
-  if (skipPrepare) enterBattle(selection.playerId, selection.bossId);
+  if (skipPrepare) enterBattle(selection.playerId, resolveBossId(bossParam ?? selection.bossId));
 
   /**
    * **UI 缩放**（设置里的 slider）。
