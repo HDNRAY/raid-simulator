@@ -75,6 +75,16 @@ describe('双弧按钮几何', () => {
     expect(innerMax).toBeLessThan(outerMin);
   });
 
+  it('【关键】圆心贴在游戏区域右下角（需求："以游戏区域右下角为圆心"）', () => {
+    /**
+     * ⚠️ 不是**正好** `(960,540)` —— 那样可用角度区只剩约 70°，
+     * 7 个按钮放不下（穷举 0 组可行）。往里挪 10px 之后视觉上仍是
+     * 右下角，但有 24 组可行解。见 `touchButtonLayer.ts` 的说明。
+     */
+    expect(960 - TOUCH_ARC_CENTER.x).toBeLessThanOrEqual(16);
+    expect(540 - TOUCH_ARC_CENTER.y).toBeLessThanOrEqual(16);
+  });
+
   it('内弧按钮在画布右下角区域（不是散在中间）', () => {
     for (const c of centers) {
       expect(c.x).toBeGreaterThan(600);

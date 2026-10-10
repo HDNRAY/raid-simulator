@@ -346,27 +346,8 @@ async function bootstrap(): Promise<void> {
   /**
    * 是否正在"由主监听器处理一次按键"。
    *
-   * ------------------------------------------------------------------
-   * 为什么必须有这个标记（一个真实的重入 bug）
-   * ------------------------------------------------------------------
-   *
-   * 一次 keydown 会经过**两个**监听器：本监听器（捕获阶段）和输入层
-   * （冒泡阶段）。而本监听器在改键时会调用 `SettingsPanel.handleKey`，
-   * 后者进入改键模式后**当场**把捕获回调注册给输入层 —— 于是输入层
-   * 在同一次事件里发现"已有捕获回调"，把**触发改键的那一次按键本身**
-   * 喂给了 `finishCapture`：一次 Enter 同时完成了"进入改键"和
-   * "把技能绑成 Enter"。堆栈证实过这条路径：
-   *
-   *   onKeyDown → handleKey → activateFocus → startCapture
-   *             → （回到 onKeyDown）→ 捕获回调 → finishCapture
-   *
-   * 修法是在**这一层**标记"这次按键已经被我处理"，让输入层跳过它。
-   * 放在这里而不是 `SettingsPanel` 里，是因为重入发生在这两个
-   * 监听器之间 —— 组件本身无从知道自己是被谁调用的。
-   *
-   * 早期我在组件里用时间戳（"同一瞬间的按键忽略"）绕过这个问题，
-   * 但那是**用阈值猜事件归属**：它同时会误判玩家的真实连按，
-   * 而且让"改键要按两次键"这种怪行为变得难以解释。
+   * 用途：输入层与设置面板都会监听 `keydown`，需要避免同一次按键被
+   * 两边各处理一遍（否则改键时技能会真的放出去）。
    */
   let handlingKeyDown = false;
 
@@ -526,7 +507,7 @@ async function bootstrap(): Promise<void> {
    */
   let draggingSlider = false;
 
-  /** 触屏控件（能力探测 + 布局 + 输入源 + 双弧按钮层）。与键盘**并存**。 */
+  /** 触屏控件（能力探测 + 布局 + 输入源 + 双弧按钮层）。与键盘并存。 */
   const touch = createTouchControls({
     pixi: { Container, Graphics, Sprite, Text },
     translate: translateSafe,
@@ -536,6 +517,9 @@ async function bootstrap(): Promise<void> {
   });
   touchPreviewSource.read = () =>
     touch.layout.current().map((b) => registry.skill(b.skillId)?.nameKey ?? b.skillId);
+  /** ⚠️ 必须接上，否则触屏产出的 Action 被直接丢掉（只画按钮、点了没反应）。 */
+  loop.setTouchInput(touch.input);
+  touch.setBindings(bindings);
   scene.setShowKeyHints(touch.caps.showKeyHints);
   settingsButton.setShowShortcut(touch.caps.showKeyHints);
   app.stage.addChild(touch.layer.root);

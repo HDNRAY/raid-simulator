@@ -267,6 +267,18 @@ export class BattleLoop {
 
   /** 替换键位表（按键设置用）。会同步到输入层。 */
   /**
+   * 接上触屏输入源。
+   *
+   * ⚠️ **必须在构造之后调用**，不能走构造参数：`BattleLoop` 是每次
+   * 重开都会重建的，而触屏控件（布局 + 按钮层 + 输入源）的生命周期
+   * **比一局长得多** —— 重开一局不该把按钮布局丢掉。主循环在创建
+   * 触屏控件后立刻接上它。
+   */
+  setTouchInput(touchInput: InputSource | undefined): void {
+    this.options = { ...this.options, ...(touchInput === undefined ? {} : { touchInput }) };
+  }
+
+  /**
    * 改键位表。
    *
    * ⚠️ 同时更新**输入层**与**画面技能格** —— 键位表是它们的唯一真相
