@@ -401,9 +401,9 @@ export type SkillTag =
 /**
  * 招式的**玩法提示标签**（给玩家看的，不参与计算）。
  *
- * ⚠️ 与 `SkillTag` 故意分开：那是机械分类（给触发器的 filter 用），
- * 这个只是让 UI 把"这一招你该怎么应对"写在读条上（如「霸体」= 别打断）。
- * 标识符用英文，文案在 i18n 里。
+ * ⚠️ 与 `SkillTag` 分开的理由是**生命周期不同**：`tags` 是静态作者数据，
+ * 而 `hintTags` 在视图层是**计算集**（`viewAdapter` 会把霸体等状态派生
+ * 进去）—— 合并后就没地方放"由状态推出的提示"。标识符英文，文案在 i18n。
  */
 export type HintTag =
   /** 「霸体」：无法被打断 —— 别浪费打断技 */
@@ -696,7 +696,7 @@ export interface GameEntity {
   /**
    * 玩法提示标签（显示在读条/技能格上）。
    *
-   * 与 `tags`（机械分类，给触发器匹配用）**分开** —— 见 `HintTag` 的说明。
+   * 与 `tags`（机械分类）**分开** —— 理由见 `HintTag` 的说明（生命周期不同）。
    */
   readonly hintTags?: readonly HintTag[];
 }

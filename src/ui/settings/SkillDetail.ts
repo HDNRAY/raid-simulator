@@ -87,10 +87,15 @@ export class SkillDetail {
         ? ''
         : truncate(t(row.descKey).replaceAll('**', ''), DETAIL_DESC_MAX_CHARS);
     /**
-     * 代价与冷却都由上层**格式化好**（走 i18n 模板）——
-     * 这里只负责把两段拼起来，不自己造文案（否则又会出现硬编码中文）。
+     * **结构化行**：消耗 · 冷却 · 施放。
+     *
+     * ⚠️ 三段都由上层**格式化好**（走 i18n 模板）—— 这里只负责拼，
+     * 不自己造文案（否则又会出现硬编码中文）。
+     * ⚠️ 它们**取代**了原先写在说明里的"消耗 30 炁""瞬发"等字样
+     * （需求："资源消耗如果单独会说，比如30炁，描述里就不要加了，
+     * 包括瞬发与否，这些应该是结构化的显示"）。写在说明里会漂移。
      */
-    const stats = [row.costText, row.cdText]
+    const stats = [row.costText, row.cdText, row.castText]
       .filter((x): x is string => x !== undefined && x !== '')
       .join('   ');
 
@@ -101,17 +106,34 @@ export class SkillDetail {
      * 如果位置写死，四个位置里会有一个永远是空的 —— 看起来像漏画了。
      * 所以按"实际有几行"重排 y。
      */
+    /**
+     * ================================================================
+     * 布局：**标签放名字右边**，不占独立的行
+     * ================================================================
+     *
+     * 需求："设置里选中的技能，里面显示tags会把描述往下推，我觉得不好，
+     * 优化一下layout，比如tags放右边，或者下面。"
+     *
+     * 原先标签占**独立一行**（名字 / 标签 / 说明 / 代价），把说明推到了
+     * 第三行。改成名字右边之后：
+     *   第 1 行  名字 + 标签
+     *   第 2 行  说明
+     *   第 3 行  消耗 · 冷却 · 施放
+     * 行数从 4 降到 3，且**不需要撑高详情区**。
+     *
+     * ⚠️ 标签的 x 依赖名字的**实际渲染宽度**（`root.width`），所以必须
+     * 先 `set` 名字再定位标签 —— 顺序反了会用到上一帧的宽度。
+     */
     const dr = skillDetailRect();
-    const rows: Label[] = [];
-    if (tags !== '') rows.push(this.tags);
-    rows.push(this.desc, this.stats);
-    for (const [i, label] of rows.entries()) {
-      label.root.y = dr.y + (i + 1) * LINE_H;
-    }
-
     this.name.set(t(row.nameKey));
     this.tags.set(tags);
     this.desc.set(desc);
     this.stats.set(stats);
+
+    const TAG_GAP = 10;
+    this.tags.root.x = dr.x + this.name.root.width + TAG_GAP;
+    this.tags.root.y = dr.y;
+    this.desc.root.y = dr.y + LINE_H;
+    this.stats.root.y = dr.y + LINE_H * 2;
   }
 }

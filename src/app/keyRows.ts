@@ -61,16 +61,31 @@ export function buildKeyRows(options: BuildKeyRowsOptions): readonly KeyRow[] {
       slot === undefined || slot.skillCdSec <= 0
         ? ''
         : translate('settings.detailCd', { seconds: Math.round(slot.skillCdSec) });
+    /**
+     * **施放方式**从数据推导（需求："包括瞬发与否，这些应该是结构化的显示"）。
+     *
+     * ⚠️ 优先级：`holdDrain` > `castTime`。按住型技能（「防」）的 `castTime`
+     * 是 0，但它显然不是"瞬发" —— 只看 `castTime` 会把它显示错。
+     */
+    const castText =
+      skill.holdDrain !== undefined
+        ? translate('settings.detailHold')
+        : skill.castTime <= 0
+          ? translate('settings.detailInstant')
+          : translate('settings.detailCast', { seconds: skill.castTime / 1000 });
     const hintTags = skill.hintTags;
     /**
      * **机械 tag（`SkillTag`）也要显示**。
      *
      * 需求（用户报告）："之前说 给 闪 和 避 加tag，我在设置里看不到啊"
      *
-     * ⚠️ 与 `hintTags` 是两回事（`core/types.ts` 里刻意分开）：
-     *   `hintTags`  = **玩法提示**（"这一招该怎么应对"，如「打断」）
-     *   `tags`      = **机械分类**（给触发器 filter 用，如 `dodge`）
-     * 但 `dodge` 对玩家是有意义的（"倒地时只有它能按"），所以也该露出来。
+     * ⚠️ 与 `hintTags` 是两个字段（生命周期不同，见 `HintTag` 的说明）：
+     *   `hintTags` = 玩法提示（"该怎么应对"，如「打断」）
+     *   `tags`     = 机械分类。⚠️ 它的**唯一消费者**是
+     *                `BuffFlags.restrictToTags`（倒地时的技能白名单）——
+     *                注释里曾说"给触发器的 filter 用"，但那个 filter
+     *                **至今没有消费者**，所以别据此以为它被广泛使用。
+     * `dodge` 对玩家有意义（"倒地时只有它能按"），所以露出来。
      *
      * ⚠️ 目前只显示**玩家看得懂的那几个**（白名单），不是把 `tags`
      * 全画出来 —— `melee` / `spell` / `dot` 是给引擎看的，
@@ -87,6 +102,7 @@ export function buildKeyRows(options: BuildKeyRowsOptions): readonly KeyRow[] {
       ...(skill.descKey === undefined ? {} : { descKey: skill.descKey }),
       ...(costText === '' ? {} : { costText }),
       ...(cdText === '' ? {} : { cdText }),
+      ...(castText === '' ? {} : { castText }),
       ...(hintTags === undefined || hintTags.length === 0 ? {} : { hintTags }),
       ...(mechanicTags.length === 0 ? {} : { mechanicTags }),
     };

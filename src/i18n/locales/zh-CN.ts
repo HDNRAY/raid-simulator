@@ -208,7 +208,7 @@ export const zhCN = {
   skill: {
     attack: {
       name: '攻',
-      desc: '普攻。消耗 10 炁，造成 10 点伤害。'
+      desc: '普通攻击，造成 10 点伤害。'
     },
     /**
      * 「避」= 原「闪」。
@@ -219,7 +219,7 @@ export const zhCN = {
      */
     dodge: {
       name: '避',
-      desc: '消耗 30 炁，获得 0.5 秒完全无敌。瞬发，随时可按。'
+      desc: '获得 0.5 秒完全无敌，随时可按。'
     },
     /**
      * 「闪」= 新增的**免费**短无敌。
@@ -229,27 +229,27 @@ export const zhCN = {
      */
     flash: {
       name: '闪',
-      desc: '不消耗任何资源，获得 0.1 秒无敌。瞬发，炁不足时的兜底。'
+      desc: '获得 0.1 秒无敌，炁不足时的兜底。'
     },
     guard: {
       name: '防',
-      desc: '按住持续减伤 40%，每 0.1 秒消耗 2 炁。松开即取消。'
+      desc: '持续减伤 40%，松开即取消。'
     },
     break: {
       name: '破',
-      desc: '瞬发。打断目标的任何招式。打断成功则冷却归零并派生「击」；失败则 10 秒冷却。',
+      desc: '打断目标的任何招式。成功则冷却归零并派生「击」，失败则进入完整冷却。',
     },
     strike: {
       name: '击',
-      desc: '派生技。伤害是「攻」的一半，无任何消耗。只在打断成功后出现，用掉即消失。',
+      desc: '派生技。伤害是「攻」的一半。只在打断成功后出现，用掉即消失。',
     },
     blast: {
       name: '轰',
-      desc: '消耗 50 缠，造成 30 点伤害并使目标易伤。'
+      desc: '造成 30 点伤害，并使目标易伤。'
     },
     focus: {
       name: '凝',
-      desc: '消耗 50 缠，自身增伤 20%，持续 30 秒。'
+      desc: '自身增伤 20%，持续 30 秒。'
     },
   },
 
@@ -378,6 +378,11 @@ export const zhCN = {
     detailCost: '{value} {resource}',
     detailCostPerSecond: '{value} {resource}/秒',
     detailCd: '冷却 {seconds} 秒',
+    /** 施放方式 —— 由 `castTime` / `holdDrain` 推导（见 `KeyRow.castText`）。 */
+    detailInstant: '瞬发',
+    detailCast: '施放 {seconds} 秒',
+    /** 按住型（「防」）—— 不是读条，所以与 `detailCast` 分开。 */
+    detailHold: '持续按住',
     keysHint: '方向键选择，Enter 改键，Esc 返回',
     /**
      * 触屏版的按键页提示。

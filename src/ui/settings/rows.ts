@@ -30,7 +30,16 @@ export interface KeyRow {
   readonly descKey?: string;
   /** 代价文案（已格式化，如 `10 炁` / `2 炁/秒`）；没有代价则为空 */
   readonly costText?: string;
-  /** 固有冷却文案（如 `5 秒`）；没有冷却则为空 */
+  /** 固有冷却文案（如 `冷却 10 秒`）；没有冷却则为空 */
   readonly cdText?: string;
+  /**
+   * **施放**文案（如 `瞬发` / `0.5 秒` / `持续按住`）。
+   *
+   * ⚠️ 从技能的 `castTime` / `holdDrain` **结构化推导**，而不是写在描述里
+   * —— 需求："资源消耗如果单独会说，比如30炁，描述里就不要加了，包括瞬发
+   * 与否，这些应该是结构化的显示"。写在描述里会漂移（改了 `castTime`
+   * 忘改文案），而这里永远跟着数据。
+   */
+  readonly castText?: string;
 }
 
