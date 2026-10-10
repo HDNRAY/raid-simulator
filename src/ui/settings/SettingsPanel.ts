@@ -264,12 +264,23 @@ export class SettingsPanel {
    *
    * @returns 是否消费了这次点击
    */
+  /**
+   * 当前是否显示键名（决定网格度量）。
+   *
+   * ⚠️ **命中测试与渲染必须用同一个值** —— 否则可点区与画出来的位置错开
+   * （实测触屏「闪」只有 6.3% 能点中）。
+   */
+  private get showKeyHintsNow(): boolean {
+    return this.options.getShowKeyHints?.() !== false;
+  }
+
   hitTest(px: number, py: number): boolean {
     if (!this.visible) return false;
 
     const target = hitTestLogic(px, py, {
       tab: this.tab,
       rowSkillIds: this.options.getRows().map((r) => r.skillId),
+      showKeyHints: this.showKeyHintsNow,
     });
 
     switch (target.kind) {
@@ -286,15 +297,10 @@ export class SettingsPanel {
         return true;
       case 'keyRow': {
         /**
-         * ⚠️ 点技能格 = **选中**，不是直接改键。
-         *
-         * 需求："设置里的按键设置，目前方向键选中和鼠标选中是两件事，
-         * 应该合并。"
-         *
-         * 原先点格子会立刻 `startCapture`（进入改键），而方向键只是移动
-         * 焦点 —— 两套语义，而且点完之后详情区显示的还是**上一个**
-         * 技能（焦点没变）。现在鼠标与方向键都只做"选中"，
-         * 改键统一走 `Enter`（`activateFocus`）。
+         * ⚠️ 点技能格 = **选中**，不是直接改键（需求："方向键选中和鼠标
+         * 选中是两件事，应该合并"）。原先点格子会立刻进改键，而方向键
+         * 只移动焦点 —— 两套语义，且点完详情还显示上一个技能。
+         * 现在两者都只做"选中"，改键统一走 `Enter`。
          */
         this.setFocusToSkill(target.skillId);
         return true;
@@ -349,6 +355,7 @@ export class SettingsPanel {
     const target = hitTestLogic(px, py, {
       tab: this.tab,
       rowSkillIds: rows.map((r) => r.skillId),
+      showKeyHints: this.showKeyHintsNow,
     });
     if (target.kind !== 'keyRow') return;
     this.setFocusToSkill(target.skillId);
@@ -548,10 +555,8 @@ export class SettingsPanel {
     /**
      * ⚠️ **先退出捕获，再做判定** —— 单一出口。
      *
-     * 早期把 `stopCapture()` 分散在几个分支里（保留键的分支忘了调），
-     * 于是"按下保留键"之后捕获状态**卡住不退**：玩家的下一次按键
-     * 仍被当成改键输入，界面看起来像死了。
-     * 所有分支都必须走到这里。
+     * 早期 `stopCapture()` 分散在几个分支里（保留键那个漏了），于是
+     * 捕获状态**卡住不退**：下一次按键仍被当成改键输入，界面像死了。
      */
     this.stopCapture();
 
@@ -617,28 +622,23 @@ export class SettingsPanel {
 
   /** 画外框（实现见 `SettingsFrame`）。 */
   private drawFrame(): void {
-    this.frame.update(this.tab, this.focus.zone, this.focus.zone === 'tabs' ? this.focus.index : -1);
+    const tabFocus = this.focus.zone === 'tabs' ? this.focus.index : -1;
+    this.frame.update(this.tab, this.focus.zone, tabFocus, this.showKeyHintsNow);
   }
 
   private drawBody(): void {
     this.keyGrid.setVisible(this.tab === 'keys');
-    /**
-     * **离开通用页时藏起滑块。**
-     *
-     * 只在这一处写"隐藏"，通用页分支只写"显示" —— 单一职责，
-     * 不会再出现"某个 tab 忘了清"的情况（第一版正是这样漏的）。
-     */
+    /** 通用页的滑块 / 触屏预览 / 详情都在此隐藏 —— 这里只写隐藏，通用页
+     * 分支只写显示。⚠️ `touchPreview` 原先只在 `drawTouchPreview()` 里置位，
+     * 而那里只在通用分支被调用 → 回按键页后它停在显示状态并压住第一格。 */
     this.scaleSlider.setVisible(false);
-    /**
-     * 详情同样"只属于按键页" —— 与滑块一个道理：**只在这一处写隐藏**，
-     * 按键页分支只写显示。
-     */
+    this.touchPreview.visible = false;
     this.detail.clear();
 
     if (this.tab === 'general') {
       // 通用 tab 目前是空的 —— 明确写出来，而不是给一片空白
       // 通用页没有"恢复默认键位"，那一栏留空（它属于按键页）
-      this.footer.showGeneralHint();
+      this.footer.showGeneralHint(this.showKeyHintsNow);
       /**
        * 通用页的控件：**显示** + 重画。
        *

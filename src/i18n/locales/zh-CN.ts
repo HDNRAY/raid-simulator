@@ -313,8 +313,15 @@ export const zhCN = {
     /** 完整说明（用在帮助文本里，不画在按钮旁） */
     openKeyHint: '按 Esc 或 , 打开设置；也可以 ↑ 选中后 Enter',
     close: '关闭',
-    tabGeneral: '通用 (G)',
-    tabKeys: '按键 (K)',
+    /**
+     * ⚠️ tab 文案**不含助记键** —— 助记键由渲染时拼（`mnemonic`）。
+     *
+     * 需求："移动端就不用显示快捷键信息了，无论是技能按钮还是其他的
+     * 功能按钮"。原先写死成 `'通用 (G)'`，字符串是一体的，**没法按模式
+     * 隐藏** —— 所以触屏上照样显示 `(G)`。
+     */
+    tabGeneral: '通用',
+    tabKeys: '按键',
     /** 通用 tab 暂时没有可调项 */
     /** 通用页：UI 缩放 slider */
     uiScale: 'UI 缩放',
@@ -390,7 +397,7 @@ export const zhCN = {
      */
     keysReserved: '{key} 是系统保留键，不能绑定',
     keysReservedHint: 'Esc / Tab / Enter / F1–F12 / 单独的 Shift、Ctrl、Alt 不能绑定',
-    keysReset: '恢复默认 (R)',
+    keysReset: '恢复默认',
     keysResetDone: '已恢复默认键位',
     /** 键位表的两列标题 */
     keyColumnAction: '技能',

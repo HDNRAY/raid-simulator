@@ -1,60 +1,36 @@
-/**
- * 设置界面的**纯逻辑**（不碰 Pixi）。
- *
- * ------------------------------------------------------------------
- * 为什么把判定逻辑抽出来
- * ------------------------------------------------------------------
- *
- * `SettingsPanel` 要构造 Pixi 对象，而 Pixi v8 在 jsdom 里不好跑
- * （需要真 canvas / WebGL）。如果判定逻辑留在类里，就只能写
- * "能构造、不报错"这种几乎没有信息的冒烟测试。
- *
- * 抽出来之后可以在 node 环境里精确测：
- *   - 点击命中了哪个区域
- *   - 改键是否冲突、冲突时该做什么
- *   - 键名怎么显示
- *   - 某个键该不该被弹窗消费掉
- *
- * 这个分工与 `DebugPanel` / `formatDebugValue` 一致：
- * **逻辑在 node 里测，绘制在浏览器里看**。
- */
+/** 设置界面的**纯逻辑**（不碰 Pixi）：几何、焦点、按键解析。 */
 
-import { LOGICAL } from '../layout';
+/**
+ * 共享几何常量（**叶子模块**，见那里的说明 —— 留在这会造循环依赖）。
+ * 转发出去，外部 import 路径不变。
+ */
+import { SETTINGS_PANEL, KEY_GRID, RESET_BUTTON, SKILL_DETAIL } from './settingsGeometry';
+export {
+  SETTINGS_PANEL,
+  KEY_GRID,
+  RESET_BUTTON,
+  SKILL_DETAIL,
+  HINT_LINE,
+  hintLineY,
+  bottomAreaTop,
+} from './settingsGeometry';
+/**
+ * ⚠️ 既 import 又 export：本文件内部要用它们（`keyGridStateOf`
+ * 之类），而外部 import 路径不变。`export ... from` 不产生本地绑定。
+ */
+import {
+  KEY_GRID_CAPACITY,
+  keyCellRect,
+  keyGridMetrics,
+  rowsCapacity,
+  type GridMetrics,
+} from './keyGridLayout';
 import { UI_SCALE_MAX, UI_SCALE_MIN, clampUiScale } from '../../render/scaling';
 
 /* ------------------------------------------------------------------ *
  * 几何
  * ------------------------------------------------------------------ */
 
-export const SETTINGS_PANEL = {
-  w: 640,
-  /**
-   * 高度按"能放下当前全部技能"定。
-   *
-   * 6 个技能 × 30px 行高 = 180px，加上 tab 栏、提示文字、
-   * 恢复默认按钮与边距，360 是刚好留一点余量的值。
-   * 若以后技能变多，`KEY_ROW_MAX` 会自动减少（而不是重叠），
-   * 那时再考虑给表格加滚动。
-   *
-   * 演进 400 → 440 → **500**。
-   *   400 → 440：格子从 44 加到 56（为了在技能名下放一行提示标签），
-   *              400 高的面板只剩 3 行、容量掉到 9。
-   *   440 → 500：按键页底部要加一块**选中技能的详情**
-   *              （需求："除了显示标签，还显示一下技能说明和代价、
-   *              cd 等信息"）。440 时格阵底与提示行之间只剩 30px，
-   *              放不下一段中文说明。
-   *
-   * 500 在画布（540）内仍然放得下（居中后 y 20..520）。
-   */
-  h: 500,
-  /** 居中 */
-  get x(): number {
-    return Math.round((LOGICAL.width - this.w) / 2);
-  },
-  get y(): number {
-    return Math.round((LOGICAL.height - this.h) / 2);
-  },
-} as const;
 
 export const TAB_BAR = { y: 40, w: 88, h: 30, gap: 8, x: 16 } as const;
 /**
@@ -87,41 +63,7 @@ export const TAB_BAR = { y: 40, w: 88, h: 30, gap: 8, x: 16 } as const;
  *
  * 每个格子 = 技能字 + 它当前的按键，上下排布。
  */
-export const KEY_GRID = {
-  top: 88,
-  cols: 3,
-  cellW: 188,
-  /**
-   * 单元格高度。**44**，不是 56。
-   *
-   * ⚠️ 56 是被**已经删掉的东西**撑出来的：当初从 44 加到 56 的理由是
-   * "在技能名下放一行提示标签"，而那行标签后来被需求删掉了（见
-   * `KeyGrid` 里的说明）。于是 56 的下半截变成空白 —— 技能字在 `y+12`、
-   * 按键在 `y+14`，下面 30px 什么都没有，表现就是"行虚高、尺寸不对"。
-   *
-   * 44 配 `FONT.warn`(20px) 实测放得下（20×1.5 ≈ 30 < 44），
-   * 并且让 `KEY_GRID_CAPACITY` 从 6 升到 8（那是好事）。
-   */
-  cellH: 44,
-  gapX: 10,
-  gapY: 8,
-  inset: 16,
-} as const;
 
-/**
- * 底部两个元素的位置：**提示文字在上、按钮在下**，都由这两个常量定义。
- *
- * 踩过的坑：`RESET_BUTTON.bottom` 与 `KEY_GRID_CAPACITY` 里各写了一次
- * 底部偏移，算重了 —— 结果"恢复默认"按钮**压在提示文字上**。
- * 现在按钮的 top 只在这里定义一次，容量推导与绘制都读它。
- */
-export const RESET_BUTTON = {
-  w: 108,
-  h: 24,
-  x: 16,
-  /** 距弹窗底部的距离 */
-  bottom: 22,
-} as const;
 
 /** 提示文字那一行的顶部（在按钮上方）。 */
 /**
@@ -159,38 +101,10 @@ export function uiScaleSliderRect(): {
   };
 }
 
-export const HINT_LINE = {
-  height: 20,
-  /** 与按钮之间的间隙 */
-  gap: 8,
-} as const;
 
-/** 提示文字行的 y（相对弹窗顶部）。 */
-export function hintLineY(): number {
-  return SETTINGS_PANEL.h - RESET_BUTTON.bottom - RESET_BUTTON.h - HINT_LINE.gap - HINT_LINE.height;
-}
 
-/** 底部区域上沿：格子不能越过这条线。 */
-export function bottomAreaTop(): number {
-  return hintLineY();
-}
 
-/**
- * 一屏能显示多少个技能格 —— **由剩余空间推导，不是写死的**。
- *
- * 踩过的坑：早期写死行数，后来调整行高就直接压到了"恢复默认"
- * 按钮上 —— 那个位置点下去会命中按钮，玩家以为在改某个技能的键，
- * 实际按了恢复默认。现在从下往上留出按钮与提示文字的空间，
- * 剩下的高度才给格子用，调尺寸不会静默产生重叠。
- */
-export const KEY_GRID_CAPACITY = (() => {
-  const usable = bottomAreaTop() - KEY_GRID.top - 6;
-  const rows = Math.max(
-    1,
-    Math.floor((usable + KEY_GRID.gapY) / (KEY_GRID.cellH + KEY_GRID.gapY)),
-  );
-  return rows * KEY_GRID.cols;
-})();
+
 
 export interface Rect {
   readonly x: number;
@@ -214,16 +128,7 @@ export function tabRect(index: number): Rect {
  * 先算"第几行第几列"，再换算坐标 —— 这样调用方只需要一个下标，
  * 不必知道列数。
  */
-export function keyCellRect(index: number): Rect {
-  const col = index % KEY_GRID.cols;
-  const row = Math.floor(index / KEY_GRID.cols);
-  return {
-    x: SETTINGS_PANEL.x + KEY_GRID.inset + col * (KEY_GRID.cellW + KEY_GRID.gapX),
-    y: SETTINGS_PANEL.y + KEY_GRID.top + row * (KEY_GRID.cellH + KEY_GRID.gapY),
-    w: KEY_GRID.cellW,
-    h: KEY_GRID.cellH,
-  };
-}
+
 
 export function resetButtonRect(): Rect {
   return {
@@ -278,6 +183,16 @@ export function hitTest(
   options: {
     readonly tab: SettingsTab;
     readonly rowSkillIds: readonly string[];
+    /**
+     * 是否显示键名 —— 它**决定网格度量**（桌面 3 列 44 高 / 触屏 3 列 64 高）。
+     *
+     * ⚠️ 必须传，否则命中测试与渲染**用的不是同一套格子**。
+     * 踩过的坑（实测）：`hitTest` 默认走桌面度量，而 `KeyGrid` 在触屏下
+     * 渲染的是 196×64 的格子 —— 于是点「闪」只有 **6.3%** 的位置能命中，
+     * 「破」有 46.9% 会点到别的技能。桌面度量自洽（7 格全 100%），
+     * 所以光靠"命中测试自身自洽"的测试抓不到它。
+     */
+    readonly showKeyHints?: boolean | undefined;
   },
 ): ClickTarget {
   if (!insidePanel(px, py)) return { kind: 'outside' };
@@ -300,9 +215,16 @@ export function hitTest(
 
   if (options.tab === 'keys') {
     if (contains(resetButtonRect(), px, py)) return { kind: 'resetKeys' };
+    /**
+     * ⚠️ 用**当前模式**的度量与容量 —— 渲染那边（`KeyGrid`）就是这么算的，
+     * 两处必须同源。用桌面常量 `KEY_GRID_CAPACITY` 会让触屏的第 3 行
+     * 整个不可点。
+     */
+    const metrics = keyGridMetrics(options.showKeyHints !== false);
+    const capacity = rowsCapacity(metrics);
     for (const [i, skillId] of options.rowSkillIds.entries()) {
-      if (i >= KEY_GRID_CAPACITY) break;
-      if (contains(keyCellRect(i), px, py)) return { kind: 'keyRow', skillId };
+      if (i >= capacity) break;
+      if (contains(keyCellRect(i, metrics), px, py)) return { kind: 'keyRow', skillId };
     }
   }
 
@@ -563,6 +485,23 @@ const MNEMONIC_KEYS: Readonly<Record<string, KeyAction>> = {
   s: { kind: 'mnemonic', target: 'slider' },
 };
 
+/**
+ * 某个助记目标的**实际按键**（如 `tabGeneral` → `'g'`）。
+ *
+ * ⚠️ 从 `MNEMONIC_KEYS` **反查**，而不是在渲染处写死 `'G'` ——
+ * 助记键是可改的，写死会让标签和实际能按的键不一致。
+ * ⚠️ 触屏上**只用它来决定要不要显示**，不因此禁用按键行为
+ * （外接键盘仍然该能用）。
+ */
+export function mnemonicKeyOf(
+  target: 'tabGeneral' | 'tabKeys' | 'resetKeys' | 'slider',
+): string | undefined {
+  for (const [key, action] of Object.entries(MNEMONIC_KEYS)) {
+    if (action.kind === 'mnemonic' && action.target === target) return key.toUpperCase();
+  }
+  return undefined;
+}
+
 export function resolveKeyAction(key: string, capturing: boolean): KeyAction {
   if (capturing) {
     // Esc 是唯一的退路，其余按键都当作"玩家想绑这个键"
@@ -637,32 +576,6 @@ export function closeButtonRect(): Rect {
   };
 }
 
-/**
- * 按键页底部：**选中技能的详情**。
- *
- * 需求："按键设置里，除了显示标签，还显示一下技能说明和代价，cd 等信息
- * 吧，要不然只显示选中的技能的信息（包括标签）也可以。"
- *
- * 选了后者：**只为当前焦点那一项**显示详情。
- * 十几个格子每个塞一段中文说明会挤成一团 —— 而玩家一次只关心一个技能。
- *
- * 位置在格阵之下、提示行之上，四行：名字 / 说明 / 标签 / 代价·冷却。
- */
-export const SKILL_DETAIL = {
-  x: 16,
-  /** 距弹窗顶部的距离（格阵底 336 之下） */
-  top: 344,
-  w: 608,
-  /**
-   * 四行：名字 / 标签 / 说明 / 代价·冷却，行距 **22px**。
-   *
-   * 22 不是随手取的：13px 的 `Label` 实测占高 **22px**
-   * （Pixi 的行高远大于字号）。我先试了 14 / 15 / 18，三次都叠字
-   * —— 这是量出来的，不是估出来的。
-   * 底边 344+80=424，提示行在 446。
-   */
-  h: 80,
-} as const;
 
 /** 详情区在弹窗坐标系里的矩形。 */
 export function skillDetailRect(): {
@@ -694,3 +607,10 @@ export function uiScaleFromPointer(px: number): number {
   const clamped = Math.min(1, Math.max(0, t));
   return clampUiScale(UI_SCALE_MIN + clamped * (UI_SCALE_MAX - UI_SCALE_MIN));
 }
+
+/**
+ * 网格几何搬到了 `./keyGridLayout`（几何与交互解析是两件事，而
+ * `logic.ts` 顶到了 700 行上限）。这里**转发**，外部 import 不变。
+ */
+export { KEY_GRID_CAPACITY, keyCellRect, keyGridMetrics, rowsCapacity };
+export type { GridMetrics };

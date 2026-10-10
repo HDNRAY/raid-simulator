@@ -9,7 +9,7 @@ import type { Container, Graphics } from 'pixi.js';
 import { FONT } from '../layout';
 import { Label, type PixiCtor } from '../primitives';
 import { PALETTE } from '../../render/theme';
-import { hintLineY, resetButtonRect, SETTINGS_PANEL } from './logic';
+import { hintLineY, mnemonicKeyOf, resetButtonRect, SETTINGS_PANEL } from './logic';
 
 export class KeysFooter {
   readonly root: Container;
@@ -47,8 +47,19 @@ export class KeysFooter {
     this.root.addChild(this.hint.root, this.resetGfx, this.resetLabel.root);
   }
 
-  /** 通用页：提示写死一句说明，恢复按钮整块不画。 */
-  showGeneralHint(): void {
+  /**
+   * 通用页：提示 + 隐藏恢复按钮。
+   *
+   * ⚠️ 提示是**键盘操作说明**（"← → 调整，↑ ↓ 切换项"），所以触屏要换成
+   * 触屏版文案，不能直接沿用 —— 需求："移动端就不用显示快捷键信息了"。
+   */
+  showGeneralHint(showKeyHints = true): void {
+    if (!showKeyHints) {
+      this.hint.set('');
+      this.resetLabel.set('');
+      this.resetGfx.clear();
+      return;
+    }
     this.hint.set(this.translate('settings.generalHint'));
     this.hint.setColor(PALETTE.textDim);
     this.resetLabel.set('');
@@ -78,7 +89,17 @@ export class KeysFooter {
     // 通知（如"已恢复默认"）用暖红，比常规提示更该被看到
     this.hint.setColor(notice !== '' ? 0xff9080 : PALETTE.textDim);
 
-    this.resetLabel.set(this.translate('settings.keysReset'));
+    /**
+     * 助记键**运行时拼** —— 触屏不显示（"移动端就不用显示快捷键信息了"），
+     * 而且显示的是实际生效的键而不是写死的 `R`。
+     */
+    const resetMnemonic = mnemonicKeyOf('resetKeys');
+    const resetText = this.translate('settings.keysReset');
+    this.resetLabel.set(
+      showKeyHints && resetMnemonic !== undefined
+        ? `${resetText} (${resetMnemonic})`
+        : resetText,
+    );
     this.resetLabel.setColor(resetFocused ? PALETTE.douqi.bright : PALETTE.text);
     const g = this.resetGfx;
     const r = this.resetRect;

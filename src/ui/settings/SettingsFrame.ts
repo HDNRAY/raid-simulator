@@ -14,7 +14,13 @@ import type { Container, Graphics } from 'pixi.js';
 import { FONT } from '../layout';
 import { Label, Panel, type PixiCtor } from '../primitives';
 import { PALETTE } from '../../render/theme';
-import { CLOSE_BUTTON, SETTINGS_PANEL, tabRect, type SettingsTab } from './logic';
+import {
+  CLOSE_BUTTON,
+  SETTINGS_PANEL,
+  mnemonicKeyOf,
+  tabRect,
+  type SettingsTab,
+} from './logic';
 
 interface TabButton {
   readonly tab: SettingsTab;
@@ -94,14 +100,38 @@ export class SettingsFrame {
    *   焦点 = 回车会作用在谁身上（一圈描边）
    * 两者可能同时在同一个 tab 上，也可能分开（焦点移走了但 tab 没切）。
    */
-  update(activeTab: SettingsTab, focusZone: string, focusIndex: number): void {
+  update(
+    activeTab: SettingsTab,
+    focusZone: string,
+    /**
+     * tab 焦点序号（-1 = 焦点不在 tab 栏）。用 `number` 而不是可选值，
+     * 调用点少一层三元判断。
+     */
+    focusIndex: number,
+    /**
+     * 是否显示助记键（如 `通用 (G)`）。
+     *
+     * 需求："移动端就不用显示快捷键信息了，无论是技能按钮还是其他的
+     * 功能按钮" —— 助记键属于"快捷键信息"，所以触屏要藏。
+     * ⚠️ 只藏**提示**，不改按键行为：触屏上按 G/K 仍然能用（外接键盘）。
+     */
+    showKeyHints = true,
+  ): void {
     for (const [i, button] of this.tabButtons.entries()) {
       const active = button.tab === activeTab;
       const focused = focusZone === 'tabs' && focusIndex === i;
+      const base = this.translate(
+        button.tab === 'general' ? 'settings.tabGeneral' : 'settings.tabKeys',
+      );
+      /**
+       * 助记键**运行时拼**，而不是写死在文案里 —— 两个理由：
+       *   1. 触屏要能按模式隐藏（需求："移动端就不用显示快捷键信息了"）
+       *   2. 显示的是**实际生效的键**（`mnemonicKeyOf` 反查），
+       *      不是写死的 G/K
+       */
+      const mnemonic = mnemonicKeyOf(button.tab === 'general' ? 'tabGeneral' : 'tabKeys');
       button.label.set(
-        this.translate(
-          button.tab === 'general' ? 'settings.tabGeneral' : 'settings.tabKeys',
-        ),
+        showKeyHints && mnemonic !== undefined ? `${base} (${mnemonic})` : base,
       );
       button.label.setColor(active || focused ? 0xffffff : PALETTE.textDim);
       const g = button.gfx;

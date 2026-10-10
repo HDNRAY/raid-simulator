@@ -17,7 +17,24 @@ import type { FrameContext, FramePart } from '../sceneTypes';
 export class PlayerActorPart implements FramePart {
   readonly name = 'playerActor';
 
-  private lastPose = 1;
+  /**
+   * 上一次画的姿态。
+   *
+   * ⚠️ **初值是 `null`（哨兵），不是 `1`。**
+   *
+   * 踩过的坑（实测）：原来写 `= 1`，而首帧 `pose` 也是 `1` ——
+   * 于是 `pose !== this.lastPose` 为假，**`drawPlayer` 一次都没执行**，
+   * `playerAnim` 的绘制指令数为 0、`getBounds()` 全零 ——
+   * **玩家在画面上完全看不到**（看起来像"角色没渲染"，其实是从没画过）。
+   *
+   * 根因是拆分帧部件时把原构造函数里的 `this.drawPlayer(1)`
+   * （旧 `BattleScene.ts` 第 205 行）漏掉了，而"初值 = 默认姿态"这个
+   * 巧合把漏掉的初始化**静默掩盖**了。
+   *
+   * 用 `null` 之后首帧必然不等于它，于是必然绘制一次；之后仍然只在
+   * 姿态变化时重画（保留原来的缓存意图）。
+   */
+  private lastPose: number | null = null;
 
   constructor(
     private readonly playerRoot: Container,

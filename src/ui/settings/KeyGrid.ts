@@ -19,7 +19,7 @@ import type { Container, Graphics } from 'pixi.js';
 import { FONT } from '../layout';
 import { Label, type PixiCtor } from '../primitives';
 import { PALETTE } from '../../render/theme';
-import { KEY_GRID_CAPACITY, keyCellRect } from './logic';
+import { KEY_GRID_CAPACITY, keyCellRect, keyGridMetrics, rowsCapacity } from './logic';
 import { keyLabel as formatKey } from './logic';
 import type { KeyRow } from './rows';
 
@@ -52,6 +52,13 @@ export class KeyGrid {
     rect: { x: number; y: number; w: number; h: number };
   }> = [];
 
+  /**
+   * 上一次用的"是否显示键名"（决定网格度量）。
+   *
+   * ⚠️ 只在变化时重排 —— 每帧重排会重建 Pixi 文本对象，帧率会塌。
+   */
+  private metricsShowKeyHints = true;
+
   constructor(
     private readonly pixi: PixiCtor,
     private readonly translate: (key: string) => string,
@@ -60,8 +67,33 @@ export class KeyGrid {
     this.gfx = new this.pixi.Graphics();
     this.root.addChild(this.gfx);
 
-    for (let i = 0; i < KEY_GRID_CAPACITY; i += 1) {
-      const rect = keyCellRect(i);
+    this.buildCells(KEY_GRID_CAPACITY);
+  }
+
+  /**
+   * 按当前度量把格子建好 / 重排。
+   *
+   * ⚠️ **必须能重排**：触屏是 2 列大格、桌面是 3 列小格（见
+   * `keyGridMetrics` 的说明）。格子位置原先只在构造时算一次，
+   * 切模式就会错位。
+   */
+  private buildCells(count: number): void {
+    const metrics = keyGridMetrics(this.metricsShowKeyHints);
+    /**
+     * 多出来的格子**销毁**（不是留着不动）—— 否则触屏切回桌面时，
+     * 2 列布局留下的格子会画在旧位置上。
+     */
+    while (this.cells.length > count) {
+      const cell = this.cells.pop();
+      if (cell === undefined) break;
+      this.root.removeChild(cell.name.root);
+      this.root.removeChild(cell.key.root);
+      cell.name.root.destroy({ children: true });
+      cell.key.root.destroy({ children: true });
+    }
+    this.layoutCells(metrics);
+    for (let i = this.cells.length; i < count; i += 1) {
+      const rect = keyCellRect(i, metrics);
       const name = new Label(this.pixi, {
         x: rect.x + 12,
         y: rect.y + 12,
@@ -91,6 +123,18 @@ export class KeyGrid {
     }
   }
 
+  /** 按度量把已有格子重新摆位（改 x/y，不重建对象）。 */
+  private layoutCells(metrics: ReturnType<typeof keyGridMetrics>): void {
+    for (const [i, cell] of this.cells.entries()) {
+      const rect = keyCellRect(i, metrics);
+      cell.rect = rect;
+      cell.name.root.x = rect.x + 12;
+      cell.name.root.y = rect.y + 12;
+      cell.key.root.x = rect.x + rect.w - 12;
+      cell.key.root.y = rect.y + 14;
+    }
+  }
+
   /** 面板切页时调用 —— 不是按键页就整块藏起来。 */
   setVisible(visible: boolean): void {
     this.root.visible = visible;
@@ -104,6 +148,25 @@ export class KeyGrid {
    * 父组件不用再遍历一遍。
    */
   update(rows: readonly KeyRow[], state: KeyGridState, onFocused: (row: KeyRow) => void): void {
+    /**
+     * ⚠️ **度量变了就重排**：触屏是 2 列大格、桌面是 3 列小格。
+     * 只在变化时做 —— 每帧重建文本对象会让帧率塌掉。
+     */
+    const showKeyHints = state.showKeyHints !== false;
+    if (showKeyHints !== this.metricsShowKeyHints) {
+      this.metricsShowKeyHints = showKeyHints;
+    }
+    const metrics = keyGridMetrics(showKeyHints);
+    const capacity = rowsCapacity(metrics);
+    /**
+     * ⚠️ 每次 update 都重排，但**只在格子数变化时重建文本对象**。
+     *
+     * 重排只是改 `x`/`y`（很便宜），而 `keyGridMetrics()` 每次返回新对象
+     * （它是纯函数），所以不能靠"对象变了没"来判断要不要重建 ——
+     * 那样会每帧重建，帧率塌掉。
+     */
+    if (this.cells.length !== capacity) this.buildCells(capacity);
+    else this.layoutCells(metrics);
     this.gfx.clear();
     for (const cell of this.cells) {
       cell.name.set('');
@@ -111,7 +174,7 @@ export class KeyGrid {
     }
 
     for (const [i, row] of rows.entries()) {
-      if (i >= KEY_GRID_CAPACITY) break;
+      if (i >= this.cells.length) break;
       const cell = this.cells[i];
       if (!cell) continue;
 
@@ -131,16 +194,29 @@ export class KeyGrid {
       if (focused) onFocused(row);
 
       // 交替底色 + 捕获 / 键盘焦点的高亮
-      this.gfx.rect(cell.rect.x, cell.rect.y, cell.rect.w, cell.rect.h).fill({
+      const box = (): typeof this.gfx =>
+        this.gfx.rect(cell.rect.x, cell.rect.y, cell.rect.w, cell.rect.h);
+      box().fill({
         color: capturing || focused ? PALETTE.douqi.base : 0xffffff,
         alpha: capturing ? 0.18 : focused ? 0.12 : i % 2 === 0 ? 0.03 : 0.06,
       });
-      if (capturing || focused) {
-        this.gfx.rect(cell.rect.x, cell.rect.y, cell.rect.w, cell.rect.h).stroke({
-          color: PALETTE.douqi.bright,
-          width: focused ? 1.5 : 1,
-        });
-      }
+      /**
+       * **每个格子都有边框**（需求："没有边框啊，选中态这些"）。
+       *
+       * 原先只有焦点/捕获那一格有描边，其余纯靠一层很淡的底 ——
+       * 于是"这些格子是可点的"这件事**完全看不出来**，触屏上尤其明显
+       * （鼠标至少还有 hover 变色）。
+       *
+       * 分三级，让"能点 / 当前 / 正在改键"一眼可分：
+       *   普通  淡描边
+       *   焦点  亮描边 + 更粗
+       *   捕获  亮描边 + 亮底
+       */
+      box().stroke({
+        color: capturing || focused ? PALETTE.douqi.bright : 0x3c3e50,
+        width: capturing || focused ? 2 : 1,
+        alpha: capturing || focused ? 1 : 0.9,
+      });
     }
   }
 }

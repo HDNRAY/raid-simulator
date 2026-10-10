@@ -9,9 +9,11 @@ import {
   applyRebind,
   contains,
   hitTest,
+  keyCellRect,
+  keyGridMetrics,
+  rowsCapacity,
   insidePanel,
   keyLabel,
-  keyCellRect,
   resetButtonRect,
   resolveActivate,
   resolveKeyAction,
@@ -578,5 +580,67 @@ describe('按键行的尺寸（需求："按键那一行 尺寸有问题"）', (
     const first = keyCellRect(0);
     expect(first.h).toBe(KEY_GRID.cellH);
     expect(12 + FONT.warn * 1.5).toBeLessThan(first.h);
+  });
+});
+
+describe('⚠️ 命中测试必须与**当前模式**的渲染度量一致', () => {
+  /**
+   * 需求（用户报告）："移动端的按键设置问题还是跟之前一样，没有修复"
+   *
+   * **根因**（实测）：`hitTest` 原先用默认度量（桌面 `keyCellRect(i)`，
+   * 188×44、步进 198/52、容量 12），而 `KeyGrid` 在触屏下渲染的是
+   * 196×64、步进 206/72、容量 9 —— 于是**可点区与画出来的格子错开**。
+   * 逐格采样"落在渲染格内且命中回自己"的比例实测：
+   *   攻 68.8% / 轰 65.8% / 凝 62.9% / 破 37.5% / 避 35.9% / 防 34.3%
+   *   **闪 6.3%**（几乎点不到）
+   * 桌面度量自洽对照是 7 格全 100% —— 所以"命中测试自己自洽"这种测试
+   * 抓不到它，**必须对着渲染度量交叉验**。
+   */
+  const rows = ['attack', 'blast', 'focus', 'break', 'dodge', 'guard', 'flash'];
+
+  /** 在某个格子的矩形内均匀采样，返回"命中回自己"的比例。 */
+  function selfHitRatio(index: number, showKeyHints: boolean): number {
+    const metrics = keyGridMetrics(showKeyHints);
+    const rect = keyCellRect(index, metrics);
+    let hit = 0;
+    let total = 0;
+    for (let dx = 2; dx < rect.w - 2; dx += 2) {
+      for (let dy = 2; dy < rect.h - 2; dy += 2) {
+        total += 1;
+        const target = hitTest(rect.x + dx, rect.y + dy, {
+          tab: 'keys',
+          rowSkillIds: rows,
+          showKeyHints,
+        });
+        if (target.kind === 'keyRow' && target.skillId === rows[index]) hit += 1;
+      }
+    }
+    return hit / total;
+  }
+
+  it('桌面度量：每一格都 100% 命中自己', () => {
+    for (let i = 0; i < rows.length; i += 1) {
+      expect(selfHitRatio(i, true)).toBe(1);
+    }
+  });
+
+  it('【关键】触屏度量：每一格也要 100% 命中自己', () => {
+    /**
+     * 这条就是那个 bug 的回归测试。修之前这一条在 i3..i6 全挂
+     * （i6「闪」只有 6.3%）。
+     */
+    for (let i = 0; i < rows.length; i += 1) {
+      expect(selfHitRatio(i, false)).toBe(1);
+    }
+  });
+
+  it('触屏第 4 行的格子不可点（那里是详情区，容量只有 9）', () => {
+    /**
+     * ⚠️ 桌面容量 12、触屏容量 9。第 10 个技能在触屏下**不该有可点区**
+     * —— 用桌面常量 `KEY_GRID_CAPACITY`(12) 会让它"能点但看不见"。
+     */
+    const metrics = keyGridMetrics(false);
+    expect(rowsCapacity(metrics)).toBe(9);
+    expect(rowsCapacity(keyGridMetrics(true))).toBe(12);
   });
 });
