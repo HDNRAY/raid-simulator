@@ -57,6 +57,14 @@ export const DEFAULT_BINDINGS: readonly KeyBinding[] = [
   { key: 'r', skillId: 'break' },
   { key: 'a', skillId: 'dodge' },
   { key: 's', skillId: 'guard' },
+  /**
+   * 「闪」：**默认不绑键**（需求）。
+   *
+   * 它仍然在这张表里 —— 表是"**可绑技能的全集**"，设置页读它，
+   * 所以「闪」会出现、可以被绑；而战斗画面读的是
+   * `slotsFromBindings()`，空键会被过滤掉，所以它**默认不上场**。
+   */
+  { key: '', skillId: 'flash' },
 ];
 
 /** 需要拦掉默认行为的键（浏览器会用它们做别的）。 */

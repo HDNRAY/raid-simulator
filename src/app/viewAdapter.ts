@@ -14,6 +14,14 @@
 import type { BattleEngine } from '../core/combat/battleState';
 import type { SkillDef, EventDef } from '../core/types';
 import { PALETTE } from '../render/theme';
+import {
+  blockKeyOf,
+  damageColor,
+  defaultBuffColor,
+  isDefensiveBuff,
+  isInternalBuff,
+  shortLabelKeyOf,
+} from './viewHelpers';
 import { LAYOUT } from '../ui/layout';
 import type {
   BattleSnapshotView,
@@ -30,111 +38,6 @@ export interface SlotBinding {
   readonly index: number;
   readonly key: string;
   readonly skillId: string;
-}
-
-/** 判定窗口类 buff 的 id 前缀（UI 要最醒目地显示它们）。 */
-const DEFENSIVE_BUFF_PREFIXES = ['dodge-iframe', 'guard'];
-
-function isDefensiveBuff(buffId: string): boolean {
-  return DEFENSIVE_BUFF_PREFIXES.some((p) => buffId.startsWith(p));
-}
-
-/**
- * 引擎内部用的标记 buff —— **不在 UI 上显示图标**。
- *
- * 它们不是"玩家应该看到的增益/减益"，而是引擎的状态标记：
- *   - `gcd`：公共冷却，UI 通过技能格变灰表达，不需要图标
- *   - `boss-telegraph`：前摇标记，UI 通过预警条表达
- *   - `combo-window`：派生窗口，UI 通过技能格高亮表达
- *
- * 早期版本没做这个过滤，结果预警条上压着一个被裁掉的图标。
- */
-const INTERNAL_BUFF_IDS = new Set(['gcd', 'boss-telegraph-active', 'boss-telegraph']);
-
-/**
- * 该 buff 是否**不应该出现在图标条上**。
- *
- * 两个来源：
- *   1. id 在内部集合里（引擎标记）
- *   2. 内容里显式声明了 `hidden: true`
- *
- * 第二条让内容作者可以自己决定"这个 buff 不需要图标"
- * （公共冷却由按钮变灰表达、Boss 前摇由预警条表达），
- * 不必回头改这个文件。
- */
-function isInternalBuff(buffId: string, hidden?: boolean): boolean {
-  if (hidden) return true;
-  return INTERNAL_BUFF_IDS.has(buffId);
-}
-
-/** 拒绝原因 → 本地化 key 后缀。 */
-/**
- * 按极性推导兜底色。
- *
- * 内容作者应尽量显式指定 `color` —— 同一极性下的不同 buff
- * （无敌 vs 急速）需要区分。这只是没指定时的保底。
- */
-function defaultBuffColor(polarity: string, buffId: string): number {
-  if (isDefensiveBuff(buffId)) return POLARITY_COLORS.iframe;
-  if (polarity === 'debuff') return POLARITY_COLORS.debuff;
-  if (polarity === 'neutral') return POLARITY_COLORS.neutral;
-  return POLARITY_COLORS.buff;
-}
-
-const POLARITY_COLORS = {
-  buff: 0x6cc46c,
-  debuff: 0xcc5555,
-  neutral: 0x8a8ca0,
-  iframe: 0xff7a55,
-} as const;
-
-/**
- * buff id → 极简标签的**语言 key**。
- *
- * 这张表的必要性：机制 id 与文案 key 不是同一套命名
- * （例如 `dodge-iframe` 的显示名是 `buffShort.dodgeIframe`）。
- * 没登记时回退到中性占位，不影响玩法。
- */
-const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
-  'dodge-iframe': 'skill.dodge.name',
-  guard: 'skill.guard.name',
-  focus: 'skill.focus.name',
-  sunder: 'debuff.sunder.name',
-  'boss-enrage': 'buffShort.enrage',
-  'boss-empowered': 'buffShort.empowered',
-  'boss-telegraph': 'buffShort.telegraph',
-  gcd: 'buffShort.gcd',
-};
-
-function shortLabelKeyOf(buffId: string): string {
-  return SHORT_LABEL_KEYS[buffId] ?? 'buffShort.telegraph';
-}
-
-function blockKeyOf(reason: string): string {
-  switch (reason) {
-    case 'gcd':
-      return 'gcd';
-    case 'cooldown':
-      return 'cooldown';
-    case 'cost':
-      return 'cost';
-    case 'condition':
-      return 'condition';
-    case 'casting':
-      return 'casting';
-    case 'locked':
-      return 'locked';
-    case 'target':
-      return 'target';
-    default:
-      return 'condition';
-  }
-}
-
-/** 事件的颜色规则（数据模型规范 §12 的 EventDef → 视觉）。 */
-function damageColor(amount: number, crit: boolean): number {
-  if (crit) return 0xfff0a0;
-  return amount >= 500 ? 0xffd080 : 0xf0f0f6;
 }
 
 /**
@@ -668,19 +571,40 @@ function emptyView(tick: number): BattleSnapshotView {
 }
 
 /**
- * 默认技能槽：与 `DEFAULT_BINDINGS` 一一对应。
+ * 从**键位表**推导战斗画面右下角的技能格。
  *
- * 顺序 = 技能栏从左到右的显示顺序 = 循环里的角色顺序
- * （基础 → 强击 → 派生 → 持续 → 终结 → 防御）。
+ * ==================================================================
+ * 为什么不让调用方手写 slots
+ * ==================================================================
+ *
+ * 原先 `DEFAULT_SLOTS` 是一张**写死的 6 格表**，与键位表各说各话。
+ * 于是改键之后画面不跟着变，而"新增一个默认不绑键的技能（「闪」）"
+ * 也没法表达 —— 它要么强行占一格，要么根本不出现。
+ *
+ * 现在**键位表是唯一真相来源**：
+ *   - 有键的技能才出现在战斗画面，顺序按 `index`
+ *   - 没键的技能（「闪」默认如此）仍然在设置里可绑，但不占画面
+ *
+ * ⚠️ 需求："暂时不设置最大按键数量" —— 这里不做截断，
+ * 技能栏自己按画布宽度收窄（见 `SkillBarView` 的 `max`）。
  */
-export const DEFAULT_SLOTS: readonly SlotBinding[] = [
-  { index: 0, key: 'q', skillId: 'attack' },
-  { index: 1, key: 'w', skillId: 'blast' },
-  { index: 2, key: 'e', skillId: 'focus' },
-  { index: 3, key: 'r', skillId: 'break' },
-  { index: 4, key: 'a', skillId: 'dodge' },
-  { index: 5, key: 's', skillId: 'guard' },
-];
+export function slotsFromBindings(
+  bindings: readonly { readonly key: string; readonly skillId: string }[],
+): readonly SlotBinding[] {
+  return bindings
+    .filter((b) => b.key !== '')
+    .map((b, i) => ({ index: i, key: b.key, skillId: b.skillId }));
+}
+
+/** 默认技能槽（= 默认键位表推导出的那一份）。 */
+export const DEFAULT_SLOTS: readonly SlotBinding[] = slotsFromBindings([
+  { key: 'q', skillId: 'attack' },
+  { key: 'w', skillId: 'blast' },
+  { key: 'e', skillId: 'focus' },
+  { key: 'r', skillId: 'break' },
+  { key: 'a', skillId: 'dodge' },
+  { key: 's', skillId: 'guard' },
+]);
 
 /** GCD 时长再导出，避免渲染层直接 import core/combat。 */
 

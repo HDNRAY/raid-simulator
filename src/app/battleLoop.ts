@@ -13,7 +13,7 @@
 import { BattleEngine, type CreateBattleOptions } from '../core/combat/battleState';
 import { MS_PER_TICK } from '../core/loopConstants';
 import { createKeyboardInput, repeatHeld, type InputSource, type KeyBinding } from '../input/keyboard';
-import { ViewAdapter, DEFAULT_SLOTS, type SlotBinding } from './viewAdapter';
+import { ViewAdapter, DEFAULT_SLOTS, slotsFromBindings, type SlotBinding } from './viewAdapter';
 import { LogFormatter, type LogEntry } from './logFormat';
 import type { BattleSnapshotView } from '../render/viewModel';
 import type { Action } from '../core/types';
@@ -51,7 +51,7 @@ export class BattleLoop {
   private input: InputSource | undefined;
   private accumulator = 0;
   private lastRealNow: number | undefined;
-  private readonly options: BattleLoopOptions;
+  private options: BattleLoopOptions;
   private ownedInput = false;
   /** 最近一帧的渲染快照 */
   private view: BattleSnapshotView | undefined;
@@ -233,9 +233,18 @@ export class BattleLoop {
   }
 
   /** 替换键位表（按键设置用）。会同步到输入层。 */
+  /**
+   * 改键位表。
+   *
+   * ⚠️ 同时更新**输入层**与**画面技能格** —— 键位表是它们的唯一真相
+   * 来源。原先只更新输入层，于是改完键画面还是老样子，
+   * 而"没绑键的技能不上场"这条规则也没法表达。
+   */
   setBindings(next: readonly KeyBinding[]): void {
     this.bindings = next;
     this.input?.setBindings(next);
+    this.options = { ...this.options, slots: slotsFromBindings(next) };
+    this.view = undefined;
   }
 
   /** 输入层（设置界面要独占输入做改键捕获）。 */
