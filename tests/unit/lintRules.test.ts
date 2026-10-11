@@ -393,3 +393,42 @@ describe('取词函数：不许用"只收一个参数"的类型', () => {
     ).toEqual([]);
   });
 });
+
+/**
+ * ==================================================================
+ * 测试**不许静态 import 被 gitignore 的素材**
+ * ==================================================================
+ *
+ * 这一条防的是一个**本地全绿、CI 必红**的坑（真实发生过）：
+ *
+ *   `tests/web/spriteAssets.test.ts` 写了一句
+ *   `import manifest from '../../public/fd2/rgba/manifest.json'` ——
+ *   而 `public/fd2/`（54MB 第三方素材）是 **gitignore** 的，仓库里没有。
+ *   本地有素材所以 `typecheck` / `test` / `build` 全过，
+ *   推到 CI 上 `vite build` 直接挂：
+ *   `TS2307: Cannot find module '.../manifest.json'`。
+ *
+ * ⚠️ **判据只针对"静态 import"**：那是**编译期**解析，文件不在就必然报错。
+ * 运行期带守卫地读（`readFileSync` + try/catch）是**允许**的 ——
+ * 素材在就跑、不在就显式 skip，这正是修好之后的做法。
+ */
+describe('测试不许静态 import 被 gitignore 的素材', () => {
+  it('tests/ 下没有指向 public/fd2 的静态 import', async () => {
+    const { readFileSync, globSync } = await import('node:fs');
+    /** 静态 import / require 一个 public/fd2 下的路径。 */
+    const badImport = /(?:from\s*|require\(\s*)['"][^'"]*public\/fd2\/[^'"]*['"]/g;
+    const offenders: string[] = [];
+
+    for (const file of globSync('tests/**/*.{ts,tsx,mts,cts}')) {
+      if (file.endsWith('lintRules.test.ts')) continue;
+      const content = readFileSync(file, 'utf8');
+      for (const m of content.matchAll(badImport)) offenders.push(`${file}: ${m[0]}`);
+    }
+
+    expect(
+      offenders,
+      `这些静态 import 会在没有素材的 CI 上让 build 失败（public/fd2 是 gitignore 的）：\n` +
+        `改成"运行期带守卫地读"——素材在就跑、不在就 skipIf。\n${offenders.join('\n')}`,
+    ).toEqual([]);
+  });
+});

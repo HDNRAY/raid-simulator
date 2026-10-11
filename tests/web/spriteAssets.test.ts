@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import manifest from '../../public/fd2/rgba/manifest.json';
 import { assetUrl } from '../../src/render/assetUrl';
 import { backdropBossIds, bossBackdropUrl } from '../../src/render/bossBackdrops';
 import { SPRITES, animUrls, frameUrl, spriteFor } from '../../src/render/spriteAssets';
@@ -47,21 +49,70 @@ function asManifest(value: unknown): Record<string, { idle: ManifestAnim; attack
   return out;
 }
 
-const MANIFEST = asManifest(manifest);
+/**
+ * ⚠️⚠️ **运行时读，不用静态 `import`** —— 这一条踩着过 CI。
+ *
+ * `public/fd2/` 是 **gitignore 的**（54MB 的第三方素材，见
+ * `THIRD-PARTY-NOTICES.md`），所以**仓库里没有这个文件**。
+ *
+ * 原本这里写的是 `import manifest from '.../manifest.json'`：本地有素材
+ * 所以一切正常，但 **CI 上 `vite build` 会直接失败**
+ * （`TS2307: Cannot find module`）—— 编译期解析一个不存在的模块。
+ *
+ * 改成运行期读 + 守卫之后：
+ *   - 本地（有素材）→ 这一组照常跑，对账仍然有效
+ *   - CI（无素材）  → **显式 skip**，而不是"悄悄少测一组"
+ *
+ * ⚠️ **不要把它改回静态 import。** 那样 build 会在 CI 上挂。
+ */
+function loadManifest(): ReturnType<typeof asManifest> | undefined {
+  try {
+    /**
+     * ⚠️ **不能用 `new URL('…', import.meta.url)`** —— 踩过。
+     *
+     * Vite 把那个写法当成**资源引用**并重写它：在 jsdom 环境下它被解析成
+     * `http://localhost:3000/fd2/rgba/manifest.json`，于是 `readFileSync`
+     * 抛 "The URL must be of scheme file"，**守卫把它静默变成"跳过"** ——
+     * 本地有素材也照样跳过 6 条，看起来"没事"。
+     *
+     * `fileURLToPath` 不做资源解析，拿到的就是真实的文件路径。
+     */
+    const here = dirname(fileURLToPath(import.meta.url));
+    const file = join(here, '..', '..', 'public', 'fd2', 'rgba', 'manifest.json');
+    return asManifest(JSON.parse(readFileSync(file, 'utf8')));
+  } catch {
+    return undefined;
+  }
+}
+
+const MANIFEST = loadManifest();
+/**
+ * 收窄用的常量。
+ *
+ * ⚠️ `describe.skipIf` 只影响**运行期是否注册用例**，TypeScript 的控制流
+ * 分析看不到它 —— 所以里面直接用 `MANIFEST` 会报"possibly undefined"。
+ * 这里回落成一个空清单：素材缺失时 `skipIf` 会把整组跳过，
+ * 所以那个空值**永远不会被用到**；它只是让类型收敛，不是兜底逻辑。
+ */
+const M = MANIFEST ?? asManifest({});
 
 /** 把 `assetUrl()` 拼出来的 base 前缀去掉，与 manifest 的相对路径比。 */
 function stripBase(url: string): string {
   return url.replace(assetUrl(''), '');
 }
 
-describe('素材表与 manifest.json 一致', () => {
+/**
+ * ⚠️ **没有素材就整组跳过**（CI）。`skipIf` 会在报告里标成 skipped，
+ * 而不是假装通过 —— 那样等于把"没测"伪装成"测了"。
+ */
+describe.skipIf(MANIFEST === undefined)('素材表与 manifest.json 一致', () => {
   it('manifest 读到了 10 个 slot（素材备好了）', () => {
-    expect(Object.keys(MANIFEST)).toHaveLength(10);
+    expect(Object.keys(M)).toHaveLength(10);
   });
 
   it('⚠️ 每个 slot 的帧数、每帧权重都与 manifest 逐项相等', () => {
     for (const sprite of SPRITES) {
-      const slot = MANIFEST[sprite.slot];
+      const slot = M[sprite.slot];
       expect(slot, `manifest 里没有 slot ${sprite.slot}`).toBeDefined();
       expect(sprite.idle, `${sprite.slot} 的 idle 权重`).toEqual(slot?.idle.delays);
       expect(sprite.attack, `${sprite.slot} 的 attack 权重`).toEqual(slot?.attack.delays);
@@ -75,7 +126,7 @@ describe('素材表与 manifest.json 一致', () => {
      * 只有这条会红。
      */
     for (const sprite of SPRITES) {
-      const slot = MANIFEST[sprite.slot];
+      const slot = M[sprite.slot];
       if (slot === undefined) continue;
       expect(animUrls(sprite).idle.map(stripBase)).toEqual([...slot.idle.frames]);
       expect(animUrls(sprite).attack.map(stripBase)).toEqual([...slot.attack.frames]);
