@@ -38,6 +38,8 @@
 | [美术管线设计](docs/specs/2026-10-11-art-pipeline.md) | 素材路线选型、投影规范、分数倍缩放两层拆解、角色解耦 |
 | [美术替换需求（给外部出图）](docs/art-brief-ai-replacement.md) | 要替换什么、每个实体出多少张、规格与七宗罪形象方向；**给不写代码的人看** |
 | [画面示意图](docs/mockups/2026-10-09-battle-scene.png) | 960×540 逻辑分辨率下的战斗界面布局 |
+| [开发与运维](docs/development.md) | 命令、校验流水线、截图验证、调试参数、确定性重放、部署 |
+| [Boss 攻略参考](docs/bosses.md) | 逐个 Boss 的招式、读条、正确应对；⚠️ 按当前数值算，会随数值失效 |
 
 另外 [`AGENTS.md`](AGENTS.md) 是**强制**约定（类型断言、单文件行数、
 触屏对等、i18n、不许自动 push）。**改这个仓库之前先读它。**
@@ -133,115 +135,15 @@
 
 ---
 
-## Boss 的招式与应对
-
-### 傲慢 —— 快慢刀
-
-| 招式 | 读条 | 伤害 | 正确应对 |
-|---|---|---|---|
-| **轻蔑** | 1.0s | 20 | **「避」**（15 炁 ≈ 少打一次「斩」= 10 伤，换掉 20 伤） |
-| **呵斥** | 1.5s | 40 | **「破」**（10 炁换 40 伤，最划算） |
-| **碾压** | 2.0s | 60 | **「避」**（「破」无效、格挡只剩 25% 收益） |
-
-⚠️ 这张表是按**当前数值**算的（判断依据：`炁` 的每秒回复量 vs 招式的伤害）。
-数值一改就要重算 —— 它不是永久结论。
-
-- 「碾压」**起手自带霸体**，覆盖整个前摇 —— 连「破」的强制打断也挡得住
-- 血量掉到 **40%** 时有一次**「回补」**：2.5 秒读条、回复 30% 血量、
-  **可打断**。全场只出现一次
-- ⚠️ 读条 UI 是**固定宽度**的，所以分辨招式靠**剩余秒数数字 + 填充速度**，
-  不是"条的长度"
-
-### 色欲 —— 印记与眩晕
-
-机制与傲慢完全不同（一样是"读前摇决定应对"，但资源换成印记层数）。
-详见 [色欲设计文档](docs/specs/2026-10-10-lust-boss.md)。
-
----
-
 ## 开发
 
-```bash
-pnpm install
-pnpm run dev            # 本地开发（http://localhost:5273）
-pnpm run typecheck      # tsc --noEmit
-pnpm run lint           # eslint .，含架构硬约束与 i18n 规则
-pnpm run test:run       # 全部单测
-pnpm run test:core      # 只跑纯逻辑，node 环境，不碰浏览器
-pnpm run build          # 产出 dist/（base 为 /raid/）
-```
-
-### 校验流水线（改完必跑这四条）
-
-```
-pnpm run typecheck  →  pnpm run lint  →  pnpm run test:run  →  pnpm run build
-```
-
-**没有端到端脚本** —— 逻辑靠单测、UI 靠截图。
-
-| 要验证的 | 用什么 |
-|---|---|
-| **逻辑**（结算、触发器、条件、内容、状态机） | **单元测试**。`src/core/` 是零依赖纯 TS，能在 Node 里直接跑 |
-| **UI**（布局、位置、重叠、显隐、文案） | **截图**，然后**自己看图**判断 |
-
-⚠️ **改完必须跑 `build`**，不能只跑 typecheck。仓库里有些素材是
-**gitignore** 的（见「美术素材」），本地有、CI 没有 ——
-测试一旦**静态 import** 它们，本地全绿而 CI 必挂。已有一条 lint 规则拦这个。
-
-### 截图与调试参数
+改这个仓库之前先读 **[`AGENTS.md`](AGENTS.md)**（强制约定）。
+命令、校验流水线、截图验证、调试参数、部署 —— 都在
+**[docs/development.md](docs/development.md)**。
 
 ```bash
-pnpm run shot /tmp/x.png        # 拍一张战斗截图（只拍图、不做断言）
-pnpm run bench                  # 性能基准
+pnpm install && pnpm run dev      # http://localhost:5273
 ```
-
-| URL 参数 | 作用 |
-|---|---|
-| `?prepare=skip` | 跳过备战界面直接进战斗 |
-| `?prepare=skip&boss=lust` | 指定 Boss 直接开一局 |
-| `?noai=1` | Boss 不出招（观察用） |
-
-⚠️ 画布有 letterbox：`clientY = rect.top + 逻辑Y × (rect.width / 960)`。
-
-**lint 的硬约束不是风格偏好**：`core/` 里出现 `Math.random`、`import 'pixi.js'`、
-`document`、`await`，或者 `src/` 下写死中文，都会**构建失败**。
-
-推送 `main` 会触发 [.github/workflows/deploy.yml](.github/workflows/deploy.yml)：
-typecheck → lint → test → build → 发布到 GitHub Pages。**任一步不通过则不发布。**
-
-### 确定性重放
-
-`tests/golden/replay.test.ts` 把**一整场战斗**压缩成一个可提交、可 diff 的常量：
-
-```
-固定种子 + 固定玩家策略  →  胜负 / 击杀用时 / 随机数终态 / 双方终局状态
-```
-
-它防的是**静默的行为变化** —— 改了一个数值、门禁顺序、AI 优先级或 tick 语义，
-重放会立刻暴露。因为引擎没有 `Math.random`（lint 硬约束）、
-随机数状态存在 `BattleState` 里，重放是逐位确定的。
-
-⚠️ **`REPLAY_FORMAT_VERSION` 当前是 `2`**。改动引擎的确定性语义时必须 `+1`，
-否则旧的重放文件会在新引擎上产生"看起来像 bug"的差异。测试会校验这个数字。
-
-### 线上地址
-
-**https://hdnray.github.io/raid/** —— 路径是 `/raid/`，不是仓库同名的
-`/raid-simulator/`。所以 `vite.config.ts` 的 `base` 是 `/raid/`。
-
-⚠️ **引用 `public/` 下的素材必须走 `assetUrl()`**（`src/render/assetUrl.ts`）。
-硬编码 `/xxx.png` 会解析到**域名根**，线上必然 404 ——
-而 dev 下 base 恰好是 `/`，所以这个 bug **在本地看不出来**。
-
-### 分辨率
-
-逻辑分辨率固定 **960×540**（16:9），渲染层按视口自适应缩放。
-
-⚠️ canvas 的**内部缓冲跟着 CSS 尺寸与 DPR 走**（见 `render/scaling.ts`）。
-CSS 拉伸会让画面变糊（视网膜屏上等效放大更多），所以 resize 会重建 framebuffer。
-
-`image-rendering: pixelated` 已启用，所以非整数倍缩放是"**锐利但不均匀**"
-（1px / 2px 交替），不是糊。细节见架构规范。
 
 ---
 
@@ -274,28 +176,3 @@ CSS 拉伸会让画面变糊（视网膜屏上等效放大更多），所以 res
 | `public/fd2/maps/` | 全部 33 张战场地图 |
 
 浏览素材：`artgen/make_index.py` 生成 `public/fd2/INDEX.html`（540 个条目）。
-
-### 出图（`artgen/`）
-
-`artgen/` 是一个**独立于游戏代码**的工具目录（不入 `src/`，不参与 lint）：
-
-```bash
-python3 artgen/generate.py balance              # 查余额
-python3 artgen/generate.py styles               # 拉风格目录
-python3 artgen/generate.py estimate --prompt "..." --style rd_plus__classic
-python3 artgen/generate.py gen --prompt "..." --style rd_plus__classic
-python3 artgen/prepare_frames.py                # 帧 + 掩码 → RGBA，并生成 manifest
-python3 artgen/make_index.py                    # 生成素材索引页
-```
-
-- key 放 `artgen/.env`（**已 gitignore**），或设环境变量 `RD_API_KEY`
-- `estimate` 是**免费试算**，不出图不扣费
-- ⚠️ `--negative` 字段**当前无效**（服务方文档说没有模型使用它）——
-  想排除什么就改写正向 prompt
-
----
-
-## 发布密钥
-
-推送 `main` 需要 `SSH_DEPLOY_KEY` secret 才能发布到 GitHub Pages。
-配置步骤见 [docs/setup-deploy-key.md](docs/setup-deploy-key.md)，约 3 分钟。
