@@ -16,13 +16,15 @@
  */
 
 import type { Container } from 'pixi.js';
+import { PALETTE } from '../../render/theme';
 import { IconButton } from '../IconButton';
-import { LAYOUT } from '../layout';
+import { LAYOUT, LOGICAL } from '../layout';
 import type { PixiCtor } from '../primitives';
+import type { TranslateFn } from '../../i18n/translator';
 
 export interface SettingsButtonOptions {
   readonly pixi: PixiCtor;
-  readonly translate: (key: string) => string;
+  readonly translate: TranslateFn,
   readonly onClick: () => void;
 }
 
@@ -44,10 +46,55 @@ const MARGIN = 8;
 /** 按钮区域的边长（含可点范围），比图标本身大一圈。 */
 const HIT = 44;
 
+/**
+ * 两个界面各自的锚点。
+ *
+ * ==================================================================
+ * 为什么按界面分开：这个按钮是**两个界面共用的**（挂在 stage 上）
+ * ==================================================================
+ *
+ * 它在**战斗界面**只能待在日志下方 —— 右上角被 Boss 血条（贴顶、通栏）
+ * 和 Boss debuff 行占着，放上去会重叠（这段演进史记在下面的 `anchor` 注释里）。
+ *
+ * 但**备战界面没有战斗 HUD**（整屏覆盖），右上角完全是空的，
+ * 而日志下方在备战界面看起来是"悬在左边空白里"。
+ *
+ * 所以按界面换位置，而不是二选一牺牲一个界面。
+ */
+const ANCHOR_BATTLE = {
+  x: LAYOUT.log.x + MARGIN + HIT / 2,
+  y: LAYOUT.log.y + LAYOUT.log.h + MARGIN + HIT / 2,
+} as const;
+
+/** 备战界面：右上角。`LOGICAL` 是 960×540。 */
+const ANCHOR_PREPARE = {
+  x: LOGICAL.width - MARGIN - HIT / 2,
+  y: MARGIN + HIT / 2,
+} as const;
+
+/** 当前应用到 root 上的偏移（相对构造时的锚点）。 */
+type Offset = { readonly x: number; readonly y: number };
+
 export class SettingsButton {
   readonly root: Container;
 
   private readonly button: IconButton;
+  /**
+   * 包在按钮外面的一层容器，**只用来整体位移**。
+   *
+   * ⚠️ 为什么需要它：`IconButton` 把锚点**烤进了子对象的绝对坐标**
+   * （`icon.root.x = box.iconX` 之类），构造之后改不了。所以这里套一层
+   * 容器做偏移，而不是去动 `IconButton` 的内部布局。
+   *
+   * ⚠️ 套了容器就必须**同步修正命中测试与 bounds** —— 它们原本读的是
+   * `IconButton` 里的坐标。漏掉这一步，按钮会"看着在新位置、点在老位置"。
+   */
+  private readonly outer: Container;
+
+  private offset: Offset = { x: 0, y: 0 };
+
+  /** 键盘焦点是否在齿轮上（见 `isFocused` 的说明）。 */
+  private focused = false;
 
   constructor(options: SettingsButtonOptions) {
     const { pixi } = options;
@@ -94,19 +141,63 @@ export class SettingsButton {
        */
       shortcut: options.translate('settings.openKey'),
       hintSide: 'corner',
+      /**
+       * ================================================================
+       * 焦点外观：**不填色**，只加一圈冷色描边
+       * ================================================================
+       *
+       * 需求（用户）："设置按钮 有时也会被变黄" —— 齿轮被键盘聚焦时
+       * 沿用了 `IconButton` 的默认高亮色（`douqi.bright`，金色），
+       * 而备战界面**已确定的角色卡也是金色**，于是"光标在这儿"
+       * 和"这一项已经选定了"看起来是同一个东西。
+       *
+       * 两处修正，都走同一条语言（**冷色 = 光标，暖金 = 选中**）：
+       *   1. `brightColor` 换成 `PALETTE.focus`（冷白偏蓝，见 `render/theme.ts`）
+       *   2. **焦点环**：键盘焦点才画的一圈描边。留下一个不依赖颜色的
+       *      线索 —— 两者同时出现在画面上时也能一眼分开（色弱视角同理）
+       *
+       * ⚠️ 环**只描边、不填色**：填色版本（"给它一个底板"）会在战斗
+       * 界面把齿轮画成一个方块，而那里的图标按钮本来是无底的
+       * （见 `IconButton` 文件头的"没有边框、没有底色"）。
+       */
+      brightColor: PALETTE.focus,
+      focusRing: true,
       onClick: options.onClick,
     });
-    this.root = this.button.root;
 
     /**
-     * ⚠️ 按钮**没有边框与底色**（需求明确）。
-     *
-     * 状态只靠图标（与文字）的颜色表达 —— 这是本项目"画面上
-     * 只有图形"的统一语言，与技能栏的处理一致。
+     * 构造时按**战斗界面**的锚点摆好；备战界面由 `setScreen('prepare')`
+     * 再偏移过去（见那两个 `ANCHOR_*` 常量）。
      */
+    this.outer = new pixi.Container();
+    this.outer.addChild(this.button.root);
+    this.root = this.outer;
   }
 
-  /** 命中测试（逻辑像素）。 */
+  /**
+   * 按当前界面摆放。
+   *
+   * 偏移量在**这一层**算（`ANCHOR_PREPARE - ANCHOR_BATTLE`），
+   * 调用方只说"现在是哪个界面"，不需要知道任何坐标 ——
+   * 布局知识留在 UI 层，与 `LAYOUT` 的用法一致。
+   */
+  setScreen(screen: 'prepare' | 'battle'): void {
+    const target = screen === 'prepare' ? ANCHOR_PREPARE : ANCHOR_BATTLE;
+    this.offset = { x: target.x - ANCHOR_BATTLE.x, y: target.y - ANCHOR_BATTLE.y };
+    this.outer.position.set(this.offset.x, this.offset.y);
+  }
+
+  /**
+   * ⚠️ 命中测试必须**减掉偏移**。
+   *
+   * `IconButton.hitTest` 读的是它内部那份**绝对逻辑坐标**的 `rect`；
+   * 我们只是把外层容器挪了位置，它并不知道。不减偏移就会出现
+   * "按钮画在右上角、但点在日志下方才响应"。
+   */
+  hitTest(px: number, py: number): boolean {
+    return this.button.hitTest(px - this.offset.x, py - this.offset.y);
+  }
+
   /**
    * 显示/隐藏整个按钮。
    *
@@ -126,10 +217,6 @@ export class SettingsButton {
     this.button.setShowShortcut(show);
   }
 
-  hitTest(px: number, py: number): boolean {
-    return this.button.hitTest(px, py);
-  }
-
   /** 指针悬停。 */
   setHovered(hovered: boolean): void {
     this.button.setHovered(hovered);
@@ -137,7 +224,20 @@ export class SettingsButton {
 
   /** 键盘焦点。 */
   setFocused(focused: boolean): void {
+    this.focused = focused;
     this.button.setFocused(focused);
+  }
+
+  /**
+   * 键盘焦点是否在齿轮上。
+   *
+   * ⚠️ 在这一层也留一份，是为了**调试入口**（`app/debugApi.ts` 的
+   * `settings.buttonFocused()`）能读到它 —— `IconButton` 把 `focused`
+   * 藏成了私有字段，而"看按钮到底有没有聚焦"在 headless 验证里
+   * 是分辨"没聚焦"与"聚焦了但没画出来"的唯一办法。
+   */
+  get isFocused(): boolean {
+    return this.focused;
   }
 
   /** 每帧（状态变化时才真正重绘）。 */
@@ -145,8 +245,14 @@ export class SettingsButton {
     this.button.update();
   }
 
-  /** 可点区域（供调试与布局断言）。 */
+  /**
+   * 可点区域（供调试与布局断言）。
+   *
+   * ⚠️ 与 `hitTest` 同源：也要**加上偏移**，否则调试探针报的是老位置，
+   * "看起来按钮没动"——而实际上只是这里漏改了。
+   */
   get bounds(): { readonly x: number; readonly y: number; readonly w: number; readonly h: number } {
-    return this.button.bounds;
+    const b = this.button.bounds;
+    return { x: b.x + this.offset.x, y: b.y + this.offset.y, w: b.w, h: b.h };
   }
 }

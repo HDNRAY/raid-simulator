@@ -40,13 +40,13 @@ function runGolden(seed?: number) {
 
 function runWith(options: EngineOptions) {
   const recorder = new RunRecorder(options);
-  recorder.runUntilEnd(planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge' }), 60 * 200);
+  recorder.runUntilEnd(planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge', interruptSkillId: 'break' }), 60 * 200);
   return recorder.outcome();
 }
 
 function recordGolden(seed?: number): RecordedRun {
   const recorder = new RunRecorder(makeGoldenEngineOptions(seed));
-  recorder.runUntilEnd(planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge' }), 60 * 200);
+  recorder.runUntilEnd(planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge', interruptSkillId: 'break' }), 60 * 200);
   return recorder.toRecordedRun();
 }
 
@@ -141,7 +141,7 @@ describe('对内容改动的敏感度（回归保护）', () => {
     /**
      * 注意方向：当前平衡下**不闪反而更快赢**（用时更短）。
      *
-     * 因为闪一次要 30 炁 = 3 次「攻」的代价，而 Boss 一次重击
+     * 因为闪一次要 30 炁 = 3 次「斩」的代价，而 Boss 一次重击
      * 只造成 18 伤害 —— "用闪换输出"在数值上不划算。
      * 这是**内容数值**的结论，不是引擎 bug：引擎的闪避判定有独立测试
      * （能量充足时能做到零承伤）。
@@ -181,7 +181,7 @@ describe('对内容改动的敏感度（回归保护）', () => {
     expect(base.combatants['player']!.hp).toBeLessThan(PLAYER_CAPS.hp);
   });
 
-  it('只按「攻」不放「轰」会打得更慢 —— 炁爆发确实是主要伤害来源', () => {
+  it('只按「斩」不放「轰」会打得更慢 —— 炁爆发确实是主要伤害来源', () => {
     const auto = runGolden();
     const attackOnly = runWithPriority(['attack']);
     // 少了 60 伤害的轰，Boss 剩余血量应该更多（或者玩家更早死）
@@ -207,7 +207,7 @@ describe('玩家防御技能的选择会改变结果', () => {
       resources: { ...p0.resources, energy: 100_000 },
     };
     const rec = new RunRecorder({ ...options, combatants: [rich, options.combatants[1]!] });
-    rec.runUntilEnd(planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge' }), 60 * 250);
+    rec.runUntilEnd(planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge', interruptSkillId: 'break' }), 60 * 250);
     const o = rec.outcome();
     expect(o.status).toBe('victory');
     // 一次伤害都没挨到
@@ -246,7 +246,7 @@ describe('随机源：新内容不含暴击，所以不消耗随机数', () => {
       })),
     });
     const rec = new RunRecorder(withPlayerStats({ ...options, skills }, { critChance: 0.5 }));
-    rec.runUntilEnd(planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge' }), 60 * 250);
+    rec.runUntilEnd(planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge', interruptSkillId: 'break' }), 60 * 250);
     expect(rec.outcome().finalRngSeed).not.toBe(FIXED_SEED);
   });
 });

@@ -101,7 +101,7 @@ describe('触屏输入 → Action', () => {
 
   it('【关键】手指从 A 滑到 B 不切换 —— 仍按住 A', () => {
     const { input } = makeInput();
-    input.pointerDown(1, 100, 100); // 按在「攻」上
+    input.pointerDown(1, 100, 100); // 按在「斩」上
     input.drain();
     // 手指移到「防」的位置（真实浏览器里会派 pointermove，
     // 但输入层不监听它 —— 因为按下时就绑定了）
@@ -179,7 +179,7 @@ describe('触屏按下 → 引擎：不能自己把自己拒了', () => {
    *
    * 这条测试把"按一下不应该产生任何拒绝"钉住。
    */
-  it('【关键】按一下「攻」→ 引擎**零拒绝**', () => {
+  it('【关键】按一下「斩」→ 引擎**零拒绝**', () => {
     const layout = createTouchLayout([{ index: 0, skillId: 'attack' }]);
     const tick = 0;
     const input = createTouchInput({

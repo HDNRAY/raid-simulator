@@ -181,9 +181,9 @@ describe('数据一致性：命中时刻必须等于读条时长', () => {
     /**
      * ⚠️ 这条规则**只适用于 Boss 招式**。
      *
-     * 玩家技能（「攻」「轰」）的 `at` 是 0 —— 它们的命中在**读条结束时**
+     * 玩家技能（「斩」「轰」）的 `at` 是 0 —— 它们的命中在**读条结束时**
      * 结算，而不是按 `at` 计时。所以不能用同一套规则去卡它们
-     * （第一版我就那么写了，结果把「攻」也报成违规）。
+     * （第一版我就那么写了，结果把「斩」也报成违规）。
      * ⚠️ 判据是 `!PLAYER_SKILL_IDS.has(id)`，**不是 id 前缀**。
      * 原来写的是 `startsWith('boss-')`，于是「色欲」的 `lust-*` 技能
      * **从来没被这条护栏检查过** —— 一个静默的覆盖漏洞
@@ -338,10 +338,30 @@ describe('Boss 读条上的招式提示标签', () => {
    * 需求："boss 的招式的 tags 显示在它的读条中，比如'霸体'技能，
    * 提示玩家无法被打断，'高伤'提示玩家闪避比防御更值得"
    */
-  it('读条视图带 hintTags，且文案 key 走 settings.hintTags.*', async () => {
-    const src = await readRenderLayer();
-    expect(src).toMatch(/cast\.hintTags/);
-    expect(src).toMatch(/settings\.hintTags\.\$\{tag\}/);
+  /**
+   * ⚠️ 语义变过一次：`hintTags` 里装的**不再是 `HintTag` 值，而是完整
+   * 的 i18n key**。
+   *
+   * 原因：控制类提示（「倒地」「眩晕」）取的是**那个 debuff 自己的
+   * `nameKey`**，而那不是 `HintTag` union 里的值（见 `app/skillHints.ts`）。
+   * 所以视图层不再拼 `settings.hintTags.${tag}` 前缀，而是把 key 直接交给
+   * 翻译层。
+   */
+  it('读条视图带 hintTags，且里面是**完整 i18n key**', async () => {
+    /** ① 渲染层确实在读这个字段（读条上要画）。 */
+    const render = await readRenderLayer();
+    expect(render).toMatch(/cast\.hintTags/);
+
+    /** ② 生产者是 `viewAdapter` —— 静态部分走 `hintKeysOf`（手写 ∪ 推导）。 */
+    const { readFileSync } = await import('node:fs');
+    const adapter = readFileSync(new URL('../../src/app/viewAdapter.ts', import.meta.url), 'utf8');
+    expect(adapter).toMatch(/hintKeysOf\(skill\)/);
+    /**
+     * ⚠️ 反向：不该再有"拼 `settings.hintTags.` 前缀"那种写法 ——
+     * 推导出来的控制类提示是**别处的 key**（debuff 自己的 `nameKey`），
+     * 拼前缀会把 `lust.stun.name` 拼成 `settings.hintTags.lust.stun.name`。
+     */
+    expect(adapter).not.toMatch(/settings\.hintTags\.\$\{tag\}/);
   });
 
   it('【关键】「霸体」是**状态**，不只是技能静态属性', async () => {
@@ -352,10 +372,22 @@ describe('Boss 读条上的招式提示标签', () => {
      */
     const { readFileSync } = await import('node:fs');
     const src = readFileSync(new URL('../../src/app/viewAdapter.ts', import.meta.url), 'utf8');
-    expect(src).toMatch(/if \(armored\) castTags\.add\('interruptImmune'\)/);
+    /**
+     * ⚠️ 加的是**完整 key**（`hintTags` 现在装 i18n key，见上一条用例）。
+     */
+    expect(src).toMatch(
+      /if \(armored\) castTags\.add\('settings\.hintTags\.interruptImmune'\)/,
+    );
   });
 
-  it('三个标签都有中文文案', () => {
+  /**
+   * ⚠️ 这条要**跟着 `HintTag` 一起长**：漏一个的后果是读条上显示
+   * 英文标识符（或空白），而玩家看着读条做生死判断。
+   *
+   * `knockdown`（倒地）是需求后加的 —— 玩家原话："傲慢现在哪个招式会
+   * 导致倒地，请加 tag，玩家看不到"。
+   */
+  it('每个标签都有中文文案', () => {
     for (const tag of ['interruptImmune', 'highDamage', 'interrupt']) {
       expect(translator.t(`settings.hintTags.${tag}` as never)).not.toBe('');
     }
@@ -363,20 +395,25 @@ describe('Boss 读条上的招式提示标签', () => {
 });
 
 describe('闪避位移（与防御区分）', () => {
-  it('闪避往右位移、然后复位；峰值是一个三角波', async () => {
+  it('闪避横移、然后复位；峰值是一个三角波', async () => {
     const src = await readRenderLayer();
     /**
-     * 需求："闪避的画面效果改成往右移动，然后复位，和防御区分开来"。
+     * 需求："闪避的画面效果改成横移，然后复位，和防御区分开来"。
      * 用三角波（0 → 峰值 → 0）而不是缓动状态机：无敌窗口本身就是
      * 这条动画的时间轴，跟着它走不会出现"动画还在播但无敌已结束"。
+     *
+     * ⚠️ 方向（左 / 右）由 `DODGE_PEAK_X` 的**符号**决定，不在这条断言里 ——
+     * 见下面那条读 `actorLayout` 的用例。站位互换过，所以方向反转了。
      */
     expect(src).toMatch(/base = DODGE_PEAK_X \* \(1 - Math\.abs\(progress \* 2 - 1\)\)/);
     /**
-     * ⚠️ 位移现在还要**叠加受击反冲**（`- fb.recoilX`）—— 这是
-     * "四通道"设计的一部分：闪避位移与受击反冲可以同时发生，所以相加
-     * 而不是二选一。断言为此更新，但"必须有闪避位移"这条没放松。
+     * ⚠️ 位移还要**叠加受击反冲** —— 这是"四通道"设计的一部分：
+     * 闪避位移与受击反冲可以同时发生，所以相加而不是二选一。
+     *
+     * ⚠️ 号是 `+`：玩家现在在**右边**，受击是向右退（背离左边的 Boss）。
+     * 站位互换前这里是 `-`。断言跟着改，但"必须有闪避位移"这条没放松。
      */
-    expect(src).toMatch(/this\.playerRoot\.x = Math\.round\(base - fb\.recoilX\)/);
+    expect(src).toMatch(/this\.playerRoot\.x = Math\.round\(base \+ fb\.recoilX\)/);
     // 没有闪避时 base 保持 0（否则会停在偏移位置）
     expect(src).toMatch(/let base = 0;/);
   });
@@ -400,8 +437,21 @@ describe('闪避位移（与防御区分）', () => {
     expect(src).not.toMatch(/dodging \|\| guarding \? 0\.85/);
   });
 
-  it('位移峰值是 52（26 的翻倍）', async () => {
-    const src = await readRenderLayer();
-    expect(src).toMatch(/const DODGE_PEAK_X = 52;/);
+  /**
+   * ⚠️ 这条读的是 `actorLayout.ts`，**不是**渲染层 ——
+   * `DODGE_PEAK_X` 已经搬到那里（与 `ACTOR_POS` 放在一起，因为
+   * "左移之后离对面还有多少余量"的推算要同时读这两者）。
+   */
+  it('位移峰值是 52，且**向左**（站位互换后方向反转）', async () => {
+    /** 与 `readRenderLayer` 同一风格：**动态 import**，不新增顶层依赖。 */
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const file = fileURLToPath(new URL('../../src/render/actorLayout.ts', import.meta.url));
+    const src = readFileSync(file, 'utf8');
+    /**
+     * 幅度是需求定的（26 的翻倍）；**符号跟着站位走** ——
+     * 玩家在右、Boss 在左，所以"躲开"是向左（负）。
+     */
+    expect(src).toMatch(/const DODGE_PEAK_X = -52;/);
   });
 });

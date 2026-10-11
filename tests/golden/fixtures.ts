@@ -135,10 +135,13 @@ export const GOLDEN_OUTCOME = {
    * 它记录了「倒地」这个机制的副作用，对下一个人仍然有用。
    * 它描述的不是当前内容。
    *
+   * ⚠️ **当前平衡的实测数字在 `src/data/entities/bossHp.ts`**（那里跟着
+   * 数值改动一起更新）。要比较"这次改动变了多少"，读那一份，不要读这里。
+   *
    * 实测（规范策略）—— **2026-10-10 加了「倒地」重新标定**：
    *   - 用时 **926** tick ≈ 15.4 秒
    *   - 玩家剩 **65 血**
-   *   - 只按「攻」（完美进攻、零防御）：**败**，Boss 还剩 30 血
+   *   - 只按「斩」（完美进攻、零防御）：**败**，Boss 还剩 30 血
    *
    * 也就是需求要的"不防御就算完美进攻也打不过"。
    *
@@ -161,7 +164,7 @@ export const GOLDEN_OUTCOME = {
    * 承受伤害因此从 78 掉到 35。这是「倒地」的**副作用**，不是设计意图。
    *
    * ⚠️ 「倒地就不能攻」这条**机制本身是对的**（用户已确认），
-   * 实测倒地窗口内「攻」被拒 94 次、成功 0 次。要不要削弱那个副作用
+   * 实测倒地窗口内「斩」被拒 94 次、成功 0 次。要不要削弱那个副作用
    * （例如给「避」加冷却）是产品决策。
    *
    * Boss 数值（2026-10-09 末次）：
@@ -179,8 +182,21 @@ export const GOLDEN_OUTCOME = {
    */
   status: 'victory' as const,
   endReason: 'hpZero' as const,
-  /** 通关用时（tick）。连续量，对数值改动敏感。 */
-  ticks: 926,
+  /**
+   * 通关用时（tick）。连续量，对数值改动敏感。
+   *
+   * ⚠️ **926 → 5696**（2026-10-11）。那一次改了四件事：
+   *   傲慢血量 210 → **420**；二阶段门槛 50% → **40%**；回补 63 → **126**；
+   *   「斩」10 → **15 炁**、「避」30 → **15 炁**；
+   *   并且**把参考策略升级成"会攒炁"的**（见 `planPriority` 的说明）。
+   *
+   * 15.4 秒 → **94.9 秒**。变长的原因是炁：斩 15 炁 + 每秒回 10
+   * ⇒ 持续输出约 6.7/s，而这一场要打穿 420 + 126（回补）= 546 点。
+   *
+   * ⚠️ 需求方已确认"100 秒左右没问题"，**且这些数值后面还会大改** ——
+   * 所以别把这几个数字当成需要守住的平衡目标。
+   */
+  ticks: 5696,
   /**
    * 当前内容没有暴击判定，所以随机数一次都不被消耗 —— **玩家侧**的
    * 随机流确实一次没用（抽招走的是 `BattleState.aiRngSeed`，
@@ -188,14 +204,12 @@ export const GOLDEN_OUTCOME = {
    */
   finalRngSeed: 20261009,
   /**
-   * ⚠️ 玩家剩 **40 血**（改造前 65）。
-   *
-   * 差值来自改造后的额外伤害来源：Boss 的「碾压」（60，附带 2 秒倒地）
-   * 与「呵斥」（40）在玩家**炁不够闪**的那几个窗口里会实打实打进来
-   * —— 旧 Boss 的单发只有 28/36。设计 §9.3 的期望区间（30–70）覆盖了它。
+   * ⚠️ 玩家剩 **20 血**（上一版 40）。数字会跟着上面那批改动一起变，
+   * 这里只记"当前实测"，不承担"必须落在某个区间"的职责 ——
+   * 那件事由 `prideBoss.test.ts` 的性质断言负责（赢 / 输，而不是具体血量）。
    */
   combatants: {
-    player: { alive: true, hp: 40, energy: 5, douqi: 28, damageDealt: 0, damageTaken: 0 },
+    player: { alive: true, hp: 20, energy: 5, douqi: 34, damageDealt: 0, damageTaken: 0 },
     meiichiro: { alive: false, hp: 0, energy: 0, douqi: 0, damageDealt: 0, damageTaken: 0 },
   },
 } satisfies Omit<RunOutcome, 'ticks'> & { readonly ticks: number };
@@ -206,111 +220,105 @@ export const GOLDEN_OUTCOME = {
  * 刻意不用手写动作时间表 —— 那种输入会随 GCD / 代价改动而整体失效，
  * 让重放因为"技能被拒"而失败，掩盖真正想检测的行为变化。
  *
+ * ==================================================================
+ * ⚠️ **2026-10-11 升级：它现在"会攒炁"了**
+ * ==================================================================
+ *
+ * 旧版的行为是"**一有炁就打输出**，只有炁够『闪避 + 再打一次』时才闪"。
+ * 那在"斩 10 炁 / 避 30 炁"时勉强能用，但 `斩` 与 `避` 都改成 **15 炁**
+ * 之后它就**永远闪不出来**了 —— 因为它的炁全变成了斩，
+ * 而闪一次需要 `15 + 15 = 30`。实测：**6.7 秒被打死，一次没闪**。
+ *
+ * ⚠️ 那不是游戏打不过，是**这个策略在炁需要管理的游戏里是个坏参考**。
+ * 一个有炁必打的玩家，等于"从不给闪避留预算"。
+ *
+ * 所以现在它按**真人打法**做取舍：
+ *   1. Boss 在读条、且那一招**会造成伤害** → 这一 tick **不做输出，攒炁**
+ *   2. 读条还长（> 400ms）→ 先试「破」（它才是设计给"长读条"的答案）
+ *   3. 快到命中了（≤ `dodgeLeadMs`）且没在无敌里 → 闪
+ *   4. 没有读条 → 才按优先级输出
+ *
+ * ⚠️ **"攒炁"只在配了 `dodgeSkillId` 时生效**：不配 = 这个策略压根不防御，
+ * 那时"停手攒炁"没有意义，会把它从"纯进攻"变成"纯站桩"，
+ * 毁掉 `pureAttackPlan` 想测的那件事。
+ *
  * @param priority 技能 id，顺序即优先级
- * @param dodgeSkillId 看到 Boss 读条时要插的防御技（不给则不躲）
+ * @param dodgeSkillId 看到 Boss 读条时要插的防御技（不给则不躲、也不攒炁）
+ * @param interruptSkillId 长读条时用来打断的技能（不给则不打断）
  */
 export function planPriority(
   priority: readonly string[],
   options: {
     readonly dodgeSkillId?: string;
+    /** 用来打断长读条的技能（「破」）。不给则不打断。 */
+    readonly interruptSkillId?: string;
     /**
-     * 在命中前多少毫秒闪避。默认 400。
+     * 在命中前多少毫秒闪避。默认 500。
      *
-     * 「闪」的无敌窗口是 0.5 秒（500ms），所以要在命中前
-     * **不超过 500ms、也不要太接近 0** 的时刻按下：
+     * 无敌窗口是 0.5 秒（500ms），所以要在命中前
+     * **不超过 500ms、也不要太接近 0** 的时刻按下。
      *
-     *   150ms（早期取值）—— 太紧。因为"预测"是按 tick 粒度做的，
-     *     而 Boss 可能在闪避的无敌窗口**结束之后**才开始下一次读条，
-     *     于是两发重击只躲掉零发（实测"成功规避=0"）。
-     *   400ms —— 当时的取值。
-     *   600ms —— **当前的取值**。玩家现在有 500ms 读条（「攻」），
-     *     所以闪避要再晚一点按，无敌窗口才盖得住命中时刻。
-     *     实测扫描（见下）：500–700ms 能完全免伤，峰值在 600ms。
-     *
-     * 数值是扫出来的，不是猜的：
+     * ⚠️ 下面那组扫描数字来自 **旧数值**（斩 10 炁 / 避 30 炁），
+     * 只当"这是个窗口、两端都会变差"的旁证看，不要当当前平衡：
      *   lead=  0ms → 剩 27 血      lead= 500ms → 剩 100 血（免伤）
      *   lead=200ms → 剩 57 血      lead= 600ms → 剩 100 血（免伤）
      *   lead=400ms → 剩 90 血      lead= 800ms → 剩  88 血（又挨打了）
-     *
-     * 两端都会变差，说明这是个**窗口**而不是"越早越好" ——
-     * 这正是玩法想要的手感。
      */
     readonly dodgeLeadMs?: number;
   } = {},
 ): (tick: number, state: BattleState) => readonly Action[] {
   const leadMs = options.dodgeLeadMs ?? 500;
+  /** 打断的提前量：读条剩这么多以上才值得用「破」。 */
+  const breakLeadMs = 400;
+
   return (tick, state) => {
-    /**
-     * 会躲的玩家：**在命中前一点点闪避**，而不是一看到读条就闪。
-     *
-     * 踩过的坑：早期版本一看到 `casts.length > 0` 就闪 —— 而 Boss 的
-     * 前摇有 1.2 秒，闪避的无敌窗口只有 300ms，于是 iframe 在命中前
-     * 早就过期了。表现为"策略明明在闪避，却一点伤害都没躲掉"，
-     * 看起来像是判定层坏了。
-     *
-     * 这正是玩法本身要求的时机判断，所以测试策略必须也做对。
-     */
-    if (options.dodgeSkillId !== undefined) {
-      const boss = state.combatants.find((c) => c.side === 'enemy');
-      const cast = boss?.casts[0];
-      if (cast !== undefined) {
-        /**
-         * **只对"会造成伤害"的招式闪避。**
-         *
-         * 踩过的坑：早期只看"Boss 在读条"就闪，于是连不造成伤害的
-         * 「蓄能」也闪 —— 白白花掉 30 炁（= 3 次「攻」的代价）。
-         * 实测表现为 **"会闪"反而比"不闪"输得更惨**（190 血时：
-         * 会闪败、不闪胜剩 4 血），让人误以为闪避机制没用，
-         * 其实是**策略在乱闪**。
-         *
-         * 真人对"纯增益招式"不会闪，所以策略也不该闪。
-         */
-        const skillDef = registry.skills.get(cast.skillId);
-        const dealsDamage = (skillDef?.hits ?? []).some((h) =>
-          h.effects.some((e) => e.kind === 'damage'),
+    const boss = state.combatants.find((c) => c.side === 'enemy');
+    const cast = boss?.casts[0];
+
+    if (cast !== undefined && options.dodgeSkillId !== undefined) {
+      const skillDef = registry.skills.get(cast.skillId);
+      /**
+       * **只对"会造成伤害"的招式反应。**
+       *
+       * 踩过的坑：早期只看"Boss 在读条"就闪 → 连不造成伤害的招式也闪，
+       * 白花 30 炁（= 3 次「斩」）。表现为"会闪反而输得更惨"，让人误以为
+       * 闪避机制没用，其实是**策略在乱闪**。真人对纯增益招式不会闪。
+       */
+      const dealsDamage = (skillDef?.hits ?? []).some((h) =>
+        h.effects.some((e) => e.kind === 'damage'),
+      );
+      const remainingMs = cast.castTimeMs - (tick - cast.startedAtTick) * (1000 / 60);
+
+      if (dealsDamage && remainingMs > 0) {
+        /** ① 长读条：打断（霸体会拒，那也没关系 —— 拒绝不花炁）。 */
+        const breaker = options.interruptSkillId;
+        if (
+          breaker !== undefined &&
+          remainingMs > breakLeadMs &&
+          roughlyUsable(breaker, state, registry.skills.get(breaker))
+        ) {
+          return [{ type: 'useSkill', skillId: breaker, atTick: tick }];
+        }
+        /** ② 快命中了：闪（已经无敌就别再闪，否则一次读条烧掉好几次）。 */
+        const alreadyImmune = (state.combatants.find((c) => c.side === 'ally')?.buffs ?? []).some(
+          (b) => b.defId === 'dodge-iframe',
         );
-        const elapsedMs = (tick - cast.startedAtTick) * (1000 / 60);
-        const remainingMs = cast.castTimeMs - elapsedMs;
-        if (dealsDamage && remainingMs > 0 && remainingMs <= leadMs) {
-          const skill = registry.skills.get(options.dodgeSkillId);
-          /**
-           * **只在"这次攻击真的会打到我"时才闪。**
-           *
-           * 踩过的坑：早期版本只要 Boss 在读条就闪 —— 包括那些
-           * 前摇刚好被公共冷却挡住的时刻。结果是白白花掉 30 炁
-           * （= 4 次「攻」的代价），实测"会闪"反而比"不闪"输得更惨。
-           *
-           * 所以这里要求：闪完之后还够打一次「攻」，
-           * 否则宁可挨这一下 —— 这与真人玩家的取舍一致。
-           */
-          /**
-           * **已经处于无敌窗口里就不要再闪了。**
-           *
-           * 踩过的坑：`remainingMs <= leadMs` 这个条件在 150ms 的
-           * 窗口里会命中约 9 个 tick，于是每个 tick 都闪一次 ——
-           * 一次读条烧掉 360 点缠，把输出的能量全抢走，
-           * 结果"会闪"反而输得比"不闪"更惨。
-           */
-          const alreadyImmune = (state.combatants.find((c) => c.side === 'ally')?.buffs ?? []).some(
-            (b) => b.defId === 'dodge-iframe',
-          );
-          if (alreadyImmune) {
-            // 直接跳到输出循环
-          } else {
-          const attackCost = registry.skills.get('attack')?.cost[0];
-          const needForAttack =
-            attackCost !== undefined && typeof attackCost.value === 'number' ? attackCost.value : 0;
-          const energyNow =
-            (state.combatants.find((c) => c.side === 'ally')?.resources.energy ?? 0);
-          const dodgeCost = skill?.cost[0];
-          const needForDodge =
-            dodgeCost !== undefined && typeof dodgeCost.value === 'number' ? dodgeCost.value : 0;
-          if (energyNow >= needForDodge + needForAttack && roughlyUsable(options.dodgeSkillId, state, skill)) {
-            return [{ type: 'useSkill', skillId: options.dodgeSkillId, atTick: tick }];
-          }
-          }
+        const dodger = options.dodgeSkillId;
+        if (
+          remainingMs <= leadMs &&
+          !alreadyImmune &&
+          roughlyUsable(dodger, state, registry.skills.get(dodger))
+        ) {
+          return [{ type: 'useSkill', skillId: dodger, atTick: tick }];
         }
       }
+      /**
+       * ③ **攒炁**：读条期间不做输出。
+       *
+       * 这是本次升级的**核心**：输出与闪避抢同一个炁池，
+       * "有炁就花掉"等于永远给闪避留不下预算。
+       */
+      return [];
     }
 
     for (const skillId of priority) {
@@ -322,6 +330,7 @@ export function planPriority(
     return [];
   };
 }
+
 
 /**
  * 输出优先级（黄金重放用）。

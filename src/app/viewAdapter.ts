@@ -16,7 +16,7 @@ import { deriveSlots, type SlotBinding } from './derivedSlots';
 import { emptyCombatant, emptyView } from '../render/emptyView';
 import type { FeedbackState } from '../render/feedback';
 import { HitFeedbackTracker } from './hitFeedback';
-import { isAttacking, lastUsedKey } from './attackFrame';
+
 /**
  * 槽位相关的两个导出**搬到了 `./derivedSlots`**（那里才是内聚的位置：
  * 派生技的槽位推导与基础槽位推导是一件事）。这里**转发**，外部
@@ -31,7 +31,9 @@ import {
   isInternalBuff,
   shortLabelKeyOf,
 } from './viewHelpers';
+import { hintKeysOf } from './skillHints';
 import { LAYOUT } from '../ui/layout';
+import type { TranslateFn } from '../i18n/translator';
 import type {
   BattleSnapshotView,
   BuffView,
@@ -74,12 +76,6 @@ export class ViewAdapter {
   private statusLineTtl = 0;
 
   /** 每个技能上次使用的 tick，用于在引擎不暴露 CD 时估算冷却显示。 */
-  /**
-   * 最近一次"谁在什么时候用了哪个技能"（键见 `lastUsedKey`）。
-   * ⚠️ 原先键只有 `skillId` 且只写不读（死字段）—— 必须带来源 id，
-   * 否则 Boss 放攻击技会让玩家也播攻击帧。
-   */
-  private readonly lastUsed = new Map<string, number>();
   private readonly skillNameKeys = new Map<string, string>();
   /** 状态提示的副标题（例如"贯击 · 公共冷却"） */
   private statusDetail = '';
@@ -98,7 +94,7 @@ export class ViewAdapter {
    */
   constructor(
     private readonly skills: ReadonlyMap<string, SkillDef>,
-    private readonly translate: ((key: string) => string) | undefined = undefined,
+    private readonly translate: TranslateFn | undefined = undefined,
   ) {
     for (const [id, skill] of skills) this.skillNameKeys.set(id, skill.nameKey);
   }
@@ -248,7 +244,6 @@ export class ViewAdapter {
           break;
         }
         case 'skillUsed': {
-          this.lastUsed.set(lastUsedKey(event.sourceId, event.skillId), event.tick);
           // 成功放出技能 → 立刻清掉被拒提示（否则会残留到超时）
           if (event.sourceId === playerId) {
             this.lastReject = undefined;
@@ -339,14 +334,12 @@ export class ViewAdapter {
       playerRaw.id,
       state.tick,
       this.hitFeedback.of(playerRaw.id),
-      isAttacking(this.lastUsed, this.skills, playerRaw.id, state.tick),
     );
     const boss = toCombatantView(
       engine,
       bossRaw.id,
       state.tick,
       this.hitFeedback.of(bossRaw.id),
-      isAttacking(this.lastUsed, this.skills, bossRaw.id, state.tick),
     );
 
     const remainingMs =
@@ -402,16 +395,6 @@ export class ViewAdapter {
       floatingText: this.floating,
       ...(this.statusLine === '' ? {} : { statusLine: this.statusLine }),
       ...(this.statusDetail === '' ? {} : { statusDetail: this.statusDetail }),
-      telegraphing: boss.cast !== undefined,
-      /**
-       * 霸体：由 boss 身上的 `interruptImmune` buff 决定。
-       *
-       * 与 `castView.interruptible` 读的是同一个 flag —— 两处结论必须
-       * 一致，否则会出现"读条说不可打断、但人物没描边"这种自相矛盾。
-       */
-      armored: boss.buffs.some(
-        (b) => engine.buffDef(b.id)?.flags?.interruptImmune === true,
-      ),
       playerFlash: this.playerFlash,
       bossFlash: this.bossFlash,
     };
@@ -563,8 +546,6 @@ function toCombatantView(
   tick: number,
   /** 本帧的受击反馈（由调用方按"事件 + 老化帧数"算好）。 */
   feedback: FeedbackState,
-  /** 刚放了攻击招式（见 `isAttacking`）。 */
-  attacking: boolean,
 ): CombatantView {
   const raw = engine.snapshot.combatants.find((c) => c.id === id);
   if (!raw) return emptyCombatant(id);
@@ -605,8 +586,14 @@ function toCombatantView(
      *   技能自己声明的 `hintTags` ∪ 当前状态推出的 `interruptImmune`
      * 否则 Boss 开了霸体、读条上却不提示，玩家会白按「破」。
      */
-    const castTags = new Set(skill?.hintTags ?? []);
-    if (armored) castTags.add('interruptImmune');
+    /**
+     * ⚠️ 列表里装的是 **i18n key**（不是 `HintTag` 值）—— 因为控制类提示
+     * 取的是**那个 debuff 自己的名字**（「倒地」「眩晕」），而那不是
+     * `HintTag` union 里的值。见 `app/skillHints.ts`。
+     */
+    const castTags = new Set(hintKeysOf(skill));
+    /** 霸体是**状态**（霸体 buff 挂没挂），所以它只能在这里补，不能静态推导。 */
+    if (armored) castTags.add('settings.hintTags.interruptImmune');
     const hintTags = [...castTags];
 
     castView = {
@@ -652,7 +639,6 @@ function toCombatantView(
     energy: { current: raw.resources.energy, cap: raw.caps.energy },
     douqi: { current: raw.resources.douqi, cap: raw.caps.douqi },
     buffs,
-    attacking,
     stunned,
     feedback,
     ...(castView ? { cast: castView } : {}),

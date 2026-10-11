@@ -42,6 +42,7 @@ import {
 } from '../render/touchButtonLayer';
 import { detectBrowserPlatform, type PlatformCaps } from '../render/platform';
 import type { BattleSnapshotView } from '../render/viewModel';
+import type { TranslateFn } from '../i18n/translator';
 
 /**
  * 从快照里挑出**生效中的派生技**。
@@ -59,7 +60,7 @@ export function derivedOfSnapshot(
 
 export interface TouchControlsOptions {
   readonly pixi: PixiCtor;
-  readonly translate: (key: string) => string;
+  readonly translate: TranslateFn;
   /** 键盘输入源的键位表 —— 触屏按钮**从它推导**（唯一真相）。 */
   readonly bindings: readonly { readonly key: string; readonly skillId: string }[];
   readonly currentTick: () => number;

@@ -70,6 +70,7 @@ import { Label } from '../ui/primitives';
 import { FONT } from '../ui/layout';
 import { PALETTE } from './theme';
 import { RESOURCE_COLORS } from './skillBar';
+import type { TranslateFn } from '../i18n/translator';
 
 /* ------------------------------------------------------------------ *
  * 几何
@@ -173,7 +174,7 @@ export function badgeCenter(button: { x: number; y: number }): { x: number; y: n
 export interface TouchButtonLayerOptions {
   readonly pixi: PixiCtor;
   /** 本地化取词（注入，不 import i18n 单例 —— 与视图适配器一致）。 */
-  readonly translate: (key: string) => string;
+  readonly translate: TranslateFn;
 }
 
 interface ButtonView {
@@ -213,7 +214,7 @@ export class TouchButtonLayer {
   readonly root: InstanceType<PixiCtor['Container']>;
 
   private readonly pixi: PixiCtor;
-  private readonly translate: (key: string) => string;
+  private readonly translate: TranslateFn;
   private readonly buttons: ButtonView[] = [];
   private skillIds: readonly string[] = [];
 

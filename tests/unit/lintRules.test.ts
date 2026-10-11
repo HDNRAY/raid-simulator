@@ -335,3 +335,61 @@ describe('AGENTS.md 硬规则：禁止类型断言逃生舱', () => {
     expect(total).toBeGreaterThan(50);
   });
 });
+
+/**
+ * ==================================================================
+ * 取词函数的形状：**不许收窄成"只收 key"**
+ * ==================================================================
+ *
+ * 这一条防的是一个**编译器不会报的 bug**（真实发生过，用户报告）：
+ *
+ *   设置页里技能的**代价与冷却全没了**；修好取数之后，界面上显示的
+ *   是 `{value} {resource}` / `{seconds}` 这些**占位符本身**。
+ *
+ * 两层根因，第二层才是难查的那个：
+ *
+ *   1. `main.ts` 写成 `(key) => translator.t(key)` —— 手工丢了 `params`
+ *   2. **`SettingsPanelOptions.translate` 的类型是 `(key: string) => string`**
+ *      → "丢参数"不是失误，而是**类型系统认可的写法**。TS 允许
+ *      "参数更少的函数"赋值给"参数更多的类型"（为了 `map(parseInt)`
+ *      那类场景），于是它一路静默：**typecheck / eslint / 单测全绿**。
+ *
+ * 所以收窄的类型不是安全网，是帮凶。形状只该有一个：`TranslateFn`。
+ */
+describe('取词函数：不许用"只收一个参数"的类型', () => {
+  it('没有任何 `translate` 字段被声明成 `(key) => string`', async () => {
+    const { readFileSync, globSync } = await import('node:fs');
+    const ROOTS = ['src', 'tests', 'tools'];
+    /** 匹配 `translate: (…) => string` 这种内联函数类型。 */
+    const inlineFnType = /translate\s*:\s*\(([^)]*)\)\s*=>\s*string/g;
+    const offenders: string[] = [];
+
+    for (const root of ROOTS) {
+      for (const file of globSync(`${root}/**/*.ts`)) {
+        /**
+         * ⚠️ **跳过本文件自身**：下面这条正则的字面量就写在这里，
+         * 不跳过会把自己也扫成违规（假失败）。
+         * 只跳这一个文件，`tests/` 下别处照样扫。
+         */
+        if (file.endsWith('lintRules.test.ts')) continue;
+        const content = readFileSync(file, 'utf8');
+        for (const m of content.matchAll(inlineFnType)) {
+          const params = m[1] ?? '';
+          /**
+           * ⚠️ 判定只看**参数个数**：一个参数 = 必然丢掉 `params`。
+           * 两个及以上（或引用 `TranslateFn`）都算合格 ——
+           * 后者不会被这条正则匹配到，因为它不是内联函数类型。
+           */
+          if (!params.includes(',')) {
+            offenders.push(`${file}: translate: (${params}) => string`);
+          }
+        }
+      }
+    }
+
+    expect(
+      offenders,
+      `这些 translate 形状会静默丢掉 params，界面上会显示 {占位符} 本身：\n${offenders.join('\n')}`,
+    ).toEqual([]);
+  });
+});

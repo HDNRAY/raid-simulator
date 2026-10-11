@@ -1,5 +1,21 @@
 /**
- * 玩家角色的**姿态与位移**（防御下沉、闪避横移）。
+ * 玩家角色的**形象与姿态**（帧动画 + 防御下沉、闪避横移）。
+ *
+ * ==================================================================
+ * 形象现在有两套：正式素材 / 程序化回退
+ * ==================================================================
+ *
+ * 需求："无论角色还是 boss，我都希望加载 完整的 idle 和 attack 的动画"。
+ *
+ * | 状态 | 画什么 |
+ * |---|---|
+ * | 素材帧还没就绪（加载中 / 加载失败 / 测试环境） | 程序化绘制（下面 `drawPlayer`） |
+ * | 素材就绪 | 贴图（`ActorSprite`），程序化图形隐藏但**不销毁** |
+ *
+ * ⚠️ **任何时刻都必须有一份可见的东西**：纹理是异步加载的，加载完成
+ * 之前如果只画贴图，玩家会看到"角色不见了"。这条踩过坑 —— 见
+ * `git log` 里"玩家的人物都看不到了"那次（根因是初始化被漏掉，
+ * 而"初值 = 默认姿态"的巧合静默掩盖了它）。
  *
  * ⚠️ 位移与防御**明显区分**（需求）：防御只有下沉（pose）+ 冷色，
  * 不位移；闪避才横移 —— 两者在余光里也不会混。
@@ -8,59 +24,23 @@
  * 放进场景会让"这个字段是谁的"变得含糊。
  */
 
-import { Assets, Sprite, type Container, type Graphics, type Texture } from 'pixi.js';
+import { Container, Sprite, type Graphics } from 'pixi.js';
 import { PALETTE } from '../theme';
-import { DODGE_PEAK_X } from '../actorLayout';
-import { assetUrl } from '../assetUrl';
+import { ACTOR_POS, DODGE_PEAK_X } from '../actorLayout';
+import { ActorSprite, type ActorSpriteFrame } from '../actors/ActorSprite';
+import { spriteFor } from '../spriteAssets';
 import type { FrameContext, FramePart } from '../sceneTypes';
 
 /**
  * 玩家"站立"的基准点 —— **与程序化绘制同一组数字**（`drawPlayer` 里的
- * `cx = 300` / `base = 456`）。贴图与图形必须落在同一位置，否则切换
- * 形象时会看到角色"跳"一下。
+ * `cx` / `base`）。贴图与图形必须落在同一位置，否则切换形象时会看到
+ * 角色"跳"一下。
+ *
+ * ⚠️ 值本身在 `actorLayout.ts` 的 `ACTOR_POS.player` —— 那里是布局知识的
+ * **唯一真相**（闪避幅度的推算也要读它）。这里只取个短名字，
+ * **不要**改回字面量：那会变成两份真相，改一处忘一处。
  */
-const PLAYER_CX = 300;
-const PLAYER_BASE_Y = 456;
-/**
- * 贴图缩放。
- *
- * 原图 202×232。**取值要按"会不会失真"来想**，而直觉在这里是反的：
- *
- * | scale | 渲染尺寸 | 相对原生 | 观感 |
- * |---|---|---|---|
- * | 0.42（旧） | 85×97 | **0.42×** | **在缩小** → 像素被丢，才是糊的主因 |
- * | 0.68（现在） | 137×158 | 0.68× | 仍略缩，但像素保留得更多 |
- * | 1.00 | 202×232 | 1.00× | **最清晰**（1:1），但高约程序化玩家的 2 倍 |
- *
- * 所以"放大"**不会**让像素画更糊 —— 它在把渲染比例推向 1:1。
- * 真正的模糊来自两处，都已处理：
- *   1. 纹理过滤必须是 `nearest`（见 `setTexture`）
- *   2. 别把比例压得太小（旧值 0.42 丢了 58% 的像素）
- *
- * 0.68 是折中：比原来大 62%（需求："人物可以稍微放大一点"），
- * 又远小于 1:1，不至于盖过 Boss（Boss 视觉高度约 200）。
- */
-const SPRITE_SCALE = 0.68;
-/**
- * 贴图路径。
- *
- * ⚠️ 在 `placeholder/` 下 —— 那是**不可分发的本地占位素材**（见该目录的
- * README 与 `.gitignore`）。换成正式美术时只改这一个常量。
- *
- * ⚠️ **必须走 `assetUrl()`**：线上部署在 `/raid/` 子路径下，硬编码
- * `/placeholder/...` 会解析到域名根而 404（本地 dev 是 `/` 所以看不出来）。
- */
-const SPRITE_URL = assetUrl('placeholder/player-fd2-mirrored.png');
-/**
- * **攻击帧**贴图。
- *
- * 需求："人物攻击，无论是那个攻击（tags实现）都播放 攻击帧（一帧就行了）。"
- *
- * ⚠️ 原图 442×234（比站姿 202×232 **宽一倍多**）—— 宽出来的部分是挥砍
- * 特效与突刺。锚点同样是底部中心，所以更宽的一半会**朝右**延伸
- * （玩家在左、Boss 在右），正好是挥向 Boss 的方向。
- */
-const ATTACK_SPRITE_URL = assetUrl('placeholder/player-fd2-slash.png');
+const { x: PLAYER_CX, y: PLAYER_BASE_Y } = ACTOR_POS.player;
 
 /** 玩家角色部件。 */
 export class PlayerActorPart implements FramePart {
@@ -84,24 +64,13 @@ export class PlayerActorPart implements FramePart {
    * 姿态变化时重画（保留原来的缓存意图）。
    */
   private lastPose: number | null = null;
-
-
   /**
-   * 贴图版玩家（有纹理时用它；没有时回退到程序化绘制）。
+   * 正式素材（帧动画）；`undefined` = 还没选定角色 / 没有对应素材。
    *
-   * ⚠️ **纹理是异步加载的**，所以 `playerAnim`（程序化）必须留着当回退
-   * —— 否则加载完成之前会什么都不画。这正是"玩家看不到"那个 bug 的
-   * 同类：**任何时刻都必须有一份可见的东西**。
+   * ⚠️ 由 `setCharacter()` 建，不在构造里建：角色是**进战斗时**才知道的
+   * （备战界面选完才有 id），而构造时还不知道。
    */
-  private sprite: Sprite | undefined;
-  /**
-   * 攻击帧贴图（拿到之后才可能切）。
-   *
-   * ⚠️ 加载失败时保持 `undefined` → 永远用站姿贴图，不会有一帧空白。
-   */
-  private attackTexture: Texture | undefined;
-  /** 站姿贴图（切回用）。 */
-  private idleTexture: Texture | undefined;
+  private actor: ActorSprite | undefined;
 
   constructor(
     private readonly playerRoot: Container,
@@ -109,68 +78,40 @@ export class PlayerActorPart implements FramePart {
     /**
      * 是否异步加载贴图形象。
      *
-     * ⚠️ 默认 `false`：测试与无贴图环境（线上没有 `placeholder/` 里的
-     * 占位素材）都该走程序化绘制 —— 那不会发起任何网络请求。
+     * ⚠️ 默认 `false`：测试与无素材环境都该走程序化绘制 ——
+     * 那不会发起任何网络请求，也就不依赖 jsdom 里的 `Assets`。
      */
     loadTexture = false,
   ) {
-    if (loadTexture) this.loadSprite();
+    this.loadTextures = loadTexture;
   }
+
+  /** 是否允许发起素材加载（构造参数存下来，`setCharacter` 时用）。 */
+  private readonly loadTextures: boolean;
 
   /**
-   * **加载贴图形象（异步）**。
+   * 换角色形象（进战斗 / 重开时调用）。
    *
-   * ⚠️ 必须容错：拿不到纹理时**保留程序化绘制**，而不是画一片空白
-   * （那就是"玩家看不到"那个 bug 的同类 —— 任何时刻都要有可见的东西）。
-   * ⚠️ 贴图在 `public/placeholder/`（**不可分发的本地占位素材**，
-   * 已 gitignore），所以线上构建里不存在 —— 那时回退就是唯一显示。
+   * ⚠️ 传入**出战单位的 id**（`data/roster.ts`），不是素材 slot ——
+   * id → slot 的映射在 `spriteAssets.ts`，一处维护。
+   * 不认识的 id 直接**保持程序化绘制**（不报错、不留空白）。
+   *
+   * ⚠️ **先把上一个形象拆掉** —— `ActorSprite` 构造时会把自己挂进
+   * `playerRoot`，只换引用的话旧的会留在场景里，第二把就有两套人物
+   * 叠着（"谍影"）。与 `BossSprite.setCharacter` 是同一个坑。
    */
-  private loadSprite(): void {
-    void Assets.load<Texture>(SPRITE_URL)
-      .then((texture) => {
-        texture.source.scaleMode = 'nearest';
-        this.idleTexture = texture;
-        this.setTexture(texture);
-      })
-      .catch(() => {
-        // 故意吞掉：没有贴图是**预期**情况，程序化回退已就位
-      });
+  setCharacter(id: string): void {
+    if (!this.loadTextures) return;
+    const source = spriteFor(id);
+    if (source === undefined) return;
+    this.actor?.dispose();
     /**
-     * 攻击帧**独立加载**：它失败不该影响站姿（两张图是分开的资源）。
+     * ⚠️ 最后一个参数 `-1` = **水平镜像**。玩家现在在**右边**，而素材
+     * 是按"玩家在左、朝右"画的 —— 不镜像就会**背对 Boss**。
      */
-    void Assets.load<Texture>(ATTACK_SPRITE_URL)
-      .then((texture) => {
-        texture.source.scaleMode = 'nearest';
-        this.attackTexture = texture;
-      })
-      .catch(() => {
-        // 没有攻击帧 → 一直用站姿，不报错
-      });
-  }
-
-  /** 换成贴图形象（纹理就绪后调用；程序化图形隐藏但**不销毁**）。 */
-  setTexture(texture: Texture): void {
-    if (this.sprite === undefined) {
-      this.sprite = new Sprite(texture);
-      /**
-       * ⚠️ **最近邻过滤**：贴图是**像素画**，默认的线性插值会把像素糊成
-       * 一团（尤其是这里还要缩放）。像素画必须 `nearest`。
-       */
-      texture.source.scaleMode = 'nearest';
-      this.sprite.texture.source.scaleMode = 'nearest';
-      /**
-       * 锚点放**底部中心**：玩家"站在"基地线上，缩放/下沉都绕脚下，
-       * 与程序化绘制的 `base` 语义一致。
-       */
-      this.sprite.anchor.set(0.5, 1);
-      this.sprite.x = PLAYER_CX;
-      this.sprite.y = PLAYER_BASE_Y;
-      this.sprite.scale.set(SPRITE_SCALE);
-      this.playerRoot.addChild(this.sprite);
-    } else {
-      this.sprite.texture = texture;
-    }
-    this.playerAnim.visible = false;
+    this.actor = new ActorSprite({ Container, Sprite }, this.playerRoot, source, -1);
+    this.actor.root.x = PLAYER_CX;
+    this.actor.root.y = PLAYER_BASE_Y;
   }
 
   /**
@@ -242,22 +183,21 @@ export class PlayerActorPart implements FramePart {
      *   - 着色与程序化一致（闪避偏蓝、防御偏冷）
      *   - 防御的"下沉"用**纵向压缩**表达（贴图锚点在脚下，压 scale.y
      *     就是"矮下去"）—— 与程序化那边 `base` 下移 12px 是同一个意思
+     *
+     * ⚠️ 动画的驱动是**读条**（`view.player.cast`），不是"刚放了招式"
+     * 那种电平信号：玩家拍板的规则是"读条时间 = 播放时长"
+     * （见 `spriteAnim.ts`）。瞬发技能（`castTime === 0`）没有 cast
+     * 记录 → 保持 idle，那是引擎侧就成立的事实，这里不用特判。
+     *
+     * ⚠️ 顺序：先 `show`（选帧、可能刚好就绪）再读 `ready`。刚就绪的
+     * 那一帧就要把程序化图形藏掉，否则两者会**同时可见**（叠影）。
      */
-    if (this.sprite !== undefined) {
-      this.sprite.tint = tint;
-      /**
-       * **攻击帧**：换贴图，不换位置/锚点 —— 所以站姿与挥砍帧的
-       * 脚下基准完全一致，切换时不会跳。
-       *
-       * ⚠️ 只有拿到攻击贴图才切；否则保持站姿（不会出现空帧）。
-       */
-      const wantAttack = ctx.view.player.attacking && this.attackTexture !== undefined;
-      const target = wantAttack ? this.attackTexture : this.idleTexture;
-      if (target !== undefined && this.sprite.texture !== target) {
-        this.sprite.texture = target;
-      }
-      // 受击的挤压**叠在**防御的下沉上（两者可以同时发生）
-      this.sprite.scale.set(SPRITE_SCALE, SPRITE_SCALE * pose * fb.squashY);
+    const actor = this.actor;
+    if (actor !== undefined) {
+      actor.show(ctx.view.tick, ctx.view.player.cast, ctx.view.status !== 'running');
+      if (actor.ready) this.playerAnim.visible = false;
+      const frame: ActorSpriteFrame = { tint, squashY: pose * fb.squashY };
+      actor.apply(frame);
     }
 
     const dodge = buffs.find((b) => b.id.startsWith('dodge') && b.remainingMs > 0);
@@ -275,6 +215,10 @@ export class PlayerActorPart implements FramePart {
       // 三角波：0 → 1 → 0
       base = DODGE_PEAK_X * (1 - Math.abs(progress * 2 - 1));
     }
-    this.playerRoot.x = Math.round(base - fb.recoilX);
+    /**
+     * ⚠️ 号从**减**改成了**加**：玩家现在在**右边**，被打是向右退
+     * （背离左边的 Boss）。与 `BossSprite` 那边正好相反。
+     */
+    this.playerRoot.x = Math.round(base + fb.recoilX);
   }
 }

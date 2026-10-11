@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeContentBox, estimateMonoWidth } from '../../src/ui/IconButton';
+import { ICON_BUTTON_DEFAULTS, computeContentBox, estimateMonoWidth, focusRingRect } from '../../src/ui/IconButton';
 import { FONT } from '../../src/ui/layout';
 
 /**
@@ -107,5 +107,36 @@ describe('宽度估算（宁宽勿窄）', () => {
 
   it('空串不会产生负宽度', () => {
     expect(estimateMonoWidth('', 13)).toBeGreaterThan(0);
+  });
+});
+
+describe('图标按钮：焦点环（不与"选中"撞色的那一半）', () => {
+  /**
+   * 需求（用户）："设置按钮 有时也会被变黄" —— 齿轮聚焦时被涂成金色，
+   * 和"已选中的角色卡"同一个颜色。
+   *
+   * 修法的另一半（颜色）在 `theme.ts` / `SettingsButton.ts`，这里测**形状**：
+   * 焦点环必须（a）包住图标、（b）比图标大一圈、（c）外扩量足够小，
+   * 不至于碰到旁边的东西。
+   */
+  it('环包住图标，且比图标大一圈（pad 在左右两侧都要算）', () => {
+    const ring = focusRingRect(100, 200, 20);
+    const pad = ICON_BUTTON_DEFAULTS.focusRingPad;
+    expect(ring.x).toBe(100 - pad);
+    expect(ring.y).toBe(200 - pad);
+    expect(ring.w).toBe(20 + pad * 2);
+    expect(ring.h).toBe(20 + pad * 2);
+  });
+
+  it('环是**正方形**且以图标为中心（弧形圆角不会被拉成椭圆）', () => {
+    const ring = focusRingRect(0, 0, 24);
+    expect(ring.w).toBe(ring.h);
+    expect(ring.x + ring.w / 2).toBeCloseTo(12, 5);
+    expect(ring.y + ring.h / 2).toBeCloseTo(12, 5);
+  });
+
+  it('外扩量不大（战斗 HUD 上方就是 Boss 血条，撑太开会叠上去）', () => {
+    expect(ICON_BUTTON_DEFAULTS.focusRingPad).toBeLessThanOrEqual(8);
+    expect(ICON_BUTTON_DEFAULTS.focusRingWidth).toBeLessThanOrEqual(3);
   });
 });

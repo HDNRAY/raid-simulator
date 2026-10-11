@@ -341,10 +341,6 @@ describe('能力结算时刻：castStart 与 castFinish', () => {
     expect(armor!.duration).toBe(heavy.castTime);
   });
 
-  it('慢刀的提示标签同时有「高伤」和「霸体」', () => {
-    const heavy = ALL_SKILLS.find((s) => s.id === 'boss-heavy')!;
-    expect([...(heavy.hintTags ?? [])].sort()).toEqual(['highDamage', 'interruptImmune']);
-  });
 
   it('读条完成时**不会**再结算一次 castStart 的能力', async () => {
     /**

@@ -4,7 +4,7 @@ import type { EntityId, LocaleKey, SkillId } from './ids';
 import type { ResourceKey, ResourcePool } from './resources';
 import type { Condition, Expr } from './stats';
 import type { Ability } from './abilities';
-import type { HintTag, SkillTag } from './triggers';
+import type { SkillTag } from './triggers';
 import type { HitDef, TargetRule } from './effects';
 
 /* ================================================================== *
@@ -64,14 +64,18 @@ export interface GameEntity {
   readonly rarity?: Rarity;
   readonly requires?: readonly Condition[];
   /**
-   * 玩法提示标签（显示在读条/技能格上）。
+   * ⚠️ 这里**曾经**有个 `hintTags?: readonly HintTag[]`（手写玩法提示），
+   * 已**整个删除**。
    *
-   * ⚠️ 与 `SkillDef.tags`（机械分类）是**两个字段、两套取值，都要维护**
-   * —— 理由见 `HintTag` / `SkillTag` 的说明。
-   * ⚠️ 这里曾有个无类型约束的 `tags?: readonly string[]`（零消费者），
-   * 已按"死值先删"删除。
+   * 删它的理由与上面那个 `tags?: readonly string[]` 一样（"死值先删"），
+   * 但更硬：它是一份**与效果冗余**的数据，于是必然漂 ——
+   *   - 漏标：「碾压」会倒地、「魅惑」会眩晕，都没写
+   *   - 错标：「魅惑」根本没有伤害，却写着「高伤」
+   *
+   * 现在提示**全部从技能自己的声明推导**（`app/skillHints.ts`）：
+   * 打断看 `interrupt` 效果、控制看 debuff 的 `flags`、霸体看
+   * `interruptImmune`、高伤按伤害阈值。**没有第二份数据要同步。**
    */
-  readonly hintTags?: readonly HintTag[];
 }
 
 export interface EquipmentEntity extends GameEntity {

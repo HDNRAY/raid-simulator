@@ -87,7 +87,7 @@ export class SkillBarView implements FramePart {
      * 踩过的坑：第一版只 `gfx.destroy()` —— 但 `glyph` / `key` / `cd` /
      * `cost` / `skillCd` 这些 Label 也是 `root` 的**直接子节点**，
      * 不会被 `gfx` 的销毁带走。于是缩放后新旧两层叠在一起
-     * （实测「攻」出现两次：`699,494` 与 `575,484`）。
+     * （实测「斩」出现两次：`699,494` 与 `575,484`）。
      */
     for (const slot of this.slots) {
       for (const node of [

@@ -59,15 +59,6 @@ export interface CombatantView {
   readonly douqi: ResourceView;
   readonly buffs: readonly BuffView[];
   /**
-   * 这个角色**刚放了攻击招式**（用来切攻击帧）。
-   *
-   * 需求："人物攻击，无论是那个攻击（tags实现）都播放 攻击帧。"
-   *
-   * ⚠️ 判定依据是技能的 **`SkillTag`**（`melee` / `spell`），不是
-   * 写死技能 id 列表 —— 那样加新攻击技能就会漏。
-   */
-  readonly attacking: boolean;
-  /**
    * 是否处于**眩晕**（完全不能行动）。
    *
    * ⚠️ 由 `viewAdapter` 从"有没有带 `actionLock` 的 buff"算出，渲染层只读。
@@ -229,10 +220,6 @@ export interface BattleSnapshotView {
   readonly statusLine?: string;
   /** 状态提示的副标题（技能名 —— 说明"是哪个技能不能用"） */
   readonly statusDetail?: string;
-  /** Boss 正在前摇 —— 驱动全屏预警表现 */
-  readonly telegraphing: boolean;
-  /** Boss 处于霸体：人物加彩色描边，读条背景偏青。 */
-  readonly armored: boolean;
   /** 玩家受击闪白强度 0..1 */
   readonly playerFlash: number;
   readonly bossFlash: number;
@@ -252,7 +239,6 @@ export type RenderAction =
 
 /** 空快照，用于首帧之前。 */
 export const EMPTY_COMBATANT: CombatantView = {
-  attacking: false,
   stunned: false,
   feedback: IDLE_FEEDBACK,
   id: '',
@@ -273,8 +259,6 @@ export const EMPTY_SNAPSHOT: BattleSnapshotView = {
   boss: { ...EMPTY_COMBATANT, side: 'enemy' },
   skills: [],
   floatingText: [],
-  telegraphing: false,
-  armored: false,
   playerFlash: 0,
   bossFlash: 0,
 };

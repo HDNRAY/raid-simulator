@@ -13,6 +13,7 @@ import { Label, type PixiCtor } from '../primitives';
 import { PALETTE } from '../../render/theme';
 import { skillDetailRect } from './logic';
 import type { KeyRow } from './rows';
+import type { TranslateFn } from '../../i18n/translator';
 
 /** 说明的最大字符数（超出截断加省略号）。 */
 const DETAIL_DESC_MAX_CHARS = 46;
@@ -35,7 +36,7 @@ export class SkillDetail {
 
   constructor(
     pixi: PixiCtor,
-    private readonly translate: (key: string) => string,
+    private readonly translate: TranslateFn,
   ) {
     const dr = skillDetailRect();
     /**
@@ -48,6 +49,12 @@ export class SkillDetail {
     const line = (row: number, size: number, color: number): Label =>
       new Label(pixi, { x: dr.x, y: dr.y + row * LINE_H, size, color });
     this.name = line(0, FONT.body, PALETTE.text);
+    /**
+     * 标签行的颜色。
+     *
+     * 取**优先级最高的那一个**标签的颜色 —— 一行小字里混两种颜色会更乱，
+     * 而标签本来就是"最该注意的那条"提示。
+     */
     this.tags = line(1, FONT.tiny, PALETTE.douqi.bright);
     this.desc = line(2, FONT.tiny, PALETTE.textDim);
     this.stats = line(3, FONT.tiny, PALETTE.textDim);
@@ -71,7 +78,10 @@ export class SkillDetail {
      * 会让"某个 tag 是哪种"这件事在 i18n 里看不出来。
      */
     const tags = [
-      ...(row.hintTags ?? []).map((tag) => t(`settings.hintTags.${tag}`)),
+      /** ⚠️ `hintTags` 里已经是**完整 i18n key**（见 `app/skillHints.ts`），
+       * 不要再拼 `settings.hintTags.` 前缀 —— 推导出来的控制类提示是
+       * debuff 自己的 `nameKey`（如 `lust.stun.name`）。 */
+      ...(row.hintTags ?? []).map((key) => t(key)),
       ...(row.mechanicTags ?? []).map((tag) => t(`settings.mechanicTags.${tag}`)),
     ].join(' · ');
     /**

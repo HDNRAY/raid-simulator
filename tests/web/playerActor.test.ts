@@ -18,8 +18,6 @@ function contextWith(playerBuffs: BattleSnapshotView['player']['buffs']): FrameC
     boss: { ...EMPTY_COMBATANT, side: 'enemy' },
     skills: [],
     floatingText: [],
-    telegraphing: false,
-    armored: false,
     playerFlash: 0,
     bossFlash: 0,
   };

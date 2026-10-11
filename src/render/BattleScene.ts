@@ -16,6 +16,7 @@ import { PALETTE } from './theme';
 import { CastBar } from '../ui/CastBar';
 import { LogPanel } from '../ui/LogPanel';
 import { drawBackground } from './background';
+import { BackdropPart } from './parts/backdrop';
 import { SkillBarView } from './skillBar';
 import { IconStrip } from './IconStrip';
 import { FloatingTextLayer } from './FloatingTextLayer';
@@ -43,6 +44,7 @@ export type { BattleSceneOptions, TranslateFn } from './sceneTypes';
 
 import { Bar, Label, PANEL_STYLE, Panel } from '../ui/primitives';
 import { BossSprite } from './actors/BossSprite';
+import { ACTOR_POS } from './actorLayout';
 import type { BattleSnapshotView } from './viewModel';
 import type { LogEntry } from '../app/logFormat';
 
@@ -74,6 +76,8 @@ export class BattleScene {
   readonly root: Container;
 
   private readonly boss: BossSprite;
+  /** 该 Boss 的战斗背景（按 `bossId` 换图，配错/漏配回退程序化夜空）。 */
+  private readonly backdrop: BackdropPart;
   private readonly playerAnim: Graphics;
   /** 玩家部件（构造时自己决定是否加载贴图形象）。 */
   private playerActor: PlayerActorPart | undefined;
@@ -160,16 +164,25 @@ export class BattleScene {
     drawBackground(background);
     this.root.addChild(background);
 
-    /* ---------- 角色（Boss 右、玩家左，中间留空给飘字） ---------- */
-    this.boss = new BossSprite(pixi, { x: 630, y: 378 });
+    /**
+     * **该 Boss 的背景图**（`bossBackdrops.ts` 的配对表）。
+     *
+     * ⚠️ 它的容器必须加在 `background` **之后**、角色之前：
+     * 图要盖住程序化夜空，但不能盖住角色。图没就绪时它只有夜空，
+     * 与上面的 `background` 完全重合（看不出接缝）。
+     */
+    this.backdrop = new BackdropPart(pixi);
+    this.root.addChild(this.backdrop.root);
+
+    /* ---------- 角色（Boss 左、玩家右，中间留空给飘字） ---------- */
+    /** ⚠️ 站位（含"互换过"的由来）在 `actorLayout.ACTOR_POS` —— 唯一真相。 */
+    this.boss = new BossSprite(pixi, { ...ACTOR_POS.boss });
     this.root.addChild(this.boss.root);
 
     /**
-     * 玩家图形外面套一层容器，**只为了能整体位移**。
-     *
-     * 闪避动画要"往右闪一下再复位"，而 `drawPlayer` 是在固定
-     * `cx = 300` 处绘制路径的。比起每帧按偏移重绘整套多边形
-     * （60fps 下白算几十次 fill），移动容器的 `x` 几乎零成本。
+     * 玩家图形外面套一层容器，**只为了能整体位移**：闪避是"横移一下再复位"，
+     * 而 `drawPlayer` 是在固定 `cx` 处绘制路径的。移动容器的 `x` 几乎零成本，
+     * 比每帧按偏移重绘整套多边形便宜得多（60fps 下白算几十次 fill）。
      */
     this.playerRoot = new pixi.Container();
     this.playerAnim = new pixi.Graphics();
@@ -523,16 +536,8 @@ export class BattleScene {
       name: 'logPanel',
       render: (ctx) => this.logPanel.update(ctx.logEntries),
     });
-    this.registry.add({
-      name: 'bossActor',
-      render: (ctx) =>
-        this.boss.update(
-          ctx.view.telegraphing,
-          ctx.view.bossFlash,
-          ctx.view.armored,
-          ctx.view.boss.feedback,
-        ),
-    });
+    // Boss 形象自己就是帧部件（读哪些字段见 `BossSprite.render`）
+    this.registry.add(this.boss);
     this.registry.add({
       name: 'result',
       /**
@@ -571,6 +576,25 @@ export class BattleScene {
   setShowKeyHints(show: boolean): void {
     this.showKeyHints = show;
     this.skillBar.root.visible = show;
+  }
+
+  /**
+   * **换这一局的出战形象**（进战斗 / 重开时调用）。
+   *
+   * 需求："无论角色还是 boss，我都希望加载 完整的 idle 和 attack 的动画"。
+   *
+   * ⚠️ 为什么不塞进 `BattleSceneOptions` 的构造参数：`BattleScene` 只在
+   * `bootstrap()` 里建**一次**，而一局战斗的出战单位是**可变的**
+   * （备战界面选完才知道，重开还能换）。放构造参数就必须重建整个场景，
+   * 那会把 Pixi 的舞台、toupper 层、设置面板全部跟着换一遍。
+   *
+   * @param playerId 玩家单位 id（`data/roster.ts`）
+   * @param bossId Boss 单位 id
+   */
+  setAppearance(playerId: string, bossId: string): void {
+    this.playerActor?.setCharacter(playerId);
+    this.boss.setCharacter(bossId);
+    this.backdrop.setBoss(bossId);
   }
 
   /**

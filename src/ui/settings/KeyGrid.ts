@@ -22,6 +22,7 @@ import { PALETTE } from '../../render/theme';
 import { KEY_GRID_CAPACITY, keyCellRect, keyGridMetrics, rowsCapacity } from './logic';
 import { keyLabel as formatKey } from './logic';
 import type { KeyRow } from './rows';
+import type { TranslateFn } from '../../i18n/translator';
 
 /** 每一格的状态（焦点 / 是否正在改键）。 */
 export interface KeyGridState {
@@ -71,7 +72,7 @@ export class KeyGrid {
 
   constructor(
     private readonly pixi: PixiCtor,
-    private readonly translate: (key: string) => string,
+    private readonly translate: TranslateFn,
   ) {
     this.root = new this.pixi.Container();
     this.gfx = new this.pixi.Graphics();

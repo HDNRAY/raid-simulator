@@ -576,7 +576,7 @@ describe('引擎：「倒地」（Boss 的「横扫」）', () => {
     e.tick([{ type: 'useSkill', skillId: 'sweep', atTick: 0 }], 'boss');
     e.drainEvents();
 
-    // 「攻」没带 dodge → 被拒，且原因是**专门的 tagRestricted**
+    // 「斩」没带 dodge → 被拒，且原因是**专门的 tagRestricted**
     // （不是 `locked` —— 玩家需要知道"我还能按什么"）
     e.tick([{ type: 'useSkill', skillId: 'attack', atTick: 1 }]);
     const rejected = e.drainEvents().filter((ev) => ev.kind === 'skillRejected');
@@ -596,7 +596,7 @@ describe('引擎：「倒地」（Boss 的「横扫」）', () => {
     expect(used.some((ev) => ev.kind === 'skillUsed' && ev.skillId === 'dodge')).toBe(true);
   });
 
-  it('倒地过期后「攻」恢复可用', () => {
+  it('倒地过期后「斩」恢复可用', () => {
     const e = mkEngine();
     e.tick([{ type: 'useSkill', skillId: 'sweep', atTick: 0 }], 'boss');
     e.drainEvents();

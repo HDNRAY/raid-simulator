@@ -251,7 +251,6 @@ export const LUST_ENTANGLE: SkillDef = {
   ],
   targeting: { mode: 'primaryEnemy' },
   tags: ['spell'],
-  hintTags: ['highDamage'],
   interruptible: true,
 };
 
@@ -282,7 +281,17 @@ export const LUST_CHARM: SkillDef = {
   hits: [{ at: logicMs(14), effects: [{ kind: 'stun', buff: LUST_STUN }] }],
   targeting: { mode: 'primaryEnemy' },
   tags: ['spell'],
-  hintTags: ['highDamage'],
+  /**
+   * ⚠️ **没有 `hintTags`** —— 它原先写的是 `['highDamage']`，**是错的**：
+   * 这一招唯一的 `hit` 效果是 `stun`，**一点伤害都没有**。
+   *
+   * 这正是"手写 hint 会漂"的**第二个方向**（第一个是「碾压」漏标倒地）：
+   * 玩家报告"色欲的魅惑好像没有眩晕标签"，查下来不但**漏了「眩晕」**，
+   * 还**错标了「高伤」**。
+   *
+   * 现在两件事都不用写：`LUST_STUN` 带 `actionLock`，所以「眩晕」由
+   * `app/skillHints.ts` 自动推出，而「高伤」本来就不该有。
+   */
   interruptible: true,
 };
 

@@ -29,10 +29,11 @@ import { Label, type PixiCtor } from '../primitives';
 import { PALETTE } from '../../render/theme';
 import { UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP, clampUiScale } from '../../render/scaling';
 import { uiScaleSliderRect } from './logic';
+import type { TranslateFn } from '../../i18n/translator';
 
 export interface ScaleSliderOptions {
   readonly pixi: PixiCtor;
-  readonly translate: (key: string) => string;
+  readonly translate: TranslateFn,
   /** 读当前倍数 */
   readonly get: () => number;
   /** 倍数变了（调用方负责应用到画布） */

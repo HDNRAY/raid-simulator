@@ -23,11 +23,17 @@ export class BossCastBarPart implements FramePart {
     /**
      * 招式的提示标签（需求："boss 的招式的 tags 显示在它的读条中"）。
      *
-     * 「霸体」= 打不断，别浪费「破」；「高伤」= 闪避比防御更值。
+     * 「霸体」= 打不断，别浪费「破」；「高伤」= 闪避比防御更值；
+     * 「倒地」「眩晕」= 挨到就会被控住（那是**后果**预告，比"疼"更急）。
+     *
+     * ⚠️ `cast.hintTags` 里装的是**完整 i18n key**，直接交给翻译层即可 ——
+     * **不要**再拼 `settings.hintTags.` 前缀。手写的那几个恰好长得像
+     * `settings.hintTags.highDamage`，但推导出来的控制类提示是
+     * **debuff 自己的 `nameKey`**（如 `lust.stun.name` = 「眩晕」）。
+     * 拼前缀会得到 `settings.hintTags.lust.stun.name`，**屏幕上就是那串
+     * 英文路径本身**（实测截图抓到过，见 `app/skillHints.ts`）。
      */
-    const tagLabel = (cast.hintTags ?? [])
-      .map((tag) => translate(`settings.hintTags.${tag}`))
-      .join(' · ');
+    const tagLabel = (cast.hintTags ?? []).map((key) => translate(key)).join(' · ');
     this.castBar.setContent(
       translate(cast.nameKey),
       `${(cast.remainingMs / 1000).toFixed(1)}s`,

@@ -14,33 +14,63 @@
  * ==================================================================
  *
  * 焦点是一个**线性游标**（人物 → 对手 → 开始），而不是三块各自维护：
- *   - 键盘：← → 在同一个槽位里换选项，↑ ↓ 换槽位，Enter 开始
- *   - 触屏：点卡片直接选中；点「开始」进入战斗
+ *   - 键盘：← → 在同一个槽位里**移动光标**，↑ ↓（或 Tab）换槽位，
+ *     **Enter 确定选择**（见下）
+ *   - 触屏 / 鼠标：点卡片 = **移光标 + 确定**（一步到位）；点「开始」进入战斗
  *
  * ⚠️ 触屏**不做**"先点选中再点确认"两步 —— 备战界面不是危险操作，
- * 直接点选更顺（与设置页不同：那里改键需要防误触）。
+ * 直接点选更顺（与设置页不同：那里改键需要防误触）。但**键盘**必须
+ * 两步：需求原话"用 enter 来确定选择，而不是靠移动到下一项"。
+ * 两者不矛盾：方向键**只移动光标**，点击**一次就是确定** —— 这样触屏
+ * 也有"确定"这个动作，满足 AGENTS.md §3b「触屏与键盘功能必须对等」。
  *
  * ⚠️ 这个界面**不碰引擎**：它只是一组选择 + 一个开始回调。战斗怎么起
  * 由 `main.ts` 决定。
+ *
+ * ==================================================================
+ * ⚠️ 光标（cursor）≠ 选择（selection）
+ * ==================================================================
+ *
+ * 需求（用户）："选中 和 目前光标 目前颜色是一样的" +
+ * "用 enter 来确定选择，而不是靠移动到下一项"。
+ *
+ * 改之前两者是同一个东西（焦点在哪一格，哪一格就变金色），所以这次：
+ *   - `PrepareSelection.cursor`：光标停在哪一项，方向键只动它
+ *   - `PrepareSelection.playerId` / `bossId`：**按 Enter 才写**，才是上场的
+ *   - 两者的外观差异**不在这个文件里手写** —— 全部走 `prepareRender.ts`
+ *     的 `cardSkin()`，那里也是单测覆盖的对象（见那个文件头的表）
  */
 
 import type { Container, Graphics } from 'pixi.js';
 import { FONT, LOGICAL } from './layout';
 import { Label, type PixiCtor } from './primitives';
 import { PALETTE } from '../render/theme';
-import type { RosterEntry } from '../data/roster';
+import { isDeveloping, type RosterEntry } from '../data/roster';
+import type { TranslateFn } from '../i18n/translator';
 import {
   PREPARE_LAYOUT,
-  cycleSelection,
+  canStartBattle,
+  confirmCursor,
+  cursorFromSelection,
+  cursorTarget,
+  cycleCursor,
   moveFocus,
   pickOption,
   prepareHitAreas,
   type PrepareSelection,
 } from './prepareLogic';
+import {
+  CARD_RADIUS,
+  CARD_STROKE,
+  CURSOR_RING_GAP,
+  PREPARE_SKIN,
+  cardSkin,
+  startSkin,
+} from './prepareRender';
 
 export interface PrepareScreenOptions {
   readonly pixi: PixiCtor;
-  readonly translate: (key: string) => string;
+  readonly translate: TranslateFn,
   readonly players: readonly RosterEntry[];
   readonly bosses: readonly RosterEntry[];
   readonly initial: { readonly playerId: string; readonly bossId: string };
@@ -74,9 +104,17 @@ export class PrepareScreen {
   private readonly startLabel: Label;
   private readonly startGfx: Graphics;
   private readonly hint: Label;
+  /**
+   * 页脚的**第三方素材声明**（页脚常驻）。
+   *
+   * ⚠️ 它是**权利归属的标示**，不是装饰 —— 本项目角色素材取自
+   * 《炎龍騎士團2》（漢堂國際 1995）。文案在 `roster.ui.notice`，
+   * 理由与"什么时候该删掉它"写在那里。
+   */
+  private readonly notice: Label;
 
   /** 每张卡片的标题 / 副标题 / 说明。 */
-  private readonly cards: { readonly name: Label }[] = [];
+  private readonly cards: { readonly name: Label; readonly status: Label }[] = [];
 
   private readonly cardGfx: Graphics;
   private readonly startGfxLayer: Graphics;
@@ -94,6 +132,8 @@ export class PrepareScreen {
       playerId: options.initial.playerId,
       bossId: options.initial.bossId,
       focus: 'player',
+      /** 进界面时光标与已确定的选择**重合**（上次选了谁就停在谁身上）。 */
+      cursor: cursorFromSelection(options.initial),
     };
 
     const { pixi } = options;
@@ -134,7 +174,12 @@ export class PrepareScreen {
 
     this.root.addChild(this.cardGfx, this.playerLabel.root, this.bossLabel.root, this.title.root);
 
-    /** 卡片上的文字（人物在前、Boss 在后，与 `prepareHitAreas` 同序）。 */
+    /**
+     * 卡片上的文字（人物在前、Boss 在后，与 `prepareHitAreas` 同序）。
+     *
+     * 每张卡两行：名字 + **状态行**（开发中）。状态行**常驻存在**、
+     * 只在需要时填字 —— 每帧新建/销毁 Label 会让 Pixi 反复重建纹理。
+     */
     const total = this.players.length + this.bosses.length;
     for (let i = 0; i < total; i += 1) {
       const name = new Label(pixi, {
@@ -144,8 +189,14 @@ export class PrepareScreen {
         color: PALETTE.text,
         kai: true,
       });
-      this.cards.push({ name });
-      this.root.addChild(name.root);
+      const status = new Label(pixi, {
+        x: 0,
+        y: 0,
+        size: FONT.small,
+        color: PALETTE.textDim,
+      });
+      this.cards.push({ name, status });
+      this.root.addChild(name.root, status.root);
     }
 
     this.startLabel = new Label(pixi, {
@@ -164,7 +215,27 @@ export class PrepareScreen {
       anchorX: 0.5,
       anchorY: 0.5,
     });
-    this.root.addChild(this.startGfxLayer, this.startGfx, this.startLabel.root, this.hint.root);
+    /**
+     * 页脚声明：贴屏幕**底边**，与「开始」按钮/提示拉开距离。
+     *
+     * ⚠️ 字号用 `FONT.small`（13）而不是 `FONT.tiny`（11）—— 见 `layout.ts`
+     * 的字号表：**中文有 13 的下限**，11 只给拉丁/数字。
+     */
+    this.notice = new Label(pixi, {
+      x: LOGICAL.width / 2,
+      y: LOGICAL.height - 18,
+      size: FONT.small,
+      color: PALETTE.textDim,
+      anchorX: 0.5,
+      anchorY: 0.5,
+    });
+    this.root.addChild(
+      this.startGfxLayer,
+      this.startGfx,
+      this.startLabel.root,
+      this.hint.root,
+      this.notice.root,
+    );
 
     this.redraw();
   }
@@ -187,32 +258,126 @@ export class PrepareScreen {
     return this.selection;
   }
 
-  /** 键盘：在同槽位内换选项（`delta` = ±1），到边界**不环绕**。 */
+  /**
+   * 键盘：在同槽位里**移动光标**（`delta` = ±1），到边界**不环绕**。
+   *
+   * ⚠️ **不改选择**。要它变成选择得按 Enter（`commit`）。
+   */
   cycle(delta: number): void {
-    this.applySelection(cycleSelection(this.selection, this.players, this.bosses, delta));
+    this.applyCursor(cycleCursor(this.selection, this.players, this.bosses, delta));
   }
 
-  /** 键盘：上下换槽位（人物 ↔ 对手 ↔ 开始）。 */
-  moveFocus(delta: number): void {
-    this.applySelection(moveFocus(this.selection, delta));
+  /**
+   * 键盘：上下换槽位（人物 ↔ 对手 ↔ 开始）。
+   *
+   * `wrap` 给 Tab / Shift+Tab 用（环绕），方向键不环绕。
+   */
+  moveFocus(delta: number, wrap = false): void {
+    this.applyCursor(
+      moveFocus(this.selection, delta, {
+        wrap,
+        players: this.players,
+        bosses: this.bosses,
+      }),
+    );
   }
 
-  /** 选中某个人物 / 对手。 */
+  /**
+   * Enter：把**光标处**的选项**确定**下来。
+   *
+   * @returns 光标是否停在「开始战斗」上（调用方据此决定要不要开战）
+   */
+  commit(): boolean {
+    const next = confirmCursor(this.selection, this.players, this.bosses);
+    if (next !== this.selection) {
+      this.applySelection(next, true);
+      return false;
+    }
+    /**
+     * 光标在「开始战斗」上（或已经确定过同一项）→ 交给调用方。
+     *
+     * ⚠️ 不能只看 `focus === 'start'`：光标在卡片上、而那一项**恰好就是**
+     * 已确定的选择时，`confirmCursor` 也返回同一个对象（这是它有意的
+     * "没变化就别重画"）—— 那时按 Enter 应当是"没反应"，而不是"开战"。
+     */
+    return this.selection.focus === 'start' && cursorTarget(this.selection, this.players, this.bosses) === undefined;
+  }
+
+  /**
+   * 键盘 / 触屏：**确定当前光标处的那一项**，若光标停在「开始战斗」
+   * 上就直接开战。`main.ts` 的 Enter 走这里。
+   */
+  confirm(): void {
+    if (this.commit()) this.start();
+  }
+
+  /** 选中某个人物 / 对手（点卡片 = 移光标 + 确定）。 */
   pick(kind: 'player' | 'boss', id: string): void {
     const next = pickOption(this.selection, this.players, this.bosses, kind, id);
     if (next === this.selection) return;
-    this.applySelection(next);
+    this.applySelection(next, true);
   }
 
-  private applySelection(next: PrepareSelection): void {
+  /**
+   * 只把**焦点**移到某个槽位（同 Tab / 方向键到达那里之后的那个状态）。
+   *
+   * ⚠️ 与 `moveFocus` 的区别是"直接指定"而不是"相对移动"：调试入口
+   * （`main.ts` 的 `window.__raidBattle.prepare`）用它一步把画面推到
+   * "光标在这一行、选择在另一行"的状态再截图，省掉"按几次方向键"的脆弱脚本。
+   */
+  focusSlot(slot: 'player' | 'boss' | 'start'): void {
+    if (slot === this.selection.focus) return;
+    this.applyCursor({ ...this.selection, focus: slot });
+  }
+
+  /**
+   * 当前选择里有没有**开发中**的单位。
+   *
+   * ⚠️ **可以选中、不能开战**（需求："备战界面里灰掉，写开发中" +
+   * "不能开始战斗（选中它们时点开始应当无效，或给明确反馈）"）。
+   * 如果连选都不让选，玩家就永远看不到"灰掉 + 开发中"这个状态，
+   * 只会以为这个角色根本不存在。
+   *
+   * 规则本身在 `prepareLogic.canStartBattle`（纯函数，可单测）。
+   */
+  private get developing(): boolean {
+    return !canStartBattle(this.selection, isDeveloping);
+  }
+
+  /**
+   * ⚠️ **光标移动不改选择**，所以这里**不发 `onChange`**。
+   *
+   * 需求："用 enter 来确定选择，而不是靠移动到下一项"。如果这里也通知，
+   * 调用方（`main.ts` → 存储）就会在"光标只是路过"时把选择持久化下来 ——
+   * 下次进来选中的是"路过的那一个"，而不是玩家按 Enter 定的那个。
+   */
+  private applyCursor(next: PrepareSelection): void {
+    if (next === this.selection) return;
+    this.selection = next;
+    this.redraw();
+  }
+
+  /**
+   * 写入**已经确定**的选择（Enter / 点击）。
+   *
+   * `notify` 为真时通知 `onChange` 持久化 —— 只有"确定"这个动作才配写存储。
+   */
+  private applySelection(next: PrepareSelection, notify: boolean): void {
     const changed = next.playerId !== this.selection.playerId || next.bossId !== this.selection.bossId;
     this.selection = next;
     this.redraw();
-    if (changed) this.options.onChange?.(next.playerId, next.bossId);
+    if (notify && changed) this.options.onChange?.(next.playerId, next.bossId);
   }
 
-  /** Enter / 点「开始」。 */
+  /**
+   * Enter / 点「开始」。
+   *
+   * ⚠️ **开发中的单位不能开战**（需求）。这里直接返回，不调 `onStart` ——
+   * 反馈由界面上那行"开发中，暂不能出战"给出（它在 `redraw` 里常驻，
+   * 玩家点之前就看得见）。
+   */
   start(): void {
+    if (this.developing) return;
     this.options.onStart(this.selection.playerId, this.selection.bossId);
   }
 
@@ -239,52 +404,98 @@ export class PrepareScreen {
 
   private redraw(): void {
     const t = this.options.translate;
+    const developing = this.developing;
     this.title.set(t('roster.ui.title'));
     this.playerLabel.set(t('roster.ui.playerLabel'));
     this.bossLabel.set(t('roster.ui.bossLabel'));
     this.startLabel.set(t('roster.ui.start'));
-    this.hint.set(t('roster.ui.hint'));
+    /**
+     * 提示行：正常时是操作说明；**选中开发中的单位时换成反馈**
+     * （需求："不能开始战斗（选中它们时点开始应当无效，或给明确反馈）"）。
+     *
+     * ⚠️ 复用卡片上那句"开发中"文案（同一个 i18n key）——
+     * 不一致的两句话会让人以为它们在说两件事。
+     */
+    this.hint.set(developing ? t('roster.ui.developing') : t('roster.ui.hintCursor'));
+    this.notice.set(t('roster.ui.notice'));
 
     const all = [...this.players, ...this.bosses];
     const areas = prepareHitAreas(this.players, this.bosses);
+    /** 光标此刻落在哪一项（`start` 槽位 / 空槽位时为 undefined）。 */
+    const cursorAt = cursorTarget(this.selection, this.players, this.bosses);
 
     this.cardGfx.clear();
     this.cards.forEach((card, i) => {
       const area = areas[i];
       const entry = all[i];
       if (area === undefined || entry === undefined) return;
+      /**
+       * ⚠️ 三态**各自独立**：一张卡可以同时是"光标在"与"已选中"。
+       *
+       * `selected` 只认选择（Enter 写进去的那个），`cursored` 只认光标 ——
+       * 判据不共用是这一版的核心（旧版两者都只看 `focus`，所以看不出区别）。
+       */
       const selected =
         (area.kind === 'player' && entry.id === this.selection.playerId) ||
         (area.kind === 'boss' && entry.id === this.selection.bossId);
-      const focused = area.kind === this.selection.focus;
+      const cursored = cursorAt !== undefined && cursorAt.kind === area.kind && cursorAt.id === entry.id;
+      /** 这个条目还没做完 —— 灰掉 + 标"开发中"（见 `start()` 的说明）。 */
+      const soon = isDeveloping(entry.id);
+      const skin = cardSkin({ developing: soon, cursored, selected });
 
       /**
-       * ⚠️ 卡片上**只有名字** —— 称号与简介是内容，不由界面顺手编
-       * （需求明确纠正过我擅自加"游侠"和一个简介）。
+       * ⚠️ 卡片上**只有名字**（+ 开发中的状态行）—— 称号与简介是内容，
+       * 不由界面顺手编（需求明确纠正过我擅自加"游侠"和一个简介）。
        */
       card.name.set(t(entry.nameKey));
-      /** 名字在卡片里**垂直居中**（只有一行，贴顶会显得空）。 */
+      card.name.setColor(skin.nameColor);
+      card.status.set(soon ? t('roster.ui.developing') : '');
+      /**
+       * 卡里两行的位置：名字在上、状态在下。
+       * ⚠️ 状态行**置空也要摆位置**：`Label.set('')` 只是不显示文字，
+       * 留着旧坐标会让"先选开发中、再选正常的卡片"时残影错位。
+       */
       card.name.root.x = area.x + 18;
-      card.name.root.y = area.y + area.h / 2 - 10;
+      card.status.root.x = area.x + 18;
+      if (soon) {
+        card.name.root.y = area.y + area.h / 2 - 22;
+        card.status.root.y = area.y + area.h / 2 + 4;
+      } else {
+        card.name.root.y = area.y + area.h / 2 - 10;
+        card.status.root.y = area.y + area.h / 2 + 16;
+      }
 
       /**
-       * 选中 = 亮底 + 亮边；焦点 = **更粗的边**。两者可以同时存在：
-       * 选中表示"就选它"，焦点表示"键盘现在在这儿"。
+       * 皮肤来自 `prepareRender.cardSkin()`（纯函数、有单测）。
+       * 这里的注释只说"画法为什么是这样"，颜色语义在那边。
        */
       this.cardGfx
-        .roundRect(area.x, area.y, area.w, area.h, 6)
-        .fill({
-          color: selected ? PALETTE.douqi.base : 0xffffff,
-          alpha: selected ? 0.14 : 0.04,
-        });
+        .roundRect(area.x, area.y, area.w, area.h, CARD_RADIUS)
+        .fill({ color: skin.fillColor, alpha: skin.fillAlpha });
       this.cardGfx
-        .roundRect(area.x, area.y, area.w, area.h, 6)
-        .stroke({
-          color: selected || focused ? PALETTE.douqi.bright : 0x3c3e50,
-          width: focused ? 3 : 2,
-          alpha: selected || focused ? 1 : 0.9,
-        });
-      card.name.setColor(selected ? PALETTE.douqi.bright : PALETTE.text);
+        .roundRect(area.x, area.y, area.w, area.h, CARD_RADIUS)
+        .stroke({ color: skin.strokeColor, width: skin.strokeWidth });
+
+      /**
+       * **需要外环**的两种情况（见 `CardSkin.ring`）：
+       *   1. 光标 + 选择同一张卡 —— 卡片本身是金的，环标出光标
+       *   2. 光标落在"开发中"的卡上 —— 那张卡整体压暗，没有环就看不出来
+       *
+       * ⚠️ 环画在卡片**外侧**（外扩 `CURSOR_RING_GAP`）：画在内侧会和
+       * 卡片自己的描边叠在一起，看起来只是"那条边变粗了"。
+       * 环色由皮肤给（两种情况亮度不同，见 `prepareRender`）。
+       */
+      if (skin.ring) {
+        this.cardGfx
+          .roundRect(
+            area.x - CURSOR_RING_GAP,
+            area.y - CURSOR_RING_GAP,
+            area.w + CURSOR_RING_GAP * 2,
+            area.h + CURSOR_RING_GAP * 2,
+            CARD_RADIUS + CURSOR_RING_GAP,
+          )
+          .stroke({ color: skin.ringColor, width: CARD_STROKE.cursor });
+      }
     });
 
     const sr = {
@@ -293,14 +504,20 @@ export class PrepareScreen {
       w: PREPARE_LAYOUT.startW,
       h: PREPARE_LAYOUT.startH,
     };
-    const startFocused = this.selection.focus === 'start';
+    /**
+     * 「开始战斗」只有光标态（它不是选项，没有"已选中"）——
+     * 见 `prepareRender.startSkin()` 的说明。
+     */
+    const startCursor = this.selection.focus === 'start';
+    const ss = startSkin({ developing, cursored: startCursor });
     this.startGfx.clear();
     this.startGfx
-      .roundRect(sr.x, sr.y, sr.w, sr.h, 6)
-      .fill({ color: PALETTE.douqi.base, alpha: startFocused ? 0.34 : 0.18 });
+      .roundRect(sr.x, sr.y, sr.w, sr.h, CARD_RADIUS)
+      .fill({ color: ss.fillColor, alpha: ss.fillAlpha });
     this.startGfx
-      .roundRect(sr.x, sr.y, sr.w, sr.h, 6)
-      .stroke({ color: PALETTE.douqi.bright, width: startFocused ? 3 : 2 });
-    this.startLabel.setColor(startFocused ? PALETTE.douqi.bright : PALETTE.text);
+      .roundRect(sr.x, sr.y, sr.w, sr.h, CARD_RADIUS)
+      .stroke({ color: ss.strokeColor, width: ss.strokeWidth });
+    this.startLabel.setColor(ss.labelColor);
+    this.hint.setColor(developing ? PREPARE_SKIN.selectionText : PALETTE.textDim);
   }
 }

@@ -40,19 +40,66 @@ export interface RosterEntry {
  * 需求："这个人物目前就叫 林晚风"。
  * ⚠️ 显示名不再用 `hud.you`（"你"）—— 那是"当前操作者"的意思，
  * 而备战界面要的是**角色名**。`hud.you` 仍用在战斗内的第一人称提示里。
+ *
+ * ⚠️ **id 是稳定的存档键**，不要为了迁就素材目录改名
+ * （`'player'` 这个 id 还写在 `core/run.ts` 的默认 `actorId` 与
+ * `viewAdapter` 的判定里）。素材怎么配在 `render/spriteAssets.ts`。
  */
 export const PLAYER_ROSTER: readonly RosterEntry[] = [
   { id: 'player', nameKey: 'roster.linWanfeng.name' },
+  { id: 'kaili', nameKey: 'roster.kaili.name' },
+  { id: 'daixuan', nameKey: 'roster.daixuan.name' },
 ];
 
-/** 可选 Boss。需求："目前只有这个boss"。 */
+/**
+ * 可选 Boss。
+ *
+ * 顺序 = 备战界面里卡片的顺序。⚠️ 新加的 5 个在本轮**只有资源与展示**
+ * （见 `DEVELOPING`）：具体玩法机制不在本次范围。
+ */
 export const BOSS_ROSTER: readonly RosterEntry[] = [
   /** Boss 名沿用已有的 `boss.name`（显示值已是"傲慢"），不另起一个 key。 */
   { id: 'meiichiro', nameKey: 'boss.name' },
   { id: 'lust', nameKey: 'lust.name' },
+  { id: 'envy', nameKey: 'envy.name' },
+  { id: 'gluttony', nameKey: 'gluttony.name' },
+  { id: 'wrath', nameKey: 'wrath.name' },
+  { id: 'sloth', nameKey: 'sloth.name' },
+  { id: 'greed', nameKey: 'greed.name' },
 ];
 
-/** 默认选中的（也是目前唯一的）。 */
+/**
+ * **开发中**的出战单位（备战界面里灰掉、标"开发中"、不能开战）。
+ *
+ * ==================================================================
+ * 为什么是**独立的一张表**，不是 `RosterEntry` 上的字段
+ * ==================================================================
+ *
+ * 1. **它是状态，不是身份**。素材、名字、血量上限是条目的一部分；
+ *    "做完了没有"会变 —— 做完一个就把它从这里删掉，条目本身不用动。
+ * 2. `tests/unit/prepareLogic.test.ts` 明确要求条目形状就是
+ *    `{ id, nameKey }` 两个键（需求纠正过：不要顺手给角色编称号/简介）。
+ *    加字段会让那条断言失败 —— 而那条断言是**对的**。
+ *
+ * ⚠️ 做完一个 Boss 时，**同时**要把它从这两处去掉：本表 + 它的
+ * 行为表（`data/units.ts` 的 `behaviorsFor` 目前给它们的是占位轮转）。
+ */
+const DEVELOPING: ReadonlySet<string> = new Set([
+  'kaili',
+  'daixuan',
+  'envy',
+  'gluttony',
+  'wrath',
+  'sloth',
+  'greed',
+]);
+
+/** 这个出战单位是不是还在开发中（备战界面据此灰掉 + 禁止开战）。 */
+export function isDeveloping(id: string): boolean {
+  return DEVELOPING.has(id);
+}
+
+/** 默认选中的（也是目前唯一开发完成的）。 */
 export const DEFAULT_PLAYER_ID = 'player';
 export const DEFAULT_BOSS_ID = 'meiichiro';
 
@@ -69,6 +116,11 @@ export function findEntry(
  *
  * ⚠️ 存储里的 id 可能来自旧版本（人物被删、改名）—— 直接信它会让备战
  * 界面"选中一个不存在的人"，进而起战斗时拿到空配置。
+ *
+ * ⚠️ **开发中的单位也是"可选"的**：它要在备战界面里被选中、被看到灰掉
+ * （需求："备战界面里列出来但灰掉"）。能不能**开战**由 `isDeveloping`
+ * 在开始那一刻判，不在这里判 —— 否则玩家永远看不到它灰着的样子，
+ * 只会觉得"这个角色不存在"。
  */
 export function resolvePlayerId(raw: string | null | undefined): string {
   return raw !== null && raw !== undefined && findEntry(PLAYER_ROSTER, raw) !== undefined

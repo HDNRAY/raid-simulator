@@ -84,9 +84,24 @@ export function makePlayer(id: string): Combatant {
  * ⚠️ 行为表是**每个 Boss 自己的**，而技能注册表是**共用的** ——
  * 所以"两个 Boss 的技能都在 `ALL_SKILLS` 里"是正常的：各自只会放
  * 自己轮转里列出的那些。
+ *
+ * ==================================================================
+ * ⚠️ 新增的 5 个 Boss **还没有自己的行为表**（本次范围只到"能上场看到"）
+ * ==================================================================
+ *
+ * 它们暂时借用「傲慢」的轮转 —— 不是"临时数值"，而是**占位**：
+ * 备战界面里它们被灰掉（`roster.isDeveloping`），正常情况下**进不了战斗**；
+ * 借这一手是为了"万一从别的路径（存档 / 调试参数）进来了也不要崩"。
+ *
+ * 做完某个 Boss 时，在这里补一条它自己的行为表，并把 id 从
+ * `data/roster.ts` 的 `DEVELOPING` 里删掉。
  */
+const BOSS_BEHAVIORS: ReadonlyMap<string, readonly Behavior[]> = new Map([
+  ['lust', LUST_BEHAVIORS],
+]);
+
 export function behaviorsFor(id: string): readonly Behavior[] {
-  return id === 'lust' ? LUST_BEHAVIORS : PRIDE_BEHAVIORS;
+  return BOSS_BEHAVIORS.get(id) ?? PRIDE_BEHAVIORS;
 }
 
 /**

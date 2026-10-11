@@ -12,25 +12,29 @@ import type { Container, Graphics } from 'pixi.js';
 import { FONT, LOGICAL } from '../layout';
 import { PALETTE } from '../../render/theme';
 import { isReservedKey, reservedKeyLabel } from '../../input/keyboard';
+import { beginCapture, classifyCaptureKey, endCapture, type CaptureState } from './captureState';
+import {
+  executeKeyPanelAction,
+  executePanelDispatch,
+  resolveCycleFocus,
+  resolveKeyDispatch,
+  resolveMoveFocus,
+  resolvePanelDispatch,
+} from './panelDispatch';
 import { KeyGrid } from './KeyGrid';
 import { SkillDetail } from './SkillDetail';
 import { SettingsFrame } from './SettingsFrame';
 import { KeysFooter } from './KeysFooter';
 import type { KeyRow } from './rows';
 import { ScaleSlider } from './ScaleSlider';
-import { detectBrowserPlatform } from '../../render/platform';
 import type { PixiCtor } from '../primitives';
+import type { TranslateFn } from '../../i18n/translator';
 import {
   INITIAL_FOCUS,
-  cycleZone,
-  hitTest as hitTestLogic,
-  resolveKeyAction,
+  hitTest,
   uiScaleFromPointer,
   uiScaleSliderRect,
   contains,
-  moveFocus,
-  resolveActivate,
-  resolveRowTap,
   type SettingsFocus,
   type SettingsTab,
 } from './logic';
@@ -40,7 +44,18 @@ export type { KeyRow } from './rows';
 
 export interface SettingsPanelOptions {
   readonly pixi: PixiCtor;
-  readonly translate: (key: string) => string;
+  /**
+   * ⚠️ **必须带上 `params`**。
+   *
+   * 这里原先写的是 `(key: string) => string` —— 于是所有拿它去满足
+   * `buildKeyRows`（那边要 `(key, params?) => string`）的地方都会
+   * **静默丢掉第二个参数**（TS 允许"参数更少"的函数赋值给"参数更多"的类型），
+   * 界面上就显示出 `{seconds}` / `{value} {resource}` 这些占位符本身 ✗
+   *
+   * 类型收窄本身**不是错**，但它把"丢参数"从"显而易见的 bug"变成了
+   * "编译器保证正确的写法"。宽到 `params` 才能让实现无处可躲。
+   */
+  readonly translate: TranslateFn;
   /** 读取当前键位表 */
   readonly getRows: () => readonly KeyRow[];
   /** 改键：把某个技能的键改成 `key` */
@@ -126,14 +141,23 @@ export class SettingsPanel {
    * 都在这个线性游标上。
    */
   private focus: SettingsFocus = INITIAL_FOCUS;
-  /**
-   * 改键开始的时间戳（`performance.now()`）。
-   *
-   * 用来挡掉"触发改键的那一次按键本身" —— 见 `startCapture` 的说明。
-   */
   private visible = false;
-  /** 正在等待按键的技能 id（undefined = 没在捕获） */
-  private capturingSkill: string | undefined;
+  /**
+   * 改键状态（"正在等待按键"）。
+   *
+   * ⚠️ 它是 `./captureState` 里的一个**值**，不是散落的两个字段 ——
+   * 语义（triggerKey 该不该作废、Esc 怎么退）全在那个模块里，面板只负责
+   * 把判定执行掉。那段逻辑刚连出过三个 bug，所以现在有单测。
+   */
+  private capture: CaptureState = endCapture();
+  /**
+   * 上一次悬停到的技能格（`hoverSkill` 用）。
+   *
+   * ⚠️ 存在的理由是"别和方向键打架"：`pointermove` 会在鼠标微抖时反复
+   * 触发，若每次都重设焦点，方向键刚移走的焦点会被立刻拽回来。
+   * 只有**格子真的换了**才改焦点。详见 `hoverSkill` 的说明。
+   */
+  private lastHoverId: string | undefined;
   /** 提示文字（冲突/已恢复默认） */
   private notice = '';
   private noticeTtl = 0;
@@ -147,17 +171,17 @@ export class SettingsPanel {
     this.dim.rect(0, 0, LOGICAL.width, LOGICAL.height).fill({ color: 0x000000, alpha: 0.66 });
     this.root.addChild(this.dim);
 
-    this.frame = new SettingsFrame(pixi, (key) => this.options.translate(key));
+    this.frame = new SettingsFrame(pixi, (key, params) => this.options.translate(key, params));
     this.root.addChild(this.frame.root);
 
     /* ---- 内容区 ---- */
     this.body = new pixi.Container();
     this.root.addChild(this.body);
 
-    this.keyGrid = new KeyGrid(pixi, (key) => this.options.translate(key));
+    this.keyGrid = new KeyGrid(pixi, (key, params) => this.options.translate(key, params));
     this.body.addChild(this.keyGrid.root);
 
-    this.footer = new KeysFooter(pixi, (key) => this.options.translate(key), () => this.notice);
+    this.footer = new KeysFooter(pixi, (key, params) => this.options.translate(key, params), () => this.notice);
     this.body.addChild(this.footer.root);
 
     /* ---------- 通用页：UI 缩放滑块 ---------- */
@@ -167,7 +191,7 @@ export class SettingsPanel {
     });
     this.touchPreview.visible = false;
     this.body.addChild(this.touchPreview);
-    this.detail = new SkillDetail(pixi, (key) => this.options.translate(key));
+    this.detail = new SkillDetail(pixi, (key, params) => this.options.translate(key, params));
     this.body.addChild(this.detail.root);
 
     this.scaleSlider = new ScaleSlider({
@@ -191,18 +215,9 @@ export class SettingsPanel {
     return this.tab === 'keys';
   }
 
-  /** 某一行的矩形（相对弹窗内的固定偏移）。 */
   get isOpen(): boolean {
     return this.visible;
   }
-
-  /**
-   * 是否作废下一次捕获回调（"触发改键的那一次按键"）。
-   *
-   * 每次 `startCapture` 置位、`finishCapture` 或 `stopCapture` 清零 ——
-   * 所以它不可能卡住。
-   */
-  private skipNextCapture = false;
 
   /** 按键轨迹（环形缓冲，供调试探针读取）。
    *
@@ -215,7 +230,7 @@ export class SettingsPanel {
 
   /** 正在等待按键的技能 id（调试探针用）。 */
   get capturingSkillId(): string | undefined {
-    return this.capturingSkill;
+    return this.capture.skillId;
   }
 
   /** 当前键盘焦点（调试探针用）。 */
@@ -244,13 +259,6 @@ export class SettingsPanel {
   }
 
   /**
-   * 点一下某个位置。命中测试自己算（不做逐对象事件绑定）—— 弹窗只有
-   * 十几个可点区域，"第一个命中的"循环就够，也比 Pixi 的事件系统更容易
-   * 在测试里驱动。
-   *
-   * @returns 是否消费了这次点击
-   */
-  /**
    * 当前是否显示键名（决定网格度量）。
    * ⚠️ 命中测试与渲染必须用同一个值，否则可点区与画出的位置错开。
    */
@@ -258,78 +266,40 @@ export class SettingsPanel {
     return this.options.getShowKeyHints?.() !== false;
   }
 
+  /**
+   * 点一下某个位置。**决策与执行**都在 `./panelDispatch`（纯函数，可单测），
+   * 这里只把面板的各个能力接进去。
+   *
+   * @returns 是否消费了这次点击
+   */
   hitTest(px: number, py: number): boolean {
     if (!this.visible) return false;
 
-    const target = hitTestLogic(px, py, {
+    const action = resolvePanelDispatch({
+      visible: this.visible,
       tab: this.tab,
+      px,
+      py,
       rowSkillIds: this.options.getRows().map((r) => r.skillId),
+      focus: this.focus,
+      capturingSkillId: this.capture.skillId,
       showKeyHints: this.showKeyHintsNow,
     });
 
-    switch (target.kind) {
-      case 'outside':
-        this.options.onClose();
-        return true;
-      case 'tab':
-        this.setTab(target.tab);
-        return true;
-      case 'resetKeys':
-        this.options.onResetKeys();
-        this.setNotice(this.options.translate('settings.keysResetDone'));
-        this.redraw();
-        return true;
-      case 'keyRow': {
-        const rows = this.options.getRows();
-        const action = resolveRowTap(
-          {
-            focusedSkillId:
-              this.focus.zone === 'grid' ? rows[this.focus.index]?.skillId : undefined,
-            capturingSkillId: this.capturingSkill,
-            isTouch: detectBrowserPlatform().touch,
-            touchedSkillId: target.skillId,
-          },
-        );
-        if (action.kind === 'bind') {
-          /**
-           * ⚠️ 触屏要的是**换位置**，不是换键 —— 触屏按钮顺序来自绑定表
-           * 顺序，而改键只换键、不动顺序。详见 `app/bindingActions.ts`。
-           */
-          const from = rows.findIndex((r) => r.skillId === this.capturingSkill);
-          const to = rows.findIndex((r) => r.skillId === action.skillId);
-          if (from >= 0 && to >= 0) {
-            this.stopCapture();
-            this.options.onSwapSlots(from, to);
-          }
-          this.redraw();
-          return true;
-        }
-        this.setFocusToSkill(target.skillId);
-        if (action.kind === 'capture') {
-          this.startCapture(target.skillId);
-          this.redraw();
-        }
-        return true;
-      }
-      case 'close':
-        // 曾经只是 Label、没有命中测试 → 点了没反应（已修）
-        this.options.onClose();
-        return true;
-      case 'scaleSlider':
-        /**
-         * 鼠标点/拖滑块：由横坐标直接反算倍数（点到哪跳到哪）。
-         *
-         * 需求："ui 缩放的 slider 还是要支持鼠标。"
-         * 拖动也能用，因为主循环每次 pointerdown / pointermove 都会
-         * 走到这里 —— 面板不需要自己维护"是否在拖"的状态。
-         */
-        this.options.onUiScale(uiScaleFromPointer(px));
-        this.redraw();
-        return true;
-      case 'none':
-        // 点在弹窗内的空白处：消费掉，不穿透到战斗
-        return true;
-    }
+    return executePanelDispatch(action, {
+      close: () => this.options.onClose(),
+      switchTab: (tab) => this.setTab(tab),
+      resetKeys: () => this.options.onResetKeys(),
+      notice: (key) => this.setNotice(this.options.translate(key)),
+      swapSlots: (from, to) => {
+        this.stopCapture();
+        this.options.onSwapSlots(from, to);
+      },
+      focusSkill: (skillId) => this.setFocusToSkill(skillId),
+      startCapture: (skillId) => this.startCapture(skillId),
+      uiScale: (value) => this.options.onUiScale(value),
+      redraw: () => this.redraw(),
+    });
   }
 
   /**
@@ -349,16 +319,39 @@ export class SettingsPanel {
    *
    * 需求要求合并这两者；悬停也走同一条路径，所以"鼠标划过"与
    * "方向键移动"看到的是同一个高亮、同一份详情。
+   *
+   * ==================================================================
+   * ⚠️ 只有**hover 的格子变了**才改焦点
+   * ==================================================================
+   *
+   * 玩家原话："关键是 hover 停止后，方向键要依然有效。"
+   *
+   * 症状：光标停在一个格子上，用方向键把焦点移走 —— **焦点立刻被拽回来**，
+   * 于是"方向键没反应"。原因是 `pointermove` 会在鼠标**极其轻微**的抖动下
+   * 反复触发（甚至像素级抖动也算），每次都把焦点重设成光标所在那一格。
+   *
+   * 所以记住上一次悬停的格子，**同一个格子上的重复 hover 直接忽略**：
+   *   - 光标停着不动（或微抖） → 方向键移走的焦点**留得住**
+   *   - 光标真的移到另一格 → 才换焦点
+   *   - 光标离开网格（`lastHoverId` 清空）→ 再移回来仍能选中它
+   *
+   * 清空那一步不能省：否则"移到 A → 方向键到 B → 移开 → 再移回 A"
+   * 会因为 A 还是 `lastHoverId` 而**选不动 A**。
    */
   hoverSkill(px: number, py: number): void {
     if (!this.visible || this.tab !== 'keys') return;
     const rows = this.options.getRows();
-    const target = hitTestLogic(px, py, {
+    const target = hitTest(px, py, {
       tab: this.tab,
       rowSkillIds: rows.map((r) => r.skillId),
       showKeyHints: this.showKeyHintsNow,
     });
-    if (target.kind !== 'keyRow') return;
+    if (target.kind !== 'keyRow') {
+      this.lastHoverId = undefined;
+      return;
+    }
+    if (target.skillId === this.lastHoverId) return;
+    this.lastHoverId = target.skillId;
     this.setFocusToSkill(target.skillId);
   }
 
@@ -387,169 +380,110 @@ export class SettingsPanel {
   /**
    * 键盘输入（弹窗打开时由主循环转发过来）。
    *
-   * @returns 是否消费了这次按键
-   */
-  /**
-   * 键盘输入（弹窗打开时由主循环转发）。
+   * **决策与执行**都在 `./panelDispatch`（纯函数，可单测）；这里只把面板的
+   * 各个能力接进去，并套用"焦点变了 / 要调滑块"这两个结果。
    *
    * @returns 是否消费了这次按键
    */
   handleKey(key: string): boolean {
     if (!this.visible) return false;
-    const cellCount = this.options.getRows().length;
 
-    const action = resolveKeyAction(key, this.capturingSkill !== undefined);
-    this.settingsTrace.push(`handleKey(${key}) cap=${this.capturingSkill ?? '-'} -> ${action.kind}`);
+    const rows = this.options.getRows();
+    const dispatch = resolveKeyDispatch({
+      visible: this.visible,
+      key,
+      capturingSkillId: this.capture.skillId,
+      focus: this.focus,
+      rowSkillIds: rows.map((r) => r.skillId),
+    });
+    this.settingsTrace.push(dispatch.trace);
     if (this.settingsTrace.length > 40) this.settingsTrace.shift();
 
-    switch (action.kind) {
-      case 'cancelCapture':
-        this.stopCapture();
-        this.redraw();
-        return true;
-      case 'closePanel':
-        this.options.onClose();
-        return true;
-      case 'capture':
-        // 捕获模式下输入层直接回调，这里不重复处理
-        return true;
-      case 'mnemonic':
-        this.applyMnemonic(action.target);
-        return true;
-      case 'move': {
-        /**
-         * slider 焦点下，**左右是"调值"而不是"移动焦点"**。
-         *
-         * 需求："设置的通用里，加一个 UI 缩放的 slide，可以调整所有 UI 的比例"，
-         * 而本项目要求"几乎全键盘可操作"，所以 slider 必须能纯键盘调。
-         * 上下仍然用于离开这一项（回 tab 行 / 去恢复按钮）。
-         */
-        const horizontal = action.direction === 'left' || action.direction === 'right';
-        if (this.focus.zone === 'slider' && horizontal) {
-          this.scaleSlider.nudge(action.direction === 'right' ? 1 : -1);
-          this.redraw();
-          return true;
-        }
-        this.focus = moveFocus(
-          this.focus,
-          action.direction,
-          cellCount,
-          this.hasSlider(),
-          this.hasGrid(),
-        );
-        this.redraw();
-        return true;
-      }
-      case 'cycle':
-        this.focus = cycleZone(this.focus, cellCount, action.back, this.hasSlider());
-        this.redraw();
-        return true;
-      case 'activate':
-        this.activateFocus();
-        return true;
-      case 'ignore':
-        return true;
-    }
-  }
+    const result = executeKeyPanelAction(
+      { action: dispatch.action, activate: dispatch.activate, key },
+      {
+        close: () => this.options.onClose(),
+        switchTab: (tab) => this.setTab(tab),
+        resetKeys: () => this.options.onResetKeys(),
+        notice: (text) => this.setNotice(this.options.translate(text)),
+        rebind: (skillId, boundKey) => this.options.onRebind(skillId, boundKey),
+        startCapture: (skillId, triggerKey) => this.startCapture(skillId, triggerKey),
+        stopCapture: () => this.stopCapture(),
+        finishCapture: (captured) => this.finishCapture(captured),
+        moveFocus: (direction) =>
+          resolveMoveFocus({
+            focus: this.focus,
+            direction,
+            cellCount: rows.length,
+            hasSlider: this.hasSlider(),
+            hasGrid: this.hasGrid(),
+          }),
+        cycleFocus: (back) =>
+          resolveCycleFocus({
+            focus: this.focus,
+            cellCount: rows.length,
+            back,
+            hasSlider: this.hasSlider(),
+          }),
+        nudgeSlider: (direction) => {
+          this.scaleSlider.nudge(direction);
+        },
+        redraw: () => this.redraw(),
+      },
+    );
 
-  /** 激活当前焦点（Enter / 空格）。 */
-  /**
-   * 助记键直达（G / K / R / S）。
-   *
-   * ⚠️ 每个分支都**同时移动焦点** —— 否则按完 G 之后 `Enter` 还会
-   * 作用在原位置上，玩家会觉得"键没生效"。
-   */
-  private applyMnemonic(target: 'tabGeneral' | 'tabKeys' | 'resetKeys' | 'slider'): void {
-    switch (target) {
-      case 'tabGeneral':
-        this.setTab('general');
-        this.focus = { zone: 'tabs', index: 0 };
-        this.redraw();
-        return;
-      case 'tabKeys':
-        this.setTab('keys');
-        this.focus = { zone: 'tabs', index: 1 };
-        this.redraw();
-        return;
-      case 'resetKeys':
-        // 恢复默认属于按键页 —— 先切过去，玩家才看得到结果
-        this.setTab('keys');
-        this.options.onResetKeys();
-        this.setNotice(this.options.translate('settings.keysResetDone'));
-        this.redraw();
-        return;
-      case 'slider':
-        /**
-         * UI 缩放只在通用页存在，所以先切页 —— 否则焦点会落在一个
-         * 不可见的控件上（那正是之前「滑块漏到按键页」那类 bug 的温床）。
-         */
-        this.setTab('general');
-        this.focus = { zone: 'slider' };
-        this.redraw();
-        return;
-    }
-  }
-
-  private activateFocus(): void {
-    const action = resolveActivate(this.focus, this.options.getRows().map((r) => r.skillId));
-    switch (action.kind) {
-      case 'switchTab':
-        this.setTab(action.tab);
-        return;
-      case 'startCapture':
-        this.startCapture(action.skillId);
-        return;
-      case 'resetKeys':
-        this.options.onResetKeys();
-        this.setNotice(this.options.translate('settings.keysResetDone'));
-        this.redraw();
-        return;
-      case 'close':
-        this.options.onClose();
-        return;
-      case 'none':
-        return;
-    }
-  }
-
-  private startCapture(skillId: string): void {
-    this.settingsTrace.push(`startCapture(${skillId})`);
-    this.capturingSkill = skillId;
+    if (result.focus !== undefined) this.focus = result.focus;
+    if (result.nudgeSlider !== undefined) this.scaleSlider.nudge(result.nudgeSlider);
     /**
-   * 跳过**触发改键的那一次按键**。
-   *
-   * 进捕获模式的那个 keydown 本身不该被当成"新绑定的键" ——
-   * 否则按 Enter 改键会立刻把技能绑到 Enter 上。
-   */
-    this.skipNextCapture = true;
-    /**
-     * 时序守卫：记录改键开始的时刻，**同一瞬间到达的按键一律忽略**。
-     *
-     * 重入问题**不在这里解决** —— 它发生在输入层与主监听器之间，
-     * 由 `main.ts` 的 `dispatching` 标记挡掉（见那里的说明）。
-     * 组件这一层只关心"收到一个键，就处理一个键"。
+     * ⚠️ `redraw === false` 时**不要重画** —— 那是 `ignore`（什么都没改）。
+     * 按住一个与设置无关的键会连续打到这里（`settingsKeys` 不过滤
+     * `event.repeat`），无条件重画等于按按键重复率重绘整个面板。
+     * 详见 `KeyExecutionResult.redraw` 的说明。
      */
+    if (result.redraw !== false) this.redraw();
+    return result.consumed;
+  }
+
+  /**
+   * 进入改键（等待一个按键）。
+   *
+   * ⚠️ 状态本身（以及"触发键只作废一次"的判据）在 `./captureState` ——
+   * 抽出去是因为那段语义刚连出过三个 bug，需要单测；面板只负责把
+   * 结果执行掉（注册捕获回调、重画）。
+   *
+   * @param triggerKey **触发改键的那一次按键**（键盘 Enter 进来时就是
+   *   `'enter'`；**鼠标点击进来时没有这一次按键**，所以传 `undefined`）。
+   */
+  private startCapture(skillId: string, triggerKey?: string): void {
+    this.settingsTrace.push(`startCapture(${skillId}) trigger=${triggerKey ?? '-'}`);
+    this.capture = beginCapture(skillId, triggerKey);
     this.options.onCapture((key) => this.finishCapture(key));
     this.redraw();
   }
 
   private stopCapture(): void {
-    if (this.capturingSkill !== undefined) {
-      this.settingsTrace.push(`stopCapture(was ${this.capturingSkill})`);
+    if (this.capture.skillId !== undefined) {
+      this.settingsTrace.push(`stopCapture(was ${this.capture.skillId})`);
     }
-    this.capturingSkill = undefined;
-    this.skipNextCapture = false;
+    this.capture = endCapture();
     this.options.onCapture(undefined);
   }
 
   private finishCapture(key: string): void {
-    this.settingsTrace.push(`finishCapture(${key}) skip=${this.skipNextCapture}`);
-    const skillId = this.capturingSkill;
+    this.settingsTrace.push(
+      `finishCapture(${key}) skip=${this.capture.triggerKey ?? '-'}`,
+    );
+    const skillId = this.capture.skillId;
     if (skillId === undefined) return;
 
-    // 作废"触发改键的那一次按键" —— 见 `startCapture` 的说明
-    if (this.skipNextCapture) {
-      this.skipNextCapture = false;
+    const verdict = classifyCaptureKey(this.capture, key);
+    if (verdict.kind === 'skip') {
+      // 作废"触发改键的那一次按键" —— 只作废一次，之后照常捕获
+      this.capture = { ...this.capture, triggerKey: undefined };
+      return;
+    }
+    if (verdict.kind === 'cancel') {
+      this.stopCapture();
       return;
     }
 
@@ -665,12 +599,12 @@ export class SettingsPanel {
      */
     this.keyGrid.update(rows, {
       focusIndex: this.focus.zone === 'grid' ? this.focus.index : -1,
-      capturingSkillId: this.capturingSkill,
+      capturingSkillId: this.capture.skillId,
       showKeyHints: this.options.getShowKeyHints?.() !== false,
     }, (row) => this.drawDetail(row));
 
     this.footer.updateKeys(
-      this.capturingSkill !== undefined,
+      this.capture.skillId !== undefined,
       this.focus.zone === 'reset',
       this.options.getShowKeyHints?.() !== false,
     );
@@ -690,10 +624,3 @@ export class SettingsPanel {
 
   /** 空 tab 的占位：一行主文案 + 一行提示，避免一片空白让人以为坏了。 */
 }
-
-/**
- * 标签行的颜色。
- *
- * 取**优先级最高的那一个**标签的颜色 —— 一行小字里混两种颜色会更乱，
- * 而标签本来就是"最该注意的那条"提示。
- */

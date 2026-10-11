@@ -14,6 +14,7 @@ import type { Container, Graphics } from 'pixi.js';
 import { FONT } from '../layout';
 import { Label, Panel, type PixiCtor } from '../primitives';
 import { PALETTE } from '../../render/theme';
+import type { TranslateFn } from '../../i18n/translator';
 import {
   CLOSE_BUTTON,
   SETTINGS_PANEL,
@@ -39,7 +40,7 @@ export class SettingsFrame {
 
   constructor(
     pixi: PixiCtor,
-    private readonly translate: (key: string) => string,
+    private readonly translate: TranslateFn,
   ) {
     this.root = new pixi.Container();
     const x = SETTINGS_PANEL.x;

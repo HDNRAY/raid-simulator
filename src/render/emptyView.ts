@@ -19,7 +19,6 @@ import { IDLE_FEEDBACK } from './feedback';
 /** 一个"什么都没有"的单位视图（血 0 / cap 1，避免 UI 除零）。 */
 export function emptyCombatant(id: string): CombatantView {
   return {
-    attacking: false,
     stunned: false,
     feedback: IDLE_FEEDBACK,
     id,
@@ -43,8 +42,6 @@ export function emptyView(tick: number): BattleSnapshotView {
     boss: { ...emptyCombatant('meiichiro'), side: 'enemy' },
     skills: [],
     floatingText: [],
-    telegraphing: false,
-    armored: false,
     playerFlash: 0,
     bossFlash: 0,
   };

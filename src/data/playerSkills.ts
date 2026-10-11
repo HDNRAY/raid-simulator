@@ -138,13 +138,15 @@ export const JIE: SkillDef = {
     },
   ],
   tags: [],
-  /** 提示玩家"这一招会打断目标" */
-  hintTags: ['interrupt'],
+  /**
+   * ⚠️ 原先这里还有 `hintTags: ['interrupt']`，已删 —— 提示现在从
+   * `hits[].effects` 里的 `interrupt` 效果推导（见 `app/skillHints.ts`）。
+   */
   interruptible: false,
 };
 
 /**
- * 「击」：**派生技**，无消耗，伤害是「攻」的一半。
+ * 「击」：**派生技**，无消耗，伤害是「斩」的一半。
  *
  * 需求："新增『击』这个技能，伤害比攻少一半，但是没有消耗。"
  *
@@ -178,7 +180,7 @@ export const STRIKE: SkillDef = {
       effects: [
         {
           kind: 'damage',
-          /** 「攻」是 `S(10)`，所以这里 `S(5)` —— "伤害比攻少一半"。 */
+          /** 「斩」是 `S(10)`，所以这里 `S(5)` —— "伤害比攻少一半"。 */
           damage: { base: S(5), canCrit: false, countsAsHit: true },
         },
         /**

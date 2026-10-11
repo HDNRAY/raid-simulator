@@ -122,8 +122,6 @@ const emptySnapshot: BattleSnapshotView = {
   boss: EMPTY_COMBATANT,
   skills: [],
   floatingText: [],
-  telegraphing: false,
-  armored: false,
   playerFlash: 0,
   bossFlash: 0,
 };
@@ -170,7 +168,7 @@ describe('设置页要能看到「闪避」tag（用户报告）', () => {
     expect(dodgeRow?.mechanicTags).toEqual(['dodge']);
     /**
      * ⚠️ `melee` 是给引擎看的（触发器的 filter），**不显示给玩家** ——
-     * 全画出来只会增加噪音。所以「攻」没有 mechanicTags。
+     * 全画出来只会增加噪音。所以「斩」没有 mechanicTags。
      */
     expect(attackRow?.mechanicTags).toBeUndefined();
   });

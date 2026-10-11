@@ -60,19 +60,22 @@ export type SkillTag =
   | 'dodge';
 
 /**
- * 招式的**玩法提示标签**（给玩家看的，不参与计算）。
+ * ⚠️ 这里**曾经**有过一个 `'knockdown'`（「倒地」）值，已删。
  *
- * ⚠️ 与 `SkillTag` 分开的理由是**生命周期不同**：`tags` 是静态作者数据，
- * 而 `hintTags` 在视图层是**计算集**（`viewAdapter` 会把霸体等状态派生
- * 进去）—— 合并后就没地方放"由状态推出的提示"。标识符英文，文案在 i18n。
+ * 它只活了一小会儿：为了让玩家看到"傲慢的哪一招会让人倒地"而加，
+ * 但那个做法是**在手写一份已经存在的数据** —— 倒地这件事的真相在
+ * `KNOCKDOWN` 这个 `BuffDef` 里（它自己就有 `nameKey: 'debuff.knockdown.name'`
+ * =「倒地」）。
+ *
+ * 现在控制类提示**从效果推导**，取的就是 debuff 自己的名字
+ * （见 `app/skillHints.ts`）。所以再加一个 union 值只会是：
+ *   1. 一份需要人工同步的副本（玩家已经因为不同步报过两次 bug）
+ *   2. 一个"只能表达倒地、表达不了眩晕"的特例
+ *
+ * 于是它被推导取代了 —— **不要加回来**。要新增一个"会控住玩家"的
+ * debuff，只要那个 buff 带上 `actionLock` / `restrictToTags`，
+ * 读条上就自动出现它的名字。
  */
-export type HintTag =
-  /** 「霸体」：无法被打断 —— 别浪费打断技 */
-  | 'interruptImmune'
-  /** 「高伤」：单次伤害很高 —— 闪避（全免）比防御（减伤）更值 */
-  | 'highDamage'
-  /** 「打断」：这一招会打断目标读条 */
-  | 'interrupt';
 
 
 export type HookFilter =

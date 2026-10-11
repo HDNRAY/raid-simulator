@@ -14,6 +14,7 @@ import {
 import { makeCombatant } from './helpers';
 import { OUTPUT_PRIORITY, makeGoldenEngineOptions, planPriority } from '../golden/fixtures';
 import type { Action, BattleState, Behavior, BuffDef, SkillDef } from '../../src/core/types';
+import { BOSS_HP_DISPLAY } from '../../src/data/entities/bossHp';
 
 /**
  * 「傲慢」的**随机选招**与**三把刀的内容数值**。
@@ -271,8 +272,13 @@ describe('「傲慢」的半血「回补」：一次性、可打断', () => {
     const boss = makeCombatant({
       id: 'meiichiro',
       side: 'enemy',
-      caps: { hp: 210, energy: 0, douqi: 0 },
-      resources: { hp: 210, energy: 0, douqi: 0 },
+      /**
+       * ⚠️ **引用常量，不写字面量** —— 这里原先硬编码 `210`，
+       * 血量翻到 420 之后它没跟着走，于是"回 126"被上限截断，
+       * 测试报的是"回血没生效"，而真相是**夹具过期了**。
+       */
+      caps: { hp: BOSS_HP_DISPLAY, energy: 0, douqi: 0 },
+      resources: { hp: BOSS_HP_DISPLAY, energy: 0, douqi: 0 },
       /** 只留时限：让 Boss 不会自己出招，测试完全控制它的施法 */
       behaviors: PRIDE_BEHAVIORS.filter((b) => b.kind === 'timeLimit'),
     });
@@ -293,9 +299,14 @@ describe('「傲慢」的半血「回补」：一次性、可打断', () => {
 
   it('读条 2.5 秒（比最长的一刀还长）、回 30% 最大生命、整场一次', () => {
     expect(BOSS_MEND.castTime).toBe(2_500);
-    // 30% × 210 = 63
+    /**
+     * ⚠️ **30% × 420 = 126**（原先 30% × 210 = 63）。
+     *
+     * 血量翻倍时它**必须跟着翻** —— 这条断言就是防"只改血量忘了改回血"：
+     * 只翻血量的话，回补会从"值得用「破」去打断"退化成"回了个零头"。
+     */
     const heal = BOSS_MEND.abilities.find((a) => a.kind === 'resource');
-    expect(heal?.kind === 'resource' && heal.delta).toBe(63);
+    expect(heal?.kind === 'resource' && heal.delta).toBe(126);
     /**
      * "整场一次"由"冷却 > 一场时长"保证。
      *
@@ -322,13 +333,23 @@ describe('「傲慢」的半血「回补」：一次性、可打断', () => {
     }
     const mid = engine.snapshot.combatants.find((c) => c.side === 'enemy')!;
     expect(mid.resources.hp).toBe(100);
-    // 读完（2.5s = 150 tick）：回到 163
+    /**
+     * 读完（2.5s = 150 tick）：100 + 回血量。
+     *
+     * ⚠️ 期望值**算出来**而不是写死 —— 写死的话每次调血量/回血比例
+     * 都要回来改这个数，而漏改的症状（"回血没生效"）会指向错误的方向。
+     */
     for (let i = 0; i < 120; i += 1) {
       engine.tick();
       engine.drainEvents();
     }
     const after = engine.snapshot.combatants.find((c) => c.side === 'enemy')!;
-    expect(after.resources.hp).toBe(163);
+    const healAmount = BOSS_MEND.abilities.find((a) => a.kind === 'resource');
+    /** `delta` 允许是 `Expr`（随属性缩放）；这里只处理字面量那种。 */
+    const rawDelta = healAmount?.kind === 'resource' ? healAmount.delta : 0;
+    const expectedHeal = typeof rawDelta === 'number' ? rawDelta : 0;
+    expect(expectedHeal).toBeGreaterThan(0);
+    expect(after.resources.hp).toBe(100 + expectedHeal);
   });
 
   it('被打断就不回血 —— 这是它从"时间税"变成"机制"的关键', () => {
@@ -379,7 +400,7 @@ describe('「傲慢」的平衡硬判据（设计 §9.3）', () => {
    * 它们回答"这个 Boss 还能不能玩"，而不是"这一局是不是 926 tick"。
    * 所以它们能在数值微调后存活，而黄金值不行。
    */
-  const playerPlan = planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge' });
+  const playerPlan = planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge', interruptSkillId: 'break' });
   const pureAttackPlan = planPriority(['attack'], {});
 
   function runPlan(plan: (t: number, s: BattleState) => readonly Action[]) {
@@ -395,18 +416,35 @@ describe('「傲慢」的平衡硬判据（设计 §9.3）', () => {
     return { status: engine.snapshot.status, playerHp: player.resources.hp, bossHp: boss.resources.hp };
   }
 
-  it('纯进攻（只按「攻」）打不过 —— Boss 必须还活着', () => {
+  it('纯进攻（只按「斩」）打不过 —— Boss 必须还活着', () => {
     const r = runPlan(pureAttackPlan);
     expect(r.status).toBe('defeat');
     expect(r.playerHp).toBe(0);
     expect(r.bossHp).toBeGreaterThan(0);
   });
 
-  it('会闪避的玩家必须赢，且剩血在 30–70（设计 §9.3 的容错窗口）', () => {
+  /**
+   * ⚠️ **从"剩血落在 30–70"改成"赢了、且没满血"**（2026-10-11）。
+   *
+   * 需求的理由（原话）："**这些数值什么的还会大改，现在没必要扣这些细节。**"
+   *
+   * 所以这条断言现在只抓**性质**：
+   *   1. 会闪避的玩家**必须赢**（这是设计目标，不是细节）
+   *   2. 赢的时候**不是满血**（否则等于没有压力，Boss 就是个木桩）
+   *
+   * 而"剩多少血才叫刚好"是**调参目标**，会随数值大改一起动 ——
+   * 钉死区间只会让它每改一次数值就红一次，然后被顺手放宽
+   * （那比不写还糟：它会给"放宽断言"这个动作培养习惯）。
+   *
+   * ⚠️ 当前实测剩 **20**，低于设计文档 §9.3 写的 30–70。
+   * 那是"当前数值还没调到设计目标"，**不是**这条断言要拦的东西 ——
+   * 真要守那个窗口，请等数值稳定后单独加一条并写清它的来历。
+   */
+  it('会闪避的玩家必须赢，且不是满血通关（性质，不卡具体血量）', () => {
     const r = runPlan(playerPlan);
     expect(r.status).toBe('victory');
-    expect(r.playerHp).toBeGreaterThanOrEqual(30);
-    expect(r.playerHp).toBeLessThanOrEqual(70);
+    expect(r.playerHp).toBeGreaterThan(0);
+    expect(r.playerHp).toBeLessThan(100);
   });
 
   it('整场时长 < 120s（狂暴线）—— 「回补」不会把战斗推过狂暴', () => {

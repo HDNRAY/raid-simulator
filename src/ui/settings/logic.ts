@@ -25,12 +25,19 @@
  * 转发出去，外部 import 路径不变。
  */
 import { SETTINGS_PANEL, KEY_GRID, RESET_BUTTON, SKILL_DETAIL } from './settingsGeometry';
-import { EMPTY_KEY, MNEMONIC_KEYS } from './keyNames';
+import { MNEMONIC_KEYS } from './keyNames';
 /**
  * 键名显示与助记键反查搬到了 `./keyNames`（那一撮自成一体的）。
  * 这里**转发**，外部 import 路径不变。
  */
 export { EMPTY_KEY, MNEMONIC_KEYS, keyLabel, mnemonicKeyOf } from './keyNames';
+/**
+ * 改键语义（`RebindResult` / `applyRebind` / `swapSlotSkills` /
+ * `resolveRowTap`）搬到了 `./rebind`（logic.ts 又一次顶到 700 行）。
+ * 这里**转发**，外部 import 路径不变 —— 与上面 `keyNames` 同一做法。
+ */
+export type { RebindResult } from './rebind';
+export { applyRebind, swapSlotSkills, resolveRowTap } from './rebind';
 export {
   SETTINGS_PANEL,
   KEY_GRID,
@@ -258,92 +265,6 @@ export function hitTest(
 }
 
 /* ------------------------------------------------------------------ *
- * 改键
- * ------------------------------------------------------------------ */
-
-export interface RebindResult {
-  readonly bindings: readonly { readonly key: string; readonly skillId: string }[];
-  /** 改键失败的原因；成功时为 undefined */
-  readonly error?: 'conflict';
-  /** 被顶掉绑定的技能（成功时可能有） */
-  readonly unbound?: string;
-}
-
-
-/**
- * 把一个技能改绑到某个键。
- *
- * ------------------------------------------------------------------
- * 冲突策略：**顶掉旧占用者，而不是拒绝**
- * ------------------------------------------------------------------
- *
- * 两种做法都常见。选"顶掉"的理由：玩家改键的意图很明确
- * （"我要让闪避是这个键"），如果因为冲突被拒绝，他还得先去把
- * 旧技能改成别的键、再回来改这个 —— 两次操作做一件事。
- *
- * 但**同一个技能内部**的冲突要拒绝：那是"列表里出现两个相同按键"
- * 这种真错误（例如内容里写错了默认键位）。
- */
-export function applyRebind(
-  bindings: readonly { readonly key: string; readonly skillId: string }[],
-  skillId: string,
-  key: string,
-): RebindResult {
-  if (bindings.some((b) => b.skillId === skillId && b.key === key)) {
-    // 已经是这个键了，无事发生
-    return { bindings };
-  }
-
-  const previous = bindings.find((b) => b.skillId === skillId);
-  const next = bindings.map((b) => {
-    if (b.skillId === skillId) return { ...b, key };
-    // 顶掉占用同一个键的其它技能
-    if (b.key === key) return { ...b, key: EMPTY_KEY };
-    return b;
-  });
-
-  const unbound = previous?.key;
-  return unbound === undefined ? { bindings: next } : { bindings: next, unbound };
-}
-
-/**
- * **交换两个按钮位的技能**（触屏配置用）。
- *
- * ==================================================================
- * ⚠️ 为什么不能复用 `applyRebind`
- * ==================================================================
- *
- * 触屏按钮的顺序 = 绑定表里"**有键的技能**"的**顺序**
- * （见 `touchButtonsFromBindings`：`filter(key !== '').map(index)`）。
- * 而 `applyRebind` **只交换键、不动数组顺序** —— 所以换完之后按钮顺序
- * **一点变化都没有**，"选 slot 再选技能换 slot"是**假的**。
- *
- * 需求："有一个方案是把 双弧 缩小放在 按键设置的右下角，然后选slot，
- * 再选技能就换slot" —— 核心诉求是**换位置**，不是换键。
- *
- * 这个函数直接**交换两个位置的技能**，于是：
- *   - 按钮顺序跟着变（那正是玩家要的）
- *   - 空键位（未上场的技能）也留在原位，不会被挤走
- *
- * @param from 源下标（`rowSkillIds` 里的位置）
- * @param to   目标下标
- */
-export function swapSlotSkills<T extends { readonly key: string; readonly skillId: string }>(
-  bindings: readonly T[],
-  from: number,
-  to: number,
-): readonly T[] {
-  if (from === to) return bindings;
-  const a = bindings[from];
-  const b = bindings[to];
-  if (a === undefined || b === undefined) return bindings;
-  const next = [...bindings];
-  next[from] = { ...a, skillId: b.skillId };
-  next[to] = { ...b, skillId: a.skillId };
-  return next;
-}
-
-/* ------------------------------------------------------------------ *
  * 键盘导航
  * ------------------------------------------------------------------ */
 
@@ -522,37 +443,6 @@ const ARROWS: Readonly<Record<string, 'up' | 'down' | 'left' | 'right'>> = {
   arrowright: 'right',
 };
 
-/**
- * **点一次技能格该做什么** —— 键盘与触屏共用一套语义。
- *
- * 需求："移动端和键盘的功能需要是一样的"（AGENTS.md §3b）。
- *
- * | 情形 | 结果 |
- * |---|---|
- * | 正在改键中 | `bind` —— 绑到这个格子 |
- * | 点到**已选中**的格子，且触屏 | `capture` —— 进改键（对等键盘的 Enter） |
- * | 其它 | `focus` —— 只选中 |
- *
- * ⚠️ "再点一次已选中的格子"**只在触屏**上生效：鼠标双击进改键会与
- * "点=选中"的语义打架，而且鼠标本来就有键盘可用。
- */
-export function resolveRowTap(input: {
-  readonly focusedSkillId: string | undefined;
-  readonly capturingSkillId: string | undefined;
-  readonly isTouch: boolean;
-  readonly touchedSkillId: string;
-}):
-  | { readonly kind: 'focus' }
-  | { readonly kind: 'capture' }
-  | { readonly kind: 'bind'; readonly skillId: string } {
-  if (input.capturingSkillId !== undefined) {
-    return { kind: 'bind', skillId: input.touchedSkillId };
-  }
-  if (input.isTouch && input.focusedSkillId === input.touchedSkillId) {
-    return { kind: 'capture' };
-  }
-  return { kind: 'focus' };
-}
 
 export function resolveKeyAction(key: string, capturing: boolean): KeyAction {
   if (capturing) {

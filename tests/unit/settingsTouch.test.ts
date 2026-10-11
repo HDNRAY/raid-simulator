@@ -8,52 +8,63 @@ describe('触屏与键盘功能对等（AGENTS.md §3b）', () => {
    *       根据是否是移动端可以不显示的，括号又不已改放进i18n"
    */
   describe('resolveRowTap：点一次格子该做什么', () => {
-    it('改键中 → 绑到这个格子（触屏的第二步）', () => {
+    it('改键中 → 绑到这个格子', () => {
       expect(
         resolveRowTap({
           focusedSkillId: 'attack',
           capturingSkillId: 'attack',
-          isTouch: true,
           touchedSkillId: 'dodge',
         }),
       ).toEqual({ kind: 'bind', skillId: 'dodge' });
     });
 
-    it('触屏 + 点到**已选中**的格子 → 进改键（对等键盘 Enter）', () => {
+    it('点到**已选中**的格子 → 进改键（对等键盘 Enter）', () => {
       expect(
         resolveRowTap({
           focusedSkillId: 'attack',
           capturingSkillId: undefined,
-          isTouch: true,
           touchedSkillId: 'attack',
         }),
       ).toEqual({ kind: 'capture' });
     });
 
-    it('触屏 + 点到**别的**格子 → 只选中（不误进改键）', () => {
+    it('点到**别的**格子 → 只选中（不误进改键）', () => {
       expect(
         resolveRowTap({
           focusedSkillId: 'attack',
           capturingSkillId: undefined,
-          isTouch: true,
           touchedSkillId: 'dodge',
         }),
       ).toEqual({ kind: 'focus' });
     });
 
-    it('【关键】非触屏 + 点到已选中的格子 → 仍只选中', () => {
-      /**
-       * ⚠️ 鼠标上"再点一次进改键"会与"点=选中"的语义打架，
-       * 而且鼠标本来就有键盘可用。所以**只在触屏**上启用。
-       */
+    /**
+     * ==================================================================
+     * 回归：**桌面与触屏必须是同一条规则**（原先不是，两边各缺一半）
+     * ==================================================================
+     *
+     * 玩家反馈："我现在任意一个都绑不了了。"
+     *
+     * 根因：这里原本有个 `isTouch` 条件，只有触屏才允许"点已选中的格子
+     * → 进改键"。当时给的理由是"**鼠标本来就有键盘可用**"——
+     *
+     *   ❌ 那个假设是错的：纯鼠标用户于是**永远进不去改键**
+     *      （桌面上 `Enter` 是唯一入口）。
+     *   ❌ 而且它**没有让两边对等，只是把缺口换了个方向**：
+     *      触屏按不出 Enter，所以触屏唯一的入口恰好就是这个条件；
+     *      桌面有这个入口却被 `isTouch` 关掉。
+     *
+     * 现在两边共用同一条规则。这个断言**故意不带平台参数** ——
+     * 参数不存在，就没法再分叉。
+     */
+    it('【回归】进改键的规则**不区分平台**（鼠标也必须能进）', () => {
       expect(
         resolveRowTap({
           focusedSkillId: 'attack',
           capturingSkillId: undefined,
-          isTouch: false,
           touchedSkillId: 'attack',
         }),
-      ).toEqual({ kind: 'focus' });
+      ).toEqual({ kind: 'capture' });
     });
   });
 });
@@ -64,7 +75,7 @@ describe('改键不能把技能"弄丢"（触屏上等于少一个按钮）', ()
    * 但**解绑在触屏上是致命的**：`touchButtonsFromBindings` 只取
    * `key !== ''` 的技能，所以被顶掉的技能会**从按钮上消失**。
    *
-   * 实测踩到的：「攻」改到「避」的键后，「避」失去绑定 —— 而「避」是
+   * 实测踩到的：「斩」改到「避」的键后，「避」失去绑定 —— 而「避」是
    * 倒地（`restrictToTags: ['dodge']`）时**唯一能按的技能**，丢掉它
    * 等于倒地没有出路。
    *

@@ -51,6 +51,15 @@ declare global {
         capturing(): string | undefined;
         focus(): { readonly zone: string; readonly index?: number };
         trace(): readonly string[];
+        /**
+         * 打开/关掉**齿轮按钮**的键盘焦点并立刻重绘（截图用）。
+         *
+         * 存在的理由：按钮由主循环逐帧重绘，而 headless 下这局战斗
+         * 3.5 秒就结束，之后没有帧 —— 聚焦后的外观拍不到。
+         */
+        setButtonFocused(focused: boolean): void;
+        /** 齿轮按钮此刻是否持有键盘焦点。 */
+        buttonFocused(): boolean;
       };
       probe(): {
         tick: number;
@@ -67,6 +76,34 @@ declare global {
         floatingCount: number;
         frameCount: number;
         errors: string[];
+      };
+      /**
+       * 备战界面（调试用）。
+       *
+       * ⚠️ 它存在的理由是"光标 ≠ 选择"这条需求**不能只靠截图验证**：
+       * 画面上的区别是颜色，而"白框在哪张卡 / 金底在哪张卡"是渲染出来的 ——
+       * 读取状态才是硬证据（截图只用来确认"确实看得分出来"）。
+       *
+       * 方法走的是界面自己的路径（同键盘 / 同点击），不是另写一套旁路。
+       */
+      prepare: {
+        /** 当前状态（选择 + 光标）。 */
+        state(): {
+          readonly playerId: string;
+          readonly bossId: string;
+          readonly focus: 'player' | 'boss' | 'start';
+          readonly cursor: { readonly playerId: string; readonly bossId: string };
+        };
+        /** 同 ← →：**只移动光标**，不改选择。 */
+        cycle(delta: number): void;
+        /** 同 ↑ ↓ / Tab：换槽位（`wrap` 为真时环绕）。 */
+        moveFocus(delta: number, wrap?: boolean): void;
+        /** 同 Enter：确定光标处那一项；光标在「开始战斗」上则开战。 */
+        confirm(): void;
+        /** 同点击卡片：移光标 + 确定（一步到位）。 */
+        pick(kind: 'player' | 'boss', id: string): void;
+        /** 直接把焦点放到某个槽位（截图用，省掉"按几次方向键"）。 */
+        focusSlot(slot: 'player' | 'boss' | 'start'): void;
       };
     };
     /** 渲染侧探针：报告实际写到 Pixi 上的位置 */

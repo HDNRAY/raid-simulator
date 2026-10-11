@@ -118,7 +118,12 @@ const MEND_TELEGRAPH = telegraphFor('boss-mend', logicMs(25));
  *   |---|---|---|
  *   | buff 时长 = 碾压 `castTime` | `logicMs(20)` | 长了 → 读条结束后还霸体；短了 → 前摇末尾能被破 |
  *   | `hits[].at` = `castTime` | `logicMs(20)` | 读条没走完就掉血 |
- *   | 技能带 `hintTags: ['interruptImmune']` | — | 引擎负责"真的打不断"，hint 负责"提前告诉玩家" |
+ *   | 读条上要显示「霸体」 | — | 引擎负责"真的打不断"，hint 负责"提前告诉玩家" |
+ *
+ * ⚠️ 第三条**不再是手写的**：`BOSS_HEAVY_ARMOR` 带 `interruptImmune`，
+ * 而读条提示正是从那个 flag 推导出来的（见 `app/skillHints.ts`）。
+ * 于是"忘了加 hint"这类漂移在这条规则上**结构性地不可能发生** ——
+ * 它读的就是同一个 buff。
  *
  * 文案 / 图标 / 颜色沿用旧的「霸体」—— 玩家看到的是同一个东西。
  */
@@ -171,7 +176,7 @@ export const BOSS_SCORN: SkillDef = {
           /**
            * **20 点**（玩家的 1/5 血）。
            *
-           * 它是"经济账"的分子：闪一次要 30 炁 = 3 次「攻」的代价，
+           * 它是"经济账"的分子：闪一次要 30 炁 = 3 次「斩」的代价，
            * 所以硬吃它往往是划算的 —— 这正是设计要的"三刀各有正确应对"。
            */
           damage: { base: S(20), canCrit: false, countsAsHit: true },
@@ -186,7 +191,6 @@ export const BOSS_SCORN: SkillDef = {
    * 20 与 40 的区分**只能靠条的长短**（见文件头），所以这两个技能
    * 的标签必须一致，否则玩家会用颜色而不是长度去猜伤害。
    */
-  hintTags: ['highDamage'],
   interruptible: true,
 };
 
@@ -228,7 +232,6 @@ export const BOSS_REBUKE: SkillDef = {
     },
   ],
   tags: ['spell'],
-  hintTags: ['highDamage'],
   interruptible: true,
 };
 
@@ -297,7 +300,6 @@ export const BOSS_HEAVY: SkillDef = {
    * 「高伤」+「霸体」两个标签都要（设计 §5.2 第三条规则）：
    * 引擎负责"真的打不断"，hint 负责"提前告诉玩家"，两个面都得有。
    */
-  hintTags: ['highDamage', 'interruptImmune'],
   interruptible: true,
 };
 
@@ -340,13 +342,17 @@ export const BOSS_MEND: SkillDef = {
   abilities: [
     { kind: 'grant', target: { mode: 'self' }, buff: MEND_TELEGRAPH },
     /**
-     * 恢复 **30% 最大生命 = 63**（`S(63)`，与其它内容同刻度）。
+     * 恢复 **30% 最大生命 = 126**（`S(126)`，与其它内容同刻度）。
+     *
+     * ⚠️ 血量从 210 翻到 420 时，这个数**必须跟着翻**：它的设计含义是
+     * "回三成血"（30% × 420 = 126），而不是"回 63 点"。只改血量不改它，
+     * 回补会从"值得用「破」去打断"退化成"回了个零头"。
      *
      * 读条完成时结算（`grant` / `resource` 不带 `on` 就是 `castFinish`），
      * 所以**被打断就不回血** —— 这正是"可打断"的一半含义。
-     * 另一半是"打断它有价值"：63 ≈ 玩家 4.6 秒输出。
+     * 另一半是"打断它有价值"：126 ≈ 玩家 9.3 秒输出（按 13.6 DPS）。
      */
-    { kind: 'resource', target: { mode: 'self' }, resource: 'hp', delta: S(63) },
+    { kind: 'resource', target: { mode: 'self' }, resource: 'hp', delta: S(126) },
   ],
   castTime: logicMs(25),
   /**
@@ -419,7 +425,7 @@ export const PRIDE_BEHAVIORS: readonly Behavior[] = [
     kind: 'weightedRotation',
     steps: [
       /**
-       * 「回补」排在最前，且**自带血量门槛**。
+       * 「回补」排在最前，且**自带血量门槛**（这就是玩家说的"二阶段"）。
        *
        * ⚠️ 它必须进这个候选池（而不是另开一条 `rotation` 步），因为
        * `decide` 的轮转段是"取到第一个可执行的轮转行为就 `break`" ——
@@ -431,7 +437,14 @@ export const PRIDE_BEHAVIORS: readonly Behavior[] = [
        */
       {
         skillId: 'boss-mend',
-        when: { kind: 'hpBelow', who: 'self', ratio: 0.5 },
+        /**
+         * ⚠️ 门槛 **0.5 → 0.4**（需求："40%血就触发二阶段"）。
+         *
+         * 配合血量翻倍（210 → 420），触发点从"105 血"变成"168 血" ——
+         * 玩家要打掉 **252 点**（而不是原来的 105）才能把它逼出回补，
+         * 所以这一场里玩家会**先充分见过三把刀**，再遇到这场唯一的回血。
+         */
+        when: { kind: 'hpBelow', who: 'self', ratio: 0.4 },
         weight: 2,
       },
       { skillId: 'boss-scorn', weight: 2 },
@@ -457,7 +470,7 @@ export const PRIDE_BEHAVIORS: readonly Behavior[] = [
      * | 策略 | 结果 |
      * |---|---|
      * | 会闪避 | **胜**，用时 926 tick，剩 **40 血** |
-     * | 纯进攻（只按「攻」） | **败**，Boss 剩 **120 血** |
+     * | 纯进攻（只按「斩」） | **败**，Boss 剩 **120 血** |
      *
      * 两条硬判据（设计 §9.3）都成立。
      *

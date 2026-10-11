@@ -77,9 +77,21 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
   const onDown = (event: PointerEvent): void => {
     const { px, py } = at(event);
 
-    /** ① 备战界面盖住整屏 —— 先让它消费。 */
-    if (t.phase() === 'prepare') {
-      if (!t.settingsOpen()) t.prepare.hitTest(px, py);
+    /**
+     * ① 备战界面盖住整屏 —— 先让它消费。
+     *
+     * ⚠️ **`!t.settingsOpen()` 这个条件是必需的**，不是冗余。
+     *
+     * 原先写的是无条件的 `if (t.phase() === 'prepare') { ...; return; }`，
+     * 于是**设置面板从备战界面打开时，指针事件在这里就被吃掉了**，
+     * 永远到不了下面的 `t.settings.hitTest()`。症状：备战界面里点设置页的
+     * 技能格**完全没反应**（战斗界面却正常，因为那条路不经过这个分支）。
+     *
+     * 这也违反 AGENTS.md §3b「触屏与键盘功能必须对等」：改键只有
+     * `Enter` 一条路，而触屏**根本按不出 Enter**。
+     */
+    if (t.phase() === 'prepare' && !t.settingsOpen()) {
+      t.prepare.hitTest(px, py);
       return;
     }
 
@@ -88,7 +100,7 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
      *
      * ⚠️ 必须**先于**按钮层与设置判断，且整体 `return`：
      *   - 放在按钮层之后：按钮会 `return true` 吃掉点击 → 玩家点在按钮弧里
-     *     **永远重开不了**（实测点「攻」不重开、点空白才重开）
+     *     **永远重开不了**（实测点「斩」不重开、点空白才重开）
      *   - 不 `return`：会同时满足 `settingsButton.hitTest` → 一次点击
      *     **既开设置又静默重开**（实测 tick 663 → 43）
      */

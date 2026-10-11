@@ -25,7 +25,7 @@
  * `isHeld(key)`。触屏按钮没有键，所以这里给它一个**合成 key**
  * （`touch:{skillId}`）：
  *
- *   - `isHeld('touch:attack')` → 手指是不是按在「攻」上
+ *   - `isHeld('touch:attack')` → 手指是不是按在「斩」上
  *   - `bindings()` 里报出 `{ key: 'touch:attack', skillId: 'attack' }`
  *
  * 于是"按住连发"这条已有逻辑**一行都不用改**就同时服务键鼠与触屏。
@@ -36,7 +36,7 @@
  * ==================================================================
  *
  * 多指跟踪靠 `pointerId`。手指**按下时**绑定到当时命中的按钮，
- * 之后移动不切换 —— 否则从「攻」滑到「防」会被当成"按住防"，
+ * 之后移动不切换 —— 否则从「斩」滑到「防」会被当成"按住防"，
  * 而玩家以为自己还按着攻。
  */
 
@@ -246,7 +246,7 @@ export function createTouchInput(options: TouchInputOptions): TouchInputSource {
        *
        * 所以语义上 `hold` 已经包含了 `useSkill`，只发它就够了：
        *   - 按住型（「防」）→ 进入按住状态，引擎每逻辑步扣资源
-       *   - 非按住型（「攻」等）→ 退化成一次普通施放
+       *   - 非按住型（「斩」等）→ 退化成一次普通施放
        */
       pending.push({ type: 'hold', skillId: area.skillId, atTick: options.currentTick() });
       return true;

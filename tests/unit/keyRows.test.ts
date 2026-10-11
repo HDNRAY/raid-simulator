@@ -19,10 +19,13 @@
  * 这类 bug 不会自己暴露，只会静默多出几行 UI。
  */
 import { describe, expect, it } from 'vitest';
-import { ALL_SKILLS, PLAYER_SKILL_IDS, PLAYER_SKILLS } from '../../src/data/content';
+import { ALL_BUFFS, ALL_SKILLS, PLAYER_SKILL_IDS, PLAYER_SKILLS } from '../../src/data/content';
 import { LUST_SKILLS } from '../../src/data/lustBoss';
 import { PRIDE_SKILLS } from '../../src/data/bossPride';
-import { isBindablePlayerSkill } from '../../src/app/keyRows';
+import { buildKeyRows, isBindablePlayerSkill } from '../../src/app/keyRows';
+import { createRegistry } from '../../src/core/content/registry';
+import { translator } from '../../src/i18n/translator';
+import { DEFAULT_BINDINGS } from '../../src/input/keyboard';
 
 describe('按键设置只列玩家技能', () => {
   it('两个 Boss 的技能都不该可绑键', () => {
@@ -84,5 +87,103 @@ describe('按键设置只列玩家技能', () => {
     const expected = [...LUST_SKILLS, ...PRIDE_SKILLS].map((s) => s.id);
 
     expect([...nonPlayer].sort()).toEqual([...expected].sort());
+  });
+
+  /**
+   * **每个可绑技能都必须在 `DEFAULT_BINDINGS` 里有一席之地。**
+   *
+   * ==================================================================
+   * 这个断言防的是什么（真实踩过的坑：「截」绑不上键）
+   * ==================================================================
+   *
+   * 设置页的行来自**技能注册表**（`isBindablePlayerSkill`），而改键写的是
+   * **绑定表**（`DEFAULT_BINDINGS`）。这是两个数据源 —— 注册表里有「截」，
+   * 所以它在设置页显示得出来；绑定表里没有，于是 `applyRebind` 的 `map`
+   * 永远匹配不到它，**绑定静默丢失**（界面看起来一切正常）。
+   *
+   * 玩家当时的原话："「截」 好像绑不上按键，闪似乎可以。"
+   * —— 「闪」在表里，所以能绑;「截」不在,所以绑不上。
+   *
+   * ⚠️ 这是**两份真相**造成的 bug，所以修法不能只是"把「截」加进表里"：
+   * 那样下一个新技能会再踩一次。这条断言让两张表**没法再分叉**。
+   * （另一道防线在 `applyRebind`：表里没有就追加，不假设调用方给全了。）
+   */
+  it('每个可绑技能都在 DEFAULT_BINDINGS 里 —— 否则改键会静默失效', () => {
+    const inTable = new Set(DEFAULT_BINDINGS.map((b) => b.skillId));
+    const missing = PLAYER_SKILLS.filter(isBindablePlayerSkill)
+      .map((s) => s.id)
+      .filter((id) => !inTable.has(id));
+
+    expect(missing, `这些技能能出现在设置页、却绑不上键：${missing.join(', ')}`).toEqual([]);
+  });
+});
+
+/**
+ * ==================================================================
+ * 行的**内容**：代价 / 冷却 / 施放方式必须真的被填上
+ * ==================================================================
+ *
+ * ⚠️ 这组用例补的是一个**真实发生过的回归**。
+ *
+ * 需求（用户原话）："所有技能的消耗，在这里没了……之前是又有描述，
+ * 又有结构化信息，我需要把结构化信息加回来。"
+ *
+ * 根因：代价与冷却**只**从运行时快照取（`slot.cost` / `slot.skillCdSec`）。
+ * 战斗里没问题，但**备战界面还没有战斗** —— `snapshotOf()` 返回
+ * `EMPTY_SNAPSHOT`，于是两项都是空字符串。而设置齿轮**现在在备战界面
+ * 上也有**，所以"打开设置看技能消耗"最常见的入口正好是没有快照的那个 ✗
+ *
+ * ⚠️ 这个 bug 之前溜过去的原因很直接：**本文件从来没构造过行**，
+ * 只测了过滤函数。所以下面这些用例的价值不在"断言什么"，
+ * 而在"**终于有一个地方会去构造行并检查它的内容**"。
+ */
+describe('行的内容：没有战斗快照时也要有结构化信息', () => {
+  /** 备战界面的状况：`snapshotOf()` 拿不到任何技能格。 */
+  function rowsWithoutSnapshot() {
+    return buildKeyRows({
+      bindings: DEFAULT_BINDINGS,
+      registry: createRegistry({ entities: [], skills: [...ALL_SKILLS], buffs: [...ALL_BUFFS] }),
+      snapshotOf: () => ({ skills: [] }) as never,
+      /** 用**真实的** `translator`，否则测不到"文案有没有被插值"。 */
+      translate: (key: string, params?: Readonly<Record<string, string | number>>) =>
+        translator.t(key as never, params as never),
+      playerSkillIds: PLAYER_SKILL_IDS,
+    } as never);
+  }
+
+  it('每个**有代价**的技能都要显示代价（备战界面没有快照）', () => {
+    const rows = rowsWithoutSnapshot();
+    const withCost = rows.filter((r) => r.costText !== undefined);
+    /** 至少得有几个 —— 否则这条断言空转、永远绿。 */
+    expect(withCost.length).toBeGreaterThanOrEqual(5);
+
+    const dodging = rows.find((r) => r.skillId === 'dodge');
+    expect(dodging?.costText, '「避」的代价必须显示').toBe('15 炁');
+    const slashing = rows.find((r) => r.skillId === 'attack');
+    expect(slashing?.costText, '「斩」的代价必须显示').toBe('15 炁');
+  });
+
+  it('按住技的代价来自 `holdDrain`（它的 `cost` 是空的）', () => {
+    const rows = rowsWithoutSnapshot();
+    const guard = rows.find((r) => r.skillId === 'guard');
+    /**
+     * ⚠️ 「防」的 `cost: []` 是空的，代价在 `holdDrain` 里。
+     * 只读 `cost` 会让它显示"没有代价"。
+     */
+    expect(guard?.costText, '「防」必须显示 2 炁/秒').toBe('2 炁/秒');
+  });
+
+  it('有冷却的技能要显示冷却', () => {
+    const rows = rowsWithoutSnapshot();
+    const brk = rows.find((r) => r.skillId === 'break');
+    expect(brk?.cdText).toBe('冷却 5 秒');
+  });
+
+  it('⚠️ 文案里的占位符必须被插值，不能把 `{seconds}` 原样显示出来', () => {
+    const rows = rowsWithoutSnapshot();
+    for (const r of rows) {
+      const all = [r.costText, r.cdText, r.castText].filter((x) => x !== undefined).join(' ');
+      expect(all, `${r.skillId} 的文案里有未替换的占位符：${all}`).not.toMatch(/\{[a-zA-Z]+\}/);
+    }
   });
 });

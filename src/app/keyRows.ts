@@ -23,6 +23,8 @@ import type { KeyBinding } from '../input/keyboard';
 import type { KeyRow } from '../ui/settings/rows';
 import type { ContentRegistry } from '../core/content/registry';
 import { PLAYER_SKILL_IDS } from '../data/content';
+import { hintKeysOf } from './skillHints';
+import type { TranslateFn } from '../i18n/translator';
 
 /**
  * 这个技能该不该出现在设置页的按键列表里。
@@ -60,10 +62,7 @@ export interface BuildKeyRowsOptions {
   readonly registry: ContentRegistry;
   /** 取当前快照里的技能格（代价 / 冷却的**唯一来源**）。 */
   readonly snapshotOf: () => BattleLoop['snapshot'];
-  readonly translate: (
-    key: string,
-    params?: Readonly<Record<string, string | number>>,
-  ) => string;
+  readonly translate: TranslateFn;
 }
 
 /**
@@ -109,10 +108,29 @@ export function buildKeyRows(options: BuildKeyRowsOptions): readonly KeyRow[] {
     const b = { skillId, key: options.bindings.find((x) => x.skillId === skillId)?.key ?? '' };
     const skill = registry.skill(b.skillId);
     const slot = options.snapshotOf().skills.find((x) => x.skillId === b.skillId);
+    /**
+     * ================================================================
+     * ⚠️ 代价 / 冷却**必须先看快照，再看静态数据**
+     * ================================================================
+     *
+     * 需求（用户报告）："所有技能的消耗，在这里没了……之前是又有描述，
+     * 又有结构化信息，我需要把结构化信息加回来。"
+     *
+     * **根因**：这两项原先**只**从运行时快照取（`slot`）。战斗里没问题，
+     * 但**备战界面还没有战斗** —— `snapshotOf()` 返回 `EMPTY_SNAPSHOT`，
+     * 于是 `slot === undefined`，两项都变成空字符串。
+     *
+     * 而设置齿轮**现在在备战界面上也有**（`SettingsButton.setScreen`），
+     * 所以"打开设置看技能消耗"最常见的入口正好是**没有快照**的那个 ✗
+     *
+     * ⚠️ 顺序不能反：**有战斗时以快照为准**。快照里的值可能被运行时
+     * 改过（代价减免、冷却缩减、按住技的 `/秒` 后缀），
+     * 静态数据只是"还没有战斗时的最佳近似"。
+     */
+    const staticCost = skill.cost[0];
     const costText =
-      slot?.cost === undefined
-        ? ''
-        : translate(
+      slot?.cost !== undefined
+        ? translate(
             slot.cost.suffix === undefined
               ? 'settings.detailCost'
               : 'settings.detailCostPerSecond',
@@ -120,11 +138,43 @@ export function buildKeyRows(options: BuildKeyRowsOptions): readonly KeyRow[] {
               value: Math.round(slot.cost.value),
               resource: translate(`resource.${slot.cost.resource}`),
             },
-          );
+          )
+        : skill.holdDrain !== undefined
+          ? /**
+             * ⚠️ **按住技（「防」）的代价不在 `cost` 里，而在 `holdDrain`** ——
+             * 它的 `cost: []` 是空的，所以只读 `cost` 会让「防」显示"没有代价" ✗
+             *
+             * `perLogicTick` 就是技能栏上那个 `2/s` 的 2（同一口径，
+             * 不要在这里换算成 /秒 —— 那会让设置页与技能栏对不上）。
+             */
+            translate('settings.detailCostPerSecond', {
+              value: skill.holdDrain.perLogicTick,
+              resource: translate(`resource.${skill.holdDrain.resource}`),
+            })
+          : staticCost === undefined || typeof staticCost.value !== 'number'
+          ? ''
+          : translate(
+              /**
+               * ⚠️ 按住技（「防」）的代价是**每秒**扣的，后缀不能省 ——
+               * 否则 `2` 会被读成"一共 2 点"。快照那边靠 `suffix`，
+               * 静态这边靠 `holdDrain` 判断，两条路要给出同一个结果。
+               */
+              skill.holdDrain === undefined
+                ? 'settings.detailCost'
+                : 'settings.detailCostPerSecond',
+              {
+                value: Math.round(staticCost.value),
+                resource: translate(`resource.${staticCost.resource}`),
+              },
+            );
     const cdText =
-      slot === undefined || slot.skillCdSec <= 0
-        ? ''
-        : translate('settings.detailCd', { seconds: Math.round(slot.skillCdSec) });
+      slot !== undefined
+        ? slot.skillCdSec <= 0
+          ? ''
+          : translate('settings.detailCd', { seconds: Math.round(slot.skillCdSec) })
+        : skill.cooldown <= 0
+          ? ''
+          : translate('settings.detailCd', { seconds: Math.round(skill.cooldown / 1000) });
     /**
      * **施放方式**从数据推导（需求："包括瞬发与否，这些应该是结构化的显示"）。
      *
@@ -137,7 +187,12 @@ export function buildKeyRows(options: BuildKeyRowsOptions): readonly KeyRow[] {
         : skill.castTime <= 0
           ? translate('settings.detailInstant')
           : translate('settings.detailCast', { seconds: skill.castTime / 1000 });
-    const hintTags = skill.hintTags;
+    /**
+     * ⚠️ 用 `hintKeysOf` 而不是直接读 `skill.hintTags`：控制类提示
+     * （「倒地」「眩晕」）是**从效果推导**出来的，不在手写字段里。
+     * 见 `app/skillHints.ts`。
+     */
+    const hintTags = hintKeysOf(skill);
     /**
      * **机械 tag（`SkillTag`）也要显示**。
      *

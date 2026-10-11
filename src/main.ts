@@ -8,6 +8,7 @@ import { PrepareScreen } from './ui/PrepareScreen';
 import { BOSS_ROSTER, PLAYER_ROSTER, resolveBossId, resolvePlayerId } from './data/roster';
 import { PLAYER_BASE, makeBoss, makePlayer } from './data/units';
 import { buildProbe, collectRuntimeErrors, emptyProbe } from './app/debugProbe';
+import { prepareDebugApi, settingsDebugApi } from './app/debugApi';
 import {
   SettingsStore,
   browserStorage,
@@ -114,13 +115,22 @@ async function bootstrap(): Promise<void> {
     new BattleLoop({
       // 飘字要"闪躲"这种本地化文案 —— 注入取词函数，而不是让
       // ViewAdapter 去 import i18n 单例
-      translate: (key) => {
-        try {
-          return translator.t(key as never);
-        } catch {
-          return key;
-        }
-      },
+      /**
+       * ⚠️ **必须是 `translateSafe` 本身，不能套一层 `(key) => ...`**
+       *
+       * 需求（用户报告）："所有技能的消耗，在这里没了……"
+       * 而修好取数之后，设置页里显示的是 **`{value} {resource}` /
+       * `{seconds}` 这些占位符本身**。
+       *
+       * 根因就在这里：原先写的是 `(key) => translator.t(key)` ——
+       * **把第二个参数 `params` 吃掉了**。TypeScript **不会报错**
+       * （"参数更少的函数"本来就可以赋值给"参数更多的类型"），
+       * 所以这个 bug 一路静默到界面上。
+       *
+       * 而 `settingsPanelOptions` 用的正是这个函数（`const t = d.translate`），
+       * 于是设置页里**所有**带占位符的文案全部原样显示 ✗
+       */
+      translate: translateSafe,
       engineOptions: {
         /**
          * ⚠️ 出战单位来自**备战界面的选择**，不是写死的。
@@ -236,6 +246,29 @@ async function bootstrap(): Promise<void> {
   let onPrepareStart: (playerId: string, bossId: string) => void = () => {};
 
   /**
+   * 设置按钮此刻是否持有键盘焦点（`↑` 提上去、`↓` 退下来）。
+   *
+   * ⚠️ **先声明、后回填**：`wireSettingsKeys(...)` 在文件末尾才接线（那里
+   * 依赖一堆已经构造好的对象），而备战界面的 keydown 处理定义在中间。
+   * 默认 `false` 表示"还没接线 = 按钮没聚焦"，与真实状态一致。
+   *
+   * ⚠️ 为什么备战界面需要知道它：设置那边**不再**在备战界面抢 `↑`
+   * （`acceptsKeyboardFocus` 只在战斗为真），但这条守卫仍然留着 ——
+   * 如果哪天设置按钮又被允许在备战聚焦，按 Enter 会先开设置而不是
+   * 确定角色，而那种 bug 在截图里看不出来（齿轮只是亮了一下）。
+   */
+  let settingsButtonFocused: () => boolean = () => false;
+
+  /**
+   * **界面切换时通知设置按钮**（它在两个界面里的位置不同）。
+   *
+   * ⚠️ 又是"延后回填"，原因和上面那条一样：`enterBattle` 可能在
+   * `settingsButton` 构造**之前**就被调用（`?prepare=skip` 走的就是
+   * 那条路，见下面 `if (skipPrepare)`），直接引用会撞 TDZ。
+   */
+  let onScreenChange: (screen: 'prepare' | 'battle') => void = () => {};
+
+  /**
    * **进入战斗**：建一局新战斗、藏起备战界面。
    *
    * ⚠️ 与 `backToPrepare` 成对：两者各自负责好**场景 / 触屏层 / 面板**的
@@ -246,11 +279,21 @@ async function bootstrap(): Promise<void> {
     selection.bossId = resolveBossId(bossId);
     settingsStore.savePick(selection.playerId, selection.bossId);
 
+    /**
+     * ⚠️ **先换形象再开战**（需求：玩家与 Boss 都要播 idle / attack 动画）。
+     *
+     * 放在这里而不是 `BattleSceneOptions`：一局战斗的出战单位**在这里**
+     * 才定下来，而场景只在启动时建一次（构造参数换不了）。同时它也覆盖
+     * "重开换了个对手" —— 结算面板的 `restart` 也走本函数。
+     */
+    scene.setAppearance(selection.playerId, selection.bossId);
+
     loop?.dispose();
     loop = startBattle();
     phase = 'battle';
     prepare.setVisible(false);
     scene.root.visible = true;
+    onScreenChange('battle');
   };
   onPrepareStart = (playerId: string, bossId: string): void => enterBattle(playerId, bossId);
 
@@ -271,11 +314,12 @@ async function bootstrap(): Promise<void> {
      */
     scene.root.visible = false;
     settingsButton.update();
+    onScreenChange('prepare');
   };
 
   const prepare = new PrepareScreen({
     pixi: { Container, Graphics, Sprite, Text },
-    translate: (key: string) => translateSafe(key),
+    translate: translateSafe,
     players: PLAYER_ROSTER,
     bosses: BOSS_ROSTER,
     initial: { playerId: selection.playerId, bossId: selection.bossId },
@@ -340,14 +384,22 @@ async function bootstrap(): Promise<void> {
      *
      * | 键 | 作用 |
      * |---|---|
-     * | ← → | 在当前槽位（人物 / 对手）里换选项 |
-     * | ↑ ↓ | 换槽位（人物 → 对手 → 开始） |
-     * | Enter | 开始战斗 |
+     * | ← → | 在槽位里**移动光标**（不改选择） |
+     * | ↑ ↓ | 换槽位（人物 → 对手 → 开始），两端停住 |
+     * | Tab / Shift+Tab | 同上但**环绕**（Tab 的通用语义） |
+     * | Enter | **确定**光标处的那一项；光标在「开始战斗」上时开战 |
+     *
+     * ⚠️ **移动光标 ≠ 确定选择**（需求原话："用 enter 来确定选择，
+     * 而不是靠移动到下一项"）。旧的 `Enter` 直接 `prepare.start()`，
+     * 而"选谁"是靠方向键移动带出来的 —— 现在方向键只动光标。
+     *
+     * ⚠️ `Tab` 必须 `preventDefault`：否则浏览器会把焦点移出画布
+     * （架构规范 §7 明确要求拦下 Tab）。
      *
      * ⚠️ 设置面板打开时**不能抢键** —— 那时玩家可能正在改键，方向键是
      * 移动焦点的。`settingsToggle.isOpen()` 的优先级高于备战。
      */
-    if (phase === 'prepare' && !settingsToggle.isOpen()) {
+    if (phase === 'prepare' && !settingsToggle.isOpen() && !settingsButtonFocused()) {
       switch (event.key) {
         case 'ArrowLeft':
           prepare.cycle(-1);
@@ -361,8 +413,17 @@ async function bootstrap(): Promise<void> {
         case 'ArrowDown':
           prepare.moveFocus(1);
           return;
+        case 'Tab':
+          /**
+           * Shift+Tab 反向。与 ↑↓ 的区别只有**环绕**（Tab 的通用语义）——
+           * 两端停住的话，在「开始战斗」上按 Tab 会毫无反应，而玩家对
+           * Tab 的预期是"跳到下一个"。
+           */
+          prepare.moveFocus(event.shiftKey ? -1 : 1, true);
+          event.preventDefault();
+          return;
         case 'Enter':
-          prepare.start();
+          prepare.confirm();
           return;
         default:
           return;
@@ -417,23 +478,17 @@ async function bootstrap(): Promise<void> {
       scene.setUiScale(uiScale);
     },
     /**
-     * 设置界面的调试入口。
+     * 设置 / 备战两块调试入口。
      *
-     * 存在的理由：headless 环境下模拟鼠标点击不可靠（rAF 会被降频，
-     * 而且 CSS 缩放 → 逻辑坐标的换算依赖真实布局）。这个入口让验证
-     * 脚本能直接把界面推到某个状态再截图。
+     * ⚠️ 抽到了 `app/debugApi.ts` —— 那里写着"为什么不另写一套逻辑"与
+     * "为什么 headless 下必须读状态而不是看图"，不在这里重复。
      */
-    settings: {
-      open: (tab: 'general' | 'keys' = 'keys') => settingsToggle.open(tab),
-      close: () => settingsToggle.close(),
-      openIn: (px: number, py: number) => settings.hitTest(px, py),
-      isOpen: () => settingsToggle.isOpen(),
-      /** 正在等待按键改键的技能 id（没有则为 null）。 */
-      capturing: () => settings.capturingSkillId,
-      /** 当前键盘焦点（调试用）。 */
-      focus: () => settings.focusState,
-      trace: () => [...settings.settingsTrace],
-    },
+    ...settingsDebugApi(
+      () => settings,
+      () => settingsToggle,
+      () => settingsButton,
+    ),
+    ...prepareDebugApi(prepare),
     /** 重开一局（端到端脚本用；见 `global.d.ts` 的说明）。 */
     restart: () => enterBattle(selection.playerId, selection.bossId),
     /** 触屏按钮圆心（端到端脚本用）。⚠️ 函数转调：`touch` 声明在下面（TDZ）。 */
@@ -495,7 +550,7 @@ async function bootstrap(): Promise<void> {
         scene.setUiScale(uiScale);
       },
       snapshot: () => battle()?.snapshot,
-      translate: (key) => translateSafe(key),
+      translate: translateSafe,
       getTouchSkills: () => touchPreviewSource.read(),
       getShowKeyHints: () => touchPreviewSource.showKeyHints,
       pixi: { Container, Graphics, Sprite, Text },
@@ -508,10 +563,20 @@ async function bootstrap(): Promise<void> {
 
   const settingsButton = new SettingsButton({
     pixi: { Container, Graphics, Sprite, Text },
-    translate: (key) => translateSafe(key),
+    translate: translateSafe,
     onClick: () => settingsToggle.toggle(),
   });
   app.stage.addChild(settingsButton.root);
+
+  /**
+   * 回填 `onScreenChange`，并**立刻按当前 phase 摆一次**。
+   *
+   * ⚠️ 必须补这次立即调用：`?prepare=skip` 时 `enterBattle` 早就跑过了，
+   * 那一次的 `onScreenChange('battle')` 打在一个空函数上（当时还没回填），
+   * 不补的话按钮会停在备战界面的右上角，压在战斗 HUD 上。
+   */
+  onScreenChange = (screen: 'prepare' | 'battle'): void => settingsButton.setScreen(screen);
+  onScreenChange(phase);
 
   /**
    * 设置按钮是否被键盘选中。
@@ -589,16 +654,23 @@ async function bootstrap(): Promise<void> {
    *
    * ⚠️ 抽到了 `app/settingsKeys.ts` —— 那里写着"必须用捕获阶段"与
    * "弹窗打开时独占键盘"两条由来，不在这里重复。
+   *
+   * ⚠️ `acceptsKeyboardFocus` 只在**战斗**为真：备战界面里 `↑↓` 是
+   * 换槽位的，不能被设置按钮抢走（那里 `Esc` / `,` 照样能开设置）。
+   * 由来见 `settingsKeys.ts` 里那个方法的注释。
    */
-  wireSettingsKeys({
+  const settingsKeys = wireSettingsKeys({
     settings,
     settingsButton,
     settingsOpen: () => settingsToggle.isOpen(),
+    acceptsKeyboardFocus: () => phase === 'battle',
     openSettings: () => settingsToggle.open('keys'),
     setHandling: (value) => {
       handlingKeyDown = value;
     },
   });
+  /** 回填给备战界面的键盘处理（见上面那个 `let` 的说明）。 */
+  settingsButtonFocused = settingsKeys.isButtonFocused;
 
   /** 统一的翻译入口（缺 key 时回退到 key 本身，而不是抛错）。 */
   function translateSafe(

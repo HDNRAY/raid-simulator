@@ -34,7 +34,7 @@
  *    战斗 HUD 需要精确占位，用这条。
  */
 
-import type { Container } from 'pixi.js';
+import type { Container, Graphics } from 'pixi.js';
 import { Icon, type IconName } from '../render/icons';
 import { PALETTE } from '../render/theme';
 import { FONT } from './layout';
@@ -66,6 +66,27 @@ export interface IconButtonOptions {
    *   - `'left'` / `'right'`：与图标同一行的左侧/右侧（旧行为）。
    */
   readonly hintSide?: 'corner' | 'left' | 'right';
+  /**
+   * 键盘焦点时在图标外画一圈**描边**（不填色）。
+   *
+   * ==================================================================
+   * 为什么需要它：只靠颜色无法区分"聚焦"与"别处的选中"
+   * ==================================================================
+   *
+   * 需求（用户）："设置按钮 有时也会被变黄" —— 齿轮聚焦时被涂成
+   * `douqi.bright`（金色），而备战界面**已选中的角色卡也是金色**，
+   * 于是"我的光标在这儿"和"这一项已经选定了"撞成一个外观。
+   *
+   * 光把 `brightColor` 换掉只是"换一种撞法"：真正的区分维度是**形状**。
+   * 所以这里给一个可选的**焦点环**：只有键盘焦点才画，
+   * 悬停（鼠标划过）不画 —— 两种状态来源不同，外观也不该一样。
+   *
+   * ⚠️ 默认关闭：战斗 HUD 上图标按钮很多，默认加环会改变既有观感。
+   * 需要"焦点必须一眼看到"的调用方（设置按钮）显式打开。
+   */
+  readonly focusRing?: boolean;
+  /** 焦点环颜色（默认与 `brightColor` 同源，见 `ICON_BUTTON_DEFAULTS.focusRingColor`）。 */
+  readonly focusRingColor?: number;
   /** 可选文字标签（画在图标与提示之间） */
   readonly label?: string;
   /** 固定矩形（给 `rect` 时按它定位并命中） */
@@ -152,11 +173,38 @@ export function estimateMonoWidth(text: string, fontSize: number): number {
   return Math.ceil(text.length * fontSize * 0.62) + 4;
 }
 
+/**
+ * 焦点环的**几何**（纯函数，可在 node 里测）。
+ *
+ * ⚠️ 环画在图标**外面**（`pad` 向外扩），且**不随提示文字变化**：
+ * 焦点是"键盘现在在这一格"，与旁边那行键位提示无关。它的存在是为了
+ * 给"聚焦"一个**不依赖颜色**的线索（需求："设置按钮 有时也会被变黄"）。
+ */
+export function focusRingRect(
+  iconX: number,
+  iconY: number,
+  size: number,
+): { readonly x: number; readonly y: number; readonly w: number; readonly h: number } {
+  const pad = ICON_BUTTON_DEFAULTS.focusRingPad;
+  return { x: iconX - pad, y: iconY - pad, w: size + pad * 2, h: size + pad * 2 };
+}
+
 /** 默认值集中在这里，调用方不必重复写。 */
 export const ICON_BUTTON_DEFAULTS = {
   size: 20,
   color: 0xb0b0be,
-  brightColor: PALETTE.douqi.bright,
+  /**
+   * 高亮色（悬停 / 键盘焦点）。
+   *
+   * ⚠️ 从 `PALETTE.douqi.bright`（金色）**改掉**了 —— 需求（用户）：
+   * "设置按钮 有时也会被变黄"。金色在本作里是"**选中**"的语言
+   * （备战界面已确定的卡片、技能格被选中），而图标按钮的聚焦是
+   * "**光标在这儿**"，两者不该同色。
+   *
+   * 现在它取 `PALETTE.focus`：冷白偏蓝，也就是备战界面光标环的颜色 ——
+   * 整个项目"光标 / 焦点"只有一种颜色语言（见 `render/theme.ts`）。
+   */
+  brightColor: PALETTE.focus,
   hintSide: 'corner' as const,
   /** 提示与图标之间的间隙（同一行排布时用） */
   gap: 4,
@@ -168,6 +216,16 @@ export const ICON_BUTTON_DEFAULTS = {
    */
   cornerSize: 9,
   cornerStroke: 3,
+  /**
+   * 焦点环的默认几何。
+   *
+   * 环画在**图标本身**外面（不外扩到提示文字），半径 6 让它看起来像
+   * 一个"按钮框"而不是"贴纸"。这些都是逻辑像素，随 `size` 一起放大
+   * 会在 `focusRing` 的实现里按 `size` 缩放。
+   */
+  focusRingPad: 5,
+  focusRingRadius: 6,
+  focusRingWidth: 2,
 } as const;
 
 export class IconButton {
@@ -178,10 +236,18 @@ export class IconButton {
   private readonly rect: { x: number; y: number; w: number; h: number };
   private readonly hint?: Label;
   private readonly text?: Label;
+  /**
+   * 焦点环（只有 `options.focusRing` 为真时才建）。
+   *
+   * ⚠️ 它是 `Graphics` 而**不是** `Panel`：环是描边、**不能有填充** ——
+   * 需求要的正是"只描边不填色"，填了就和"被选中"的金色底板撞了。
+   */
+  private readonly ring?: Graphics;
 
   private hovered = false;
   private focused = false;
   private lastLit = false;
+  private lastRingVisible: boolean | undefined = undefined;
 
   constructor(private readonly options: IconButtonOptions) {
     const { pixi } = options;
@@ -241,6 +307,23 @@ export class IconButton {
     this.icon = new Icon({ pixi, name: options.icon, size, color });
     this.icon.root.x = box.iconX;
     this.icon.root.y = box.iconY;
+
+    /**
+     * 焦点环：**先加进 root**（它要画在图标下面，不能盖住齿轮笔画），
+     * 初始不可见。
+     */
+    if (options.focusRing === true) {
+      const ringRect = focusRingRect(box.iconX, box.iconY, size);
+      this.ring = new pixi.Graphics();
+      this.ring
+        .roundRect(ringRect.x, ringRect.y, ringRect.w, ringRect.h, ICON_BUTTON_DEFAULTS.focusRingRadius)
+        .stroke({
+          color: options.focusRingColor ?? options.brightColor ?? ICON_BUTTON_DEFAULTS.brightColor,
+          width: ICON_BUTTON_DEFAULTS.focusRingWidth,
+        });
+      this.ring.visible = false;
+      this.root.addChild(this.ring);
+    }
 
     // 提示与文字按同一顺序排布，垂直各自居中
     let cursor = box.x;
@@ -338,6 +421,10 @@ export class IconButton {
    *
    * 与"悬停"分开记录：视觉一致，但来源不同 —— 混成一个字段会让
    * "鼠标移开时把键盘选中也一起清掉"。
+   *
+   * ⚠️ 但**外观不完全一致**：焦点环只跟键盘焦点走（见 `focusRing`）。
+   * 鼠标悬停是"我正在指过去"，键盘焦点是"按 Enter 会作用在它身上"——
+   * 后者需要更明确、更持久的提示。
    */
   setFocused(focused: boolean): void {
     this.focused = focused;
@@ -347,6 +434,15 @@ export class IconButton {
   /** 亮起/熄灭（悬停或键盘焦点）。 */
   update(): void {
     const lit = this.hovered || this.focused;
+    /**
+     * ⚠️ 焦点环的处理**放在 `lit` 的早退之前**：环只看 `focused`，
+     * 而"悬停着、同时失去键盘焦点"时 `lit` 不变（还是 true），
+     * 早退会把环留在屏幕上。
+     */
+    if (this.ring !== undefined && this.lastRingVisible !== this.focused) {
+      this.lastRingVisible = this.focused;
+      this.ring.visible = this.focused;
+    }
     if (lit === this.lastLit) return;
     this.lastLit = lit;
     this.icon.setColor(lit ? (this.options.brightColor ?? ICON_BUTTON_DEFAULTS.brightColor) : (this.options.color ?? ICON_BUTTON_DEFAULTS.color));

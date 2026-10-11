@@ -25,7 +25,7 @@ function makeEngine(): BattleEngine {
 /**
  * 施放一个技能并**推进到读条结算完**，返回这期间的事件。
  *
- * 为什么需要它：早期「攻」「轰」是瞬发（伤害在施放那一 tick 就打出去），
+ * 为什么需要它：早期「斩」「轰」是瞬发（伤害在施放那一 tick 就打出去），
  * 后来改成读条（0.5s / 0.9s），于是所有"施放后立刻检查伤害"的断言
  * 都会失败 —— 但失败原因是**测试的假设过期了**，不是功能坏了。
  *
@@ -101,12 +101,12 @@ describe('真实内容：Boss 的机制都接线了', () => {
 
   it('玩家能打死 Boss（战斗是双向可行的）', () => {
     /**
-     * 用"贪心优先级"而不是单个技能：只按「攻」在当前平衡下打不死 Boss
+     * 用"贪心优先级"而不是单个技能：只按「斩」在当前平衡下打不死 Boss
      * （Boss 的承伤节奏刚好压过玩家的基础输出）。这也是一条
      * 有价值的结论 —— **必须用上「轰」**才能赢。
      */
     const engine = makeEngine();
-    const plan = planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge' });
+    const plan = planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge', interruptSkillId: 'break' });
     let sawEnd: string | undefined;
     for (let t = 0; t < 60 * 250; t += 1) {
       if (engine.snapshot.status !== 'running') break;
@@ -118,12 +118,12 @@ describe('真实内容：Boss 的机制都接线了', () => {
     expect(sawEnd).toBeDefined();
   });
 
-  it('【需求】只按「攻」打不过 Boss —— 不用防御就是输', () => {
+  it('【需求】只按「斩」打不过 Boss —— 不用防御就是输', () => {
     /**
      * 需求目标："不闪避或防御的话，就算完美进攻循环也打不过，
      * 但加一点容错。"
      *
-     * 实测：纯「攻」（读条一结束就按下一个，最理想的输出手法）**败**；
+     * 实测：纯「斩」（读条一结束就按下一个，最理想的输出手法）**败**；
      * 用上闪避/格挡才能赢（见黄金重放）。
      */
     const engine = makeEngine();
@@ -152,7 +152,7 @@ describe('真实内容：Boss 的机制都接线了', () => {
      * 实测：**403 tick 就败、Boss 剩 120**。为什么会比旧 Boss 差这么多
      * （旧记录是"剩 30"）：纯进攻派**按不出防御**，而「傲慢」的开场是
      * `opener`「碾压」（2.0s 前摇 / 60 伤 / 霸体）紧跟「呵斥」（40 伤）
-     * —— 两刀合计 100 伤正好等于满血，玩家只来得及打出 9 次「攻」。
+     * —— 两刀合计 100 伤正好等于满血，玩家只来得及打出 9 次「斩」。
      *
      * ⚠️ 这条**没有**弱化"纯进攻必须输"这个核心判据（`status` /
      * `player.alive` 两条断言原样保留，`attacks > 5` 也保留），
@@ -161,11 +161,20 @@ describe('真实内容：Boss 的机制都接线了', () => {
      * （13.6 DPS）与实际策略（~9 DPS）的落差，不是引擎问题。
      * 详见 `src/data/bossPride.ts` 的 `gapMs` 注释。
      *
-     * ⚠️ 上界 130 = 实测 120 + 10 点余量，仍然拦得住
-     * "纯进攻把 Boss 打到只剩一两成血"这种回归。
+     * ⚠️ **2026-10-11 再标定：上界 130 → 340。**
+     *
+     * 那一次的改动是"傲慢血量 210 → 420" + "「斩」「避」的炁耗都改成 15"。
+     * 新实测：**Boss 剩 330**。
+     *
+     * ⚠️ 相对位置其实**变差了**（130/210 = 62% → 330/420 = **79%**）：
+     * 斩从 10 炁涨到 15，「纯进攻」能打出的次数更少 —— 这正是"抬高输出税"
+     * 想要的效果，所以"相对更差"是**预期**，不是回归。
+     *
+     * ⚠️ 上界 340 = 实测 330 + 10 点余量。核心判据（`status` /
+     * `player.alive` / `attacks > 5`）一条没动，放宽的只是"输得多接近"。
      */
     expect(boss.resources.hp).toBeGreaterThan(0);
-    expect(boss.resources.hp).toBeLessThanOrEqual(130);
+    expect(boss.resources.hp).toBeLessThanOrEqual(340);
   });
 
   it('3 分钟超时判负', () => {
@@ -250,7 +259,7 @@ describe('真实内容：Boss 的机制都接线了', () => {
 });
 
 describe('真实内容：玩家招式都接线了', () => {
-  it('攻：读条 0.5 秒后造成 10 点伤害', () => {
+  it('斩：读条 0.5 秒后造成 10 点伤害', () => {
     const engine = makeEngine();
     const events = castAndResolve(engine, 'attack');
     const damage = events.find((e) => e.kind === 'damage');
@@ -259,7 +268,7 @@ describe('真实内容：玩家招式都接线了', () => {
     expect(damage.amount).toBe(10); // 需求：攻造成 10 点伤害
   });
 
-  it('攻：代价确实是 10 点缠（与"不施放"对照，隔离自然回复的干扰）', () => {
+  it('斩：代价确实是 15 点炁（与"不施放"对照，隔离自然回复的干扰）', () => {
     /**
      * 为什么要做对照：缠每个逻辑步都会自然回复，
      * 直接断言"施放前的值 − 100"会被回复量污染（实测差 10 点）。
@@ -276,11 +285,14 @@ describe('真实内容：玩家招式都接线了', () => {
     const spent = spend.snapshot.combatants.find((c) => c.side === 'ally')!.resources.energy;
     const kept = idle.snapshot.combatants.find((c) => c.side === 'ally')!.resources.energy;
     /**
-     * 差额是 9 而不是 10：付掉 10 点之后，**同一 tick 内**
+     * 差额是 14 而不是 15：付掉 15 点之后，**同一 tick 内**
      * 又走了一次自然回复（+1）。这正是"用对照隔离干扰"要暴露的东西 ——
-     * 直接断言"施放前的值 − 10"会得到假失败。
+     * 直接断言"施放前的值 − 15"会得到假失败。
+     *
+     * ⚠️ 这条断言会**跟着技能价格一起改**，这正是它存在的意义：
+     * 它是"价格真的被扣了、而且只扣了这些"的机器检查。
      */
-    expect(kept - spent).toBe(9);
+    expect(kept - spent).toBe(14);
   });
 
   it('闪：进入无敌窗口，期间完全免伤', () => {
@@ -404,7 +416,7 @@ describe('炁按伤害换算', () => {
   it('造成伤害会给自己攒炁', () => {
     const engine = makeEngine();
     const before = engine.snapshot.combatants.find((c) => c.side === 'ally')!.resources.douqi;
-    // 「攻」现在是读条技能，要等它结算完才会造成伤害、才谈得上攒炁
+    // 「斩」现在是读条技能，要等它结算完才会造成伤害、才谈得上攒炁
     castAndResolve(engine, 'attack');
     const after = engine.snapshot.combatants.find((c) => c.side === 'ally')!.resources.douqi;
     expect(after).toBeGreaterThan(before);
@@ -442,7 +454,7 @@ describe('炁按伤害换算', () => {
 
 describe('公共冷却不应产生误报（用户报过的 bug）', () => {
   /**
-   * 症状：按住「攻」时会周期性地看到「攻 · 公共冷却中」，
+   * 症状：按住「斩」时会周期性地看到「攻 · 公共冷却中」，
    * 而技能其实马上就要放出来了。
    *
    * 根因：输入层的"预测可用性"与引擎门禁**各写了一份 GCD 判据**，
@@ -452,7 +464,7 @@ describe('公共冷却不应产生误报（用户报过的 bug）', () => {
    * 修法：两侧共用 `isOnGcd`。这条测试锁住"共用"这个事实 ——
    * 如果以后有人再复制一份判据，它会失败。
    */
-  it('预测门禁与引擎判据一致：按住「攻」不会产生被拒', () => {
+  it('预测门禁与引擎判据一致：按住「斩」不会产生被拒', () => {
     const options = makeGoldenEngineOptions();
     const engine = new BattleEngine(options);
     const attack = options.skills.get('attack')!;
@@ -493,7 +505,7 @@ describe('公共冷却不应产生误报（用户报过的 bug）', () => {
 });
 
 describe('读条与打断（公共冷却已删除，节奏改由读条表达）', () => {
-  it('「攻」是读条技能：按下后不会立刻造成伤害', () => {
+  it('「斩」是读条技能：按下后不会立刻造成伤害', () => {
     const engine = makeEngine();
     const bossBefore = engine.snapshot.combatants[1]!.resources.hp;
     engine.tick([{ type: 'useSkill', skillId: 'attack', atTick: 0 }]);
@@ -509,7 +521,7 @@ describe('读条与打断（公共冷却已删除，节奏改由读条表达）'
     engine.drainEvents();
     expect(engine.snapshot.combatants[0]!.casts.length).toBe(1);
 
-    // 读 5 tick 后改用「破」（瞬发，不占用的资源），它应当打断「攻」
+    // 读 5 tick 后改用「破」（瞬发，不占用的资源），它应当打断「斩」
     for (let t = 1; t <= 5; t += 1) engine.tick();
     engine.tick([{ type: 'useSkill', skillId: 'break', atTick: 6 }]);
     const events = engine.drainEvents();
@@ -518,7 +530,7 @@ describe('读条与打断（公共冷却已删除，节奏改由读条表达）'
     expect(interrupted).toBeDefined();
     // 原因必须是"主动换招"，而不是被 Boss 打断
     expect(interrupted?.kind === 'castInterrupted' && interrupted.reason).toBe('replaced');
-    // 「攻」的读条已经被打断，「破」是瞬发所以现在没有读条
+    // 「斩」的读条已经被打断，「破」是瞬发所以现在没有读条
     expect(engine.snapshot.combatants[0]!.casts.length).toBe(0);
   });
 
@@ -526,7 +538,7 @@ describe('读条与打断（公共冷却已删除，节奏改由读条表达）'
     /**
      * 踩过的坑：早期打断检查放在门禁**之前**，于是"资源不足被拒绝"
      * 也会顺手把正在读的条打断 —— 玩家按下幻想的「轰」（缠不够），
-     * 结果连「攻」的读条也没了。日志里表现为同一 tick 先
+     * 结果连「斩」的读条也没了。日志里表现为同一 tick 先
      * `castInterrupted` 再 `skillRejected`。
      */
     const engine = makeEngine();
@@ -567,13 +579,13 @@ describe('读条与打断（公共冷却已删除，节奏改由读条表达）'
 
   it('「闪」**会**打断自己的读条 —— 这是"放弃一次输出换生存"的取舍', () => {
     /**
-     * 需求明确：闪避应该打断自己的「攻」。
+     * 需求明确：闪避应该打断自己的「斩」。
      *
      * 我一度给它开了豁免（理由："瞬发自保不该有双重代价"），
      * 但需求要的是它**必须**打断 —— 读条中按闪避 = 放弃这次输出
      * 换取生存，这个取舍本身就是玩法。
      *
-     * 代价确实很大（一次「攻」≈10 伤 + 30 炁），所以给「闪」
+     * 代价确实很大（一次「斩」≈10 伤 + 30 炁），所以给「闪」
      * 加了 1 秒冷却，避免连按把炁浪费掉。
      */
     const engine = makeEngine();
@@ -620,7 +632,7 @@ describe('读条与打断（公共冷却已删除，节奏改由读条表达）'
     for (let t = 1; t <= 3; t += 1) engine.tick();
     engine.tick([{ type: 'useSkill', skillId: 'blast', atTick: 4 }]);
     engine.drainEvents();
-    // 中断之后「攻」的那 10 点炁**不会退回来**
+    // 中断之后「斩」的那 10 点炁**不会退回来**
     expect(engine.snapshot.combatants[0]!.resources.energy).toBeLessThanOrEqual(afterStart);
   });
 
@@ -636,13 +648,13 @@ describe('读条与打断（公共冷却已删除，节奏改由读条表达）'
 
     engine.tick([{ type: 'hold', skillId: 'guard', atTick: 1 }]);
     const events = engine.drainEvents();
-    // 「攻」的读条被打断
+    // 「斩」的读条被打断
     expect(events.some((e) => e.kind === 'castInterrupted')).toBe(true);
     // 减伤 buff 已经挂上 —— 打断不是纯损失
     expect(engine.snapshot.combatants[0]!.buffs.some((b) => b.defId === 'guard')).toBe(true);
   });
 
-  it('「轰」比「攻」读条更久（高伤害的代价是更容易被打断）', () => {
+  it('「轰」比「斩」读条更久（高伤害的代价是更容易被打断）', () => {
     const a = registry.skills.get('attack')!;
     const b = registry.skills.get('blast')!;
     expect(b.castTime).toBeGreaterThan(a.castTime);

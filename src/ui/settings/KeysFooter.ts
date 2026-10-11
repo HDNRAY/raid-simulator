@@ -10,6 +10,7 @@ import { FONT } from '../layout';
 import { Label, type PixiCtor } from '../primitives';
 import { PALETTE } from '../../render/theme';
 import { hintLineY, mnemonicKeyOf, resetButtonRect, SETTINGS_PANEL } from './logic';
+import type { TranslateFn } from '../../i18n/translator';
 
 export class KeysFooter {
   readonly root: Container;
@@ -21,7 +22,7 @@ export class KeysFooter {
 
   constructor(
     pixi: PixiCtor,
-    private readonly translate: (key: string) => string,
+    private readonly translate: TranslateFn,
     private readonly notice: () => string,
   ) {
     this.root = new pixi.Container();

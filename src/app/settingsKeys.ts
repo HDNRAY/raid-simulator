@@ -27,18 +27,53 @@ export interface SettingsKeyTargets {
     setFocused(focused: boolean): void;
   };
   settingsOpen(): boolean;
+  /**
+   * 现在是否**允许**用 `↑` 把键盘焦点提到设置按钮。
+   *
+   * ==================================================================
+   * 为什么需要这个开关（踩过的坑）
+   * ==================================================================
+   *
+   * `↑` 原本是"战斗中把焦点提到设置按钮、再 Enter 打开"。但**备战界面
+   * 也用 `↑↓` 换槽位**，于是同一次按键被两边处理：光标跳了一行，
+   * 设置按钮同时被点亮。
+   *
+   * 后果不只是"按钮亮了"：焦点一旦落在按钮上（内部 `focused = true`），
+   * 之后按 **Enter 会先开设置**而不是确定角色（见下面 `enter && focused`
+   * 那条分支）—— 而玩家看到的只是"齿轮不知为何变黄了"。
+   * 这正是需求里"设置按钮 有时也会被变黄"的由来之一。
+   *
+   * 所以把这个流程**限定在它本来服务的界面**：备战界面走 `Esc` / `,`
+   * 打开设置（那两条不受影响），`↑` 留给光标。
+   */
+  acceptsKeyboardFocus(): boolean;
   /** 打开设置（`tab` 固定为按键页 —— 这是本作的默认入口）。 */
   openSettings(): void;
   /** 标记"正由设置处理这次按键"，输入层据此跳过。 */
   setHandling(value: boolean): void;
 }
 
+/** `wireSettingsKeys` 的返回值。 */
+export interface SettingsKeyHandle {
+  /** 卸载监听。 */
+  readonly dispose: () => void;
+  /**
+   * 键盘焦点此刻是否在设置按钮上。
+   *
+   * ⚠️ **备战界面需要它**：`↑` 在这里被用来"把焦点提到设置按钮"，
+   * 而备战界面也用 `↑↓` 换槽位 —— 两边都处理同一次按键，结果是
+   * "光标跳了槽位，同时设置按钮亮了"。
+   *
+   * 优先级：**设置按钮聚焦时，备战不抢键**（否则按 Enter 想开设置，
+   * 却把角色选定了）。这和 `settingsOpen()` 挡住备战是同一个道理。
+   */
+  readonly isButtonFocused: () => boolean;
+}
+
 /**
  * 装上设置的键盘监听。
- *
- * @returns 卸载函数。
  */
-export function wireSettingsKeys(t: SettingsKeyTargets): () => void {
+export function wireSettingsKeys(t: SettingsKeyTargets): SettingsKeyHandle {
   /**
    * 键盘焦点是否在设置按钮上（`↑` 提上去、`↓` 退下来、`Enter` 打开）。
    * 它是这个模块**唯一**的持久状态。
@@ -67,7 +102,7 @@ export function wireSettingsKeys(t: SettingsKeyTargets): () => void {
     }
 
     /** 战斗中：`↑` 把焦点提到设置按钮，再 Enter 打开。 */
-    if (key === 'arrowup') {
+    if (key === 'arrowup' && t.acceptsKeyboardFocus()) {
       setFocused(true);
       event.preventDefault();
       return;
@@ -110,5 +145,8 @@ export function wireSettingsKeys(t: SettingsKeyTargets): () => void {
   };
 
   window.addEventListener('keydown', onKeyDown, true);
-  return () => window.removeEventListener('keydown', onKeyDown, true);
+  return {
+    dispose: () => window.removeEventListener('keydown', onKeyDown, true),
+    isButtonFocused: () => focused,
+  };
 }

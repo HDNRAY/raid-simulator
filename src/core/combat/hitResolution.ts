@@ -112,6 +112,15 @@ export function resolveHit(
     const casterStats = ctx.statsOf(actor.id);
     const victimFlags = aggregateFlags(target);
 
+    /**
+     * 这次命中**有没有碰到人**。
+     *
+     * ⚠️ **在循环之前判定一次**，不要在每个效果里现算：
+     * 判据属于"整次命中"，与效果的顺序、种类都无关（见 `applyHitEffects`
+     * 里那段"我闪躲了还是倒地了"的说明）。
+     */
+    const avoided = victimFlags.invulnerable === true;
+
     /** 本次命中实际扣掉的血（用于判断"是否算受伤"，见函数末尾）。 */
     let taken = 0;
 
@@ -136,8 +145,12 @@ export function resolveHit(
             victimFlags,
             { crit, multiplier: crit ? 1 + (casterStats.critDamage ?? 0) : 1 },
           );
-          // 命中本身也会触发"授予 buff"类效果（例如 Boss 给自己挂前摇标记）
-          applyHitEffects(ctx, actor, target, effect, skill.id);
+          /**
+           * 命中本身也会触发"授予 buff"类效果（例如 Boss 给自己挂前摇标记）
+           * —— 那类效果写的是 `target: self`，所以**被闪掉时照样生效**；
+           * 而挂在挨打者身上的（如「倒地」）会被 `avoided` 挡掉。
+           */
+          applyHitEffects(ctx, actor, target, effect, skill.id, avoided);
           const applied = applyDamage(
             ctx.current(target.id),
             result,
@@ -168,7 +181,7 @@ export function resolveHit(
           break;
         }
         default:
-          applyHitEffects(ctx, actor, target, effect, skill.id);
+          applyHitEffects(ctx, actor, target, effect, skill.id, avoided);
           break;
       }
     }
@@ -190,7 +203,42 @@ export function resolveHit(
     }
   }
 
-  /** 非伤害类效果（授予 buff / 改资源 / 打断）。 */
+/**
+ * 这个效果是不是**作用在挨打者身上**。
+ *
+ * ==================================================================
+ * 为什么需要它（`avoided` 的判据）
+ * ==================================================================
+ *
+ * 被闪掉 / 无敌的命中**没有碰到人**，所以"挨打者完全不受影响" ——
+ * 但**施法者自己的东西照旧**（他确实放了这一招，代价与冷却已经付了）。
+ *
+ * 所以这条判据必须按**效果作用于谁**来分，不能按"是不是伤害"来分：
+ *
+ * | 效果 | 作用对象 | 被闪掉时 |
+ * |---|---|---|
+ * | `grantBuff` / `removeBuff` / `stun` / `interrupt` | 挨打者（默认） | **跳过** |
+ * | 同上，但写了 `target: self` | 施法者 | 照常 |
+ * | `resource` / `cooldown` | **永远是施法者** | 照常 |
+ *
+ * ⚠️ `resource` / `cooldown` 这两条**必须显式列出来** —— 它们没有
+ * `target` 字段，如果落到"默认 = 挨打者"那一支就会被误跳过：
+ * 于是"被打断"会不退冷却、"派生技消耗资源"会不生效，
+ * 而且症状是**静默的数值不对**，极难查。
+ */
+function actsOnVictim(effect: Effect): boolean {
+  switch (effect.kind) {
+    /** 施法者自己的资源收支（`applyHitEffects` 里读的就是 `actor`）。 */
+    case 'resource':
+    /** 施法者自己的冷却调整（「截」成功不退 CD 靠它）。 */
+    case 'cooldown':
+      return false;
+    default:
+      return effect.target?.mode !== 'self';
+  }
+}
+
+/** 非伤害类效果（授予 buff / 改资源 / 打断）。 */
 export function applyHitEffects(
   ctx: HitResolutionContext,
   actor: Combatant,
@@ -198,7 +246,31 @@ export function applyHitEffects(
   effect: Effect,
   /** 触发这个效果的技能 —— `cooldown` 效果默认调它自己的冷却。 */
   skillId?: string,
+  /**
+   * 这次命中是否**被闪掉 / 免疫**了（见 `resolveHit`）。
+   *
+   * ⚠️ 默认 `false` 是**有意**的：调用方（触发器、派生技）绝大多数
+   * 不经过"命中判定"，它们的效果本来就该生效。只有 `resolveHit`
+   * 知道闪避结果，所以只有它传 `true`。
+   */
+  avoided = false,
 ): void {
+    /**
+     * ⚠️ **被闪掉的命中不改变挨打者。**
+     *
+     * 踩过的坑（玩家原话）："我闪躲了还是倒地了。"
+     *
+     * 傲慢的「碾压」把「倒地」和伤害放在**同一个 hit** 里，设计原话是
+     * "闪掉了就不会倒地"。但伤害的免疫判定只在 `damage` 分支里发生
+     * （`computeDamage` 返回 `avoided`），而 `grantBuff` 走 `default`
+     * 分支、**无条件执行** —— 于是设计意图从来没被引擎实现过。
+     *
+     * 顺带一提：当时能"看起来对"是因为 `damage` 排在 `grantBuff` **前面**。
+     * 顺序一换（或某个 hit 只有 buff 没有伤害），同一个 bug 会以
+     * 另一种面貌出现。所以判据要**整次命中判定一次**，不能靠效果顺序。
+     */
+    if (avoided && actsOnVictim(effect)) return;
+
     if (effect.kind === 'grantBuff' && effect.buff) {
       const who = effect.target?.mode === 'self' ? actor : target;
       const applied = applyBuff(ctx.current(who.id), effect.buff, actor.id, ctx.state.tick);

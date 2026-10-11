@@ -16,6 +16,35 @@ import { zhCN } from './locales/zh-CN';
 import type { Catalog, MessageKey } from './types';
 
 /** 支持的语言。当前只有中文，但结构上已就绪。 */
+/**
+ * **取词函数的统一形状** —— 所有组件、所有注入点都用它。
+ *
+ * ==================================================================
+ * 为什么必须是一个具名类型，而不是各处写 `(key: string) => string`
+ * ==================================================================
+ *
+ * 踩过的坑（用户报告）：设置页里**技能的代价与冷却全没了**，
+ * 修好取数之后界面上显示的却是 **`{value} {resource}` / `{seconds}`
+ * 这些占位符本身**。
+ *
+ * 根因有两层，而第二层才是真正难查的：
+ *
+ *   1. `main.ts` 里写成 `(key) => translator.t(key)` —— 手工丢了 `params`
+ *   2. **`SettingsPanelOptions.translate` 的类型是 `(key: string) => string`**
+ *      —— 于是"丢参数"不是失误，而是**类型系统认可的写法**。
+ *      TypeScript 允许"参数更少的函数"赋值给"参数更多的类型"
+ *      （这是刻意的、为了 `Array.map(parseInt)` 那类场景），
+ *      所以这个 bug **一路静默到界面上**，编译、单测、eslint 全绿。
+ *
+ * 收窄成"只有一个参数"就不再是安全网，而是**帮凶**。所以：
+ * 形状只在这里定义一次，各处引用它。以后再有人写出只收 `key` 的实现，
+ * 编译器会当场拦下 —— 因为**显式的 `params` 参数不能不处理**。
+ */
+export type TranslateFn = (
+  key: string,
+  params?: Readonly<Record<string, string | number>>,
+) => string;
+
 export type LocaleId = 'zh-CN';
 
 export const DEFAULT_LOCALE: LocaleId = 'zh-CN';

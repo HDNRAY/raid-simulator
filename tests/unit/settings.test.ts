@@ -212,6 +212,42 @@ describe('改键：冲突策略是"顶掉旧占用者"', () => {
     expect(r.bindings.find((b) => b.skillId === 'attack')?.key).toBe(EMPTY_KEY);
   });
 
+  /**
+   * **技能不在表里时必须追加**，不能静默什么都不做。
+   *
+   * ==================================================================
+   * 这个断言防的是什么（真实踩过的坑：「截」绑不上键）
+   * ==================================================================
+   *
+   * 玩家反馈："「截」 好像绑不上按键，闪似乎可以。"
+   *
+   * 根因：`applyRebind` 原来只有 `bindings.map(...)`，而 `map`
+   * **只改已存在的条目、从不新增**。当时 `DEFAULT_BINDINGS` 里漏了
+   * `jie`（有两个数据源：注册表负责"显示"、绑定表负责"写入"），
+   * 于是改键流程全程看起来正常 —— 进入改键、按键、界面刷新 ——
+   * 但那一条绑定从来没被写进去。
+   *
+   * 所以这里**故意喂一张不含目标技能的表**，断言它被追加。
+   * 光靠"把「截」补进默认表"是修不掉这类 bug 的：下一个新技能会再踩。
+   */
+  it('技能不在表里时：追加一条，而不是静默丢弃', () => {
+    // `base` 里没有 `jie`
+    expect(base.some((b) => b.skillId === 'jie')).toBe(false);
+
+    const r = applyRebind(base, 'jie', 'z');
+    expect(r.bindings.find((b) => b.skillId === 'jie')?.key).toBe('z');
+    // 原有条目一个不少
+    for (const b of base) {
+      expect(r.bindings.some((x) => x.skillId === b.skillId)).toBe(true);
+    }
+  });
+
+  it('技能不在表里、且目标键被占用：占用者让位，新技能拿到键', () => {
+    const r = applyRebind(base, 'jie', 'q');
+    expect(r.bindings.find((b) => b.skillId === 'jie')?.key).toBe('q');
+    expect(r.bindings.find((b) => b.skillId === 'dodge')?.key).toBe(EMPTY_KEY);
+  });
+
   it('改动不会影响未涉及的技能', () => {
     const r = applyRebind(base, 'blast', 'x');
     expect(r.bindings.find((b) => b.skillId === 'attack')?.key).toBe('1');
@@ -540,8 +576,12 @@ describe('标签只出现在详情区，不占技能格', () => {
     const all = src + detail;
     expect(all).toMatch(/this\.tags = line\(1, FONT\.tiny/);
     expect(all).toMatch(/this\.tags\.set\(tags\)/);
-    // 文案 key 仍然来自 settings.hintTags.<id>
-    expect(src + detail).toMatch(/settings\.hintTags\.\$\{tag\}/);
+    /**
+     * ⚠️ 文案 key 现在是**完整 i18n key**（不再拼 `settings.hintTags.`
+     * 前缀）：控制类提示取的是那个 debuff 自己的 `nameKey`
+     * （如 `lust.stun.name` = 「眩晕」）。见 `app/skillHints.ts`。
+     */
+    expect(src + detail).toMatch(/\.map\(\(key\) => t\(key\)\)/);
   });
 
   it('tagColor 已随格子标签一起删除（不留死代码）', async () => {

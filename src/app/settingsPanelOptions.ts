@@ -21,6 +21,7 @@ import { rebindWithSwap, swapSlots } from './bindingActions';
 import { buildKeyRows } from './keyRows';
 import type { ContentRegistry } from '../core/content/registry';
 import { EMPTY_SNAPSHOT } from '../render/viewModel';
+import type { TranslateFn } from '../i18n/translator';
 
 export interface SettingsOptionsDeps {
   readonly registry: ContentRegistry;
@@ -36,7 +37,8 @@ export interface SettingsOptionsDeps {
   readonly setUiScale: (v: number) => void;
   /** 当前战斗快照（设置页用它显示代价 / CD）。备战阶段给空快照。 */
   readonly snapshot: () => unknown;
-  readonly translate: (key: string) => string;
+  /** ⚠️ 用共享的 `TranslateFn`（带 `params`）—— 收窄成只收 `key` 会让占位符漏到界面上。 */
+  readonly translate: TranslateFn;
   /** 触屏按钮的只读预览。 */
   readonly getTouchSkills: () => readonly string[];
   readonly getShowKeyHints: () => boolean;
@@ -57,7 +59,11 @@ export function buildSettingsOptions(d: SettingsOptionsDeps): SettingsPanelOptio
     getTouchSkills: () => d.getTouchSkills(),
     getShowKeyHints: () => d.getShowKeyHints(),
     pixi: d.pixi,
-    translate: (key) => t(key),
+    /**
+     * ⚠️ **透传 `params`** —— 只写 `(key) => t(key)` 会把占位符参数吃掉，
+     * 界面上的 `{seconds}` 就会原样显示出来（踩过，见 `main.ts` 的 `translateSafe`）。
+     */
+    translate: (key, params) => t(key, params),
     getRows: () =>
       buildKeyRows({
         bindings: d.getBindings(),
