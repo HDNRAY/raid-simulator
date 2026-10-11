@@ -11,6 +11,7 @@
 import { Assets, Sprite, type Container, type Graphics, type Texture } from 'pixi.js';
 import { PALETTE } from '../theme';
 import { DODGE_PEAK_X } from '../actorLayout';
+import { assetUrl } from '../assetUrl';
 import type { FrameContext, FramePart } from '../sceneTypes';
 
 /**
@@ -45,8 +46,11 @@ const SPRITE_SCALE = 0.68;
  *
  * ⚠️ 在 `placeholder/` 下 —— 那是**不可分发的本地占位素材**（见该目录的
  * README 与 `.gitignore`）。换成正式美术时只改这一个常量。
+ *
+ * ⚠️ **必须走 `assetUrl()`**：线上部署在 `/raid/` 子路径下，硬编码
+ * `/placeholder/...` 会解析到域名根而 404（本地 dev 是 `/` 所以看不出来）。
  */
-const SPRITE_URL = '/placeholder/player-fd2-mirrored.png';
+const SPRITE_URL = assetUrl('placeholder/player-fd2-mirrored.png');
 /**
  * **攻击帧**贴图。
  *
@@ -56,7 +60,7 @@ const SPRITE_URL = '/placeholder/player-fd2-mirrored.png';
  * 特效与突刺。锚点同样是底部中心，所以更宽的一半会**朝右**延伸
  * （玩家在左、Boss 在右），正好是挥向 Boss 的方向。
  */
-const ATTACK_SPRITE_URL = '/placeholder/player-fd2-slash.png';
+const ATTACK_SPRITE_URL = assetUrl('placeholder/player-fd2-slash.png');
 
 /** 玩家角色部件。 */
 export class PlayerActorPart implements FramePart {
