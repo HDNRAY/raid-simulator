@@ -41,30 +41,44 @@ import { C, S } from './scale';
 import { LUST_BUFFS, LUST_SKILLS } from './lustBoss';
 import { COMBO_WINDOW, JIE, STRIKE } from './playerSkills';
 export { C, S } from './scale';
-import {
-  BOSS_ARMOR,
-  BOSS_CLEAVE_ARMOR,
-  BOSS_ENRAGE,
-  KNOCKDOWN,
-  BOSS_SKILLS,
-  BOSS_TELEGRAPH,
-} from './bossSkills';
+import { BOSS_ENRAGE, BOSS_TELEGRAPH, KNOCKDOWN } from './bossShared';
+/**
+ * ⚠️ 只 import **本文件自己要用**的两个汇总（`ALL_SKILLS` / `ALL_BUFFS`）；
+ * 逐个技能的转发走下面的 `export { ... } from`。
+ *
+ * 两件事分开写是因为 `import { X }` + `export { X } from` 会让 `X`
+ * 变成"import 了但没用到"（`export ... from` 是从源模块重新导出，
+ * 不经过本地绑定），`noUnusedLocals` 会报错。
+ */
+import { PRIDE_BUFFS, PRIDE_SKILLS } from './bossPride';
 
 /**
- * Boss 的 buff 与技能从 `./bossSkills` **转发**，外部 import 路径不变。
+ * Boss 的内容从各自的内容文件**转发**，外部 import 路径不变。
+ *
+ * ⚠️ 分工（与 `bossSkills.ts` 时代不同）：
+ *   `bossShared.ts` 两个 Boss 共用的三样（前摇标记 / 狂暴 / 倒地）
+ *   `bossPride.ts`  「傲慢」的技能 + buff + 轮转
+ *   `lustBoss.ts`   「色欲」的技能 + buff + 轮转
+ *
+ * 旧的 `BOSS_CLEAVE` / `BOSS_SWEEP` / `BOSS_EMPOWER` / `BOSS_ARMOR` /
+ * `BOSS_ARMOR_SKILL` 已随「霸体合并」删除（设计 §6.3）—— 它们不是因为
+ * 改名而消失，而是**技能本身没了**：霸体现在是「碾压」自带的属性，
+ * 「蓄能」整个删掉（占出招格却不打人）。
  */
 export {
   KNOCKDOWN,
-  BOSS_ARMOR,
-  BOSS_ARMOR_SKILL,
-  BOSS_CLEAVE,
-  BOSS_CLEAVE_ARMOR,
-  BOSS_EMPOWER,
   BOSS_ENRAGE,
-  BOSS_SKILLS,
-  BOSS_SWEEP,
   BOSS_TELEGRAPH,
-} from './bossSkills';
+} from './bossShared';
+export {
+  BOSS_HEAVY,
+  BOSS_HEAVY_ARMOR,
+  BOSS_MEND,
+  BOSS_REBUKE,
+  BOSS_SCORN,
+  PRIDE_BUFFS,
+  PRIDE_SKILLS,
+} from './bossPride';
 
 
 /** 生命上限（展示值）。 */
@@ -289,7 +303,7 @@ const DODGE: SkillDef = {
   targeting: { mode: 'self' },
   hits: [],
   /**
-   * ⚠️ **`dodge` 是"被控时的出路"**：Boss 的「横扫」会造成倒地，倒地
+   * ⚠️ **`dodge` 是"被控时的出路"**：Boss 的「碾压」会造成倒地，倒地
    * 期间（`BuffFlags.restrictToTags`）只有带 `dodge` 的技能可按 ——
    * 也就是"被打倒了还能翻滚躲开下一击"。
    *
@@ -334,7 +348,7 @@ const FLASH: SkillDef = {
   targeting: { mode: 'self' },
   hits: [],
   /**
-   * ⚠️ **`dodge` 是"被控时的出路"**：Boss 的「横扫」会造成倒地，倒地
+   * ⚠️ **`dodge` 是"被控时的出路"**：Boss 的「碾压」会造成倒地，倒地
    * 期间（`BuffFlags.restrictToTags`）只有带 `dodge` 的技能可按 ——
    * 也就是"被打倒了还能翻滚躲开下一击"。
    *
@@ -528,18 +542,46 @@ export const PLAYER_SKILLS: readonly SkillDef[] = [
   FOCUS,
 ];
 
-
+/**
+ * **玩家技能 id 集合** —— "这个技能是不是玩家的"的**唯一真相**。
+ *
+ * ==================================================================
+ * ⚠️ 为什么需要它（踩过的坑）
+ * ==================================================================
+ *
+ * 判断"是不是 Boss 技能"曾经靠在 **id 前缀**上猜（`startsWith('boss-')`）。
+ * 那在「色欲」加入后就静默失效了 —— 它的技能 id 是
+ * `lust-hum` / `lust-entangle` / `lust-charm`，**全都不以 `boss-` 开头**，
+ * 于是漏过检查。症状：**Boss 的技能出现在设置页的按键列表里**，
+ * 玩家可以给 Boss 的招绑键。
+ *
+ * 同一个前缀约定还被另外两处依赖（`derivedSlots.ts` 的派生槽、
+ * `viewModel.test.ts` 的读条时长护栏），它们**同时**对色欲失效。
+ *
+ * ⚠️ **所以不要再用 id 前缀判断技能归属。** 7 宗罪各有一套前缀，
+ * 前缀约定每加一个 Boss 就要记得维护一次，而漏掉时**不会报错**。
+ *
+ * `ALL_SKILLS` 是由 `PLAYER_SKILLS` + 各 Boss 的技能表拼出来的，
+ * 所以"在不在这个集合里"是**结构性的** —— 新加 Boss 时自动生效，
+ * 不需要任何人记得改哪里。
+ */
+export const PLAYER_SKILL_IDS: ReadonlySet<string> = new Set(
+  PLAYER_SKILLS.map((s) => s.id),
+);
 
 /**
  * 全部技能。
  *
  * ⚠️ **两个 Boss 的技能都在这里**，各自由自己的 `Behavior` 轮转决定实际
- * 放哪些（见 `LUST_BEHAVIORS` vs `VERROT_BEHAVIORS`）。所以"注册"不等于
+ * 放哪些（见 `LUST_BEHAVIORS` vs `PRIDE_BEHAVIORS`）。所以"注册"不等于
  * "会用"—— 这也是为什么加 Boss 只需要加它的轮转。
+ *
+ * ⚠️ 注意 `ALL_SKILLS` 里**混着 Boss 技能**，所以想"只要玩家技能"时
+ * 不要按 id 前缀过滤，用 `PLAYER_SKILL_IDS`（见那里的说明）。
  */
 export const ALL_SKILLS: readonly SkillDef[] = [
   ...PLAYER_SKILLS,
-  ...BOSS_SKILLS,
+  ...PRIDE_SKILLS,
   ...LUST_SKILLS,
 ];
 
@@ -551,14 +593,16 @@ export const ALL_BUFFS: readonly BuffDef[] = [
   SUNDER_DEBUFF,
   BOSS_TELEGRAPH,
   BOSS_ENRAGE,
-  BOSS_ARMOR,
-  BOSS_CLEAVE_ARMOR,
+  ...PRIDE_BUFFS,
   ...LUST_BUFFS,
   /**
-   * 「倒地」（Boss 的「横扫」给玩家的）。
+   * 「倒地」（Boss 的「碾压」给玩家的）。
    *
    * ⚠️ 必须注册进 `ALL_BUFFS` —— 内容校验器与 `registry.buffs` 都读它，
    * 漏了会导致"引擎认识这个 buff，但 hittest/校验看不到"。
+   *
+   * ⚠️ 它**不在** `PRIDE_BUFFS` 里：两个 Boss 都会用到它（设计 §6.4 的
+   * "共享"边界），所以它由 `bossShared.ts` 定义、在这里单独列出。
    */
   KNOCKDOWN,
   /** 派生窗口（「截」成功后挂上，激活「击」）。 */

@@ -21,6 +21,7 @@
  * 于是"改了一个数值 → 某场重放的结果变了"会立刻在测试里暴露。
  */
 
+import { aggregateFlags } from './buffs';
 import { BattleEngine } from './combat/battleState';
 import type {
   Action,
@@ -36,8 +37,13 @@ import type {
  *
  * **改动引擎的确定性语义时必须 +1** —— 否则旧的重放文件会
  * 在新引擎上产生"看起来像 bug"的差异。测试会校验这个数字。
+ *
+ * 1 → 2（2026-10-11，「傲慢」改造）：新增了**第二条随机流**
+ * （`BattleState.aiRngSeed`，供随机选招用）与"加权随机轮转"这种
+ * 行为 —— 同一份 `(seed + 输入)` 在 v1 引擎上会得到完全不同的结果
+ * （Boss 的出招顺序由随机决定，而不再由声明顺序决定）。
  */
-export const REPLAY_FORMAT_VERSION = 1 as const;
+export const REPLAY_FORMAT_VERSION = 2 as const;
 
 /** 一次记录的运行。 */
 export interface RecordedRun {
@@ -234,6 +240,7 @@ export function roughlyUsable(
         readonly cooldown: number;
         readonly cost: readonly { readonly resource: string; readonly value: unknown }[];
         readonly requires?: readonly Condition[];
+        readonly tags?: readonly string[];
       }
     | undefined,
   actorId = 'player',
@@ -242,6 +249,20 @@ export function roughlyUsable(
   const actor = state.combatants.find((c) => c.id === actorId);
   if (!actor || !actor.alive) return false;
   if (actor.casts.length > 0) return false;
+  /**
+   * **技能 tag 白名单**（倒地时只能用「闪避」类）。
+   *
+   * ⚠️ 与引擎门禁的**第 1b 步**同源（`core/combat/index.ts` 的
+   * `checkGate`）。踩过的坑：这一侧漏了它，于是「傲慢」的「碾压」
+   * 命中把玩家打倒后，这个预测函数仍然说「攻」可用 —— 而引擎会连续
+   * 拒绝 14 次（`tagRestricted`）。测试里"预测与引擎一致"这条断言
+   * 就是为了抓这种**两份判据各自漂移**，所以这里补上而不是放宽断言。
+   */
+  const allowedTags: readonly string[] | undefined = aggregateFlags(actor).restrictToTags;
+  if (allowedTags !== undefined && allowedTags.length > 0) {
+    const skillTags: readonly string[] = skill.tags ?? [];
+    if (!skillTags.some((t) => allowedTags.includes(t))) return false;
+  }
   if ((actor.cooldowns[skillId] ?? 0) > state.tick) return false;
   for (const cost of skill.cost) {
     const need = typeof cost.value === 'number' ? cost.value : 0;

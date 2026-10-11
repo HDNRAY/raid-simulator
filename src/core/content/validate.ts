@@ -513,6 +513,13 @@ function behaviorSkillRefs(behavior: Behavior): readonly string[] {
       return [behavior.skillId];
     case 'rotation':
       return behavior.steps.map((s) => s.skillId);
+    /**
+     * 随机轮转里的技能引用同样要校验存在性 —— 否则内容把 id 写错时
+     * 表现为"某个技能永远抽不到"（候选集里查不到定义，静默跳过），
+     * 那是极难从表现反推的诊断。
+     */
+    case 'weightedRotation':
+      return behavior.steps.map((s) => s.skillId);
     case 'interruptible':
       return behavior.skillIds;
     case 'onHpBelow':

@@ -32,8 +32,35 @@ export interface AiContext {
   readonly events: EventDef[];
   readonly tick: number;
   readonly combatants: readonly Combatant[];
-  /** ⚠️ 可变：AI 要记住"已经用过的 opener / 各技能上次施放 tick" */
-  aiState: AiState;
+  /**
+   * 本次决策**读**的 AI 状态（只读入口）。
+   *
+   * ⚠️ 推进后的状态必须走 `updateAiState` 写回引擎 —— 见那里的说明。
+   */
+  readonly aiState: AiState;
+  /**
+   * 把推进后的 AI 状态**写回引擎**。
+   *
+   * ==================================================================
+   * ⚠️ 为什么需要这个回调（这是一个真 bug 的修复）
+   * ==================================================================
+   *
+   * 原先这里是 `aiState: AiState`，`runAi` 直接给它赋值
+   * （`ctx.aiState = decision.nextState`）。但 `ctx` 是**每次调用新建的
+   * 一个普通对象**（`battleState.aiContext()`），所以那次赋值只改了一个
+   * 立刻被丢弃的对象 —— 引擎自己的 `this.aiState` **永远是空的**。
+   *
+   * 症状（改造「傲慢」时暴露）：`lastUsedAt` 恒为 `{}`，于是
+   *   - `gapMs` 完全失效（每次决策都以为"这个技能从没用过"）
+   *   - "同招不连发"的保底失效
+   * Boss 因此按**冷却**而不是 `gapMs` 出招（实测 2 秒一刀，而不是 4 秒）。
+   *
+   * 旧 Boss 掩盖了它：它的顺序轮转每次都返回 `steps[0]` 或同一个
+   * "第一个可用"的招，**与 `lastUsedAt` 无关**；`triggeredThresholds`
+   * 与 `enraged` 也被内容里的其它条件兜住了。随机轮转把这个必然失败
+   * 的写入路径照了出来。
+   */
+  updateAiState(next: AiState): void;
   readonly options: {
     readonly bossId?: string;
     readonly skills: ReadonlyMap<string, SkillDef>;
@@ -160,7 +187,14 @@ export function runAi(
     };
 
     const decision = decide(view, self.behaviors, ctx.aiState);
-    ctx.aiState = decision.nextState;
+    /**
+     * ⚠️ **必须写回引擎**，不能只改 `ctx`：`ctx` 每次调用都是新建的
+     * 临时对象（见 `updateAiState` 的说明）。
+     *
+     * 写回时机放在"事件与动作都执行之前"：万一下游抛错，状态也已经
+     * 记下了这次决策，不会出现"招放出去了、但没人记得放过"的错位。
+     */
+    ctx.updateAiState(decision.nextState);
 
     /**
      * AI 层事件 → 实际效果。

@@ -15,11 +15,11 @@
  */
 
 import type { Behavior, Combatant, StatKey } from '../core/types';
-import { VERROT_BEHAVIORS } from '../core/ai';
 import { applyBuff } from '../core/buffs';
 import { BOSS_HP_DISPLAY } from './entities/bossHp';
 import { DOUQI_MAX, ENERGY_MAX, HP_MAX } from './content';
 import { LUST_BEHAVIORS, LUST_PASSIVE } from './lustBoss';
+import { PRIDE_BEHAVIORS } from './bossPride';
 import { BOSS_ROSTER, PLAYER_ROSTER, findEntry } from './roster';
 
 /**
@@ -86,7 +86,7 @@ export function makePlayer(id: string): Combatant {
  * 自己轮转里列出的那些。
  */
 export function behaviorsFor(id: string): readonly Behavior[] {
-  return id === 'lust' ? LUST_BEHAVIORS : VERROT_BEHAVIORS;
+  return id === 'lust' ? LUST_BEHAVIORS : PRIDE_BEHAVIORS;
 }
 
 /**

@@ -47,7 +47,7 @@ export const PLAYER_ROSTER: readonly RosterEntry[] = [
 
 /** 可选 Boss。需求："目前只有这个boss"。 */
 export const BOSS_ROSTER: readonly RosterEntry[] = [
-  /** Boss 名沿用已有的 `boss.name`（"伪名一郎"），不另起一个 key。 */
+  /** Boss 名沿用已有的 `boss.name`（显示值已是"傲慢"），不另起一个 key。 */
   { id: 'meiichiro', nameKey: 'boss.name' },
   { id: 'lust', nameKey: 'lust.name' },
 ];

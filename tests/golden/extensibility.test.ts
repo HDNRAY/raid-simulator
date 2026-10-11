@@ -402,9 +402,9 @@ describe('可扩展性：新增一个 Boss 只需要写数据', () => {
   });
 
   it('同一套引擎代码能同时驱动两个完全不同的 Boss', () => {
-    // Verrot 与新 Boss 各自跑 10 秒，都应有自己的行为表现
+    // 两个 Boss 各自跑 10 秒，都应有自己的行为表现
     const a = new BattleEngine({
-      ...{ combatants: [makeCombatant('player', 'ally', 30_000), { ...makeCombatant('meiichiro', 'enemy', 50_000), behaviors: [{ kind: 'opener', skillId: 'boss-cleave', delayMs: 500 }] }] },
+      ...{ combatants: [makeCombatant('player', 'ally', 30_000), { ...makeCombatant('meiichiro', 'enemy', 50_000), behaviors: [{ kind: 'opener', skillId: 'boss-heavy', delayMs: 500 }] }] },
       seed: 5,
       bossId: 'meiichiro',
       buffs: registryWith({}).buffs,
@@ -417,7 +417,7 @@ describe('可扩展性：新增一个 Boss 只需要写数据', () => {
       a.tick();
       for (const e of a.drainEvents()) if (e.kind === 'skillUsed') aUsed.add(e.skillId);
     }
-    expect(aUsed.has('boss-cleave')).toBe(true);
+    expect(aUsed.has('boss-heavy')).toBe(true);
 
     const b = makeBossEngine();
     const bUsed = new Set<string>();

@@ -26,16 +26,17 @@
  * 见架构规范 §12。
  */
 
-import { expireBuffs } from '../buffs';
-import {
-  capOf,
-  regenerate,
-  type CombatContext,
-} from './index';
+import { type CombatContext } from './index';
 import { createAiState, type AiState } from '../ai';
 import type { StatBreakdown } from '../stats/pipeline';
 import type { HitResolutionContext } from './hitResolution';
-import { createWorkSet, toMutable, type MutableCombatant } from './battleStateTypes';
+import {
+  clampStart,
+  createWorkSet,
+  defaultActorIdOf,
+  toMutable,
+  type MutableCombatant,
+} from './battleStateTypes';
 import { endHold, gainDouqiFromDamage, startHold, tickHolds, type HoldsContext } from './holds';
 import {
   runAbilities,
@@ -56,7 +57,13 @@ import {
 } from './stats';
 import { nextRandom, type RngState } from '../rng';
 import { triggerContextFor } from './triggerContext';
-import { deathEvent, timeoutEvent } from './encounterEnd';
+import {
+  checkDeaths,
+  checkTimeLimit,
+  expireBuffs,
+  regenerateResources,
+  type UpkeepContext,
+} from './encounterLifecycle';
 import type {
   Action,
   BattleState,
@@ -68,8 +75,6 @@ import type {
   StatModifier,
   DamageSpec,
 } from '../types';
-
-
 
 /** 起始初始状态需要的输入。 */
 export interface CreateBattleOptions {
@@ -98,12 +103,16 @@ export class BattleEngine {
    *
    * **必须在引擎内部持久**：它是决策的输入，必须随战斗一起可重放。
    * 如果放在外部，回放时 AI 会做出不同决定。
+   *
+   * ⚠️ 它带**自己的**随机流（`aiRngSeed`）—— 与玩家的 `rngSeed` 分开，
+   * 这样随机选招不会扰动玩家侧的黄金基线（见 `AiState.aiRngSeed`）。
    */
-  private aiState: AiState = createAiState();
+  private aiState: AiState;
 
   constructor(options: CreateBattleOptions) {
     this.options = options;
     this.rng = { seed: options.seed >>> 0 };
+    this.aiState = createAiState(options.seed);
     this.state = {
       tick: 0,
       rngSeed: options.seed >>> 0,
@@ -126,11 +135,13 @@ export class BattleEngine {
    * 于是"随机数状态在状态里、所以战斗可重放"这条设计约定**实际上是假的** ——
    * 快照里读不到推进后的随机状态。虽然重放本身只依赖初始种子，
    * 但任何"从快照恢复战斗"的用法（存档、断线续玩、分叉调试）都会静默错位。
+   *
+   * `aiRngSeed` 同理：它从 `aiState` 取，而不是直接用构造时写进 state 的那个值
+   * —— 否则它就是同一个坑的第二个实例。
    */
   get snapshot(): BattleState {
-    return { ...this.state, rngSeed: this.rng.seed };
+    return { ...this.state, rngSeed: this.rng.seed, aiRngSeed: this.aiState.aiRngSeed };
   }
-
 
   /**
    * 按 id 查技能定义。
@@ -147,7 +158,6 @@ export class BattleEngine {
     return this.options.buffs.get(buffId);
   }
 
-
   /** 全部技能 id（UI 构建技能栏用）。 */
   get skillIds(): readonly string[] {
     return [...this.options.skills.keys()];
@@ -163,10 +173,6 @@ export class BattleEngine {
   /* ---------------------------------------------------------------- *
    * AI（M4）：行为数组 → Action
    * ---------------------------------------------------------------- */
-
-
-
-
 
   /**
    * 属性计算与狂暴 —— 实现搬到 `./stats.ts`（约 105 行）。
@@ -201,6 +207,14 @@ export class BattleEngine {
       tick: this.state.tick,
       combatants: this.state.combatants,
       aiState: this.aiState,
+      /**
+       * ⚠️ 唯一的 AI 状态写回路径 —— 见 `AiContext.updateAiState` 的说明。
+       * 没有它，`ctx.aiState = next` 只会改一个被丢弃的临时对象，
+       * 引擎的 `lastUsedAt` 永远是空的（`gapMs` 与保底同时失效）。
+       */
+      updateAiState: (next) => {
+        this.aiState = next;
+      },
       buffs: this.options.buffs,
       skills: this.options.skills,
       options: {
@@ -351,8 +365,6 @@ export class BattleEngine {
     };
   }
 
-
-
   /**
    * 直接写入一个单位的状态。
    *
@@ -382,10 +394,6 @@ export class BattleEngine {
   /* ---------------------------------------------------------------- *
    * 按住型技能（「防」）
    * ---------------------------------------------------------------- */
-
-
-
-
 
   /* ---------------------------------------------------------------- *
    * 工作副本：一次 tick 内只有一份可变状态
@@ -466,10 +474,9 @@ export class BattleEngine {
     }
   }
 
-  /** 默认施法者：第一个存活的我方单位（没有则取第一个单位）。 */
+  /** 默认施法者 —— 纯函数实现搬到 `./battleStateTypes.ts`（本文件顶在 700 行上限）。 */
   private defaultActorId(): string {
-    const ally = this.state.combatants.find((c: Combatant) => c.side === 'ally' && c.alive);
-    return (ally ?? this.state.combatants[0])?.id ?? 'player';
+    return defaultActorIdOf(this.state.combatants);
   }
 
   /**
@@ -531,77 +538,59 @@ export class BattleEngine {
    * 技能施放
    * ---------------------------------------------------------------- */
 
-
   /* ---------------------------------------------------------------- *
    * 读条推进
    * ---------------------------------------------------------------- */
-
-
-
-
-
 
   /* ---------------------------------------------------------------- *
    * 单个 hit 段的结算（判定层的核心）
    * ---------------------------------------------------------------- */
 
-
-
   /* ---------------------------------------------------------------- *
    * 持续效果、buff 过期、资源回复、死亡
    * ---------------------------------------------------------------- */
 
+  /**
+   * 每个 tick 的四步收尾 —— 实现全部搬到 `./encounterLifecycle.ts`。
+   *
+   * ⚠️ **顺序是不变量**（见本文件顶部的 tick 管线）：过期 → 回复 →
+   * 时限 → 死亡。四步不拆到不同文件，就是为了让这个顺序只有一个读者。
+   *
+   * ⚠️ 它们要改 `this.state`，而 `state` 是**主文件私有的**，所以这里把
+   * "改成什么"以回调（`end`）借出去，而不是把 state 交出去 ——
+   * 状态永远只有一个写入者。
+   */
   private expireBuffs(): void {
-    for (const combatant of this.mutableAll()) {
-      const { buffs, expired } = expireBuffs(combatant.buffs, this.state.tick);
-      if (expired.length === 0) continue;
-      this.replaceCombatant({ ...combatant, buffs });
-      for (const buffId of expired) {
-        this.events.push({
-          kind: 'buffExpired',
-          tick: this.state.tick,
-          targetId: combatant.id,
-          buffId,
-          stacks: 0,
-          sourceId: combatant.id,
-        });
-      }
-    }
+    expireBuffs(this.upkeepContext());
   }
 
   private regenerateResources(): void {
-    for (const combatant of this.mutableAll()) {
-      const stats = this.statsOf(combatant.id);
-      const result = regenerate(combatant, stats, this.state.tick);
-      if (result.events.length > 0) {
-        this.replaceCombatant(result.combatant);
-        this.events.push(...result.events);
-      }
-    }
+    regenerateResources(this.upkeepContext());
   }
 
   private checkTimeLimit(): void {
-    const event = timeoutEvent({
-      timeLimitMs: this.options.timeLimitMs,
-      tick: this.state.tick,
-      startedAtTick: this.state.startedAtTick,
-    });
-    if (event === undefined) return;
-    this.state = { ...this.state, status: 'defeat', endReason: 'timeout' };
-    this.events.push(event);
+    checkTimeLimit(this.upkeepContext());
   }
 
   private checkDeaths(): void {
-    const event = deathEvent(this.state.combatants, this.state.tick);
-    if (event === undefined) return;
-    this.state = {
-      ...this.state,
-      status: event.result,
-      endReason: 'hpZero',
-    };
-    this.events.push(event);
+    checkDeaths(this.upkeepContext());
   }
 
+  private upkeepContext(): UpkeepContext {
+    return {
+      tick: this.state.tick,
+      startedAtTick: this.state.startedAtTick,
+      timeLimitMs: this.options.timeLimitMs,
+      combatants: this.state.combatants,
+      mutableAll: () => this.mutableAll(),
+      replaceCombatant: (updated) => this.replaceCombatant(updated),
+      statsOf: (id) => this.statsOf(id),
+      events: this.events,
+      end: (result, reason) => {
+        this.state = { ...this.state, status: result, endReason: reason };
+      },
+    };
+  }
 
   /* ---------------------------------------------------------------- *
    * 状态更新辅助
@@ -687,13 +676,3 @@ export class BattleEngine {
 /* ------------------------------------------------------------------ *
  * 辅助
  * ------------------------------------------------------------------ */
-
-
-function clampStart(combatant: Combatant): Combatant['resources'] {
-  const out = { ...combatant.resources };
-  for (const key of ['hp', 'energy', 'douqi'] as const) {
-    out[key] = Math.max(0, Math.min(capOf(combatant, key), Math.round(out[key])));
-  }
-  return out;
-}
-

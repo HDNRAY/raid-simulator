@@ -79,7 +79,11 @@ describe('黄金重放：固定种子 + 固定策略 → 固定结果', () => {
   });
 
   it('重放格式版本固定（改确定性语义时必须显式改这个数字）', () => {
-    expect(REPLAY_FORMAT_VERSION).toBe(1);
+    /**
+     * 1 → 2：新增 AI 随机流（`aiRngSeed`）+ 加权随机轮转。
+     * 见 `src/core/run.ts` 的版本说明。
+     */
+    expect(REPLAY_FORMAT_VERSION).toBe(2);
     expect(recordGolden().version).toBe(REPLAY_FORMAT_VERSION);
   });
 

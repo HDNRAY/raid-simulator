@@ -314,7 +314,7 @@ describe('UI 缩放（设置 · 通用页的 slider）', () => {
 
 describe('能力结算时刻：castStart 与 castFinish', () => {
   /**
-   * 需求："重斩加上霸体标签和霸体效果"
+   * 需求："重斩加上霸体标签和霸体效果"（改造后挂在「碾压」上）。
    *
    * ⚠️ 这个需求逼出了一个新的能力时刻 `on: 'castStart'`。
    *
@@ -323,27 +323,27 @@ describe('能力结算时刻：castStart 与 castFinish', () => {
    * 前摇期间照样能被「破」打断（实测确认过：重斩读条 216 tick，
    * 带霸体 0 tick，3 次「破」全部成功）。
    */
-  it('重斩的霸体标了 castStart —— 否则前摇期间不免疫', () => {
-    const cleave = ALL_SKILLS.find((s) => s.id === 'boss-cleave');
-    expect(cleave).toBeDefined();
-    const armorGrant = cleave!.abilities.find(
-      (a) => a.kind === 'grant' && a.buff.id === 'boss-cleave-armor',
+  it('慢刀的霸体标了 castStart —— 否则前摇期间不免疫', () => {
+    const heavy = ALL_SKILLS.find((s) => s.id === 'boss-heavy');
+    expect(heavy).toBeDefined();
+    const armorGrant = heavy!.abilities.find(
+      (a) => a.kind === 'grant' && a.buff.id === 'boss-heavy-armor',
     );
-    expect(armorGrant, '重斩应该有霸体 grant').toBeDefined();
+    expect(armorGrant, '慢刀应该有霸体 grant').toBeDefined();
     expect(armorGrant!.kind === 'grant' && armorGrant!.on).toBe('castStart');
   });
 
-  it('霸体时长 == 重斩前摇（读条走完就消失，不会溢出到下一招）', () => {
-    const cleave = ALL_SKILLS.find((s) => s.id === 'boss-cleave')!;
-    const armor = ALL_BUFFS.find((b) => b.id === 'boss-cleave-armor');
+  it('霸体时长 == 慢刀前摇（读条走完就消失，不会溢出到下一招）', () => {
+    const heavy = ALL_SKILLS.find((s) => s.id === 'boss-heavy')!;
+    const armor = ALL_BUFFS.find((b) => b.id === 'boss-heavy-armor');
     expect(armor).toBeDefined();
     expect(armor!.flags?.interruptImmune).toBe(true);
-    expect(armor!.duration).toBe(cleave.castTime);
+    expect(armor!.duration).toBe(heavy.castTime);
   });
 
-  it('重斩的提示标签同时有「高伤」和「霸体」', () => {
-    const cleave = ALL_SKILLS.find((s) => s.id === 'boss-cleave')!;
-    expect([...(cleave.hintTags ?? [])].sort()).toEqual(['highDamage', 'interruptImmune']);
+  it('慢刀的提示标签同时有「高伤」和「霸体」', () => {
+    const heavy = ALL_SKILLS.find((s) => s.id === 'boss-heavy')!;
+    expect([...(heavy.hintTags ?? [])].sort()).toEqual(['highDamage', 'interruptImmune']);
   });
 
   it('读条完成时**不会**再结算一次 castStart 的能力', async () => {

@@ -75,6 +75,17 @@ export interface BattleState {
   readonly tick: number;
   /** 随机数状态（必须在状态里，否则无法重放） */
   readonly rngSeed: number;
+  /**
+   * **AI 自己的随机流**（与 `rngSeed` 平级）。
+   *
+   * 随机选招（`weightedRotation`）消耗的是它，而不是玩家的 `rngSeed`
+   * —— 理由见 `AiState.aiRngSeed`：两条流分开之后，"玩家侧的黄金基线
+   * 是否被动过"从"要重新标定才不会错"变成**结构上不可能**。
+   *
+   * ⚠️ 可选（`?`）是为了让"只关心玩家随机"的构造方（测试、工具）不必
+   * 写它；**引擎自己总是**写这个字段，所以 `snapshot` 里读到的永远有值。
+   */
+  readonly aiRngSeed?: number;
   readonly status: EncounterStatus;
   readonly combatants: readonly Combatant[];
   /** 战斗开始 tick */

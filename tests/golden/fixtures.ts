@@ -1,5 +1,5 @@
 import { BattleEngine, type CreateBattleOptions } from '../../src/core/combat/battleState';
-import { VERROT_BEHAVIORS } from '../../src/core/ai';
+import { PRIDE_BEHAVIORS } from '../../src/data/bossPride';
 import { createRegistry } from '../../src/core/content/registry';
 import { ALL_BUFFS, ALL_SKILLS, DOUQI_MAX, ENERGY_MAX, HP_MAX } from '../../src/data/content';
 import { BOSS_HP_DISPLAY } from '../../src/data/entities/bossHp';
@@ -84,7 +84,7 @@ export function makeBoss(): Combatant {
     cooldowns: {},
     casts: [],
     uses: {},
-    behaviors: VERROT_BEHAVIORS,
+    behaviors: PRIDE_BEHAVIORS,
     alive: true,
   };
 }
@@ -125,6 +125,15 @@ export function makeEngine(seed = FIXED_SEED): BattleEngine {
 export const GOLDEN_OUTCOME = {
   /**
    * 当前平衡下"会闪避"的玩家获胜。
+   *
+   * ⚠️ **2026-10-11 改造「傲慢」后重新标定**（快慢刀 + 霸体合并 +
+   * 随机选招，见 `docs/specs/2026-10-11-pride-boss.md` §9.3）：
+   *   三招 1.0s/20、1.5s/40、2.0s/60，冷却全 3s，`gapMs` 4s（= §Q5 推荐）；
+   *   60 起手自带霸体并附带「倒地」；半血有一次可打断的「回补」。
+   *
+   * 下面的实测表是**旧 Boss（伪名一郎）的记录，刻意保留** ——
+   * 它记录了「倒地」这个机制的副作用，对下一个人仍然有用。
+   * 它描述的不是当前内容。
    *
    * 实测（规范策略）—— **2026-10-10 加了「倒地」重新标定**：
    *   - 用时 **926** tick ≈ 15.4 秒
@@ -173,15 +182,20 @@ export const GOLDEN_OUTCOME = {
   /** 通关用时（tick）。连续量，对数值改动敏感。 */
   ticks: 926,
   /**
-   * 当前内容没有暴击判定，所以随机数一次都不被消耗。
-   *
-   * 注意这里**没有 `phase`** —— 引擎已经没有"阶段"这个概念了：
-   * Boss 的阶段是一层内容 buff（`boss-frenzy`），由 `onHpBelow` 授予，
-   * 轮转用 `when: hasBuff(...)` 换招。
+   * 当前内容没有暴击判定，所以随机数一次都不被消耗 —— **玩家侧**的
+   * 随机流确实一次没用（抽招走的是 `BattleState.aiRngSeed`，
+   * 与它平级的另一条流，见 `AiState.aiRngSeed`）。
    */
   finalRngSeed: 20261009,
+  /**
+   * ⚠️ 玩家剩 **40 血**（改造前 65）。
+   *
+   * 差值来自改造后的额外伤害来源：Boss 的「碾压」（60，附带 2 秒倒地）
+   * 与「呵斥」（40）在玩家**炁不够闪**的那几个窗口里会实打实打进来
+   * —— 旧 Boss 的单发只有 28/36。设计 §9.3 的期望区间（30–70）覆盖了它。
+   */
   combatants: {
-    player: { alive: true, hp: 65, energy: 5, douqi: 53, damageDealt: 0, damageTaken: 0 },
+    player: { alive: true, hp: 40, energy: 5, douqi: 28, damageDealt: 0, damageTaken: 0 },
     meiichiro: { alive: false, hp: 0, energy: 0, douqi: 0, damageDealt: 0, damageTaken: 0 },
   },
 } satisfies Omit<RunOutcome, 'ticks'> & { readonly ticks: number };

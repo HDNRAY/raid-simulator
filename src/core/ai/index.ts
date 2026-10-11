@@ -20,7 +20,16 @@
  * **不需要为每个 Boss 写代码**。
  */
 
-import type { Ability, Action, Behavior, Combatant, RotationStep, SkillDef } from '../types';
+import { nextRandom } from '../rng';
+import type {
+  Ability,
+  Action,
+  Behavior,
+  Combatant,
+  RotationStep,
+  SkillDef,
+  WeightedRotationStep,
+} from '../types';
 
 /** AI 做决策时能看到的全部信息（只读快照）。 */
 export interface AiView {
@@ -52,10 +61,37 @@ export interface AiState {
    */
   readonly triggeredThresholds: readonly number[];
   readonly enraged: boolean;
+  /**
+   * **AI 自己的随机流**（uint32）。
+   *
+   * ==================================================================
+   * 为什么和玩家的 `BattleState.rngSeed` 分开（设计 §4.3 / Q3）
+   * ==================================================================
+   *
+   * 玩家侧的黄金基线（`tests/golden/fixtures.ts` 的 `GOLDEN_OUTCOME`）
+   * 明确断言"当前内容没有暴击判定，所以随机数一次都不被消耗"。
+   * 随机选招一旦接上**同一条**流，就会连带打破那条断言与整个黄金基线
+   * —— 而且会让"Boss 选招"与"玩家暴击"互相扰动随机序列。
+   *
+   * 分成两条流之后，"这一改动会不会悄悄改变玩家侧的黄金值"从
+   * "要重新标定才不会错"变成**结构上不可能**。
+   *
+   * ⚠️ 它必须与 `rngSeed` 平级地进快照（`BattleState.aiRngSeed`），
+   * 否则"从快照恢复战斗"会静默错位 —— 这正是 `snapshot` 的 getter
+   * 注释里记的那个坑（rngSeed 曾经长期是初始种子的硬编码）。
+   */
+  readonly aiRngSeed: number;
 }
 
-export function createAiState(): AiState {
-  return { openedSkills: [], lastUsedAt: {}, triggeredThresholds: [], enraged: false };
+/** 创建初始状态。 */
+export function createAiState(aiRngSeed = 0): AiState {
+  return {
+    openedSkills: [],
+    lastUsedAt: {},
+    triggeredThresholds: [],
+    enraged: false,
+    aiRngSeed: aiRngSeed >>> 0,
+  };
 }
 
 /**
@@ -91,6 +127,8 @@ export type AiEvent =
  *   4. rotation：按顺序找第一个"条件满足 + 冷却好 + 间隔够"的技能。
  *      **换招就靠这里的 `when`** —— 例如
  *      `{ skillId: 'x', when: { kind: 'hasBuff', buffId: 'phase2' } }`。
+ *      同一个 tick 只会执行**一条**轮转行为：第一条挑得出招就 `break`。
+ *      `weightedRotation` 与它同级，只是挑法不同（候选集内加权随机）。
  */
 export function decide(view: AiView, behaviors: readonly Behavior[], state: AiState): AiDecision {
   const actions: Action[] = [];
@@ -132,16 +170,29 @@ export function decide(view: AiView, behaviors: readonly Behavior[], state: AiSt
     events.push({ kind: 'enrageStarted' });
   }
 
-  // ---- 4. rotation ----
+  // ---- 4. rotation / weightedRotation ----
   if (!view.canAct) return { actions, nextState: next, events };
 
   for (const behavior of behaviors) {
-    if (behavior.kind !== 'rotation') continue;
-    const step = pickStep(view, behavior.steps, next);
-    if (!step) continue;
-    actions.push({ type: 'useSkill', skillId: step.skillId, atTick: view.tick });
-    next = { ...next, lastUsedAt: { ...next.lastUsedAt, [step.skillId]: view.tick } };
-    break; // 一个 tick 最多一个动作
+    if (behavior.kind === 'rotation') {
+      const step = pickStep(view, behavior.steps, next);
+      if (!step) continue;
+      actions.push({ type: 'useSkill', skillId: step.skillId, atTick: view.tick });
+      next = { ...next, lastUsedAt: { ...next.lastUsedAt, [step.skillId]: view.tick } };
+      break; // 一个 tick 最多一个动作
+    }
+
+    if (behavior.kind === 'weightedRotation') {
+      const picked = pickWeightedStep(view, behavior, next);
+      if (!picked) continue;
+      actions.push({ type: 'useSkill', skillId: picked.step.skillId, atTick: view.tick });
+      next = {
+        ...next,
+        aiRngSeed: picked.aiRngSeed,
+        lastUsedAt: { ...next.lastUsedAt, [picked.step.skillId]: view.tick },
+      };
+      break; // 一个 tick 最多一个动作
+    }
   }
 
   return { actions, nextState: next, events };
@@ -173,6 +224,127 @@ function pickStep(view: AiView, steps: readonly RotationStep[], state: AiState):
     return step;
   }
   return undefined;
+}
+
+/**
+ * 加权随机轮转的抽取结果。
+ *
+ * 返回**推进后的种子**而不是原地改 `state`：`AiState` 是 `readonly` 的，
+ * 而且"这一次抽取消耗了一个随机数"应当在类型上可见（`nextRandom` 的
+ * 注释里解释了同一个理由）。
+ */
+interface WeightedPick {
+  readonly step: WeightedRotationStep;
+  readonly aiRngSeed: number;
+}
+
+/**
+ * 从加权随机轮转里挑一招。
+ *
+ * ==================================================================
+ * 四条决策（设计 §4.2，逐条给理由）
+ * ==================================================================
+ *
+ * 1. **候选集** = 定义存在 + 冷却已好 + `when` 成立，且**全场间隔**够。
+ *
+ *    ⚠️ `gapMs` 是"**任意两刀之间**至少隔多久"，不是"同一个技能多久能
+ *    再来一次"（那是 `cooldown` 的职责）。所以它比的是**轮转里最近一次
+ *    施放**，而不是"这个技能自己上次施放"。
+ *
+ *    实现时我一度写成后者，症状是**开场三刀连着出**（实测
+ *    0 / 91 / 212）—— 因为每个技能第一次出手时"自己上次施放"还是空的，
+ *    gap 完全不生效。设计 §4.2 把 `gapMs` 与单技能冷却**分开列两行**，
+ *    要的正是这个区别。
+ * 2. **同招不连发**：候选集里若有"上一次刚放过的那个"，且候选集大小 > 1
+ *    → 剔掉它。纯随机会出现"连着 4 次 60"这种**不可玩**的局面
+ *    （100 血，3 刀就死）。⚠️ 这是**体验保底**，不是平衡补丁 ——
+ *    它保证"随机"是**难猜**而不是**要命**。
+ * 3. **加权抽取**：`weight` 是正整数，直接当权重。
+ * 4. **空候选集不消耗随机数**：与 `rollChance` 的短路原则一致
+ *    （`chance <= 0` 不消耗），否则"某一步的门槛暂时不成立"会扰动
+ *    整条随机序列，让固定种子下的出招序列变得无法推理。
+ *
+ * ⚠️ `view.canAct` 为假时 `decide` 根本走不到这里（上面已经 return），
+ * 所以这里不必再判一次 —— 也正是"不在不能行动时消耗随机数"的落点。
+ *
+ * ⚠️ `opener` **不受 `gapMs` 约束**（它只有"每个 opener 一次"这一个门禁）：
+ * 所以开场第一刀可以紧跟着第二刀。那是设计的"开场爆发"，设计 §10 的
+ * 风险表把它列为已知项。
+ */
+function pickWeightedStep(
+  view: AiView,
+  behavior: { readonly steps: readonly WeightedRotationStep[]; readonly gapMs?: number },
+  state: AiState,
+): WeightedPick | undefined {
+  /**
+   * **全场**最近一次施放的 tick（只看这条轮转里的技能）。
+   *
+   * `undefined` = 这条轮转一次都还没出手 → 不设间隔门槛（开场第一刀）。
+   */
+  const mostRecent = latestUseIn(behavior.steps, state);
+  const gapOk =
+    behavior.gapMs === undefined ||
+    mostRecent === undefined ||
+    (view.tick - mostRecent) * (1000 / 60) >= behavior.gapMs;
+
+  const candidates: WeightedRotationStep[] = [];
+  if (gapOk) {
+    for (const step of behavior.steps) {
+      if (!view.skillOf(step.skillId)) continue;
+      if (!view.isReady(step.skillId)) continue;
+      if (step.when && !evalAiCondition(step.when, view)) continue;
+      candidates.push(step);
+    }
+  }
+
+  if (candidates.length === 0) return undefined;
+
+  // ---- 保底：同招不连发（候选集只剩一个时不动它，否则会把候选集清空）----
+  /**
+   * 找"最近一次被放过的候选"，而不是比较"上一次决策"。
+   *
+   * 两个理由：候选集里可能混着 opener 刚放的招；而"最近"要用 tick 比较才
+   * 与 `gapMs` 的判定同源（免得出现"刚放过的招反而被当成很久没放"）。
+   */
+  const latestTick = latestUseIn(candidates, state) ?? -1;
+  const justUsed = candidates.filter((s) => state.lastUsedAt[s.skillId] === latestTick);
+  const pool =
+    latestTick >= 0 && justUsed.length === 1 && candidates.length > 1
+      ? candidates.filter((s) => s !== justUsed[0])
+      : candidates;
+
+  // ---- 加权抽取 ----
+  const total = pool.reduce((sum, s) => sum + Math.max(0, s.weight), 0);
+  if (!(total > 0)) return undefined;
+
+  const rolled = nextRandom({ seed: state.aiRngSeed });
+  const roll = rolled.value * total;
+  let acc = 0;
+  for (const step of pool) {
+    acc += Math.max(0, step.weight);
+    if (roll < acc) return { step, aiRngSeed: rolled.state.seed };
+  }
+  // 浮点边界兜底：`roll` 极小概率恰好等于 `total`
+  return { step: pool[pool.length - 1]!, aiRngSeed: rolled.state.seed };
+}
+
+/**
+ * 一组技能里**最近一次**被施放的 tick（没有则 `undefined`）。
+ *
+ * 抽出来是因为"最近"这个词在本文件里有两个消费者（`gapMs` 的全场间隔、
+ * 保底的"同招不连发"），它们必须是**同一份**判定 —— 两处各写一遍
+ * 会漂移，而漂移的表现是"同一招连着出"这种极难反推的症状。
+ */
+function latestUseIn(
+  steps: readonly { readonly skillId: string }[],
+  state: AiState,
+): number | undefined {
+  let latest: number | undefined;
+  for (const step of steps) {
+    const last = state.lastUsedAt[step.skillId];
+    if (last !== undefined && (latest === undefined || last > latest)) latest = last;
+  }
+  return latest;
 }
 
 /** AI 侧的条件求值（只依赖只读视图，不需要引擎上下文）。 */
@@ -222,130 +394,27 @@ function ratioOf(combatant: Combatant): number {
 }
 
 /* ------------------------------------------------------------------ *
- * Verrot 的行为数组
+ * 旧「伪名一郎」的内容去哪了
  * ------------------------------------------------------------------ */
 
 /**
- * Verrot 的战斗脚本 —— **全部是数据**。
+ * ⚠️ 这里曾经有 `VERROT_BEHAVIORS`（约 128 行）—— 它**本来就不该在
+ * `core/`**：`core/` 是引擎，里面却写着"重斩 28 伤、横扫 36 伤"这种
+ * 具体内容，连设计说明都混在引擎文件里。
  *
- * ------------------------------------------------------------------
- * 设计意图（配合玩家 6 招）
- * ------------------------------------------------------------------
+ * 改造「傲慢」时把它整体搬到了 `data/bossPride.ts`（改名
+ * `PRIDE_BEHAVIORS`），与 `data/lustBoss.ts` 对称：**一个 Boss 一个内容
+ * 文件，引擎里只剩解释器**。这是 `core/` 与 `data/` 边界的修正，
+ * 不是重命名 —— 所以引擎文件因此少了约 130 行。
  *
- * 玩家只有 6 招、100 血，所以 Boss 的威胁必须来自**节奏**而不是数值：
- *
- *   - 重斩（0.8 秒前摇 / 18 伤）：频率最高，是"基础压力"。
- *     可以硬吃一发（18% 血）也可以挡，教玩家"什么时候值得用防"。
- *   - 横扫（1.2 秒前摇 / 30 伤）：伤害高、前摇长 ——
- *     **这是为「闪」准备的那一招**：前摇足够长，玩家来得及反应。
- *   - 蓄能（1 秒前摇）：不造成伤害，但之后 10 秒内自己增伤 30%。
- *     打断它等于免掉一轮爆发 —— **这是为「破」准备的那一招**。
- *
- * 三个技能分别对应三种应对手段，玩家手上也正好有三张牌
- * （闪 / 防 / 破），这就是"招式要能被打断/闪避/格挡"的落地方式。
- *
- * 时限 3 分钟、2 分钟进入狂暴（伤害翻倍）—— 拖久了会被压死。
+ * 旧 Boss 的调参史（仍然有用的部分）现在记在
+ * `tests/golden/fixtures.ts` 的 `GOLDEN_OUTCOME` 上方：
+ *   - `gapMs` 与技能的 `cooldown` **要一起调**，真正决定间隔的是两者中
+ *     **更长的那个**。踩过的坑：冷却确实存在（重斩 3s、横扫 6s），但
+ *     `gapMs` 更短，于是冷却还没走完、轮转就先放行了 —— 观感上像
+ *     "重斩没有 CD"
+ *   - 把霸体做成一个**独立的技能**放进轮转后，即使它一次都没挡下打断，
+ *     **占掉的那一格也会把 Boss 出招挤后**（战斗从 897 tick 拉长到
+ *     1094 tick，直接把玩家打成"先死"）。「傲慢」的改造据此把霸体
+ *     合并进「碾压」，删掉了那个独立技能
  */
-export const VERROT_BEHAVIORS: readonly Behavior[] = [
-  { kind: 'timeLimit', ms: 180_000 },
-  { kind: 'enrage', atMs: 120_000, dmgMult: 2 },
-
-  /**
-   * **阶段转换用「血量阈值 + 授予 buff」表达，引擎不知道"阶段"是什么。**
-   *
-   * 血量降到 60% 时授予「狂怒」—— 它让横扫的冷却缩短、伤害提高。
-   * 轮转里再用 `when: hasBuff('boss-frenzy')` 挑出二阶段的招式。
-   *
-   * 想加第三阶段就是再写一条 `onHpBelow` + 一个新 buff，
-   * **不需要动引擎**。
-   */
-  {
-    kind: 'onHpBelow',
-    ratio: 0.6,
-    then: [
-      {
-        kind: 'grant',
-        target: { mode: 'self' },
-        buff: {
-          id: 'boss-frenzy',
-          nameKey: 'buffShort.enrage',
-          icon: 'enrage',
-          polarity: 'debuff',
-          color: 0xd04040,
-          duration: Number.POSITIVE_INFINITY,
-          maxStacks: 1,
-          stacking: { mode: 'refresh' },
-          modifiers: [
-            {
-              stat: 'damageBoost',
-              op: 'addPercent',
-              value: 25,
-              sourceKey: 'buffShort.enrage',
-              namespace: 'boss-frenzy',
-              tier: 'buff',
-            },
-          ],
-        },
-      },
-    ],
-  },
-
-  // 开场 1.2 秒后先来一发重斩：让玩家第一次看到前摇就该反应
-  { kind: 'opener', skillId: 'boss-cleave', delayMs: 1200 },
-  {
-    kind: 'rotation',
-    steps: [
-      /**
-       * `gapMs` 必须**短于**技能的冷却，否则轮转会空转。
-       *
-       * 踩过的坑：早期把 gap 写成 6–22 秒，而轮转的逻辑是
-       * "按顺序取第一个「冷却已好 且 距上次使用超过 gap」的技能" ——
-       * 于是高优先级的技能会长时间把低优先级的顶掉，
-       * 表现为 **Boss 大部分时间站着不动**（用户直接问"Boss 咋不攻击了"）。
-       *
-       * 二阶段的步骤放在前面：`when` 不满足就跳到下一条。
-       */
-      {
-        skillId: 'boss-sweep',
-        when: { kind: 'hasBuff', who: 'self', buffId: 'boss-frenzy' },
-        gapMs: 2_200,
-      },
-      { skillId: 'boss-empower', gapMs: 7_700 },
-      /**
-       * 霸体：**只在二阶段（有「狂怒」时）出现**。
-       *
-       * 为什么加这个限制：实测把霸体放进轮转后，即使它一次都没挡下
-       * 打断（测试策略里不带「破」），**它占掉的那一格也会把 Boss 的
-       * 出招挤后** —— 战斗从 897 tick 拉长到 1094 tick，玩家多挨 18 点
-       * 伤害，直接变成"玩家先死、Boss 剩 8 血"。
-       *
-       * 所以限制在二阶段后：前半场节奏不变，后半场 Boss 变凶时
-       * 多一层"这段时间打断无效"的压力。实测结果与"没有霸体"的
-       * 黄金值完全一致（897 tick / 玩家剩 30 血）。
-       *
-       * `when` 里还有"自己还没有霸体" —— 否则冷却一好会立刻再挂一次，
-       * 变成几乎常驻。
-       */
-      {
-        skillId: 'boss-armor',
-        when: {
-          kind: 'all',
-          of: [
-            { kind: 'notHasBuff', who: 'self', buffId: 'boss-armor' },
-            { kind: 'hasBuff', who: 'self', buffId: 'boss-frenzy' },
-          ],
-        },
-        gapMs: 6_400,
-      },
-      /**
-       * ⚠️ `gapMs` 与技能的 `cooldown` **要一起调**。
-       *
-       * 踩过的坑：冷却确实存在（重斩 3s、横扫 6s），但 `gapMs` 更短，
-       * 于是冷却还没走完、轮转就先放行了 —— 观感上像"重斩没有 CD"。
-       * 真正决定间隔的是两者中**更长的那个**。
-       */
-      { skillId: 'boss-sweep', gapMs: 6_400 },
-      { skillId: 'boss-cleave', gapMs: 2_200 },
-    ],
-  },
-];
