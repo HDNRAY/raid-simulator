@@ -22,6 +22,38 @@ import type { BattleLoop } from './battleLoop';
 import type { KeyBinding } from '../input/keyboard';
 import type { KeyRow } from '../ui/settings/rows';
 import type { ContentRegistry } from '../core/content/registry';
+import { PLAYER_SKILL_IDS } from '../data/content';
+
+/**
+ * 这个技能该不该出现在设置页的按键列表里。
+ *
+ * ==================================================================
+ * ⚠️ 为什么用 `PLAYER_SKILL_IDS` 而不是判 id 前缀
+ * ==================================================================
+ *
+ * 原先的条件是 `!sk.id.startsWith('boss-')` —— 靠**命名约定**判断归属。
+ * 「色欲」的技能 id 是 `lust-hum` / `lust-entangle` / `lust-charm`，
+ * **不以 `boss-` 开头**，于是全部漏过，**Boss 的技能出现在按键设置里**。
+ *
+ * 而 `ALL_SKILLS` 本身是 `PLAYER_SKILLS` + 各 Boss 技能表拼出来的，
+ * 所以"在不在 `PLAYER_SKILL_IDS` 里"是**结构性**判据：新加 Boss 自动生效，
+ * 不依赖任何人记得维护前缀。
+ *
+ * 抽成导出的纯函数是为了**能直接对它写回归测试** ——
+ * 这类"漏掉一个 Boss 前缀"的 bug 不会自己暴露，只会静默多出几行 UI。
+ */
+export function isBindablePlayerSkill(skill: {
+  readonly id: string;
+  readonly requires?: readonly unknown[];
+}): boolean {
+  if (skill.id === '') return false;
+  if (!PLAYER_SKILL_IDS.has(skill.id)) return false;
+  /**
+   * 排除派生技（带 `requires` 的，如「击」）：它靠派生出现，
+   * **不由玩家直接按**，列出来只会让人困惑。
+   */
+  return (skill.requires?.length ?? 0) === 0;
+}
 
 export interface BuildKeyRowsOptions {
   readonly bindings: readonly KeyBinding[];
@@ -59,13 +91,10 @@ export function buildKeyRows(options: BuildKeyRowsOptions): readonly KeyRow[] {
   const boundOrder = new Map(options.bindings.map((b, i) => [b.skillId, i]));
   /**
    * ⚠️ 只列**玩家技能**：`registry.skills` 里也有 Boss 技能，那些不该让
-   * 玩家绑键。
-   * ⚠️ 排除派生技（带 `requires` 的，如「击」）：它靠派生出现，
-   * **不由玩家直接按**，列出来只会让人困惑。
+   * 玩家绑键。判据见 `isBindablePlayerSkill` 的说明 ——
+   * **不要退回按 id 前缀过滤**，那对「色欲」是失效的。
    */
-  const all = [...registry.skills.values()].filter(
-    (sk) => sk.id !== '' && (sk.requires?.length ?? 0) === 0 && !sk.id.startsWith('boss-'),
-  );
+  const all = [...registry.skills.values()].filter(isBindablePlayerSkill);
   const ordered = all
     .map((sk) => sk.id)
     .sort((a, b) => {

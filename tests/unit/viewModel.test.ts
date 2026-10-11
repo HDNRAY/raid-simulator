@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { translator } from '../../src/i18n/translator';
-import { ALL_SKILLS } from '../../src/data/content';
+import { ALL_SKILLS, PLAYER_SKILL_IDS } from '../../src/data/content';
 import { FONT, LAYOUT } from '../../src/ui/layout';
 import {
   formatClock,
@@ -184,8 +184,14 @@ describe('数据一致性：命中时刻必须等于读条时长', () => {
      * 玩家技能（「攻」「轰」）的 `at` 是 0 —— 它们的命中在**读条结束时**
      * 结算，而不是按 `at` 计时。所以不能用同一套规则去卡它们
      * （第一版我就那么写了，结果把「攻」也报成违规）。
+     * ⚠️ 判据是 `!PLAYER_SKILL_IDS.has(id)`，**不是 id 前缀**。
+     * 原来写的是 `startsWith('boss-')`，于是「色欲」的 `lust-*` 技能
+     * **从来没被这条护栏检查过** —— 一个静默的覆盖漏洞
+     * （和"Boss 技能漏进按键设置"是同一个根因）。
      */
-    const bossSkills = ALL_SKILLS.filter((s) => s.id.startsWith('boss-') && s.castTime > 0);
+    const bossSkills = ALL_SKILLS.filter(
+      (s) => !PLAYER_SKILL_IDS.has(s.id) && s.castTime > 0,
+    );
     expect(bossSkills.length).toBeGreaterThan(0);
     const offenders: string[] = [];
     for (const skill of bossSkills) {

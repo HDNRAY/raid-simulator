@@ -15,6 +15,7 @@
  */
 
 import type { SkillDef } from '../core/types';
+import { PLAYER_SKILL_IDS } from '../data/content';
 
 /** 一个技能格：位置、绑定的键、放哪个技能。 */
 export interface SlotBinding {
@@ -118,14 +119,18 @@ export function deriveSlots(
    * 找**当前可用的派生技**。
    *
    * ⚠️ 只遍历玩家技能：Boss 技能也可能带 `requires`（AI 用它做轮转），
-   * 但那不该混进玩家的技能栏。`boss-` 前缀是现有的命名约定。
+   * 但那不该混进玩家的技能栏。
+   *
+   * ⚠️ 判据是 `PLAYER_SKILL_IDS`，**不是 id 前缀**。原来这里写的是
+   * `skill.id.startsWith('boss-')` —— 那对「色欲」失效，因为它的技能 id 是
+   * `lust-*`。见 `isBindablePlayerSkill` / `PLAYER_SKILL_IDS` 的说明。
    */
   const held = new Set(playerBuffs.map((b) => b.defId));
   let derivedSkillId: string | undefined;
   for (const skill of skills.values()) {
     const reqs = skill.requires;
     if (reqs === undefined || reqs.length === 0) continue;
-    if (skill.id.startsWith('boss-')) continue;
+    if (!PLAYER_SKILL_IDS.has(skill.id)) continue;
     const ok = reqs.every((c) => c.kind !== 'hasBuff' || held.has(c.buffId));
     if (ok) {
       derivedSkillId = skill.id;
