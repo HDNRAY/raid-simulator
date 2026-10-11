@@ -39,3 +39,6 @@ artgen/out/
 # 临时占位素材（含第三方版权素材，绝不入库）
 public/placeholder/
 artgen/placeholder-fd2/
+
+# FD2 原版素材（汉堂国际 1995，非商业占位；见 THIRD-PARTY-NOTICES.md）
+public/fd2/

@@ -134,7 +134,14 @@ def build_payload(args: argparse.Namespace, check_cost: bool) -> dict:
     if args.seed is not None:
         payload["seed"] = args.seed
     if args.negative:
-        payload["negative_prompt"] = args.negative
+        # ⚠️ 字段名是 `negative`（不是 `negative_prompt`）。
+        #
+        # ⚠️ 更要紧的是：RD 官方文档明确写着这个字段
+        #   "is a placeholder — no current model uses it".
+        # 也就是**当前它不生效**。保留只是为了将来它接上时能直接用；
+        # 真正管用的手段是**重写正向 prompt**（"只描述你想要的东西"）。
+        # 别指望它能把两个人改成一个人 —— 实测无效。
+        payload["negative"] = args.negative
     if args.remove_bg:
         payload["remove_bg"] = True
     if args.palette:
@@ -208,7 +215,9 @@ def add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--height", type=int, default=64)
     p.add_argument("--num", type=int, default=1)
     p.add_argument("--seed", type=int, default=None)
-    p.add_argument("--negative", default=None)
+    p.add_argument("--negative", default=None,
+                   help="⚠️ 当前**无效**：RD 文档说该字段是占位、没有模型使用它。"
+                        "想排除什么就改写正向 prompt")
     p.add_argument("--remove-bg", action="store_true", help="输出透明背景")
     p.add_argument("--palette", default=None, help="调色板图片路径（锁色板）")
     p.add_argument("--reference", action="append", default=None,
