@@ -63,6 +63,10 @@
 
 事实核查与"要做什么"分开：**本表只是事实**，结论在 §0.3.1。
 
+> ⚠️ **表里的 `文件:行号` 是初稿那天的快照**，之后代码一直在动（`main.ts`
+> 拆成 `src/app/*`、`core/types.ts` 拆成目录……）。**当行号对不上时以文件为准**
+> —— 每条都给了文件名，行号只用来少翻几屏。
+
 | 事实 | 值 / 结论 | 证据 |
 |---|---|---|
 | Boss 名单 | **7 个**：`meiichiro`(傲慢) / `lust`(色欲) / `envy` / `gluttony` / `wrath` / `sloth` / `greed` | `src/data/roster.ts:60-69` |
@@ -78,8 +82,8 @@
 | 两条随机流 | `BattleState.rngSeed`（玩家侧）+ `BattleState.aiRngSeed`（AI 选招），**刻意分开** | `src/core/types/runtime.ts:73-88`、`src/core/ai/index.ts:57-63` |
 | 随机数工具 | `core/rng.ts` 的 mulberry32（`nextRandom` / `randomInt` / `rollChance`），状态手动穿线、纯函数 | `src/core/rng.ts` |
 | 重放格式 | `REPLAY_FORMAT_VERSION = 2`；`RecordedRun = {version, seed, ticks, input}`，**一场战斗一份**；测试断言它就是 2 | `src/core/run.ts:44-62`、`tests/golden/replay.test.ts:81-88` |
-| 界面阶段 | `Phase = 'prepare' \| 'battle'` | `src/app/flow.ts:37-38` |
-| 结算 | 结算面板画在 `BattleScene` 里（`renderResultPanel`）；结束后 **Enter / 触屏点屏 → `backToPrepare()`** | `src/render/resultPanel.ts:32-76`、`src/app/loopWiring.ts:166-172`、`src/app/canvasInput.ts:96-107` |
+| 界面阶段 | `Phase = 'home' \| 'characterSelect' \| 'prepare' \| 'battle'`（初稿写作时是 `'prepare' \| 'battle'`；P2 加了前两个） | `src/app/phaseLogic.ts`（`flow.ts` 只转发） |
+| 结算 | 结算面板画在 `BattleScene` 里（`renderResultPanel`）；结束后 **Enter / 触屏点屏 → `backFromBattle()`**（按模式分流：肉鸽 → 选角色；自由 → 自由模式界面） | `src/render/resultPanel.ts:32-76`、`src/app/loopWiring.ts`、`src/app/canvasInput.ts`、`src/app/game.ts` |
 | 备战界面的语义 | **"选人物 + 选 Boss + 开始"**（玩家直接挑对手），"开始"那一刻判 `isDeveloping` | `src/ui/prepareLogic.ts:275-359`、`src/ui/PrepareScreen.ts:71-96` |
 | 生命钳制用的是**静态 caps** | `changeResource` 用 `combatant.caps[key]` 钳制；`maxHp` 只是属性管线里的一个累加器，**没有任何地方读它去改上限** | `src/core/combat/index.ts:83-113`、`src/core/stats/aggregate.ts:89` |
 | 内容实体的实例化路径**没有消费者** | 注册表可以传 `entities`，但没有"实体 → 战斗输入"的规范化；`deps.ts` 传的是 `entities: []` | `src/core/content/registry.ts:16-70`、`src/app/deps.ts:48-51` |
@@ -255,77 +259,108 @@ startRun(runSeed, playerId, order)
 
 ## 3. 新的交互流程
 
+> ⚠️ **本节同时写着"当前"与"目标"两件事**（2026-10-12 第三次修订），别混起来读：
+>
+> - **当前（P2 已落地）**：`首页 → 选角色 → 一局肉鸽`；自由模式是**开发/测试入口**。
+>   P2 的"只跑一场"是**临时桩**（本节末尾）。
+> - **目标（P3 起）**：一局肉鸽 = 7 场 + 每场之后的炁机选择（§2、§5）。
+
 ### 3.1 状态机（逐屏）
 
+```text
+首页（默认入口）
+  ├─ 「肉鸽模式」 → 选角色屏 → 一局肉鸽
+  └─ 「自由模式」 → 备战界面（标题「自由模式」）
+                    以后 + 炁机选择 / Boss 难度
 ```
-                         ┌──────────────────────────────┐
-                         │ Boot                          │
-                         └───────────────┬───────────────┘
-              mode=roguelike（默认）      │        mode=dev（?prepare=skip / ?mode=dev）
-        ┌────────────────────────────────┴────────────────────────────┐
-        ▼                                                             ▼
-┌──────────────────┐                                       ┌──────────────────────┐
-│ CharacterSelect  │  列出 PLAYER_ROSTER（未实现的灰掉）    │ Prepare（现有，保留） │
-│ 选 1 个角色      │  ←→ 移光标 / Enter 确定 / 点卡确定     │ 选人物 + 选 Boss      │
-└────────┬─────────┘                                       └──────────┬───────────┘
-         │ Enter                                                     │ Enter
-         ▼                                                           ▼
-┌──────────────────┐                                       ┌──────────────────────┐
-│ RunIntro         │  显示"本局共 7 场"+"第 1 场：XXX"      │ Battle（单场，现状）  │
-│ 开局              │  Enter / 点"开始"                       │                      │
-└────────┬─────────┘                                       └──────────┬───────────┘
-         ▼                                                           │ 胜/负
-┌──────────────────┐                                                 ▼
-│ Battle（第1场）   │◄──────────────┐                        ┌──────────────────────┐
-└────────┬─────────┘               │                        │ Result（现有结算面板）│
-         │ 胜                      │                        │ Enter/点屏 → Prepare  │
-         ▼                          │                        └──────────────────────┘
-┌──────────────────┐               │
-│ Result（结算）    │  Enter/点屏    │
-└────────┬─────────┘               │
-         │ position ≤ 7             │
-         ▼                          │
-┌──────────────────┐               │
-│ QijiSelect       │  候选 = 已解锁的炁机（含"通用炁机"兜底）
-│ 选 1 个生效       │  ←→ 移光标 / Enter 确定 / 点卡确定
-└────────┬─────────┘               │
-         │                         │
-         └─────────────────────────┘
-         下一场战斗（Boss = order[position]，档位 = 第 position 档）
 
-  任一场战斗负 ──► RunOver（失败：打到第几场）
-  第 7 场胜     ─► RunOver（通关：本局带了哪些炁机）
-  RunOver：Enter / 点屏 ──► CharacterSelect
+两条路都从首页出发，**首页是唯一的正门**。
+
+**⚠️ 为什么"首页"能当默认入口，而"选角色"不能**（这是判断，不是细节）：
+
+- **首页只是路由**：它不通向半成品 —— 一个按钮去"还不完整但能用"的肉鸽，
+  另一个去"完全能用"的自由模式。
+- **"选角色"当正门不安全**：它背后那条路**还不完整**（炁机选择是 P3、
+  强度曲线是 P4/P5、7 个 Boss 只有 2 个能打）。把玩家直接丢进半成品的
+  入口，等于把"还没做完"呈现成"这就是成品"。
+- ⚠️ 因此初稿那张"Boot 之后按 `mode` 二选一、默认 `characterSelect`"的图
+  **作废**：模式的选择权交给**玩家**（首页那两个按钮），而不是启动参数。
+  `?prepare=skip` 仍然保留 —— 它是**开发参数**（直接进战斗、跳过首页），
+  不是玩家路径。
+
+**⚠️ "自由模式"是给"任意测试任意节点场景"用的**（用户原话）：
+
+- 它就是原来的备战界面（选人物 + 选 Boss + 开始），语义一字未改 ——
+  **玩家直接挑对手**正是它存在的理由，也是它**不能**混进肉鸽那条路的原因
+  （肉鸽第一条规则就是"不许挑 Boss"，见 §3.4）。
+- 以后给它加的那两个选择器（**炁机选择** / **Boss 难度**）就是为它加的：
+  开发时要能"指定任意 Boss + 任意角色 + 任意炁机 + `?noai=1`"，
+  才能把某个机制单独摆出来看。
+
+**⚠️ P2 的"只跑一场"是临时桩**：选完角色只打**一场**，结算完回选角色屏。
+P3 才把它接成 **N 场 + 每场之间的炁机选择**。桩的落点在
+`src/app/runSession.ts` 与 `ui/CharacterSelectScreen.ts` 的文件头，两处都标了。
+**不要**为了"看起来完整"而在选角色屏后面假装有炁机选择。
+
+**当前实现的相位**（唯一真相 `src/app/phaseLogic.ts`，只有四个值）：
+
+```ts
+export type Phase = 'home' | 'characterSelect' | 'prepare' | 'battle';
 ```
+
+**后续阶段再加的值**（见 §3.2）：`qijiSelect`、`runOver`。
+
+**这一轮（P2 收尾）新增/改动的两条交互**：
+
+| 交互 | 键 | 触屏 | 落点 |
+|---|---|---|---|
+| **返回首页** | `Esc` | **左上角的返回箭头**（可见、可点） | `phaseLogic.phaseFromEscape` + `ui/ScreenControls.ts` |
+| **打开设置** | **`F1`**（原先 `Esc` / `,`） | 点右上角的齿轮 | `app/settingsKeys.ts` |
+
+- ⚠️ **战斗中 `Esc` 什么都不做**（判断）：传统上战斗里的 `Esc` 是
+  "暂停 / 菜单"，而本作**没有菜单**；没有确认的"中途弃局"比"没反应"更坏。
+- ⚠️ **键位提示不进 i18n**（AGENTS.md §3b）：返回箭头的 `Esc`、齿轮的 `F1`
+  都由渲染层拼；触屏不拼（`IconButton.setShowShortcut`）。
+- ⚠️ **触屏与键盘功能必须对等**（§3.5）：返回**不是**"只有键盘能用"的东西。
 
 ### 3.2 阶段枚举的改动
 
-现在是 `Phase = 'prepare' | 'battle'`（`src/app/flow.ts:37-38`）。新增后：
+现在是四个值（`src/app/phaseLogic.ts`）：
 
 ```ts
-export type Phase =
-  | 'prepare'        // 开发用（现有语义，一字不改）
-  | 'characterSelect'
-  | 'battle'
-  | 'qijiSelect'
-  | 'runOver';
+export type Phase = 'home' | 'characterSelect' | 'prepare' | 'battle';
+```
+
+（初稿这里是 `'prepare' | 'battle'`；P2 加了 `'home'` 与 `'characterSelect'`。）
+
+**P3 起再加**：
+
+```ts
+  | 'qijiSelect'     // 每场战斗后选 1 个炁机
+  | 'runOver'        // 一局肉鸽结束（通关 / 失败）
 ```
 
 **刻意不新增 `'result'`**：结算面板本来就画在 `BattleScene` 里
-（`render/BattleScene.ts:544-548`）。把它提升成独立 phase 会让
-"战斗场景的显隐"多一个状态，而现有代码的注释已经把"两个界面同时可见"
-列为踩过的坑（`src/app/game.ts:204-206`）。**结算 = `battle` phase 内的
-一个子状态**，由 `snapshot.status !== 'running'` 表达（现有做法）。
+（`render/BattleScene.ts` 的 `renderResultPanel`）。把它提升成独立 phase 会让
+"战斗场景的显隐"多一个状态，而"两个界面同时可见"是仓库踩过的坑。
+**结算 = `battle` phase 内的一个子状态**，由 `snapshot.status !== 'running'`
+表达（现有做法）。
 
-⚠️ 加 phase 必须同时改这几处（现在都 switch 在 `phase` 上）：
+⚠️ 加 phase 必须同时改这几处（现在都读 `phase`）：
 
-| 位置 | 现在读什么 | 要改成什么 |
+| 位置 | 现在读什么 | 加新屏时要做什么 |
 |---|---|---|
-| `src/app/loopWiring.ts:86` | `phase === 'prepare'` → 只 frame 备战 | 按 phase 分发到各自的屏 |
-| `src/app/loopWiring.ts:132-172` | 备战/战斗两段键盘 | 每段按 phase 分派（Enter 在 4 个屏里语义都不同） |
-| `src/app/canvasInput.ts:43,93,96` | `phase() === 'prepare'` + 结算点屏 | 新屏的命中分支插在"设置"之前（该文件"顺序即优先级"） |
-| `src/app/game.ts:316,346,363` | `isPrepareOpen` / `phase` / `acceptsKeyboardFocus` | 触屏层要**在非 `battle` 的一切 phase 都隐藏** |
-| `src/app/flow.ts:37` | `Phase` 联合 | 加 3 个值 |
+| `src/app/game.ts` 的 `applyPhase` | **显隐的唯一写入点**：三屏 + 返回箭头 + 战斗场景 | **先改这里**（加一行），别的路径都不用动 |
+| `src/app/loopWiring.ts` 主循环 | `phase !== 'battle'` → 分发给三屏各自 `frame()` | 加一屏的分支（漏了的表现是"那一屏停住不动"） |
+| `src/app/loopWiring.ts` 键盘 | 每屏一段 switch（Enter 在每屏语义不同） | 新屏一段；`Esc`（返回）已经在**最前面**统一判 |
+| `src/app/canvasInput.ts` | 齿轮 → 返回箭头 → 当前那一屏（"顺序即优先级"） | 新屏的命中分支插在返回箭头之后 |
+| `src/app/game.ts` 的 `isBattleActive` | 触屏按钮层**在非 `battle` 的一切 phase 都隐藏** | 什么都不用做（判据是"在战斗中"，新屏默认就隐藏） |
+| `src/app/phaseLogic.ts` | `Phase` 联合 + `backVisibleIn` / `phaseFromEscape` | 加值 + 决定新屏能不能返回 |
+
+⚠️ **`backVisibleIn` 与 `phaseFromEscape` 必须同源**：前者是"返回箭头在不在"，
+后者是"`Esc` 去哪"。两处各写一遍判据，漂移的样子就是"箭头看得见、按 `Esc`
+却没反应"。它们已经在 `phaseLogic.ts` 里绑在一起，并有单测钉住
+（`tests/unit/phaseLogic.test.ts`）。
 
 ### 3.3 复用 / 新做
 
@@ -352,7 +387,10 @@ export type Phase =
 
 ### 3.4 ⚠️ 备战界面在新流程里的位置
 
-**决议：`Prepare` = 开发/测试入口，不是正式流程的"选角色"页。**
+**决议：`Prepare` = 「自由模式」，开发/测试入口，不是正式流程的"选角色"页。**
+
+它在首页上是**和「肉鸽模式」并列的一个按钮**（不是 `?mode=dev` 那种隐藏入口）——
+玩家点了"自由模式"就进这一屏，标题也是「自由模式」。
 
 理由：
 
@@ -361,22 +399,32 @@ export type Phase =
    "**不许挑 Boss**"。同一界面同时承担两种语义，只能靠"肉鸽模式下把
    Boss 行灰掉"实现 —— 那是把备战的主要功能在正式流程里废掉还留着 UI。
 2. **测试需要完整能力**。开发时要能"指定任意 Boss + 任意角色 + `?noai=1`
-   静止场景截图"（`data/units.ts:108-115` 的 `noAi` 就是为这个存在）。
-   这个能力不该塞进正式流程。
-3. **入口可共存**。正式流程走 `CharacterSelect`，开发走 `?mode=dev` /
-   `?prepare=skip`，互不影响、不用改现有代码。
+   静止场景截图"（`data/units.ts` 的 `noAi` 就是为这个存在）。这个能力
+   不该塞进正式流程 —— **"任意测试任意节点场景"正是这一屏存在的目的**
+   （用户原话），以后加的炁机选择 / Boss 难度也是为它加的。
+3. **两条入口可以共存**：正式流程走 `CharacterSelect`，开发走「自由模式」
+   与 `?prepare=skip`，互不影响。
 
-**放弃了什么**：玩家路径上多一个屏才能开始；备战界面在正式流程里看不到。
+**放弃了什么**：备战界面在肉鸽那条路里看不到（它只属于「自由模式」）；
+玩家要"挑对手打一场"得走自由模式，而不是肉鸽。
+
+⚠️ **返回**：自由模式与选角色屏都**能回首页**（`Esc` / 左上角箭头）。
+这一屏不再是"死胡同"——原先只能一路往前（开战 → 结算 → 回来）。
 
 ### 3.5 输入：键盘与触屏**必须对等**（AGENTS.md §3b）
 
 | 屏幕 | 键盘 | 触屏 | 对等性怎么保证 |
 |---|---|---|---|
+| `Home` | ↑↓ 移光标；Enter 进入 | **点按钮 = 进入**（一步到位） | 键盘能到的两个状态，触屏都能一步到达 |
 | `CharacterSelect` | ←→ 移光标；Enter 确定 | **点卡片 = 移光标 + 确定** | 复用 `prepareLogic.pickOption`（它的注释明确说"点击必须一步确定"） |
-| `RunIntro` | Enter = 开始 | **点"开始"按钮** | 不能只让 Enter 能开始（仓库踩过：改键只有 Enter 一条路，触屏进不去） |
+| `CharacterSelect` / `Prepare` | **`Esc` = 返回首页** | **点左上角的返回箭头** | `ui/ScreenControls.ts`（两个屏共用一份实现；`Esc` 只有键盘按得出，所以箭头是**必需的**） |
+| `RunIntro`（P3） | Enter = 开始 | **点"开始"按钮** | 不能只让 Enter 能开始（仓库踩过：改键只有 Enter 一条路，触屏进不去） |
 | `Result` | Enter = 继续 | 点屏任意处 = 继续（现有路径） | 已有 |
-| `QijiSelect` | ←→ 移光标；Enter 确定 | 点卡片 = 确定 | 可选加数字键 `1..9` 直达（**加速器**，不是唯一路径） |
-| `RunOver` | Enter = 回选角色 | 点屏任意处 | 同上 |
+| `QijiSelect`（P3） | ←→ 移光标；Enter 确定 | 点卡片 = 确定 | 可选加数字键 `1..9` 直达（**加速器**，不是唯一路径） |
+| `RunOver`（P3） | Enter = 回选角色 | 点屏任意处 | 同上 |
+
+**打开设置**：键盘 `F1`；触屏点右上角的齿轮（`SettingsButton`，一直可点）。
+两者作用相同 —— `F1` 不是"只有键盘能用"的另一套东西。
 
 **键位提示不进 i18n**（AGENTS.md §3b）：新屏的"继续 (Enter)"由渲染层
 拼上按键名，触屏不拼；i18n 里只放 `'继续'`。
@@ -984,12 +1032,15 @@ RUN_FORMAT_VERSION      我们**自己的记录格式**（加了字段就该 +1�
 ### 8.2 触屏对等
 
 - 所有"确定 / 继续"都必须有**可点区域**，不能只有 `Enter`。
+  ⚠️ 同理**"返回"也不能只有 `Esc`**：自由模式 / 选角色屏左上角的箭头就是
+  那条对等入口（`ui/ScreenControls.ts`，P2 已落地）。
 - 触屏层在**非 `battle` 的一切 phase 都隐藏**：现在传的是
-  `isPrepareOpen: () => state.phase === 'prepare'`（`game.ts:316`），
-  要改成 `isBattleActive: () => state.phase === 'battle'`，否则新屏上会浮着
-  双弧按钮、与卡片重叠（AGENTS.md §3b："触屏时整条技能栏都隐藏"同理）。
+  `isBattleActive: () => state.phase === 'battle'`（P2 已改对），
+  所以新屏**默认就是隐藏**的（不会浮着双弧按钮与卡片重叠；
+  AGENTS.md §3b："触屏时整条技能栏都隐藏"同理）。
 - `canvasInput.ts` 的 `phase()` 判断要为新屏加分支，且**顺序即优先级**
-  （该文件已写明三条实测踩出来的规则，`canvasInput.ts:83-107`）。
+  （该文件已写明实测踩出来的规则：齿轮 → 返回箭头 → 当前那一屏 → 结算点屏
+  → 触屏按钮）。
 
 ---
 
@@ -1164,3 +1215,4 @@ src/ui/
 | 2026-10-12 | **第二次修订的收尾（评审 7 条反馈）** | ① **`Q-a` 拆文件**：`stats.ts`（514 行，混了"归约"与"查询求值"两个职责）拆成 `stats.ts`（造数）+ `query.ts`（读数）+ `outcome.ts`（叶子；避免 `stats ⇄ query` 的类型环）；② **`Q-b` `flawless` 收成必填**（默认值 = 静默失效：忘了传会让某个炁机永远解锁不了）；③ **`Q-e` 加对账**：`parseRecordedRun` 现在校验 `battleStats.battles` 与 `RunRecord.battles` 的**长度 / 次序 / 胜负 / 满血**一致，不一致整条丢弃（`RunBattleRecord` 因此新增可选 `flawless`；⚠️ **P7 写存档时应把它收成必填并 `RUN_FORMAT_VERSION + 1`**——长期留着"缺 = 不参与对账"这个口子等于那半条对账不存在）；④ **`Q-f` 删掉整局汇总的 `flawless` 字段**（逐场的在 `battles` 里，顶层那个没有消费者）；⑤ **`Q-d` / `Q-c` 写进文档**：`scope` 在结算那一刻同值（不是 bug；分叉点在 P3 的卡片文案与将来的战斗内判定）、`dodges` 只数 `dodged` 而 `immune` 没有查询能拿到 |
 | 2026-10-12 | **评审追加（用户对形状的确认 + W1 理由再改）** | ① **把用户确认的形状写成纪律**：`query.ts` 顶部新增"**一次归约，多次查询；加条件不重扫事件**"（用户原话："以后对战斗 log 的处理，最好遍历一次，统计所有需要统计的……方便我们开发进行扩展"）—— 落点：`reduceBattleStats` 是**唯一**读 `EventDef[]` 的地方；查询只读 `BattleStats` 字段；加一条 `QijiUnlock` 不动归约。⚠️ 并写明禁止"把归约塞进查询里"；② **W1 的理由再改**：用户明确"**暴怒的那个技能以后靠 buff 实现**"，于是 §0.3.1 里 W1 唯一举的例子（"按受伤次数减 CD"）**没了** —— 定性从"暂不做，等第一个消费者"改成"**没有已知消费者；要做它必须先有一个真实的、非它不可的机制**"，并把它往 `BattleState` 加状态、可能动 `REPLAY_FORMAT_VERSION` 的**代价**写在同一条里（让想加它的人先掂量） |
 | 2026-10-12 | **评审三条决定（收尾）** | ① **两个版本号的判据写进 §7.2**（新增一节）：`REPLAY_FORMAT_VERSION` = 引擎的确定性语义（+1 要重标定黄金基线、不匹配**英文抛错**）vs `RUN_FORMAT_VERSION` = 我们自己的记录格式（+1 只是因为形状变了、不匹配**整条丢弃**）——⚠️ 并点明"**加记录字段时不要套用引擎那条判据**"，附本轮两个反向实例（`flawless` → 记录号 +1 而引擎号不动；`sourceSkillId` → 引擎事件字段变了但引擎号不 +1）；② **`RunBattleRecord.flawless` 收成必填、`RUN_FORMAT_VERSION` 1 → 2**：原先留的"缺 = 不参与对账"那个口子只为兼容 v1 记录，而**没有任何 v1 记录存在**（存档是 P7）→ 有洞的检查等于没有检查；③ **`outcomeOf` 留着并标注"目前没有 core 消费者"**（删它会重建 `stats ⇄ query` 的类型环；它是叶子的语义理由，也是 P2/P3 的 app 入口） |
+| 2026-10-12 | **第三次修订（P2 落地后的流程对账 + 收尾）** | ① **§3.1 / §3.2 / §3.4 改成新流程**：初稿那张"Boot 按 `mode` 二选一、默认 `characterSelect`"的图**作废** —— 现在是 `首页（默认入口）├ 肉鸽模式 → 选角色 → 一局肉鸽 └ 自由模式 → 备战界面`；并把三条**判断**写进去（不是细节）：**为什么首页能当默认入口而"选角色"不能**（首页只是路由，不通向半成品；肉鸽那条路还不完整）、**"自由模式"是给"任意测试任意节点场景"用的**（用户原话；以后加的炁机选择 / Boss 难度就是为它加的）、**P2 的"只跑一场"是临时桩**（P3 接成 N 场 + 炁机选择）。② **`Phase` 的真相源搬到 `src/app/phaseLogic.ts`**（四个值，`flow.ts` 只转发），加 `qijiSelect` / `runOver` 时要动的那张表跟着更新。③ **这一轮加的两条交互写进 §3.1 / §3.5**：**返回**（`Esc` / 左上角箭头 → 首页，只在自由模式与选角色屏；**战斗中 `Esc` 什么都不做**）与 **`F1` 打开设置**（原先 `Esc` / `,`）。④ §3.4 的"入口"说法改对：自由模式是首页上**并列的按钮**，不是 `?mode=dev` 那种隐藏入口 |

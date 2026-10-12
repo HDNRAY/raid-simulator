@@ -29,41 +29,25 @@
  *   - `touch` —— 见 `battleSetup.ts` 里 `touchInput` getter 的说明
  */
 
+import type { Phase } from './phaseLogic';
 import type { BattleLoop } from './battleLoop';
 import type { TouchControls } from './touchControls';
 import type { PrepareScreen } from '../ui/PrepareScreen';
 import type { HomeScreen } from '../ui/HomeScreen';
 import type { CharacterSelectScreen } from '../ui/CharacterSelectScreen';
+import type { ScreenControls } from '../ui/ScreenControls';
 import type { SettingsButton } from '../ui/settings/SettingsButton';
 import type { KeyBinding } from '../input/keyboard';
 
 /**
  * 当前阶段（**界面路由**）。
  *
- * ==================================================================
- * 用户 2026-10-12 定的流程（设计稿 §3.1 的旧状态机已作废）
- * ==================================================================
- *
- * ```
- * 首页（新，默认入口）
- *   ├─ 「肉鸽模式」 → 选角色屏（新）→ 一局肉鸽
- *   └─ 「自由模式」 → 现在的备战界面（标题改成「自由模式」）
- * ```
- *
- * ⚠️ **首页是安全的默认入口**（它只是路由，不通向半成品）；
- * 而"选角色屏直接当正门"**不安全** —— 肉鸽那条路还不完整
- * （炁机选择是 P3、强度曲线是 P4/P5、7 个 Boss 只有 2 个能打）。
- *
- * ⚠️ **不要新增 `'result'`**：结算面板本来就画在 `BattleScene` 里
- * （设计稿 §3.2 专门写了这条）。把它提升成独立 phase 会让"战斗场景的
- * 显隐"多一个状态，而"两个界面同时可见"是这个仓库踩过的坑。
- *
- * ⚠️ 加值必须**同时**改这些 `phase` 的消费者（设计稿 §3.2 那张表）：
- *   `game.ts`（显隐的唯一写入点 `applyPhase` / 触屏 `isBattleActive` /
- *   指针路由的 `phase` / 设置焦点）、`loopWiring.ts`（每帧分发 + 键盘分发）、
- *   `canvasInput.ts`（指针路由）、`debugApiSetup.ts`（补一次界面摆位）。
+ * ⚠️ **定义在 `phaseLogic.ts`**（"哪个相位下按 `Esc` / 显示哪个控件"的
+ * 判定要在 node 里单测），这里只是**转发** —— 于是
+ * `import type { Phase } from './flow'` 这种既有写法照旧可用，
+ * 不必因为搬家去改一片文件的 import。由来与流程图见那个文件。
  */
-export type Phase = 'home' | 'characterSelect' | 'prepare' | 'battle';
+export type { Phase } from './phaseLogic';
 
 /**
  * **设置齿轮按钮该摆在哪**。
@@ -109,6 +93,16 @@ export interface GameState {
 
   /** 选角色屏（肉鸽模式的第一屏）。同样是先声明、后回填。 */
   select: CharacterSelectScreen | undefined;
+
+  /**
+   * **整屏界面共用的"返回"箭头**（左上角；自由模式 / 选角色屏）。
+   *
+   * ⚠️ 与 `home` / `select` 同样是**先声明、后回填**：`applyPhase` 的定义
+   * 早于它（`?prepare=skip` 那条路），所有访问点都容忍 `undefined`。
+   *
+   * ⚠️ 触屏对等就靠它 —— `Esc` 只有键盘按得出（AGENTS.md §3b）。
+   */
+  back: ScreenControls | undefined;
 
   /** 备战界面（自由模式；进战斗时隐藏，回来时显示）。 */
   prepare: PrepareScreen | undefined;
@@ -189,6 +183,7 @@ export function createGameState(bindings: readonly KeyBinding[]): GameState {
     phase: 'home',
     home: undefined,
     select: undefined,
+    back: undefined,
     prepare: undefined,
     bindings,
     touch: undefined,

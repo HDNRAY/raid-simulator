@@ -139,6 +139,23 @@ declare global {
         /** 同点击卡片：移光标 + 确定 + 开始（一步到位）。 */
         pick(id: string): void;
       };
+      /**
+       * **返回箭头**（自由模式 / 选角色屏左上角；调试用）。
+       *
+       * 需求："肯定要加返回啊"，且**触屏必须有对等入口**
+       * （AGENTS.md §3b：`Esc` 只有键盘按得出）。
+       *
+       * 验证"点得通"必须**真的点**：注入一个真实 `PointerEvent` 到
+       * canvas 上，坐标由 `center()` 给（页面自己的几何，不是脚本抄一份）。
+       */
+      back: {
+        /** 此刻是否可见（= 当前相位允许返回）。 */
+        visible(): boolean;
+        /** 可点区域（含角落的 `Esc` 提示）。 */
+        bounds(): { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+        /** 箭头中心的逻辑坐标 —— 注入点击时用它，别手写数字。 */
+        center(): { readonly x: number; readonly y: number };
+      };
     };
     /** 渲染侧探针：报告实际写到 Pixi 上的位置 */
     __raidProbe?(): {

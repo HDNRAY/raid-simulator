@@ -53,6 +53,7 @@
  */
 
 import { Assets, Sprite } from 'pixi.js';
+import * as arrowLeftSvg from './icons/arrow-left.svg?raw';
 import * as closeSvg from './icons/close.svg?raw';
 import * as gearSvg from './icons/gear.svg?raw';
 import * as infoSvg from './icons/info.svg?raw';
@@ -85,6 +86,13 @@ const SOURCES: Readonly<Record<string, unknown>> = {
   play: playSvg,
   restart: restartSvg,
   info: infoSvg,
+  /**
+   * 返回箭头（自由模式 / 选角色屏左上角）。
+   *
+   * ⚠️ 与其他图标一样，**回来时是白的**，颜色由运行时 `Sprite.tint` 决定
+   * （见文件头"颜色"那段）。
+   */
+  'arrow-left': arrowLeftSvg,
 };
 
 /**

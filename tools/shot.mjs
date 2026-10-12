@@ -34,7 +34,16 @@
  * 而且绕过了浏览器默认行为（Tab 的焦点转移恰恰要靠默认行为来验证
  * `preventDefault` 有没有生效）。这里要测的正是"真的按键会发生什么"。
  *
- * ⚠️ 仍属于"拍一张图"的范畴：只按键、只截图，不做断言。
+ * ⚠️ 仍属于"拍一张图"的范畴：只按键 / 只注入一次指针 / 只截图，不做断言。
+ *
+ * ==================================================================
+ * `RAID_SHOT_POINTER=x,y`：截图前注入一次**真实指针事件**
+ * ==================================================================
+ *
+ * 逻辑坐标，逗号分隔。用途是验证"触屏 / 鼠标能点到的入口"真的点得通
+ * （例如自由模式 / 选角色屏左上角的返回箭头 —— 那些功能不能只有键盘能用，
+ * AGENTS.md §3b）。坐标可以从页面自己的调试入口拿
+ * （`window.__raidBattle.back.center()`），别在脚本里手写布局数字。
  */
 
 import { spawn } from 'node:child_process';
@@ -68,6 +77,13 @@ const KEYS = {
   Escape: { code: 'Escape', key: 'Escape', vk: 27 },
   Tab: { code: 'Tab', key: 'Tab', vk: 9 },
   'Shift+Tab': { code: 'Tab', key: 'Tab', vk: 9, modifiers: 8 },
+  /**
+   * `F1`（打开设置；P2 收尾时 `Esc` / `,` 换成了它）。
+   *
+   * ⚠️ `windowsVirtualKeyCode: 112` 是 VK_F1 —— CDP 要靠它把这次按键送到
+   * 页面；给 0 的话某些浏览器路径会把它当未知键丢掉。
+   */
+  F1: { code: 'F1', key: 'F1', vk: 112 },
 };
 const PORT = 10103;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -182,6 +198,40 @@ for (const name of RAW_KEYS) {
 
 await sleep(1200);
 
+/**
+ * 可选：在截图前向 canvas **注入一次真实指针事件**（`RAID_SHOT_POINTER=x,y`，
+ * 逻辑坐标）。
+ *
+ * 用途：验证"触屏 / 鼠标能点到的入口"真的点得通 —— 例如自由模式与
+ * 选角色屏左上角的**返回箭头**（AGENTS.md §3b：那些功能不能只有 `Esc`）。
+ *
+ * ⚠️ 必须注入**真实 `PointerEvent`**（`isTrusted` 虽为假，但走的是页面
+ * 自己的 `pointerdown` 监听器 → 与玩家同一条路）。直接调界面自己的方法
+ * （`back.hitTest()` 之类）是旁路，证明不了"点击路由接对了"。
+ *
+ * ⚠️ 坐标是**逻辑坐标**，这里按 canvas 的实测尺寸换算成 client 坐标 ——
+ * 不许把 letterbox 的换算抄一份到脚本里（画布尺寸跟着窗口变）。
+ */
+if (process.env.RAID_SHOT_POINTER) {
+  const [lx, ly] = process.env.RAID_SHOT_POINTER.split(',').map((v) => Number(v.trim()));
+  const r = await ev(`(() => {
+    const c = document.querySelector('canvas');
+    const rect = c.getBoundingClientRect();
+    const x = rect.left + ${lx} * (rect.width / 960);
+    const y = rect.top + ${ly} * (rect.width / 960);
+    const target = document.elementFromPoint(x, y) ?? c;
+    target.dispatchEvent(new PointerEvent('pointerdown', {
+      clientX: x, clientY: y, pointerId: 1, pointerType: 'touch', bubbles: true, cancelable: true, isPrimary: true,
+    }));
+    target.dispatchEvent(new PointerEvent('pointerup', {
+      clientX: x, clientY: y, pointerId: 1, pointerType: 'touch', bubbles: true, cancelable: true, isPrimary: true,
+    }));
+    return JSON.stringify({ ok: true, x, y, hit: target.tagName });
+  })()`);
+  console.log(`[pointer ${process.env.RAID_SHOT_POINTER}] ${r}`);
+  await sleep(400);
+}
+
 const shot = await send('Page.captureScreenshot', { format: 'png' });
 writeFileSync(OUT, Buffer.from(shot.data, 'base64'));
 console.log(`已保存 ${OUT}`);
@@ -200,6 +250,9 @@ if (process.env.RAID_SHOT_TEXT === '1') {
     settingsOpen: window.__raidBattle.settings.isOpen(),
     prepare: window.__raidBattle.prepare.state(),
     buttonFocused: window.__raidBattle.settings.buttonFocused(),
+    back: window.__raidBattle.back.visible(),
+    backCenter: window.__raidBattle.back.center(),
+    backBounds: window.__raidBattle.back.bounds(),
   })`);
   console.log(`[diag] ${diag}`);
   const dump = await ev(`(() => {

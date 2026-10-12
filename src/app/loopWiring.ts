@@ -39,6 +39,15 @@ export interface CanvasHost {
     moveFocus(delta: number, wrap?: boolean): void;
     confirm(): void;
   };
+  /**
+   * 返回箭头（整屏界面共用，左上角）。
+   *
+   * ⚠️ 每帧要 `update()` 一次：键位提示的显隐跟着**触屏能力**走，
+   * 而那个能力值是装配后期才探测出来的（见 `ScreenControls` 的说明）。
+   */
+  readonly back: {
+    update(): void;
+  };
   /** 设置面板（每帧更新）。 */
   readonly settings: SettingsPanel;
   /** 设置齿轮按钮（每帧更新）。 */
@@ -62,6 +71,14 @@ export interface CanvasHost {
    * （`runSession.active` 是唯一的真相），这里只管"叫它一声"。
    */
   readonly backFromBattle: () => void;
+  /**
+   * **返回首页**（`Esc` / 点左上角箭头）。
+   *
+   * ⚠️ 键盘那条路（`Esc`）走这里，触屏/鼠标那条路走 `ScreenControls`
+   * 自己的 `onBack` —— 两条路都落到 `game.ts` 里**同一个**闭包
+   * （`backToHome`），所以不会出现"按 `Esc` 回首页、点箭头去别处"。
+   */
+  readonly backToHome: () => void;
   /** 当前的战斗循环（非战斗阶段为 `undefined`）。 */
   readonly battle: () => BattleLoop | undefined;
 }
@@ -120,6 +137,8 @@ export function wireLoop(o: WireOptions): void {
       host.touch.frame();
       host.settingsButton.update();
       host.settings.update();
+      /** 返回箭头的键位提示跟着触屏能力走（它也是每帧纠正的那一类）。 */
+      host.back.update();
       return;
     }
     const l = host.battle();
@@ -130,9 +149,10 @@ export function wireLoop(o: WireOptions): void {
     host.touch.frame(l.snapshot);
     host.settingsButton.update();
     host.settings.update();
+    host.back.update();
   });
 
-  /* ---------- 重开 ----------
+  /* ---------- 重开 / 返回 ----------
    * 战斗结束后：**键盘 Enter** 或 **触屏点屏幕** 都离开战斗。
    *
    * ⚠️ 两条路径**共用这一个函数** —— 否则很容易出现"桌面能重开、
@@ -141,6 +161,41 @@ export function wireLoop(o: WireOptions): void {
    * ⚠️ 去哪一屏由 `host.backFromBattle` 决定（肉鸽 → 选角色；
    * 自由 → 备战界面）。这里不判模式，避免三处各判一遍。 */
   window.addEventListener('keydown', (event) => {
+    /**
+     * **返回（`Esc`）先判** —— 它在"哪个相位能用"这件事上与前缀无关。
+     *
+     * | 相位 | `Esc` |
+     * |---|---|
+     * | 首页 | 无（首页就是返回的目标） |
+     * | 选角色 | → 首页 |
+     * | 自由模式 | → 首页 |
+     * | 战斗 | **什么都不做** |
+     *
+     * ⚠️ **战斗中 `Esc` 不做事，也不被消费**（用户的判断）：战斗中的 `Esc`
+     * 传统上是"暂停 / 菜单"，而本作**没有菜单**，所以它没有语义。
+     * 既不中途弃局（没有确认的弃局比如没反应更坏），也不打开设置
+     * —— 设置现在是 `F1`（原先是 `Esc` / `,`，这一轮腾给了返回）。
+     *
+     * ⚠️ 三条前置守卫与下面那段**同源**，不能少：
+     *   - `settingsToggle.isOpen()`：面板开着时 `Esc` 是**它的**关闭键
+     *   - `settingsButtonFocused()`：焦点在齿轮上时，`Esc` 不该顺手把界面
+     *     也切走（与 `Enter` 那条同一个道理）
+     *   - `phase !== 'battle'`：见上表最后一行
+     */
+    if (
+      !host.settingsToggle.isOpen() &&
+      !state.settingsButtonFocused() &&
+      state.phase !== 'battle' &&
+      event.key === 'Escape'
+    ) {
+      /**
+       * 目标相位由 `game.ts` 的 `backToHome` 自己判（`phaseFromEscape`）
+       * —— 这里**不重复判一次**：那是同一个判据的第二份，而两份判据
+       * 漂移的样子正是"首页按 Esc 会跳到某处"。
+       */
+      host.backToHome();
+      return;
+    }
     /**
      * **各屏的键盘操作**。
      *
@@ -155,6 +210,7 @@ export function wireLoop(o: WireOptions): void {
      * | 自由模式 | ↑ ↓ | 换槽位（人物 → 对手 → 开始），两端停住 |
      * | 自由模式 | Tab / Shift+Tab | 同上但**环绕**（Tab 的通用语义） |
      * | 自由模式 | Enter | **确定**光标处的那一项；在「开始战斗」上时开战 |
+     * | 自由模式 / 选角色 | `Esc` | **返回首页**（战斗中无反应，见上） |
      *
      * ⚠️ **移动光标 ≠ 确定选择**（需求原话："用 enter 来确定选择，
      * 而不是靠移动到下一项"）。旧的 `Enter` 直接 `prepare.start()`，

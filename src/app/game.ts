@@ -19,7 +19,8 @@
  *   battleSetup.ts     startBattle()：造一局 BattleLoop
  *   settingsSetup.ts   new SettingsPanel + SettingsButton + settingsToggle
  *   touchSetup.ts      触屏层（能力 / 布局 / 输入源 / 双弧按钮）
- *   flow.ts            GameState（延后回填的共享状态）+ Phase
+ *   flow.ts            GameState（延后回填的共享状态）
+ *   phaseLogic.ts      Phase + "哪个相位能返回 / 显示哪个控件"的判定
  *   loopWiring.ts      Pixi ticker / 键盘 / pagehide
  *   debugApiSetup.ts   window.__raidBattle
  * ```
@@ -28,10 +29,12 @@
  * ⚠️ 顺序即正确性：这些"先后关系"不许整理
  * ==================================================================
  *
- *   1. **先造三个界面（首页 / 选角色 / 自由模式）、后 `?prepare=skip`
- *      的进入战斗** —— `enterBattle` 会走 `applyPhase`（它一次性重设
- *      三个界面与战斗场景的显隐）与 `scene.setAppearance` / `startBattle`，
- *      界面早一步调用会撞 TDZ。
+ *   1. **先造三个界面（首页 / 选角色 / 自由模式）+ 返回箭头、后
+ *      `?prepare=skip` 的进入战斗** —— `enterBattle` 会走 `applyPhase`
+ *      （它一次性重设三个界面、返回箭头与战斗场景的显隐）与
+ *      `scene.setAppearance` / `startBattle`，界面早一步调用会撞 TDZ。
+ *      返回箭头也在这批里：它的显隐同样由 `applyPhase` 写，而且要挂在
+ *      三个界面**上面**（后 `addChild` 的盖在上面）。
  *   2. **触屏层必须晚于设置面板** —— 面板要接收 `touch` 的能力值
  *      （是否显示键位提示），所以它拿到的是一份**预览数据源**，
  *      稍后由 `touchSetup` 回填。
@@ -51,6 +54,7 @@ import { BattleScene } from '../render/BattleScene';
 import { PrepareScreen } from '../ui/PrepareScreen';
 import { HomeScreen } from '../ui/HomeScreen';
 import { CharacterSelectScreen } from '../ui/CharacterSelectScreen';
+import { ScreenControls } from '../ui/ScreenControls';
 import {
   BOSS_POOL,
   BOSS_ROSTER,
@@ -65,6 +69,7 @@ import { parseUiScale } from './settingsStore';
 import { createStartBattle } from './battleSetup';
 import { createRunSession } from './runSession';
 import { createGameState, settingsAnchorOf } from './flow';
+import { CONTROL_VISIBILITY, phaseFromEscape } from './phaseLogic';
 import { createSettingsSetup } from './settingsSetup';
 import { createTouchSetup } from './touchSetup';
 import { installDebugApi } from './debugApiSetup';
@@ -235,6 +240,13 @@ export function createGame(o: CreateGameDeps): GameHandle {
     state.home?.setVisible(phase === 'home');
     state.select?.setVisible(phase === 'characterSelect');
     state.prepare?.setVisible(phase === 'prepare');
+    /**
+     * ⚠️ 返回箭头（左上角）也走这张表 —— 它的可见相位与"哪个相位按 `Esc`
+     * 会回首页"是**同一个判据**（`phaseLogic.backVisibleIn`）。
+     * 两处各写一遍就会漂，而漂移的样子正是"箭头看得见、按 Esc 却不动"
+     * （或反过来）。同理它在 `battle` / `home` 不出现。
+     */
+    state.back?.setVisible(CONTROL_VISIBILITY.back(phase));
     scene.root.visible = phase === 'battle';
     /**
      * ⚠️ 走 `state.settingsButton`（可能还没回填）：`applyPhase` 的定义早于
@@ -315,6 +327,23 @@ export function createGame(o: CreateGameDeps): GameHandle {
   };
 
   /**
+   * **返回首页**（用户 2026-10-12："肯定要加返回啊"）。
+   *
+   * 两条路都落到这里：
+   *   - 键盘 `Esc`（`loopWiring` 的 `backToHome`）
+   *   - 触屏 / 鼠标点左上角的箭头（`ScreenControls.onBack`）
+   *
+   * ⚠️ 只对**自由模式 / 选角色屏**成立 —— 判据在 `phaseFromEscape`
+   * （`phaseLogic.ts`）里，与箭头的可见相位**同一张表**。战斗与首页
+   * 都返回 `undefined`，于是这里什么都不做（战斗中 `Esc` 不做事是
+   * 用户的判断，见那个函数的说明）。
+   */
+  const backToHome = (): void => {
+    const target = phaseFromEscape(state.phase);
+    if (target !== undefined) switchTo(target);
+  };
+
+  /**
    * **肉鸽模式：选完角色，开始一局**。
    *
    * Boss 由这一局的**种子洗出来**（`runSession.begin`）—— 不是备战界面
@@ -385,6 +414,34 @@ export function createGame(o: CreateGameDeps): GameHandle {
   });
   state.prepare = prepare;
   app.stage.addChild(prepare.root);
+
+  /* ---------- 返回箭头（整屏界面共用） ---------- */
+  /**
+   * 需求（用户 2026-10-12）："肯定要加返回啊" + "把设置的快捷键改成别的
+   * 比如 f1"（`Esc` 腾出来做返回）。
+   *
+   * ⚠️ **触屏对等**（AGENTS.md §3b）：`Esc` 只有键盘按得出，所以这一屏
+   * 左上角必须有一个**可见、可点**的箭头 —— 它就是本组件。
+   *
+   * ⚠️ 它挂在 stage 上（与设置齿轮同一层），**不画进任何一个屏**：
+   * 两个界面共用一份实现，否则"选角色屏的箭头能点、自由模式的不行"
+   * 只是时间问题。
+   *
+   * ⚠️ 显隐的唯一写入点仍是 `applyPhase`（上面那行
+   * `CONTROL_VISIBILITY.back`）；本对象自己**不**决定何时可见。
+   */
+  const back = new ScreenControls({
+    pixi: { Container, Graphics, Sprite, Text },
+    showKeyHints: () => state.touch?.caps.showKeyHints ?? true,
+    /**
+     * ⚠️ 与键盘 `Esc` 走**同一个**闭包（`backToHome`）—— 目标相位、
+     * "战斗里不做事"这些判断只有一份，不会出现"按 Esc 回首页、
+     * 点箭头去别处"。
+     */
+    onBack: () => backToHome(),
+  });
+  state.back = back;
+  app.stage.addChild(back.root);
 
   /**
    * ⚠️ 开局默认在**首页**：一次性把三个界面与战斗场景的显隐摆好
@@ -476,6 +533,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
     home,
     select,
     prepare,
+    back,
     settings,
     settingsButton,
     touch,
@@ -491,8 +549,8 @@ export function createGame(o: CreateGameDeps): GameHandle {
    * ⚠️ 抽到了 `app/settingsKeys.ts` —— 那里写着"必须用捕获阶段"与
    * "弹窗打开时独占键盘"两条由来，不在这里重复。
    *
-   * ⚠️ `acceptsKeyboardFocus` 只在**战斗**为真：备战界面里 `↑↓` 换槽位、
-   * 首页里 `↑↓` 移动光标，都不能被设置按钮抢走（那些界面 `Esc` / `,`
+   * ⚠️ `acceptsKeyboardFocus` 只在**战斗**为真：自由模式里 `↑↓` 换槽位、
+   * 首页里 `↑↓` 移动光标，都不能被设置按钮抢走（那些界面 `F1`
    * 照样能开设置）。由来见 `settingsKeys.ts` 里那个方法的注释。
    */
   const settingsKeys = wireSettingsKeys({
@@ -528,12 +586,14 @@ export function createGame(o: CreateGameDeps): GameHandle {
           home,
           select,
           prepare,
+          back,
           settings,
           settingsButton,
           touch,
           scene,
           settingsToggle,
           backFromBattle,
+          backToHome,
           battle,
         },
         app,
@@ -556,6 +616,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
         home,
         select,
         prepare,
+        back,
         touch,
         restart: () => enterBattle(selection.playerId, selection.bossId),
       });

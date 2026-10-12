@@ -31,6 +31,7 @@ import {
   settingsDebugApi,
 } from './debugApi';
 import { clampUiScale } from '../render/scaling';
+import { backButtonCenter } from '../ui/ScreenControls';
 import { settingsAnchorOf } from './flow';
 import type { BattleLoop } from './battleLoop';
 import type { GameState } from './flow';
@@ -67,6 +68,17 @@ export interface DebugApiDeps {
   readonly select: CharacterSelectScreen;
   /** 备战界面（自由模式）调试入口的目标。 */
   readonly prepare: PrepareScreen;
+  /**
+   * 返回箭头（自由模式 / 选角色屏左上角）。
+   *
+   * ⚠️ 它只暴露**几何与可见性**，没有"点它"的方法 —— 那会是一条旁路。
+   * 脚本要验证"点得通"必须注入真实 `PointerEvent`（坐标从 `center()` 拿），
+   * 走的才是玩家那条路（见 `global.d.ts` 里 `back` 的说明）。
+   */
+  readonly back: {
+    readonly visible: boolean;
+    readonly bounds: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+  };
   /** 触屏按钮几何的唯一真相（`touchButtonCenter` 从它反查）。 */
   readonly touch: TouchControls;
   /** 重开一局（`restart` 从它走 `enterBattle`）。 */
@@ -145,6 +157,18 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
     ...homeDebugApi(d.home),
     ...characterSelectDebugApi(d.select),
     ...prepareDebugApi(d.prepare),
+    /**
+     * 返回箭头（截图 / 触屏验证用）。
+     *
+     * ⚠️ `center()` 从**对象自己的几何**反推（`bounds` 是"含角落提示"的
+     * 可点区域，箭头在它的左上角）—— 不让脚本抄一份坐标：布局一调，
+     * 抄的那份就会静默指到别处（`SettingsButton` 的偏移注释记着同一个坑）。
+     */
+    back: {
+      visible: () => d.back.visible,
+      bounds: () => ({ ...d.back.bounds }),
+      center: () => backButtonCenter(),
+    },
     /** 重开一局（端到端脚本用；见 `global.d.ts` 的说明）。 */
     restart: () => d.restart(),
     /** 触屏按钮圆心（端到端脚本用）。 */
