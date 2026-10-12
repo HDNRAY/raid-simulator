@@ -560,14 +560,19 @@ describe('parseRecordedRun —— 坏数据整条丢弃（§11 风险 #9）', ()
         battles: [{ position: 1, bossId: 'x', seed: 1, outcome: 'victory' }],
       }),
     ).toBeUndefined();
-    // 值不是布尔 → 同样丢弃
-    expect(
-      parseRecordedRun({
-        ...good,
-        state,
-        battles: [{ position: 1, bossId: 'x', seed: 1, outcome: 'victory', flawless: 'no' }],
-      }),
-    ).toBeUndefined();
+    // ⚠️ 值不是布尔 → 同样丢弃。用 `1` 而不是 `'no'`/`undefined`：
+    // 变异测试发现第一版只用了**真值**（`'no'`）与**缺键**两种输入，
+    // 而"宽松实现"（`flawless !== undefined && typeof !== boolean`）
+    // 对这两种都仍然拒绝它 —— 于是漏掉了"显式传一个真值非布尔"这一格。
+    for (const bad of [1, 'no', null] as const) {
+      expect(
+        parseRecordedRun({
+          ...good,
+          state,
+          battles: [{ position: 1, bossId: 'x', seed: 1, outcome: 'victory', flawless: bad }],
+        }),
+      ).toBeUndefined();
+    }
     // 带上正确的 `flawless` → 通过（证明上面的失败是"缺字段"而不是别的原因）
     expect(
       parseRecordedRun({
