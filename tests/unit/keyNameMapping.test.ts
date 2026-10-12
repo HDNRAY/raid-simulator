@@ -73,7 +73,7 @@ describe('键名显示：一处映射，`escape` → `Esc`', () => {
 
   it('⚠️ 返回按钮用的显示名与设置页那份**同源**（不许自己拼）', () => {
     /**
-     * `ScreenControls` 的 `ESC_SHORTCUT` 取的就是 `KEY_EDIT_KEYS.cancel.label`；
+     * `ScreenChrome` 的 `ESC_SHORTCUT` 取的就是 `KEY_EDIT_KEYS.cancel.label`；
      * 这里钉住它与 `reservedKeyLabel('escape')` 一致 —— 两者若漂开，
      * 返回按钮与设置页的 `Esc` 又会变成两个写法（用户报过的那个 bug）。
      */

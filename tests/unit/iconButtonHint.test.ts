@@ -41,16 +41,20 @@ describe('IconButton：角落提示的位置由图标位置推出来', () => {
     bottom: p.anchorY === 1 ? p.y : p.y + hintH,
   });
 
-  it('【关键】一条全局规则：提示的**左上角**压在**图标的左上角**', () => {
+  it('【关键】一条全局规则：提示的**左上角**就是**图标的左上角**', () => {
     /**
-     * ⚠️ 用户 2026-10-12 把规格说死了（原话）："**快捷键在图标的左上角**，
-     * 目前在**正中间**"。
+     * ⚠️ 用户 2026-10-12 把规格说死了（原话）："**快捷键在图标的左上角**"。
      *
      * 判据不是"两个按钮的绝对坐标相同"（它们在对角，不可能相同），
      * 而是"**同一个公式 + 同一个锚点**"：
      *   - 锚点都是提示的**左上角**（`anchorX = 0` / `anchorY = 0`）
      *   - 提示左缘 = **图标左缘**（`b.x === icon.x`，不是"以图标左缘为中心"）
-     *   - 提示上缘 = 图标上缘 + `hintOverlap`（角标压住一角）
+     *   - 提示上缘 = **图标上缘**（`b.y === icon.y`）
+     *
+     * ⚠️ 上一版这里断言的是 `b.y - icon.y === hintOverlap`（上缘比图标低
+     * 4px）。那 4px 在 20~22px 的图标上让提示**纵向几乎居中** —— 用户报的
+     * 正是"F1 位置不对，现在是**左中**"。那个常量已删，`hintOverlap` 也
+     * 不再存在（这条断言本身就是回归测试）。
      */
     for (const icon of [gear, back]) {
       const p = place(icon);
@@ -60,9 +64,12 @@ describe('IconButton：角落提示的位置由图标位置推出来', () => {
       expect(p.anchorY, tag).toBe(0);
       /** 左对齐图标左缘 —— 这正是"不在正中间"的判据。 */
       expect(b.x, tag).toBe(icon.x);
-      expect(b.y - icon.y, tag).toBe(ICON_BUTTON_DEFAULTS.hintOverlap);
-      /** 提示要**压住**图标：横向与图标的交叠必须为正。 */
+      /** 上对齐图标上缘 —— 这正是"不在左中"的判据。 */
+      expect(b.y, tag).toBe(icon.y);
+      /** 提示与图标在同一角：横向交叠必须为正。 */
       expect(Math.min(b.right, icon.x + icon.w) - Math.max(b.x, icon.x), tag).toBeGreaterThan(0);
+      /** ⚠️ 且提示**整块落在图标的上半部分**（"贴顶部"而不是"居中"）。 */
+      expect(b.bottom, tag).toBeLessThan(icon.y + icon.h / 2);
     }
   });
 
@@ -84,7 +91,7 @@ describe('IconButton：角落提示的位置由图标位置推出来', () => {
       const tag = JSON.stringify(icon);
       expect(p.anchorX, tag).toBe(0);
       expect(b.x, tag).toBe(icon.x);
-      expect(b.y - icon.y, tag).toBe(ICON_BUTTON_DEFAULTS.hintOverlap);
+      expect(b.y, tag).toBe(icon.y);
     }
   });
 

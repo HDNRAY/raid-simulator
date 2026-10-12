@@ -198,27 +198,21 @@ export interface SettingsDebugTarget {
   };
 }
 
-/** 返回箭头（`ScreenControls`）暴露给调试的最小面。 */
-export interface BackDebugTarget {
-  readonly visible: boolean;
-  readonly bounds: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
-  /**
-   * `Esc` 提示的包围盒（触屏隐藏时也仍然算得出来）。
-   *
-   * ⚠️ 它回答的是这一轮的关键问题："提示贴在自己那一侧、且没有被画布边
-   * 裁掉" —— 那件事是 `IconButton.iconHintPlacement` **推**出来的，
-   * 而这个读数是它的硬证据（截图只能看出"看着像在角上"）。
-   */
-  readonly shortcutBounds:
-    | { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
-    | undefined;
-}
-
-/** 设置**按钮**暴露给调试的最小面（`SettingsButton` 满足它）。 */
-export interface SettingsButtonDebugTarget {
+/**
+ * 设置**齿轮**暴露给调试的最小面（`ScreenChrome` 满足它）。
+ *
+ * ⚠️ 它不再叫 `SettingsButtonDebugTarget`：齿轮从"一个共享的
+ * `SettingsButton`"变成**四个界面各自持有的 `ScreenChrome`**（用户
+ * 2026-10-12："多个页面的齿轮，应该分别定义"）。调试入口拿的是**当前这一屏**
+ * 的那一个（`game.ts` 的 `getChrome()`），所以取值函数可能返回 `undefined`
+ * （装配期那一瞬）—— 那时这几个入口是无害的空操作。
+ */
+export interface SettingsGearDebugTarget {
+  /** 只点亮**这一屏**的齿轮（`↑` / `↓` 那条路的状态）。 */
   setFocused(focused: boolean): void;
-  /** 键盘焦点是否在齿轮上（`↑` 那条路的状态）。 */
-  isFocused: boolean;
+  /** 齿轮此刻是否持有键盘焦点。 */
+  readonly focused: boolean;
+  /** 重绘一次（headless 下可能没有下一帧，探针要立刻看到状态）。 */
   update(): void;
 }
 
@@ -243,7 +237,7 @@ export function settingsDebugApi(
     readonly close: () => void;
     readonly isOpen: () => boolean;
   },
-  getButton: () => SettingsButtonDebugTarget,
+  getGear: () => SettingsGearDebugTarget | undefined,
 ): {
   readonly settings: {
     open(tab?: SettingsTab): void;
@@ -277,16 +271,18 @@ export function settingsDebugApi(
     };
     trace(): readonly string[];
     /**
-     * 把**齿轮按钮**的键盘焦点打开/关掉，并立刻重绘一次。
+     * 把**当前这一屏的齿轮**的键盘焦点打开/关掉，并立刻重绘一次。
      *
-     * 为什么需要：`↑`（或 `,` 悬停）是被逐帧循环重绘的，而 headless 下
+     * 为什么需要：`↑`（或悬停）是被逐帧循环重绘的，而 headless 下
      * 这局战斗 3.5 秒就结束了 —— 之后没有帧，任何"聚焦后的外观"都拍不到。
      * 这个入口让验证脚本能把按钮推到聚焦态并**在同一个 tick 里**画出来。
      *
-     * ⚠️ 它改的就是按钮自己的状态（同 `↑` 那条路），不是另画一个样子。
+     * ⚠️ 它改的就是齿轮自己的状态（同 `↑` 那条路），不是另画一个样子。
+     * ⚠️ 齿轮有**四个**（每屏一个），所以这里问的是"当前那一屏"的
+     * 那一个（`game.ts` 的 `getChrome()`）；没有对应的齿轮时是无害空操作。
      */
     setButtonFocused(focused: boolean): void;
-    /** 齿轮按钮此刻是否持有键盘焦点。 */
+    /** 当前这一屏的齿轮此刻是否持有键盘焦点。 */
     buttonFocused(): boolean;
   };
 } {
@@ -311,12 +307,13 @@ export function settingsDebugApi(
       detailScroll: () => ({ ...getSettings().probes.detailScroll() }),
       trace: () => [...getSettings().settingsTrace],
       setButtonFocused: (focused) => {
-        const button = getButton();
-        button.setFocused(focused);
+        const gear = getGear();
+        if (gear === undefined) return;
+        gear.setFocused(focused);
         /** 立即重绘（正常路径由主循环每帧调，headless 下可能没有下一帧）。 */
-        button.update();
+        gear.update();
       },
-      buttonFocused: () => getButton().isFocused,
+      buttonFocused: () => getGear()?.focused ?? false,
     },
   };
 }

@@ -15,7 +15,6 @@
  */
 
 import { Container, Graphics, Sprite, Text } from 'pixi.js';
-import { SettingsButton } from '../ui/settings/SettingsButton';
 import { SettingsPanel } from '../ui/settings/SettingsPanel';
 import { buildSettingsOptions } from './settingsPanelOptions';
 import { createSettingsToggle, type SettingsToggle } from './settingsToggle';
@@ -29,9 +28,14 @@ import type { KeyBinding } from '../input/keyboard';
 import type { BattleLoop } from './battleLoop';
 import type { GameState } from './flow';
 
+/** 齿轮里、设置面板需要认识的**唯一**一件事：面板开合时藏 / 显示它。 */
+export interface SettingsGearTarget {
+  setGearVisible(visible: boolean): void;
+}
+
 /** 设置装配需要的外部依赖。 */
 export interface SettingsSetupDeps {
-  /** Pixi 应用（面板与齿轮按钮挂在它的 stage 上）。 */
+  /** Pixi 应用（设置面板挂在它的 stage 上）。 */
   readonly app: {
     readonly stage: { addChild(child: unknown): unknown };
   };
@@ -52,6 +56,22 @@ export interface SettingsSetupDeps {
   readonly scene: {
     setUiScale(scale: number): void;
   };
+  /**
+   * **落实一次 UI 缩放**（设置面板的滑块走这里）。
+   *
+   * ⚠️ 用户 2026-10-12："UI 缩放要带上"。齿轮从"一个挂 stage 上的共享组件"
+   * 变成**每屏一个**之后，缩放必须**四处一起**走 —— 但那件事**不在本模块**：
+   * 它是"这一局有哪几块 UI"的整体知识，住在 `game.ts`（`applyUiScale`）。
+   * 这里只负责"滑块动了 → 叫它一声"，于是设置模块不逐个认识四个界面。
+   *
+   * ⚠️ 这也是**唯一**的缩放入口：调试入口（`__raidBattle.setUiScale`）与
+   * 设置滑块都调它。两条路各写一遍必然漂 —— 实测踩到过：调试入口只推给
+   * 了场景，于是"探针里选角色 / 自由模式的齿轮没跟着缩放"，而战斗那一屏
+   * 看起来正常（它的缩放本来就在场景里）。
+   */
+  readonly applyUiScale: (scale: number) => void;
+  /** 当前相位对应的那个齿轮（`game.ts` 的 `getChrome()`）—— 面板开合时藏它。 */
+  readonly activeChrome: () => SettingsGearTarget | undefined;
   /**
    * 键位表被改之后的**另一处同步**（`loop` 已经在上面做过）：画面技能格
    * 的键位提示。
@@ -100,18 +120,22 @@ export interface SettingsSetupDeps {
 /** `createSettingsSetup()` 的产物。 */
 export interface SettingsSetup {
   readonly settings: SettingsPanel;
-  readonly settingsButton: SettingsButton;
   readonly settingsToggle: SettingsToggle;
 }
 
 /**
- * 造设置面板 + 齿轮按钮 + 开关。
+ * 造设置面板 + 开关（**不再造齿轮**）。
  *
- * ⚠️ **顺序**：
- *   1. 面板 → 齿轮 → 开关。
- *   2. 开关只能读 `battle()?.isPaused`（**取值函数**，不是构造期的值）——
- *      所以"设置比战斗循环晚"或"比它早"都不影响 `isPaused` 的解析：
- *      它只在 `open()` / `close()` 时被调用，那时战斗状态已经就绪。
+ * ⚠️ 齿轮从"一个共享的 `SettingsButton`"变成**四个界面各自持有**的
+ * `ScreenChrome`（用户 2026-10-12："多个页面的齿轮，应该分别定义"、
+ * "stage 上理论上不挂任何小组件"）—— 那四个对象由各自的界面构造
+ * （`screenSetup` / `BattleScene`），本函数只负责把"缩放"与"面板开合时
+ * 藏齿轮"接到它们身上。
+ *
+ * ⚠️ **顺序**：面板 → 开关。
+ *   开关只能读 `battle()?.isPaused`（**取值函数**，不是构造期的值）——
+ *   所以"设置比战斗循环晚"或"比它早"都不影响 `isPaused` 的解析：
+ *   它只在 `open()` / `close()` 时被调用，那时战斗状态已经就绪。
  *
  * ⚠️ **不再有"能力值转交点"**：操作方式住在 `GameState.operationMode`
  * （唯一 flag），面板与触屏层都只是它的读者 —— 没有"谁先构造谁产出"，
@@ -144,7 +168,7 @@ export function createSettingsSetup(d: SettingsSetupDeps): SettingsSetup {
          * 比如面板、技能图标等，战斗画面和战斗文字保持不变。"
          * 所以系数**只传给渲染层的 UI 部件**，画布尺寸照旧。
          */
-        d.scene.setUiScale(d.state.uiScale);
+        d.applyUiScale(d.state.uiScale);
       },
       snapshot: () => d.battle()?.snapshot,
       translate: translateSafe,
@@ -163,13 +187,6 @@ export function createSettingsSetup(d: SettingsSetupDeps): SettingsSetup {
   );
   d.app.stage.addChild(settings.root);
 
-  const settingsButton = new SettingsButton({
-    pixi: { Container, Graphics, Sprite, Text },
-    translate: translateSafe,
-    onClick: () => settingsToggle.toggle(),
-  });
-  d.app.stage.addChild(settingsButton.root);
-
   /**
    * 设置面板的开关（含"打开时暂停 / 关闭时恢复原状"的状态机）。
    *
@@ -178,7 +195,11 @@ export function createSettingsSetup(d: SettingsSetupDeps): SettingsSetup {
    */
   const settingsToggle = createSettingsToggle({
     settings,
-    settingsButton,
+    /**
+     * ⚠️ 藏 / 显示的是**当前那一屏**的齿轮（`activeChrome()`）——
+     * 面板只可能从当前那一屏被打开。
+     */
+    setGearVisible: (visible) => d.activeChrome()?.setGearVisible(visible),
     /**
      * ⚠️ **从哪打开**取自相位（`settingsOriginOf`，纯函数、有单测）——
      * 首页打开的面板没有「按键」页（那里没有技能可配）。
@@ -188,5 +209,5 @@ export function createSettingsSetup(d: SettingsSetupDeps): SettingsSetup {
     setPaused: (value) => d.battle()?.setPaused(value),
   });
 
-  return { settings, settingsButton, settingsToggle };
+  return { settings, settingsToggle };
 }

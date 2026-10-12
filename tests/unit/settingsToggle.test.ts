@@ -13,11 +13,11 @@ import type { SettingsOrigin } from '../../src/ui/settings/tabs';
  */
 function make(initiallyPaused = false, origin: SettingsOrigin = 'gameplay') {
   const settings = { open: vi.fn(), close: vi.fn() };
-  const settingsButton = { setVisible: vi.fn() };
+  const setGearVisible = vi.fn();
   let paused = initiallyPaused;
   const toggle = createSettingsToggle({
     settings,
-    settingsButton,
+    setGearVisible,
     /**
      * ⚠️ **从哪打开**由开关自己在打开的**那一刻**问一次
      * （`phase` 会变，快照一份就会永远停在装配那一刻）。
@@ -28,7 +28,7 @@ function make(initiallyPaused = false, origin: SettingsOrigin = 'gameplay') {
       paused = v;
     },
   });
-  return { toggle, settings, settingsButton, isPaused: () => paused };
+  return { toggle, settings, setGearVisible, isPaused: () => paused };
 }
 
 describe('打开设置', () => {
@@ -41,7 +41,7 @@ describe('打开设置', () => {
   it('打开时藏起齿轮', () => {
     const t = make();
     t.toggle.open('keys');
-    expect(t.settingsButton.setVisible).toHaveBeenCalledWith(false);
+    expect(t.setGearVisible).toHaveBeenCalledWith(false);
   });
 
   it('把 tab 与**来源**一起传给面板', () => {
@@ -61,7 +61,7 @@ describe('打开设置', () => {
     const settings = { open: vi.fn(), close: vi.fn() };
     const toggle = createSettingsToggle({
       settings,
-      settingsButton: { setVisible: vi.fn() },
+      setGearVisible: () => {},
       origin: () => origin,
       isPaused: () => false,
       setPaused: () => {},
@@ -106,7 +106,7 @@ describe('关闭设置', () => {
     const t = make();
     t.toggle.open('keys');
     t.toggle.close();
-    expect(t.settingsButton.setVisible).toHaveBeenLastCalledWith(true);
+    expect(t.setGearVisible).toHaveBeenLastCalledWith(true);
   });
 });
 

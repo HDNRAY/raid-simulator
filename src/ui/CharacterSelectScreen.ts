@@ -44,6 +44,7 @@
 import type { Container, Graphics } from 'pixi.js';
 import { FONT, LOGICAL } from './layout';
 import { Label, type PixiCtor } from './primitives';
+import { ScreenChrome } from './ScreenChrome';
 import { PALETTE } from '../render/theme';
 import { isDeveloping, type RosterEntry } from '../data/roster';
 import { CARD_RADIUS, CARD_STROKE, CURSOR_RING_GAP, PREPARE_SKIN, cardSkin } from './prepareRender';
@@ -69,6 +70,12 @@ export interface CharacterSelectScreenOptions {
   readonly initialPlayerId: string;
   /** 是否显示键位提示（触屏为假）。见 `HomeScreenOptions.showKeyHints`。 */
   readonly showKeyHints: () => boolean;
+  /** 点右上角的齿轮（打开设置）。见 `HomeScreenOptions.onGear`。 */
+  readonly onGear: () => void;
+  /** 点左上角的返回箭头（回首页）—— 触屏对等靠它（AGENTS.md §3b）。 */
+  readonly onBack?: (() => void) | undefined;
+  /** `F1` 的显示名（齿轮的键位提示）。 */
+  readonly f1Label: () => string;
   /** 用这个角色开始一局肉鸽。 */
   readonly onStart: (playerId: string) => void;
 }
@@ -87,6 +94,14 @@ export class CharacterSelectScreen {
   private readonly hint: Label;
   private readonly cardGfx: Graphics;
   private readonly cards: { readonly name: Label; readonly status: Label }[] = [];
+  /**
+   * **本屏自己的边角控件**：右上角的齿轮 + 左上角的返回箭头。
+   *
+   * ⚠️ 用户 2026-10-12："多个页面的齿轮，应该分别定义"、"stage 上理论上
+   * 不挂任何小组件" —— 所以两个按钮都在本屏的 root 里，显隐与缩放都跟着
+   * 本屏走（不再是挂在 stage 上、靠 `setScreen` 挪位置的那一个）。
+   */
+  readonly chrome: ScreenChrome;
   private readonly players: readonly RosterEntry[];
   private readonly options: CharacterSelectScreenOptions;
 
@@ -155,6 +170,16 @@ export class CharacterSelectScreen {
     });
     this.root.addChild(this.hint.root);
 
+    /** 齿轮 + 返回箭头（最后加 = 最上层；见 `HomeScreen` 里同一条说明）。 */
+    this.chrome = new ScreenChrome({
+      pixi,
+      showKeyHints: options.showKeyHints,
+      f1Label: options.f1Label,
+      onGear: options.onGear,
+      onBack: options.onBack,
+    });
+    this.root.addChild(this.chrome.root);
+
     this.redraw();
   }
 
@@ -208,6 +233,8 @@ export class CharacterSelectScreen {
 
   /** 点一下（逻辑坐标）。@returns 是否消费了这次点击 */
   hitTest(px: number, py: number): boolean {
+    /** ⚠️ 齿轮 / 返回箭头先于卡片（顺序即优先级，见 `HomeScreen.hitTest`）。 */
+    if (this.chrome.hitTest(px, py)) return true;
     for (const area of characterSelectHitAreas(this.players)) {
       if (px < area.x || px > area.x + area.w) continue;
       if (py < area.y || py > area.y + area.h) continue;
@@ -219,7 +246,21 @@ export class CharacterSelectScreen {
 
   /** 每帧：只在可见时保证画面与选择一致。 */
   frame(): void {
-    if (this.root.visible) this.redraw();
+    if (this.root.visible) {
+      this.redraw();
+      this.chrome.update();
+    }
+  }
+
+  /**
+   * **UI 缩放**：本屏只转发给**它自己的**边角控件（与 `HomeScreen` 同一条）。
+   *
+   * ⚠️ 卡片与标题**不随缩放**（现状如此）：这一屏是满屏布局，卡片位置由
+   * `CHARACTER_SELECT_LAYOUT` 定死；只有浮在界面之上的齿轮 / 返回箭头要
+   * 跟别的界面保持一致的大小。
+   */
+  setUiScale(scale: number): void {
+    this.chrome.setUiScale(scale);
   }
 
   /**

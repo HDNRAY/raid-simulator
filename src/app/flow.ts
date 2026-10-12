@@ -22,11 +22,13 @@
  *
  *   - `loop` —— `?prepare=skip` 会让 `enterBattle` 早于一切界面构造，
  *     所有访问点都走 `battle()` 并容忍 `undefined`
- *   - `settingsButtonFocused` / `onScreenChange` —— `?prepare=skip` 时
- *     `enterBattle` 里的 `onScreenChange('battle')` 打在一个**空函数**上，
- *     所以必须在齿轮按钮构造之后**补调用一次 `onScreenChange(phase)`**，
- *     否则按钮会停在备战界面的右上角、压在战斗 HUD 上
  *   - `touch` —— 见 `battleSetup.ts` 里 `touchInput` getter 的说明
+ *
+ * ⚠️ **曾经在这里的两个回填点已经删掉**（2026-10-12）：`settingsButton`
+ * 与 `onScreenChange` 存在的唯一理由是"齿轮是**一个**挂在 stage 上的共享
+ * 组件，得有人告诉它现在在哪一屏"。现在齿轮**每屏一个**（用户："多个页面的
+ * 齿轮，应该分别定义"），位置由各屏自己的 `ScreenChrome` 决定、显隐由
+ * `applyPhase` 交给各屏 —— 没有需要回填的全局对象了。
  */
 
 import type { Phase } from './phaseLogic';
@@ -35,8 +37,6 @@ import type { TouchControls } from './touchControls';
 import type { PrepareScreen } from '../ui/PrepareScreen';
 import type { HomeScreen } from '../ui/HomeScreen';
 import type { CharacterSelectScreen } from '../ui/CharacterSelectScreen';
-import type { ScreenControls } from '../ui/ScreenControls';
-import type { SettingsButton } from '../ui/settings/SettingsButton';
 import type { KeyBinding } from '../input/keyboard';
 import type { OperationMode } from '../render/platform';
 
@@ -49,23 +49,6 @@ import type { OperationMode } from '../render/platform';
  * 不必因为搬家去改一片文件的 import。由来与流程图见那个文件。
  */
 export type { Phase } from './phaseLogic';
-
-/**
- * **设置齿轮按钮该摆在哪**。
- *
- * 全屏界面（首页 / 选角色 / 自由模式）没有战斗 HUD，右上角是空的；
- * 只有**战斗**界面要让它待在日志下方（详见 `SettingsButton` 的锚点注释）。
- *
- * ⚠️ 抽成一个函数是为了**只有一处映射**：`game.ts` 与 `debugApiSetup.ts`
- * 都要把当前 phase 告诉按钮（后者是"补一次摆位"），两处各写一遍
- * `phase === 'battle' ? 'battle' : 'prepare'` 就是两份会漂的真相。
- *
- * ⚠️ 它返回的是**锚点名**（`'prepare'` = 整屏界面右上角），不是 phase ——
- * `SettingsButton` 在 `ui/`，不该认识 `app/` 的 phase 取值。
- */
-export function settingsAnchorOf(phase: Phase): 'prepare' | 'battle' {
-  return phase === 'battle' ? 'battle' : 'prepare';
-}
 
 /** 装配期间被填、之后被读的共享状态。 */
 export interface GameState {
@@ -94,16 +77,6 @@ export interface GameState {
 
   /** 选角色屏（肉鸽模式的第一屏）。同样是先声明、后回填。 */
   select: CharacterSelectScreen | undefined;
-
-  /**
-   * **整屏界面共用的"返回"箭头**（左上角；自由模式 / 选角色屏）。
-   *
-   * ⚠️ 与 `home` / `select` 同样是**先声明、后回填**：`applyPhase` 的定义
-   * 早于它（`?prepare=skip` 那条路），所有访问点都容忍 `undefined`。
-   *
-   * ⚠️ 触屏对等就靠它 —— `Esc` 只有键盘按得出（AGENTS.md §3b）。
-   */
-  back: ScreenControls | undefined;
 
   /** 备战界面（自由模式；进战斗时隐藏，回来时显示）。 */
   prepare: PrepareScreen | undefined;
@@ -158,7 +131,7 @@ export interface GameState {
   uiScale: number;
 
   /**
-   * 设置按钮此刻是否持有键盘焦点（`↑` 提上去、`↓` 退下来）。
+   * 设置齿轮此刻是否持有键盘焦点（`↑` 提上去、`↓` 退下来）。
    *
    * ⚠️ **先声明、后回填**：`wireSettingsKeys(...)` 在 `createGame` 的末尾
    * 才接线（那里依赖一堆已经构造好的对象），而备战界面的 keydown 处理
@@ -168,28 +141,11 @@ export interface GameState {
    * （`acceptsKeyboardFocus` 只在战斗为真），但这条守卫仍然留着 ——
    * 如果哪天设置按钮又被允许在备战聚焦，按 Enter 会先开设置而不是
    * 确定角色，而那种 bug 在截图里看不出来（齿轮只是亮了一下）。
+   *
+   * ⚠️ 齿轮有**四个**（每屏一个，见 `ScreenChrome`），这个取值函数回答的是
+   * "**当前这一屏**的齿轮聚焦了没有"（`settingsKeys` 只点亮当前那一屏）。
    */
   settingsButtonFocused: () => boolean;
-
-  /**
-   * **界面切换时通知设置按钮**（它在两个界面里的位置不同）。
-   *
-   * ⚠️ 又是"延后回填"，原因和上面那条一样：`enterBattle` 可能在
-   * 齿轮按钮构造**之前**就被调用（`?prepare=skip` 走的就是那条路），
-   * 直接引用会撞 TDZ。
-   */
-  onScreenChange: (screen: Phase) => void;
-
-  /**
-   * 设置齿轮按钮。
-   *
-   * ⚠️ **先声明、后回填**：`backToPrepare`（回备战）里要 `update()` 它一次，
-   * 而 `backToPrepare` 的**定义**早于齿轮按钮的构造 —— 这个顺序是
-   * `?prepare=skip` 需要的（见 `game.ts` 文件头"顺序即正确性"第 1 条）。
-   * 定义早不等于调用早：第一次真正回备战一定是用户点/按出来的，那时
-   * 齿轮按钮早就构造好了；用状态对象读它就同时满足两者。
-   */
-  settingsButton: SettingsButton | undefined;
 
   /**
    * 是否正在"由主监听器处理一次按键"。
@@ -234,7 +190,6 @@ export function createGameState(
     phase: 'home',
     home: undefined,
     select: undefined,
-    back: undefined,
     prepare: undefined,
     bindings,
     touchButtons,
@@ -242,8 +197,6 @@ export function createGameState(
     touch: undefined,
     uiScale: 1,
     settingsButtonFocused: () => false,
-    onScreenChange: () => {},
-    settingsButton: undefined,
     handlingKeyDown: false,
     frameCount: 0,
   };

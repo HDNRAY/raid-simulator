@@ -24,12 +24,18 @@ export interface BattleSceneOptions {
   readonly app: Application;
   readonly pixi: PixiCtor;
   readonly translate: TranslateFn;
-}
-
-export interface BattleSceneOptions {
-  readonly app: Application;
-  readonly pixi: PixiCtor;
-  readonly translate: TranslateFn;
+  /**
+   * **战斗界面自己的边角控件**（右上角……不，是日志下方的齿轮）。
+   *
+   * ⚠️ 用户 2026-10-12："多个页面的齿轮，应该分别定义"、"stage 上理论上
+   * 不挂任何小组件"、"UI 缩放要带上"。所以战斗这一屏的齿轮由**场景**持有
+   * （它 `addChild` 到 HUD 层），而不是挂在 stage 上、靠外部挪位置。
+   *
+   * 为什么是**工厂**而不是现成的对象：`ScreenChrome` 需要 `pixi` 构造器，
+   * 而那正是场景的构造参数；`app/game.ts` 只提供"点击之后做什么"。
+   * 这也让 `render/` 不必认识 `app/` 的设置开关。
+   */
+  readonly createChrome: (pixi: PixiCtor) => import('../ui/ScreenChrome').ScreenChrome;
 }
 
 /* ================================================================== *

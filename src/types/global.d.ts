@@ -166,27 +166,78 @@ declare global {
        * 需求："肯定要加返回啊"，且**触屏必须有对等入口**
        * （AGENTS.md §3b：`Esc` 只有键盘按得出）。
        *
+       * ⚠️ 箭头现在住在**那一屏自己的 `ScreenChrome`** 里（用户 2026-10-12：
+       * "stage 上理论上不挂任何小组件"、"多个页面的齿轮，应该分别定义"），
+       * 所以这几个读数取自**当前相位的那一屏**。首页与战斗那一屏没有箭头
+       * —— `visible()` 为假、`bounds()` / `center()` 为 `null`。
+       *
        * 验证"点得通"必须**真的点**：注入一个真实 `PointerEvent` 到
        * canvas 上，坐标由 `center()` 给（页面自己的几何，不是脚本抄一份）。
        */
       back: {
-        /** 此刻是否可见（= 当前相位允许返回）。 */
+        /** 此刻是否可见（= 当前这一屏有返回箭头）。 */
         visible(): boolean;
-        /** 可点区域（含角落的 `Esc` 提示）。 */
-        bounds(): { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
-        /** 箭头中心的逻辑坐标 —— 注入点击时用它，别手写数字。 */
-        center(): { readonly x: number; readonly y: number };
+        /**
+         * 可点区域（含角落的 `Esc` 提示）。
+         *
+         * ⚠️ `null` 而不是 `undefined`：要跨 `Runtime.evaluate` 的 JSON 边界
+         * （`undefined` 在那里会被丢掉 —— "这一屏没有箭头"与"忘了返回值"
+         * 长得一样）。与 `settings.slotCenter` 同一条约定。
+         */
+        bounds(): {
+          readonly x: number;
+          readonly y: number;
+          readonly w: number;
+          readonly h: number;
+        } | null;
+        /** 箭头中心的逻辑坐标 —— 注入点击时用它，别手写数字（没有则 `null`）。 */
+        center(): { readonly x: number; readonly y: number } | null;
         /**
          * `Esc` 提示的**包围盒**（逻辑坐标；触屏隐藏时也仍然算得出来）。
          *
          * ⚠️ 提示的位置来自 `IconButton.iconHintPlacement` 的**一条全局
-         * 规则**（压在图标左上角，与按钮在画布哪个角无关）。这个读数是
-         * 那条规则在**真实布局**下的证据 —— 截图只能看出"看着像在角上"，
-         * 看不出它有没有被画布边裁掉、也看不出两个按钮是不是同一条规则。
+         * 规则**（提示左上角 = 图标左上角，与按钮在画布哪个角无关）。
+         * 这个读数是那条规则在**真实布局**下的证据 —— 截图只能看出
+         * "看着像在角上"，看不出它有没有被画布边裁掉、也看不出两个按钮
+         * 是不是同一条规则。
          */
         shortcutBounds():
           | { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
           | null;
+      };
+      /**
+       * **界面结构探针**（截图 / 验证脚本用）。
+       *
+       * ⚠️ 这一轮齿轮从"一个挂 stage 上的共享组件"改成**四个界面各自持有**
+       * （用户："多个页面的齿轮，应该分别定义"、"stage 上理论上不挂任何小组件"），
+       * 所以"每一屏的齿轮都在正确位置、都点得开设置"必须逐屏验 —— 这个入口
+       * 给出每一屏的几何，配合 `RAID_SHOT_POINTER` 注入真实点击即可。
+       *
+       * ⚠️ 只读几何与标志位：**没有"点它"的方法**（那会是一条旁路）。
+       */
+      chrome(): {
+        readonly phase: string;
+        /** 当前这一屏的齿轮可不可见（四屏都该为真）。 */
+        readonly gear: boolean;
+        readonly gearBounds: {
+          readonly x: number;
+          readonly y: number;
+          readonly w: number;
+          readonly h: number;
+        } | null;
+        /** 当前这一屏的返回箭头（只有选角色 / 自由模式有）。 */
+        readonly backBounds: {
+          readonly x: number;
+          readonly y: number;
+          readonly w: number;
+          readonly h: number;
+        } | null;
+        readonly gearFocused: boolean;
+        /** 当前这一屏的边角控件的缩放系数（应等于 `uiScale`）。 */
+        readonly chromeScale: number | null;
+        readonly uiScale: number;
+        /** `app.stage` 的直接子节点数（证明没有小组件挂在 stage 上）。 */
+        readonly stageChildren: number;
       };
       /**
        * **复盘（战报）那层** + 当前的**输入归属**（调试 / 验证用）。

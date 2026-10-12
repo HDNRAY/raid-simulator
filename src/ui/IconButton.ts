@@ -132,22 +132,33 @@ export interface IconHintInput {
  * 规则（一条，两个角落共用；没有"看位置"的判断、也没有模式开关）
  * ==================================================================
  *
- * 设图标矩形为 `(ix, iy, iw, ih)`、提示尺寸 `hintW × hintH`：
+ * 设图标矩形为 `(ix, iy, iw, ih)`：
  *
  * ```
- * 提示的【左上角】 = (ix, iy + OVERLAP)
+ * 提示的【左上角】 = (ix, iy)
  * ```
  *
- * 也就是**提示的左缘与图标的左缘对齐**、上缘比图标上缘低 `OVERLAP`
- * —— 提示因此压住图标的**左上角**，读起来是一个**角标**。
- * 锚点是提示的左上角（`anchorX/Y = 0`），提示**往右下方**长。
+ * 也就是**提示的左缘与上缘都对齐图标的左上角** —— 提示因此是一枚**角标**，
+ * 而不是"贴在旁边"或"压在中间"的东西。锚点是提示的左上角
+ * （`anchorX/Y = 0`），提示**往右下方**长。
  *
- * ⚠️ **用户 2026-10-12 把"在哪"说死了**（原话）："**快捷键在图标的左上角**，
- * 目前在**正中间**"。
+ * ==================================================================
+ * ⚠️ `iy + 4` 那一版就是用户说的"**左中**"（2026-10-12 第二次修正）
+ * ==================================================================
  *
- * ⚠️ 旧版把锚点放在提示的**右下角**、且右缘对齐到 `ix + OVERLAP` ——
- * 那让提示以"图标左缘"为中心横跨，看起来就**在正中间**（用户报的正是
- * 这个）。现在左缘对齐 `ix`。
+ * 上一版把提示上缘放在 `iy + hintOverlap(4)`，理由是"角标要压住那一角"。
+ * 但图标只有 **20~22px** 高，往下一个 9px 的提示落在
+ * `iy + 4 .. iy + 13` —— **纵向几乎居中**，横向又贴着左缘，看起来正是
+ * 用户报的"**左中**"✗（原话："F1 位置不对，现在是左中"）。
+ *
+ * 现在**没有那个偏移量**（`hintOverlap` 整个删掉）：贴就是贴在图标的
+ * 左上角，垂直方向也在**顶部**。
+ *
+ * ⚠️ **用户 2026-10-12 把"在哪"说死了**（原话）："**快捷键在图标的左上角**"。
+ *
+ * ⚠️ 旧版（更早）把锚点放在提示的**右下角**、且右缘对齐到 `ix + 4` ——
+ * 那让提示以"图标左缘"为中心横跨，看起来也**在正中间**。两版都已被这条
+ * 规则取代。
  *
  * ⚠️ **不做越界避让**（没有夹取、没有第二套逻辑）—— 用户 2026-10-12 明确
  * 否掉了（"别再加第二套避让逻辑"）。判据：画布是 letterbox 的，返回箭头在
@@ -156,8 +167,8 @@ export interface IconHintInput {
  *
  * | 调用点 | 图标左上角 | 提示包围盒（`Esc` 估计宽 21） | 在 960×540 内？ |
  * |---|---|---|---|
- * | 返回箭头 | `(8, 8)` | `x 8..29, y 12..21` | ✅ |
- * | 设置齿轮 | `(924, 8)` | `x 924..945, y 12..21` | ✅ |
+ * | 返回箭头 | `(8, 8)` | `x 8..29, y 8..17` | ✅ |
+ * | 设置齿轮 | `(924, 8)` | `x 924..945, y 8..17` | ✅ |
  *
  * ⚠️ 所以这里**故意不写兜底**：真有调用方把图标放到会溢出的位置，那是
  * 它自己的 bug，应当在截图/测试里**看见**，而不是被一段夹取悄悄推回来。
@@ -168,17 +179,17 @@ export function iconHintPlacement(
   hintH: number,
 ): { x: number; y: number; anchorX: number; anchorY: number } {
   const { icon } = input;
-  const { hintOverlap: overlap } = ICON_BUTTON_DEFAULTS;
   /**
-   * 提示的左上角 = 图标左上角 + 纵向 `OVERLAP`。
+   * 提示的左上角 = 图标的左上角。**这就是全部公式**。
    *
    * ⚠️ 两个按钮都走这里 —— 没有分支看"按钮在画布哪一半"；
-   * `canvasW` / `canvasH` 仍在入参里（调用方要说明"这块提示是画在哪张
-   * 画布上的"），但**规则本身不使用它们**。
+   * `canvasW` / `canvasH` / `hintW` / `hintH` 仍在入参里（调用方要说明
+   * "这块提示是画在哪张画布上的、有多大"，纯函数测试也靠它们做对账），
+   * 但**规则本身不使用它们** —— 用不上就不看，正是"一条规则"的含义。
    */
   void hintW;
   void hintH;
-  return { x: icon.x, y: icon.y + overlap, anchorX: 0, anchorY: 0 };
+  return { x: icon.x, y: icon.y, anchorX: 0, anchorY: 0 };
 }
 
 export interface ContentBox {
@@ -297,23 +308,46 @@ export const ICON_BUTTON_DEFAULTS = {
    * 角落提示的字号与描边。
    *
    * 比 `FONT.tiny`(11) 还小一号 —— 它是辅助信息，不能和图标抢注意力。
-   * 描边是为了在任意背景上都读得清（需求："esc 可以考虑加描边"）。
+   * 描边是为了在任意背景上都读得清（需求："esc 可以考虑加描边"、
+   * "esc 的描边没有让它看起来足够清晰"：**3px** 才让 `Esc` 从齿轮的
+   * 浅色笔画里跳出来；颜色也同时从 `textDim` 换成了亮的 `PALETTE.text`）。
+   *
+   * ⚠️ 这里**曾经有 `hintOverlap: 4`**（"提示上缘比图标上缘低 4px，
+   * 于是压住那一角"）—— 2026-10-12 删掉。理由：图标只有 20~22px 高，
+   * 下移 4px 之后那 9px 的提示**纵向几乎居中**，看起来就是用户报的
+   * "**左中**"。落位现在由 `iconHintPlacement` 一条规则定死
+   * （提示左上角 = 图标左上角），不需要任何"压多少"的参数。
+   *
+   * ⚠️ `hintCanvasGap: 2` 也一并删掉：它从第一天起就没有读者（那是
+   * "别伸出画布"那条兜底的余量，而那条兜底已被用户明确否掉 ——
+   * "别再加第二套避让逻辑"）。一个常量没有读者，就是在暗示一条不存在的
+   * 规则，比删掉更危险。
    */
   cornerSize: 9,
   cornerStroke: 3,
   /**
-   * 角落提示的**落位参数**（只有两个，其余全是推出来的）。
+   * 可点区域在**图标外侧**的外扩量（逻辑像素）。
    *
-   *   - `hintOverlap`：提示的外缘越过图标那个角多少 —— 提示因此**压住
-   *     图标那一角**（需求："esc 应该……盖住小部分齿轮 icon"）。
-   *   - `hintCanvasGap`：提示与画布边的**最小**呼吸空间。它是"别伸出
-   *     画布"那条兜底的余量（提示字形自带描边，贴到 0 会看着被切）。
+   * ==================================================================
+   * ⚠️ 为什么是**增量**而不是"整个矩形"
+   * ==================================================================
    *
-   * ⚠️ 这两个不是"调位置"的数字：提示在**哪一侧**由 `iconHintPlacement`
-   * 的规则定死（图标左上角），它们只决定**压多少**与**离画布边多远**。
+   * 旧版 `SettingsButton` 有一个 `HIT = 44`：锚点按它算、图标钉在它中心，
+   * 于是可点范围 = 44×44 的方块。可它同时**把按钮的落位也绑死了** ——
+   * "按钮贴右上角 8px"其实算的是那个 44 方块贴边，图标因此内缩 12px
+   * （齿轮落在 `x=924` 而不是 `932`）。位置与命中范围被同一个魔数绑在一起，
+   * 正是 `ScreenChrome` 要把两者分开的原因（图标左上角是一条落位规则，
+   * 可点范围是另一条人体工学规则）。
+   *
+   * 现在命中范围 = 内容盒 **∪ 图标外扩 `hitSlop`**：图标 20/22px 加上
+   * 两侧各 10px，得到 40~42px 的方块 —— 与旧版 44 相差无几，鼠标 / 手指
+   * 都好点，而**它不再影响按钮画在哪**。
+   *
+   * ⚠️ 顺带修掉一个真实的副作用：旧版 44 方块在战斗界面会**盖住右上角
+   * 的计时器**（`LAYOUT.timer` 就在 `x 868..952, y 3..23`）—— 那里本来
+   * 不该有可点区域。40/42 的方块仍然与计时器相邻，但不再压住它。
    */
-  hintOverlap: 4,
-  hintCanvasGap: 2,
+  hitSlop: 10,
   /**
    * 焦点环的默认几何。
    *
@@ -343,7 +377,12 @@ export class IconButton {
   private readonly ring?: Graphics;
 
   /**
-   * 角落提示的**包围盒**（逻辑坐标，构造时由 `iconHintPlacement` 算出来）。
+   * 角落提示的**包围盒**（构造时由 `iconHintPlacement` 算出来）。
+   *
+   * ⚠️ **坐标是相对本组件 `root` 的**（与 `rect` / `contains` 同一坐标系），
+   * **不是**画布坐标：落位函数只拿到"盒内"的图标矩形。谁把按钮整体摆到了
+   * 画布上的某处，谁就要在报出去之前加上那个位移 —— `ScreenChrome.
+   * backShortcutBounds` 正是这么做的（不加就会报出 `{0,0}` 这种假位置）。
    *
    * 为什么要留一份：提示是"算出来的落位"，而截图脚本只能看图 ——
    * "提示贴在自己那一侧、且没有伸出画布"这条纪律需要一个**读得到**的数
@@ -355,6 +394,19 @@ export class IconButton {
   private focused = false;
   private lastLit = false;
   private lastRingVisible: boolean | undefined = undefined;
+
+  /**
+   * 图标在本组件 `root` 坐标系里的左上角与边长。
+   *
+   * ⚠️ 存在的理由：`ScreenChrome` 要把按钮的**图标左上角**钉到一个算法
+   * 算出来的点上（"贴右上角 8px"之类）。而图标在 `root` 里的位置由
+   * `computeContentBox` + `anchor` 一起决定（含取整），外面**重算一遍**
+   * 就是第二份布局真相 —— 那正是"看着在按钮里、点不到"的来源。
+   * 所以答案只在这里留一份，外面读它。
+   */
+  private iconX = 0;
+  private iconY = 0;
+  private iconSize = 0;
 
   constructor(private readonly options: IconButtonOptions) {
     const { pixi } = options;
@@ -407,6 +459,9 @@ export class IconButton {
     // ── 布局：全部交给纯函数算（可在 node 里测） ──
     const box = computeContentBox(options);
     this.rect = { x: box.x, y: box.y, w: box.w, h: box.h };
+    this.iconX = box.iconX;
+    this.iconY = box.iconY;
+    this.iconSize = size;
     const midY = box.y + box.h / 2;
     const hintW = options.shortcut === undefined ? 0 : estimateMonoWidth(options.shortcut, FONT.small);
     const labelW = options.label === undefined ? 0 : estimateMonoWidth(options.label, FONT.body);
@@ -463,17 +518,17 @@ export class IconButton {
          * 角落提示：**位置全是算出来的**（旧版这里是手调偏移）
          * ============================================================
          *
-         * 需求："esc 应该比较小，然后再设置按钮的左上角"，以及"理论上
-         * esc 应该**盖住**小部分齿轮 icon"。所以它不是"贴在旁边"，而是
-         * 压住图标的一个角。
+         * 需求："esc 应该比较小，然后再设置按钮的左上角"。所以它不是
+         * "贴在旁边"、也不是"压在中间"，而是贴在图标**左上角**的一枚角标。
          *
          * ⚠️ **位置由 `iconHintPlacement` 一条规则推**（不按按钮在画布
          * 哪一半、也没有任何偏移常量）：齿轮在右上角、返回箭头在左上角，
-         * 两边都是**提示压在自己图标的左上角**。
+         * 两边都是**提示的左上角 = 自己图标的左上角**。
          *
          * ⚠️ 旧版这里写的是 `box.iconX + 12 + hintOffset.dx`、`box.iconY + 12
-         * + hintOffset.dy`，而 `ScreenControls` 传了 `+34 / +22` 去硬拗
-         * 左上的落位（"调了三版"）。那个参数已删。
+         * + hintOffset.dy`，而调用方传了 `+34 / +22` 去硬拗左上的落位
+         * （"调了三版"）。那个参数已删；**再往后一版**又给上缘加了
+         * `+4`，那正是用户 2026-10-12 报的"左中"—— 也删了。
          *
          * ⚠️ 描边宽度 2 → **3**（需求："esc 的描边没有让它看起来足够清晰"）：
          * 3px 才让 Esc 从齿轮的浅色笔画里跳出来。那条约束现在体现在
@@ -496,10 +551,11 @@ export class IconButton {
         /**
          * 探针用（`hintBounds`）—— 提示真的画在哪儿只有这里知道。
          *
-         * ⚠️ 锚点现在是提示的**左上角**（规则改成"左缘对齐图标左缘"之后），
-         * 所以包围盒的左上角就是 `placed` —— 这里只把估算宽度补上。
-         * 公式与 `iconHintPlacement` 的锚点语义**必须同步**：锚点一改，
-         * 这个盒子就会算错（截图脚本读它判断"有没有压住图标左上角"）。
+         * ⚠️ 锚点现在是提示的**左上角**（规则改成"左上角 = 图标左上角"
+         * 之后），所以包围盒的左上角就是 `placed` —— 这里只把估算宽度
+         * 补上。公式与 `iconHintPlacement` 的锚点语义**必须同步**：
+         * 锚点一改，这个盒子就会算错（截图脚本读它判断"提示是不是贴在
+         * 图标左上角"）。
          */
         this.cornerHintBox = {
           x: placed.anchorX === 1 ? placed.x - cornerW : placed.x,
@@ -514,10 +570,40 @@ export class IconButton {
 
   /** 命中测试（逻辑像素）。命中会触发 `onClick`。 */
   hitTest(px: number, py: number): boolean {
-    const { x, y, w, h } = this.rect;
-    const hit = px >= x && px <= x + w && py >= y && py <= y + h;
+    const hit = this.contains(px, py);
     if (hit) this.options.onClick();
     return hit;
+  }
+
+  /**
+   * **只问"在不在里面"**（逻辑像素，坐标与 `root` 同系）—— 不触发点击。
+   *
+   * ⚠️ 与 `hitTest` 共用同一段算术：调用方两种需求都有（命中即触发 vs
+   * 只想知道悬停状态），各写一遍必然漂移。
+   *
+   * 命中区域 = 内容盒 **∪ 图标外扩 `hitSlop`** —— 见 `ICON_BUTTON_DEFAULTS`
+   * 里那个常量的说明（图标只有 20px 见方，纯按它算太小，手指点不中）。
+   */
+  contains(px: number, py: number): boolean {
+    const { x, y, w, h } = this.rect;
+    if (px >= x && px <= x + w && py >= y && py <= y + h) return true;
+    const pad = ICON_BUTTON_DEFAULTS.hitSlop;
+    return (
+      px >= this.iconX - pad &&
+      px <= this.iconX + this.iconSize + pad &&
+      py >= this.iconY - pad &&
+      py <= this.iconY + this.iconSize + pad
+    );
+  }
+
+  /** 图标在 `root` 坐标系里的左上角（`ScreenChrome` 用它钉落位）。 */
+  get iconLeft(): number {
+    return this.iconX;
+  }
+
+  /** 图标在 `root` 坐标系里的上缘。 */
+  get iconTop(): number {
+    return this.iconY;
   }
 
   /** 指针悬停。 */
@@ -582,6 +668,9 @@ export class IconButton {
 
   /**
    * 角落提示的包围盒（没有提示时为 `undefined`）。
+   *
+   * ⚠️ **相对本组件 `root` 的坐标**（见 `cornerHintBox` 的说明）——
+   * 想拿画布坐标要自己加上 `root.x/y`。
    *
    * ⚠️ 它是**估算**（用 `estimateMonoWidth` + `cornerSize`）：真实字形宽度
    * 要等 Pixi 生成纹理。估宽不估窄，所以"看着没伸出画布"用它判是安全的。

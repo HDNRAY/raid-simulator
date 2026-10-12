@@ -60,9 +60,15 @@ export interface TouchSetupDeps {
    * （不需要重建控件，也不需要回到这里重新装配一遍）。
    */
   readonly mode: () => OperationMode;
-  /** 键名提示变化要通知的部件（场景里的技能栏 / 齿轮按钮）。 */
+  /**
+   * 键名提示变化要通知的部件（场景里的技能栏）。
+   *
+   * ⚠️ **齿轮不在这里**（2026-10-12 重构）：齿轮的键位提示由
+   * `ScreenChrome.update()` 每帧现读唯一 flag —— 而那个方法由主循环对
+   * **当前那一屏**调用（`loopWiring`）。所以"切换操作方式要通知所有界面的
+   * 所有齿轮"这件事**没有订阅表**，因为它是每帧算的。
+   */
   readonly scene: { setShowKeyHints(show: boolean): void };
-  readonly settingsButton: { setShowShortcut(show: boolean): void };
 }
 
 /**
@@ -116,7 +122,6 @@ export function createTouchSetup(d: TouchSetupDeps): TouchControls {
   const caps = capsOf(d.mode());
   touch.setButtons(d.touchSkillIds());
   d.scene.setShowKeyHints(caps.showKeyHints);
-  d.settingsButton.setShowShortcut(caps.showKeyHints);
   d.app.stage.addChild(touch.layer.root);
 
   return touch;

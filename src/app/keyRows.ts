@@ -23,9 +23,103 @@ import type { KeyBinding } from '../input/keyboard';
 import type { KeyRow } from '../ui/settings/rows';
 import type { ContentRegistry } from '../core/content/registry';
 import { holdDrainPerSecond } from '../core/combat/holds';
+import { LOGIC_TICKS_PER_SECOND } from '../core/loopConstants';
 import { PLAYER_SKILL_IDS } from '../data/content';
 import { hintKeysOf } from './skillHints';
 import type { TranslateFn } from '../i18n/translator';
+import { flattenCatalog } from '../i18n/translator';
+import { zhCN } from '../i18n/locales/zh-CN';
+
+/**
+ * ==================================================================
+ * ⚠️ **说明文案里的数值必须从数据推导**（根治"两份真相"）
+ * ==================================================================
+ *
+ * 这一块解决的是一个**已经犯过**的错：`skill.dodge.desc` 里写着
+ * "获得 0.5 秒完全无敌"，而 0.5 秒真正的家是 `DODGE_IFRAME.duration`。
+ * 同一个数字有两份表达 ⇒ 改数值时**必然漏一处**（改「闪」0.1 → 0.2
+ * 那次就差点漏掉文案）。
+ *
+ * 现在的分工：
+ *   - **模板**住在 i18n（`获得 {seconds} 秒无敌，不花炁，但窗口极窄。`）
+ *   - **数值**只有一个来源 —— 技能授予的那个 buff 的 `duration`，
+ *     由下面 `buffGrantedSeconds()` 推导
+ *   - **拼装**发生在 `SkillDetail.render`（把 `descParams` 交给 `t()`）
+ *
+ * ⚠️ 判据是**模板里有没有 `{seconds}`**，不是"技能有没有 buff"：
+ * 只有真的要显示秒数的说明才传参。若不看模板，就会给那些**没有占位符**
+ * 的说明也塞 `{seconds}` —— 虽然 `t()` 对多余参数是宽容的，但那是
+ * "靠巧合正确"。
+ */
+
+/**
+ * 全部 i18n key → 模板（启动时扁平化一次）。
+ *
+ * ⚠️ 用**基准语言**（`zh-CN`）来判"哪个说明模板要秒数"。语言包是数据，
+ * 各语言模板里的占位符名由 i18n 规范约束为同一套，所以看基准语言即可；
+ * 而且这样不依赖调用方传进来的 `translate` 是哪一份（测试会传假实现）。
+ */
+const TEMPLATES = flattenCatalog(zhCN);
+
+/**
+ * 模板里含某个占位符的全部 i18n key。
+ *
+ * ⚠️ **导出是为了能对它写测试**：下面那条"说明里的秒数必须来自数据"
+ * 需要一份**权威清单**（"哪些说明模板引用了 `{seconds}`"）—— 让测试
+ * 自己写死名单就会变成第三份真相，加了新说明也不会提醒任何人。
+ */
+export function messageKeysMatching(placeholder: string): readonly string[] {
+  const needle = `{${placeholder}}`;
+  return [...TEMPLATES.entries()]
+    .filter(([, template]) => template.includes(needle))
+    .map(([key]) => key)
+    .sort();
+}
+
+/** 描述模板里出现的占位符名。 */
+function placeholdersOf(template: string): readonly string[] {
+  return [...template.matchAll(/\{(\w+)\}/g)].flatMap((m) =>
+    m[1] === undefined ? [] : [m[1]],
+  );
+}
+
+/**
+ * 这个技能**授予自己**的 buff 的时长（秒）；没有就给 `undefined`。
+ *
+ * 只认 `target.mode === 'self'` 的 `grant`：给敌人挂的 debuff 时长
+ * 与"我获得 X 秒……"不是同一句话（例如「轰」的易伤）。
+ * 多个自我 grant 时取**第一个** —— 当前内容里每个技能最多一个，
+ * 真出现两个时该由内容设计决定写哪一个，不该由这里默默挑一个。
+ * 写成契约（返回 `undefined`）而不是猜，是为了让它**在测试里现形**。
+ */
+function buffGrantedSeconds(skill: {
+  readonly abilities: readonly {
+    readonly kind: string;
+    readonly target?: { readonly mode: string };
+    readonly buff?: { readonly duration: number };
+  }[];
+}): number | undefined {
+  for (const ability of skill.abilities) {
+    if (ability.kind !== 'grant') continue;
+    if (ability.target?.mode !== 'self') continue;
+    const ms = ability.buff?.duration;
+    if (ms === undefined || !Number.isFinite(ms)) continue;
+    return secondsFromMs(ms);
+  }
+  return undefined;
+}
+
+/** 逻辑步口径的换算：毫秒 → 秒。 */
+function secondsFromMs(ms: number): number {
+  /**
+   * 先归到**逻辑步**（本作的逻辑最小单位，0.1 秒）再折成秒，而不是
+   * 直接 `ms / 1000` —— 那样浮点会给出 `0.19999999999999998`
+   * （`logicMs(2)` 的毫秒数除 1000），而文案要的正是玩家看到的
+   * **0.2**。四舍五入到逻辑步也顺带保证"显示的秒数 = 内容的逻辑步数"。
+   */
+  const steps = Math.round((ms / 1000) * LOGIC_TICKS_PER_SECOND);
+  return steps / LOGIC_TICKS_PER_SECOND;
+}
 
 /**
  * 这个技能该不该出现在设置页的按键列表里。
@@ -143,7 +237,7 @@ export function buildKeyRows(options: BuildKeyRowsOptions): readonly KeyRow[] {
      * 但**备战界面还没有战斗** —— `snapshotOf()` 返回 `EMPTY_SNAPSHOT`，
      * 于是 `slot === undefined`，两项都变成空字符串。
      *
-     * 而设置齿轮**现在在备战界面上也有**（`SettingsButton.setScreen`），
+     * 而设置齿轮**现在在每一屏都有**（各屏自己的 `ScreenChrome`），
      * 所以"打开设置看技能消耗"最常见的入口正好是**没有快照**的那个 ✗
      *
      * ⚠️ 顺序不能反：**有战斗时以快照为准**。快照里的值可能被运行时
@@ -232,11 +326,28 @@ export function buildKeyRows(options: BuildKeyRowsOptions): readonly KeyRow[] {
     const mechanicTags = (skill.tags ?? []).filter((tag: string) =>
       VISIBLE_MECHANIC_TAGS.has(tag),
     );
+    /**
+     * **说明里的秒数**（见本文件顶部的"两份真相"说明）。
+     *
+     * 只在**模板真的要秒数**且**数据真给了时长**时才传 —— 缺任何一边
+     * 就留 `undefined`，让 `SkillDetail` 走原来的"无参取词"。这样
+     * "模板写了 `{seconds}` 但数据没有时长"不会在渲染时抛错，而是
+     * 由 `tests/unit/keyRows.test.ts` 那条断言**在测试里**把它抓出来。
+     */
+    const descSeconds =
+      skill.descKey === undefined ? undefined : buffGrantedSeconds(skill);
+    const descTemplate =
+      skill.descKey === undefined ? '' : (TEMPLATES.get(skill.descKey) ?? '');
+    const descParams =
+      descSeconds === undefined || !placeholdersOf(descTemplate).includes('seconds')
+        ? undefined
+        : { seconds: descSeconds };
     return {
       skillId: b.skillId,
       nameKey: skill.nameKey,
       key: b.key,
       ...(skill.descKey === undefined ? {} : { descKey: skill.descKey }),
+      ...(descParams === undefined ? {} : { descParams }),
       ...(costText === '' ? {} : { costText }),
       ...(cdText === '' ? {} : { cdText }),
       ...(castText === '' ? {} : { castText }),

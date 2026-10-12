@@ -12,10 +12,12 @@
  * 不另写一套逻辑：调试入口自己改状态就验证不到界面本身
  * （来龙去脉见 `app/debugApi.ts`）。
  *
- * ⚠️ **`onScreenChange` 的回填与那一次补调用必须在一起**（本函数末尾）：
- * `?prepare=skip` 时 `enterBattle` 早就跑过了，那一次的
- * `onScreenChange('battle')` 打在一个**空函数**上；不补的话齿轮按钮会停在
- * 备战界面的右上角，压在战斗 HUD 上。
+ * ⚠️ **不再有"补一次界面摆位"**（2026-10-12 重构）：原先这里末尾要回填
+ * `onScreenChange` 并**立刻按当前 phase 调一次** —— 因为齿轮是**一个**
+ * 挂在 stage 上的共享组件，`?prepare=skip` 时那次摆位会打在空函数上。
+ * 现在齿轮**每屏一个**（用户："多个页面的齿轮，应该分别定义"），位置由
+ * 各屏自己的 `ScreenChrome` 决定、显隐由各屏的 `visible` 带上 —— 没有
+ * 需要补摆位的全局对象，那一段整体删掉了。
  */
 
 import {
@@ -29,20 +31,17 @@ import {
   homeDebugApi,
   prepareDebugApi,
   settingsDebugApi,
-  type BackDebugTarget,
 } from './debugApi';
 import { clampUiScale } from '../render/scaling';
-import { backButtonCenter } from '../ui/ScreenControls';
-import { settingsAnchorOf } from './flow';
 import type { BattleLoop } from './battleLoop';
 import type { GameState } from './flow';
 import type { InputLayer } from './inputRouter';
 import type { SettingsPanel } from '../ui/settings/SettingsPanel';
-import type { SettingsButton } from '../ui/settings/SettingsButton';
 import type { SettingsToggle } from './settingsToggle';
 import type { HomeScreen } from '../ui/HomeScreen';
 import type { CharacterSelectScreen } from '../ui/CharacterSelectScreen';
 import type { PrepareScreen } from '../ui/PrepareScreen';
+import type { ScreenChrome } from '../ui/ScreenChrome';
 import type { TouchControls } from './touchControls';
 
 /**
@@ -57,9 +56,8 @@ type RaidBattleGlobal = NonNullable<Window['__raidBattle']>;
 /** 探针与界面入口要读的那些东西。 */
 export interface DebugApiDeps {
   readonly state: GameState;
-  /** 场景（`setUiScale` 与面板滑块走同一条路）。 */
+  /** 场景（复盘那一层要读它）。 */
   readonly scene: {
-    setUiScale(scale: number): void;
     /**
      * 复盘那一层（`logReview` 入口读它）。
      *
@@ -73,25 +71,39 @@ export interface DebugApiDeps {
       pointerRatio(): number;
     };
   };
+  /**
+   * **落实一次 UI 缩放**（`game.ts` 的 `applyUiScale`：场景 + 四屏齿轮）。
+   *
+   * ⚠️ 由调用方注入而不是在这里自己拼：缩放的落点是**整体知识**
+   * （这一局有哪几块 UI），判据只能有一处 —— 调试入口再转发一遍就会漏
+   * （实测踩到：漏了三个界面的齿轮）。
+   */
+  readonly applyUiScale: (scale: number) => void;
   /** Pixi 应用（探针 `stage` 暴露它的 `app.stage`）。 */
   readonly app: { readonly stage: unknown };
   readonly settings: SettingsPanel;
-  readonly settingsButton: SettingsButton;
+  /**
+   * **当前这一屏的齿轮**（`game.ts` 的 `getChrome()`，按相位查）。
+   *
+   * ⚠️ 是取值函数、而且可能返回 `undefined`（装配期那一瞬）：齿轮从
+   * "一个共享组件"变成**四个界面各自持有**（用户 2026-10-12："多个页面的
+   * 齿轮，应该分别定义"），所以"当前是谁"只能现查。探针里凡是要读齿轮
+   * 状态的入口（`settings.buttonFocused`、`back.shortcutBounds`）都走它。
+   */
+  readonly chrome: () => ScreenChrome | undefined;
   readonly settingsToggle: SettingsToggle;
   /** 首页调试入口的目标。 */
   readonly home: HomeScreen;
   /** 选角色屏调试入口的目标。 */
   readonly select: CharacterSelectScreen;
-  /** 备战界面（自由模式）调试入口的目标。 */
-  readonly prepare: PrepareScreen;
   /**
-   * 返回箭头（自由模式 / 选角色屏左上角）。
+   * 备战界面（自由模式）调试入口的目标。
    *
-   * ⚠️ 它只暴露**几何与可见性**，没有"点它"的方法 —— 那会是一条旁路。
-   * 脚本要验证"点得通"必须注入真实 `PointerEvent`（坐标从 `center()` 拿），
-   * 走的才是玩家那条路（见 `global.d.ts` 里 `back` 的说明）。
+   * ⚠️ 返回箭头（自由模式 / 选角色屏左上角）**不再是独立参数**：它现在
+   * 住在那一屏自己的 `ScreenChrome` 里，所以探针通过 `chrome()` 读它
+   * （见下面 `api.back` 与文件头那段"为什么按相位查"）。
    */
-  readonly back: BackDebugTarget;
+  readonly prepare: PrepareScreen;
   /** 触屏按钮几何的唯一真相（`touchButtonCenter` 从它反查）。 */
   readonly touch: TouchControls;
   /** 重开一局（`restart` 从它走 `enterBattle`）。 */
@@ -154,12 +166,17 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
     /**
      * 设定 UI 缩放（端到端脚本用）。
      *
-     * 走的是设置面板的**同一条路径**（`onUiScale` → `scene.setUiScale`），
-     * 所以它验证的就是真实行为，不是另一套旁路。
+     * ⚠️ 走的是设置面板**同一条路径**（`onUiScale` → `game.ts` 的
+     * `applyUiScale`：场景 + 四个界面各自的齿轮），所以它验证的就是真实
+     * 行为，不是另一套旁路。
+     *
+     * ⚠️ 这里**不许**自己逐个转发（`scene.setUiScale` + 四个 chrome）：
+     * 那正是之前那个 bug 的写法 —— 调试入口漏了三个界面的齿轮，
+     * 于是"探针说没缩放、而战斗那一屏看起来正常"。
      */
     setUiScale: (value: number) => {
       state.uiScale = clampUiScale(value);
-      d.scene.setUiScale(state.uiScale);
+      d.applyUiScale(state.uiScale);
     },
     /**
      * 设置 / 备战两块调试入口。
@@ -173,7 +190,7 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
     ...settingsDebugApi(
       () => d.settings,
       () => d.settingsToggle,
-      () => d.settingsButton,
+      () => d.chrome(),
     ),
     ...homeDebugApi(d.home),
     ...characterSelectDebugApi(d.select),
@@ -181,23 +198,74 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
     /**
      * 返回箭头（截图 / 触屏验证用）。
      *
+     * ⚠️ **从当前这一屏的 `ScreenChrome` 反推**（`d.chrome()`）—— 箭头现在
+     * 住在选角色屏 / 自由模式各自的 root 里（用户 2026-10-12："stage 上
+     * 理论上不挂任何小组件"、"多个页面的齿轮，应该分别定义"）。首页 / 战斗
+     * 那一屏没有箭头，所以这几个读数返回 `null` / `false`。
+     *
      * ⚠️ `center()` 从**对象自己的几何**反推（`bounds` 是"含角落提示"的
      * 可点区域，箭头在它的左上角）—— 不让脚本抄一份坐标：布局一调，
-     * 抄的那份就会静默指到别处（`SettingsButton` 的偏移注释记着同一个坑）。
+     * 抄的那份就会静默指到别处（各屏的落位函数记着同一个坑）。
      */
     back: {
-      visible: () => d.back.visible,
-      bounds: () => ({ ...d.back.bounds }),
-      center: () => backButtonCenter(),
+      visible: () => d.chrome()?.backBounds !== undefined,
+      /**
+       * ⚠️ 用三目而不是 `??`：`{ ...undefined }` 会得到 `{}`（不是
+       * `nullish`），于是"这一屏没有箭头"会变成一个**空矩形** —— 脚本拿它
+       * 去点就会点到画布左上角。
+       */
+      bounds: () => {
+        const b = d.chrome()?.backBounds;
+        return b === undefined ? null : { ...b };
+      },
+      center: () => d.chrome()?.backCenter ?? null,
       /**
        * ⚠️ `null` 而不是 `undefined`：它要跨 `Runtime.evaluate` 的
        * JSON 边界，而 `undefined` 在那里会被丢掉（"没有提示"与"忘了返回"
        * 长得一样）。与 `settings.slotCenter` 同一条约定。
        */
-      shortcutBounds: () => d.back.shortcutBounds ?? null,
+      shortcutBounds: () => d.chrome()?.backShortcutBounds ?? null,
     },
     /** 重开一局（端到端脚本用；见 `global.d.ts` 的说明）。 */
     restart: () => d.restart(),
+    /**
+     * **界面结构探针**（截图 / 验证脚本用）。
+     *
+     * ⚠️ 存在的理由：这一轮把齿轮 / 返回箭头从"一个挂 stage 上的共享组件"
+     * 改成**四个界面各自持有**（用户 2026-10-12："多个页面的齿轮，应该分别
+     * 定义"、"stage 上理论上不挂任何组件"）。于是"某个界面的齿轮在正确位置、
+     * 且点得开设置"这件事**必须逐屏验**——只拍一张战斗界面证明不了别的屏。
+     *
+     * ⚠️ 只读**几何与标志位**：没有"点它"的方法 —— 要验证"点得通"必须注入
+     * 真实指针事件（走玩家那条路），与 `back` 的纪律一致。
+     */
+    chrome: () => {
+      const active = d.chrome();
+      const dev = d.app.stage;
+      /** Pixi 的 `stage.children` 顺序就是 `addChild` 顺序（层叠顺序）。 */
+      const children =
+        dev !== null && typeof dev === 'object' && 'children' in dev
+          ? (dev as { children: readonly { label?: string }[] }).children.length
+          : -1;
+      return {
+        /** 当前相位（字符串；`battle` / `home` / …）。 */
+        phase: String(d.state.phase),
+        /** 当前这一屏的齿轮在不在（首页 / 选角色 / 自由模式 / 战斗都该有）。 */
+        gear: active?.gearShown ?? false,
+        /** 齿轮的可点区域（含角落提示；`null` = 这一屏没有齿轮）。 */
+        gearBounds: active?.gearBounds ?? null,
+        /** 当前这一屏的返回箭头（只有选角色 / 自由模式有；`null` = 没有）。 */
+        backBounds: active?.backBounds ?? null,
+        /** 齿轮的键盘焦点（`↑` 那条路的读数）。 */
+        gearFocused: active?.focused ?? false,
+        /** 这一屏的边角控件当前用的缩放系数（证明"缩放带上了它"）。 */
+        chromeScale: active?.scale ?? null,
+        /** 设置里的 UI 缩放值（与 `chromeScale` 应当始终相等）。 */
+        uiScale: state.uiScale,
+        /** `app.stage` 的直接子节点数 —— 用来证明**没有**小组件挂在 stage 上。 */
+        stageChildren: children,
+      };
+    },
     /** 触屏按钮圆心（端到端脚本用）。 */
     touchButtonCenter: (skillId: string) => d.touch.centerOfSkill(skillId),
     /**
@@ -222,19 +290,6 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
   };
 
   installRaidBattleApi(api);
-
-  /**
-   * 回填 `onScreenChange`，并**立刻按当前 phase 摆一次**。
-   *
-   * ⚠️ 必须补这次立即调用：`?prepare=skip` 时 `enterBattle` 早就跑过了，
-   * 那一次的 `onScreenChange('battle')` 打在一个空函数上（当时还没回填），
-   * 不补的话按钮会停在备战界面的右上角，压在战斗 HUD 上。
-   *
-   * ⚠️ 映射与 `game.ts` 走**同一个** `settingsAnchorOf`（`flow.ts`）：
-   * 非战斗界面（首页 / 选角色 / 自由模式）都用右上角那个锚点。
-   */
-  state.onScreenChange = (screen) => d.settingsButton.setScreen(settingsAnchorOf(screen));
-  state.onScreenChange(state.phase);
 
   return api;
 }

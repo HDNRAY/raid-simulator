@@ -193,7 +193,7 @@ export function reservedKeyLabel(key: string): string {
     /**
      * ⚠️ **显式**列出来（而不是落到 `default`）：它是"返回 / 取消"这个功能键
      * 的显示名，`ui/settings/keyNames` 的 `KEY_EDIT_KEYS.cancel.label`
-     * 以及 `ScreenControls` 的返回按钮都指着它。写成显式分支才看得出
+     * 以及各屏 `ScreenChrome` 的返回按钮都指着它。写成显式分支才看得出
      * "这里有约定"。
      */
     case 'escape':

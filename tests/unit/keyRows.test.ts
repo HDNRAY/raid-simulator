@@ -22,11 +22,14 @@ import { describe, expect, it } from 'vitest';
 import { ALL_BUFFS, ALL_SKILLS, PENDING_SKILLS, PLAYER_SKILL_IDS, PLAYER_SKILLS } from '../../src/data/content';
 import { LUST_SKILLS } from '../../src/data/lustBoss';
 import { PRIDE_SKILLS } from '../../src/data/bossPride';
-import { buildKeyRows, isBindablePlayerSkill } from '../../src/app/keyRows';
+import { buildKeyRows, isBindablePlayerSkill, messageKeysMatching } from '../../src/app/keyRows';
 import { createRegistry } from '../../src/core/content/registry';
 import { translator } from '../../src/i18n/translator';
 import { DEFAULT_BINDINGS } from '../../src/input/keyboard';
 import { GUARD_HOLD_DRAIN_PER_SECOND } from '../../src/data/balance';
+import { FLASH_IFRAME } from '../../src/data/kits/kaili';
+import { DODGE_IFRAME } from '../../src/data/kits/linwanfeng';
+import { LOGIC_TICKS_PER_SECOND, logicMs } from '../../src/core/loopConstants';
 
 describe('按键设置只列玩家技能', () => {
   it('两个 Boss 的技能都不该可绑键', () => {
@@ -232,6 +235,119 @@ describe('行的内容：没有战斗快照时也要有结构化信息', () => {
     for (const r of rows) {
       const all = [r.costText, r.cdText, r.castText].filter((x) => x !== undefined).join(' ');
       expect(all, `${r.skillId} 的文案里有未替换的占位符：${all}`).not.toMatch(/\{[a-zA-Z]+\}/);
+      /**
+       * ⚠️ **说明里的占位符也要一起查**（2026-10-12 补）。
+       *
+       * 说明与结构化行用的**不是同一条**取词路径（前者走
+       * `descKey` + `descParams`，由 `SkillDetail.render` 拼），所以只查
+       * 上面三样会漏掉"说明里还剩 `{seconds}`"这种情况 —— 那正是把
+       * 数值从文案里搬走时最容易犯的错。
+       */
+      if (r.descKey === undefined) continue;
+      const desc = translator.t(r.descKey as never, r.descParams as never);
+      expect(desc, `${r.skillId} 的说明里有未替换的占位符：${desc}`).not.toMatch(
+        /\{[a-zA-Z]+\}/,
+      );
     }
+  });
+});
+
+/**
+ * ==================================================================
+ * ⚠️ 说明里的秒数**必须来自数据**（根治"两份真相"）
+ * ==================================================================
+ *
+ * 真实踩过的坑：`skill.dodge.desc` 原文写着"获得 0.5 秒完全无敌" ——
+ * 而 0.5 秒的家是 `DODGE_IFRAME.duration`。同一个数字两份表达，于是
+ * "把「闪」从 0.1 改成 0.2"那次**只改得动一处**，文案会静默留在旧值。
+ *
+ * 现在文案只留模板 `{seconds}`，数值由 `app/keyRows.ts` 从技能授予的
+ * buff 的 `duration` 推导。下面把那条链**从两端钉住**：
+ *
+ *   1. 有没有一份**能显示秒数的说明**忘了带参数（→ 渲染出 `{seconds}`）
+ *   2. 参数是不是**真的等于**那个 buff 的时长（→ 抄错一个数也拦得住）
+ *
+ * ⚠️ 名单从 `messageKeysMatching('seconds')` **反查**，不在测试里写死：
+ * 写死名单的话，下次有人加一条 `获得 {seconds} 秒……` 的说明时，
+ * 这条测试**不会**跟着长，秒数又会静默漂掉。
+ */
+describe('说明里的秒数 = buff 的真实时长（不再写死）', () => {
+  /**
+   * 备战界面的状况：`snapshotOf()` 拿不到任何技能格。
+   *
+   * ⚠️ 与上面那组各自的 `rowsWithoutSnapshot()` 是同一个形状 ——
+   * 这里不合并是因为两组的"用真实 translator"理由不同（那组测代价/冷却，
+   * 这组测说明的秒数），而合并会让任何一边改口径时误伤另一边。
+   */
+  function rows() {
+    return buildKeyRows({
+      bindings: DEFAULT_BINDINGS,
+      registry: createRegistry({ entities: [], skills: [...ALL_SKILLS], buffs: [...ALL_BUFFS] }),
+      snapshotOf: () => ({ skills: [] }) as never,
+      translate: (key: string, params?: Readonly<Record<string, string | number>>) =>
+        translator.t(key as never, params as never),
+      playerSkillIds: PLAYER_SKILL_IDS,
+    } as never);
+  }
+
+  /** 从技能表里按 id 找技能（`ALL_SKILLS` 是玩家 + Boss 的全集）。 */
+  function skillOf(id: string) {
+    const skill = ALL_SKILLS.find((s) => s.id === id);
+    expect(skill, `技能表里没有 ${id}`).toBeDefined();
+    return skill;
+  }
+
+  /**
+   * 把"毫秒时长"按本作**逻辑步**（0.1 秒）口径折成一个数。
+   *
+   * ⚠️ 不能写 `ms / 1000`：`logicMs(2) / 1000 = 0.19999999999999998`，
+   * 而玩家看到的、以及推导出来的都是 `0.2`。这条换算与
+   * `app/keyRows.ts` 的 `secondsFromMs()` 是**同一条口径**。
+   */
+  function secondsNumber(ms: number): number {
+    const steps = Math.round((ms / 1000) * LOGIC_TICKS_PER_SECOND);
+    return steps / LOGIC_TICKS_PER_SECOND;
+  }
+
+  it('模板清单里提到的技能，行数据都要带上 `descParams`', () => {
+    const all = rows();
+    const keysNeedingSeconds = messageKeysMatching('seconds');
+    /** ⚠️ 空清单 = 这条测试空转、永远绿 —— 至少「闪」「避」两条要在。 */
+    expect(keysNeedingSeconds.length).toBeGreaterThanOrEqual(2);
+
+    const missing = keysNeedingSeconds.filter((key) => {
+      const row = all.find((r) => r.descKey === key);
+      /** 引用了 `{seconds}` 的 key 若不属于任何**可绑技能**，这条不管它。 */
+      if (row === undefined) return false;
+      return row.descParams?.seconds === undefined;
+    });
+    expect(
+      missing,
+      `这些说明模板写了 {seconds}，但行数据没带时长（界面会显示 {seconds} 本身）：${missing.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('「闪」的说明 = `FLASH_IFRAME.duration`（0.2 秒），且不再是 0.1 秒', () => {
+    const flash = skillOf('flash');
+    const row = rows().find((r) => r.skillId === 'flash');
+    expect(row, '「闪」必须出现在设置页的行里').toBeDefined();
+    expect(
+      row?.descParams?.seconds,
+      '「闪」说明里的秒数必须等于 FLASH_IFRAME.duration',
+    ).toBe(secondsNumber(FLASH_IFRAME.duration));
+    /** 数值本身也钉一下 —— 用户要求的就是 0.2 秒。 */
+    expect(FLASH_IFRAME.duration).toBe(logicMs(2));
+
+    const rendered = translator.t(flash!.descKey as never, row?.descParams as never);
+    expect(rendered).toBe(`获得 ${secondsNumber(FLASH_IFRAME.duration)} 秒无敌，不花炁，但窗口极窄。`);
+    expect(rendered).not.toContain('0.1');
+  });
+
+  it('「避」仍然是 0.5 秒（这次只改「闪」）', () => {
+    const row = rows().find((r) => r.skillId === 'dodge');
+    expect(row?.descParams?.seconds, '「避」仍是 0.5 秒').toBe(
+      secondsNumber(DODGE_IFRAME.duration),
+    );
+    expect(DODGE_IFRAME.duration).toBe(logicMs(5));
   });
 });

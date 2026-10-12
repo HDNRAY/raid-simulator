@@ -32,9 +32,15 @@ import { normalizeKey } from '../input/keyboard';
 /** 接线需要的依赖。 */
 export interface SettingsKeyTargets {
   readonly settings: { handleKey(key: string): boolean };
-  readonly settingsButton: {
-    setFocused(focused: boolean): void;
-  };
+  /**
+   * **当前这一屏的齿轮**（`GameState.phase` 对应的那个 `ScreenChrome`）。
+   *
+   * ⚠️ 是**取值函数**、而且可能返回 `undefined`（装配期那一瞬）：
+   * 齿轮从"一个共享组件"变成**四个界面各自持有**（用户 2026-10-12：
+   * "多个页面的齿轮，应该分别定义"），所以"点亮谁"必须按相位现查 ——
+   * 指着一个全局引用就会点亮看不见的那一个。
+   */
+  readonly chrome: () => { setFocused(focused: boolean): void } | undefined;
   settingsOpen(): boolean;
   /**
    * 现在是否**允许**用 `↑` 把键盘焦点提到设置按钮。
@@ -105,7 +111,11 @@ export function wireSettingsKeys(t: SettingsKeyTargets): SettingsKeyHandle {
 
   const setFocused = (value: boolean): void => {
     focused = value;
-    t.settingsButton.setFocused(value);
+    /**
+     * ⚠️ 只点亮**当前这一屏**的齿轮（`chrome()` 可能还没回填 —— 装配期
+     * 那几帧，`undefined` 就什么都不做，与旧版"回填前走空函数"同义）。
+     */
+    t.chrome()?.setFocused(value);
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {

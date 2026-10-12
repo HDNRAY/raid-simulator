@@ -37,8 +37,14 @@ export interface OperationModeSwitchDeps {
   /** 用来把键位表里的失效 id 过滤掉（与启动时同一份判据）。 */
   readonly registry: ContentRegistry;
   readonly scene: { setShowKeyHints(show: boolean): void };
-  readonly settingsButton: { setShowShortcut(show: boolean): void };
-  /** 设置面板（切完让它重画 + 把焦点挪到存在的区）。 */
+  /**
+   * 设置面板（切完让它重画 + 把焦点挪到存在的区）。
+   *
+   * ⚠️ **不再有 `settingsButton`**（2026-10-12 重构）：齿轮从"一个共享组件"
+   * 变成**四个界面各自持有**，而它们的键位提示由 `ScreenChrome.update()`
+   * 每帧现读唯一 flag（主循环对当前那一屏调用，见 `loopWiring`）。所以
+   * 这里不需要"挨个通知齿轮"—— 那是"每帧算"换掉"订阅表"的直接收益。
+   */
   readonly settings: { setOperationMode(): void };
 }
 
@@ -83,6 +89,5 @@ export function switchOperationMode(
 
   const caps = capsOf(mode);
   deps.scene.setShowKeyHints(caps.showKeyHints);
-  deps.settingsButton.setShowShortcut(caps.showKeyHints);
   deps.settings.setOperationMode();
 }

@@ -36,6 +36,7 @@
 import type { Container, Graphics } from 'pixi.js';
 import { FONT, LOGICAL } from './layout';
 import { Label, type PixiCtor } from './primitives';
+import { ScreenChrome } from './ScreenChrome';
 import { PALETTE } from '../render/theme';
 import { CARD_RADIUS, cardSkin } from './prepareRender';
 import {
@@ -60,6 +61,18 @@ export interface HomeScreenOptions {
    * 本屏构造**之后**才探测出来（装配顺序使然），而每帧的 `redraw` 会现读它。
    */
   readonly showKeyHints: () => boolean;
+  /**
+   * 点右上角的**齿轮**（打开设置）。
+   *
+   * ⚠️ 每个全屏界面**自己持有**齿轮（用户 2026-10-12："多个页面的齿轮，
+   * 应该分别定义"、"stage 上理论上不挂任何小组件"），所以这个回调由
+   * `app/screenSetup.ts` 接通、由本屏自己的 `chrome` 负责命中。
+   * 同一时刻只有一个整屏界面在台上（`applyPhase` 是显隐的唯一写入点），
+   * 所以指针路由不会问错人。
+   */
+  readonly onGear: () => void;
+  /** `F1` 的显示名（齿轮的键位提示；键名不进 i18n，AGENTS.md §3b）。 */
+  readonly f1Label: () => string;
   /** 选了某条路（Enter / 点击）。 */
   readonly onPick: (action: HomeAction) => void;
 }
@@ -105,6 +118,16 @@ export class HomeScreen {
    */
   private readonly notice: Label;
   private readonly buttons: readonly HomeButtonRefs[];
+  /**
+   * **本屏自己的边角控件**（右上角的齿轮）。
+   *
+   * ⚠️ 首页没有返回箭头（它就是返回的目标本身，见 `phaseLogic.backVisibleIn`），
+   * 所以这里只传 `onGear`、不传 `onBack`。
+   *
+   * ⚠️ 它在**本屏的 root 里**（不是 stage 上）：所以 `setVisible` 自动带上它，
+   * 缩放也由本屏的 `setUiScale` 一并转发 —— 这正是"组件归它所在的界面所有"。
+   */
+  readonly chrome: ScreenChrome;
   private readonly options: HomeScreenOptions;
 
   private state: HomeState = createHomeState();
@@ -176,6 +199,18 @@ export class HomeScreen {
     });
     this.root.addChild(this.hint.root, this.notice.root);
 
+    /**
+     * 齿轮**最后加**（同一层里后加的盖在上面）：它与两个入口按钮不重叠，
+     * 但"边角控件在最上层"是这一层的通用约定，别让它哪天被卡片压住。
+     */
+    this.chrome = new ScreenChrome({
+      pixi,
+      showKeyHints: options.showKeyHints,
+      f1Label: options.f1Label,
+      onGear: options.onGear,
+    });
+    this.root.addChild(this.chrome.root);
+
     this.redraw();
   }
 
@@ -214,6 +249,12 @@ export class HomeScreen {
 
   /** 点一下（逻辑坐标）。 */
   hitTest(px: number, py: number): boolean {
+    /**
+     * ⚠️ **齿轮先于卡片**：它是这一屏上浮在界面之上的可点元素
+     * （右上角，与两个入口按钮不重叠）。`ScreenChrome.hitTest` 里
+     * 齿轮又排在返回箭头之前 —— 顺序就是优先级（`canvasInput` 的纪律）。
+     */
+    if (this.chrome.hitTest(px, py)) return true;
     const action = homeActionAtPoint(px, py);
     if (action === undefined) return false;
     /**
@@ -230,7 +271,22 @@ export class HomeScreen {
 
   /** 每帧：只在可见时保证画面与光标一致（状态是离散的，很便宜）。 */
   frame(): void {
-    if (this.root.visible) this.redraw();
+    if (this.root.visible) {
+      this.redraw();
+      /** 键位提示跟着"键盘 / 触屏"这个唯一 flag 走（见 `ScreenChrome.update`）。 */
+      this.chrome.update();
+    }
+  }
+
+  /**
+   * **UI 缩放**：本屏只转发给**它自己的**边角控件。
+   *
+   * ⚠️ 缩放不作用于首页的标题 / 卡片（现状如此：这一屏整体是一个满屏
+   * 布局，缩放它等于缩放整屏）。齿轮在这一屏是**浮在界面之上**的控件，
+   * 它要跟其它界面的齿轮长得一样大 —— 所以必须有这一条。
+   */
+  setUiScale(scale: number): void {
+    this.chrome.setUiScale(scale);
   }
 
   private redraw(): void {

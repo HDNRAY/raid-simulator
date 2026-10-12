@@ -44,6 +44,7 @@
 import type { Container, Graphics } from 'pixi.js';
 import { FONT, LOGICAL } from './layout';
 import { Label, type PixiCtor } from './primitives';
+import { ScreenChrome } from './ScreenChrome';
 import { PALETTE } from '../render/theme';
 import { isDeveloping, type RosterEntry } from '../data/roster';
 import type { TranslateFn } from '../i18n/translator';
@@ -74,6 +75,14 @@ export interface PrepareScreenOptions {
   readonly players: readonly RosterEntry[];
   readonly bosses: readonly RosterEntry[];
   readonly initial: { readonly playerId: string; readonly bossId: string };
+  /** 是否显示键位提示（触屏为假）。见 `HomeScreenOptions.showKeyHints`。 */
+  readonly showKeyHints: () => boolean;
+  /** 点右上角的齿轮（打开设置）。见 `HomeScreenOptions.onGear`。 */
+  readonly onGear: () => void;
+  /** 点左上角的返回箭头（回首页）—— 触屏对等靠它（AGENTS.md §3b）。 */
+  readonly onBack?: (() => void) | undefined;
+  /** `F1` 的显示名（齿轮的键位提示）。 */
+  readonly f1Label: () => string;
   /** 点了「开始」。 */
   readonly onStart: (playerId: string, bossId: string) => void;
   /** 选择变了（用于持久化）。 */
@@ -115,6 +124,14 @@ export class PrepareScreen {
 
   /** 每张卡片的标题 / 副标题 / 说明。 */
   private readonly cards: { readonly name: Label; readonly status: Label }[] = [];
+
+  /**
+   * **本屏自己的边角控件**：右上角的齿轮 + 左上角的返回箭头。
+   *
+   * ⚠️ 用户 2026-10-12："多个页面的齿轮，应该分别定义"、"stage 上理论上
+   * 不挂任何小组件" —— 两个按钮都在本屏的 root 里，显隐与缩放跟着本屏走。
+   */
+  readonly chrome: ScreenChrome;
 
   private readonly cardGfx: Graphics;
   private readonly startGfxLayer: Graphics;
@@ -236,6 +253,16 @@ export class PrepareScreen {
       this.hint.root,
       this.notice.root,
     );
+
+    /** 齿轮 + 返回箭头（最后加 = 最上层；见 `HomeScreen` 里同一条说明）。 */
+    this.chrome = new ScreenChrome({
+      pixi,
+      showKeyHints: options.showKeyHints,
+      f1Label: options.f1Label,
+      onGear: options.onGear,
+      onBack: options.onBack,
+    });
+    this.root.addChild(this.chrome.root);
 
     this.redraw();
   }
@@ -387,6 +414,8 @@ export class PrepareScreen {
    * @returns 是否消费了这次点击
    */
   hitTest(px: number, py: number): boolean {
+    /** ⚠️ 齿轮 / 返回箭头先于卡片（顺序即优先级，见 `HomeScreen.hitTest`）。 */
+    if (this.chrome.hitTest(px, py)) return true;
     for (const area of prepareHitAreas(this.players, this.bosses)) {
       if (px < area.x || px > area.x + area.w) continue;
       if (py < area.y || py > area.y + area.h) continue;
@@ -399,7 +428,21 @@ export class PrepareScreen {
 
   /** 每帧：只需要在"可见"时保证画面与选择一致（选择是离散的，很便宜）。 */
   frame(): void {
-    if (this.root.visible) this.redraw();
+    if (this.root.visible) {
+      this.redraw();
+      this.chrome.update();
+    }
+  }
+
+  /**
+   * **UI 缩放**：本屏只转发给**它自己的**边角控件（与 `HomeScreen` 同一条）。
+   *
+   * ⚠️ 卡片 / 标题 / 开始按钮**不随缩放**（现状如此）：这一屏的位置由
+   * `PREPARE_LAYOUT` 定死，重排它是一次独立的重构；只有浮在界面之上的
+   * 齿轮 / 返回箭头要跟别的界面保持一致的大小。
+   */
+  setUiScale(scale: number): void {
+    this.chrome.setUiScale(scale);
   }
 
   private redraw(): void {

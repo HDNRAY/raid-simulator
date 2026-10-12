@@ -11,26 +11,26 @@
  * 也集中在一处、能一眼看完。
  *
  * ==================================================================
- * ⚠️ 顺序即优先级，五条都不能动
+ * ⚠️ 顺序即优先级，四条都不能动
  * ==================================================================
  *
- *   1. **齿轮按钮**（首页 / 选角色 / 自由模式）—— 这三个界面盖住整屏，
- *      而齿轮浮在最上层
- *   2. **返回箭头**（自由模式 / 选角色屏，左上角）—— 与齿轮同一种东西
- *      （浮在整屏界面之上的可点控件），所以与它挨着；**必须早于界面本身**
- *      （界面不消费左上角那块地方，排在后面就成了"看得见、点不动"）
- *   3. **当前那一个全屏界面**（首页 / 选角色 / 自由模式）—— 没消费的
- *      点击才往下走
- *   4. **结算中点击 = 离开战斗** —— 必须早于按钮层与设置判断
- *   5. **触屏按钮** —— 它自己会在"设置打开"时拒绝消费
+ *   0. **复盘层**（一局结束后的全屏战报）—— 它是 `battle` 相位里的子模式
+ *   1. **当前那一个全屏界面**（首页 / 选角色 / 自由模式）—— 那一屏自己
+ *      先问它的**边角控件**（齿轮 / 返回箭头），没消费的点击才轮到卡片
+ *   2. **结算中点击 = 离开战斗** —— 必须早于按钮层与设置判断
+ *   3. **触屏按钮** —— 它自己会在"设置打开"时拒绝消费
+ *
+ * ⚠️ **齿轮与返回箭头不再单独排在这里**（2026-10-12 重构）：它们从
+ * "挂 stage 上的共享组件"变成**每个界面自己持有**（用户："stage 上理论上
+ * 不挂任何小组件"、"多个页面的齿轮，应该分别定义"）。所以"谁先吃到点击"
+ * 这件事跟着各屏的 `hitTest` 走（各屏里都是边角控件先于卡片）。
+ * 这一层只回答"这次点击属于哪一屏"。
  *
  * 每条的由来都写在各自的位置上（都是实测踩出来的）。
  */
 
 import { LOGICAL_H, LOGICAL_W } from '../render/scaling';
 import type { SettingsPanel } from '../ui/settings/SettingsPanel';
-import type { SettingsButton } from '../ui/settings/SettingsButton';
-import type { PrepareScreen } from '../ui/PrepareScreen';
 import {
   activeInputLayer,
   battleExitOnPointer,
@@ -39,26 +39,38 @@ import {
 } from './inputRouter';
 import type { Phase } from './flow';
 
+/**
+ * 一个**全屏界面**在指针路由里要满足的最小面。
+ *
+ * ⚠️ 它的 `hitTest` 里**已经包含了那一屏自己的边角控件**（齿轮 / 返回
+ * 箭头先于卡片，见各屏的 `hitTest`）—— 这正是 2026-10-12 那轮重构的重点：
+ * 组件归它所在的界面所有，所以路由只把点击交给"当前那一屏"，不需要
+ * 在路由里额外排一个"齿轮 / 返回箭头"的优先级。
+ *
+ * ⚠️ 战斗那一屏是 `scene`：它的齿轮挂在 `BattleScene.chrome` 上，而场景
+ * 自己也会先让齿轮吃掉点击（`BattleScene.hitTestChrome`）。
+ */
+export interface ScreenHitTarget {
+  hitTest(px: number, py: number): boolean;
+}
+
 /** 指针要路由到的对象。 */
 export interface CanvasInputTargets {
   readonly canvas: HTMLCanvasElement;
-  /** 首页（默认入口）。 */
-  readonly home: { hitTest(px: number, py: number): boolean };
-  /** 选角色屏（肉鸽模式的第一屏）。 */
-  readonly select: { hitTest(px: number, py: number): boolean };
-  /** 自由模式（原备战界面）。 */
-  readonly prepare: PrepareScreen;
+  /** 首页（默认入口；含它自己的齿轮）。 */
+  readonly home: ScreenHitTarget;
+  /** 选角色屏（肉鸽模式的第一屏；含它自己的齿轮与返回箭头）。 */
+  readonly select: ScreenHitTarget;
+  /** 自由模式（原备战界面；含它自己的齿轮与返回箭头）。 */
+  readonly prepare: ScreenHitTarget;
   /**
-   * 整屏界面共用的**返回箭头**（左上角；自由模式 / 选角色屏）。
+   * **战斗场景**（含战斗界面自己的齿轮）。
    *
-   * ⚠️ 它**不属于**任何一屏，所以必须显式排在①②之间（见下面 `onDown`
-   * 那段"顺序即优先级"）：放在界面之后的话，界面自己的 `hitTest` 会先
-   * 拿到这次点击 —— 而两个屏都**不消费**左上角那块地方，于是箭头看起来
-   * 能点、实际点不动。
+   * ⚠️ 它的 `hitTestChrome` 只问那个齿轮 —— 战斗界面没有返回箭头
+   * （`phaseLogic.backVisibleIn('battle') === false`）。
    */
-  readonly back: { hitTest(px: number, py: number): boolean };
+  readonly scene: { hitTestChrome(px: number, py: number): boolean };
   readonly settings: SettingsPanel;
-  readonly settingsButton: SettingsButton;
   /** 触屏控件（按钮层 + 输入源）。 */
   readonly touch: {
     onPointerDown(pointerId: number, px: number, py: number): boolean;
@@ -191,26 +203,19 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
      */
     if (t.phase() !== 'battle' && !t.settingsOpen()) {
       /**
-       * ⚠️ **齿轮要先判**：它是这些界面上**唯一**浮在界面之上的可点元素
-       * （右上角，见 `SettingsButton` 的锚点）。
+       * ⚠️ **只交给当前那一屏**，由它自己决定先问谁。
        *
-       * 原先备战那条分支无条件 `return`（不管界面有没有消费这次点击），
-       * 于是**备战界面里点齿轮完全没反应** —— 一个看起来能点、实际是死的
-       * 按钮。首页现在是**默认入口**，同一个 bug 在那里会更显眼
-       * （而且触屏玩家没有 `F1`，等于完全进不去设置 —— 触屏只能点齿轮）。
-       */
-      if (t.settingsButton.hitTest(px, py)) {
-        t.openSettings();
-        return;
-      }
-      /**
-       * ⚠️ **返回箭头排在界面之前**（顺序即优先级，见上面那段）。
+       * 每一屏的 `hitTest` 里，**边角控件（齿轮 / 返回箭头）都排在卡片之前**
+       * —— 它们浮在界面之上，而卡片铺满整屏。原先这个顺序写在本文件里
+       * （先 `settingsButton`、再 `back`、最后界面），那正是"一个共享组件
+       * 要适配所有屏"的写法：三个界面各自的知识被搬到路由里统一排。
        *
-       * 它的可见相位由 `applyPhase` 决定，`hitTest` 自己也判一次
-       * `visible`（不可见时不该吃掉点击）。命中后**整个 return**：
-       * 一次点击只能做一件事 —— 继续往下走会同时点中底下的卡片。
+       * 现在组件归各屏自己，于是顺序也归各屏 —— 本文件只剩"这次点击属于
+       * 哪一屏"这一个问题。
+       *
+       * ⚠️ 命中即 `return`（各屏内部也一样）：一次点击只能做一件事 ——
+       * 继续往下走会同时点中底下的卡片。
        */
-      if (t.back.hitTest(px, py)) return;
       if (t.phase() === 'home') t.home.hitTest(px, py);
       else if (t.phase() === 'characterSelect') t.select.hitTest(px, py);
       else t.prepare.hitTest(px, py);
@@ -223,7 +228,7 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
      * ⚠️ 必须**先于**按钮层与设置判断，且整体 `return`：
      *   - 放在按钮层之后：按钮会 `return true` 吃掉点击 → 玩家点在按钮弧里
      *     **永远重开不了**（实测点「斩」不重开、点空白才重开）
-     *   - 不 `return`：会同时满足 `settingsButton.hitTest` → 一次点击
+     *   - 不 `return`：会同时满足齿轮的命中 → 一次点击
      *     **既开设置又静默重开**（实测 tick 663 → 43）
      *
      * ⚠️ 判据是 `battleExitOnPointer(layer, reviewConsumed)` 而不是
@@ -247,8 +252,17 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
      */
     if (t.touch.onPointerDown(event.pointerId, px, py)) return;
 
+    /**
+     * ⚠️ 战斗界面的**齿轮**：它在触屏按钮之后判（与重构前的位置、
+     * 优先级都一致 —— 双弧外弧最左缘在 `x 654`，齿轮在日志下方
+     * `x ≈ 16..78`，两者不可能重叠，所以顺序在这里只是"保持原样"）。
+     *
+     * ⚠️ 面板打开时齿轮已经被 `settingsToggle` 藏起来了，
+     * 所以下面那句 `!settingsOpen()` 的守卫是**给面板用的**、不是给齿轮的：
+     * 面板开着时这一层要把点击让给面板（那是下面的 `settings.hitTest`）。
+     */
     if (!t.settingsOpen()) {
-      if (t.settingsButton.hitTest(px, py)) t.openSettings();
+      if (t.scene.hitTestChrome(px, py)) t.openSettings();
       return;
     }
     /**

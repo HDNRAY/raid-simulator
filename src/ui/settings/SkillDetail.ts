@@ -321,8 +321,16 @@ export class SkillDetail {
      *
      * ⚠️ 文案里可能带 **Markdown 的强调标记**（如"**无法被打断**"）——
      * 那是给文档看的，直接画到 canvas 上会原样显示星号。统一剥掉。
+     *
+     * ⚠️ **`descParams` 必须透传**：说明里的秒数（`{seconds}`）由
+     * `app/keyRows.ts` 从 buff 的 `duration` 推导 —— 不透传的话
+     * `t()` 会把 `{seconds}` 原样画出来（本仓库踩过一次同样的坑，
+     * 见 `rows.ts` 的 `castText` 与 `lintRules.test.ts` 那条扫描）。
      */
-    const desc = row.descKey === undefined ? '' : t(row.descKey).replaceAll('**', '');
+    const desc =
+      row.descKey === undefined
+        ? ''
+        : t(row.descKey, row.descParams).replaceAll('**', '');
     /**
      * **结构化行**：消耗 · 冷却 · 施放。
      *

@@ -28,6 +28,22 @@ export interface KeyRow {
   readonly mechanicTags?: readonly string[];
   /** 技能说明的 i18n key（详情区用） */
   readonly descKey?: string;
+  /**
+   * **说明模板里的数值参数**（如 `{seconds}`）。
+   *
+   * ⚠️ 为什么要有它：说明里出现过**写死的数值** —— `skill.dodge.desc`
+   * 原文是"获得 0.5 秒完全无敌"，而 0.5 秒的家是 `DODGE_IFRAME.duration`。
+   * 同一个数字两份表达 ⇒ 改一处必漏另一处（改「闪」0.1 → 0.2 那次
+   * 就差点漏掉文案）。
+   *
+   * 现在说明只留模板，数值由 `app/keyRows.ts` 从技能的 buff `duration`
+   * **推导**后经这里传下去 —— 与 `costText` / `cdText` / `castText`
+   * 同一条纪律（**渲染层不持有可显示数值**）。
+   *
+   * ⚠️ 这是**数值参数**，不违反"键名不进 i18n"（AGENTS.md §3b）——
+   * 那条管的是"括号里的按键名"，不是模板参数。
+   */
+  readonly descParams?: Readonly<Record<string, string | number>>;
   /** 代价文案（已格式化，如 `10 炁` / `2 炁/秒`）；没有代价则为空 */
   readonly costText?: string;
   /** 固有冷却文案（如 `冷却 10 秒`）；没有冷却则为空 */

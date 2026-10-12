@@ -14,10 +14,21 @@
 import type { BattleLoop } from './battleLoop';
 import type { GameState } from './flow';
 import type { SettingsPanel } from '../ui/settings/SettingsPanel';
-import type { SettingsButton } from '../ui/settings/SettingsButton';
 import type { SettingsToggle } from './settingsToggle';
 import type { TouchControls } from './touchControls';
 import { activeInputLayer, type InputLayer } from './inputRouter';
+
+/**
+ * 一个界面的**边角控件**在主循环里要满足的最小面。
+ *
+ * ⚠️ 结构性类型（只有 `update`）：驱动层不需要认识 `ScreenChrome` 的其它
+ * 能力（命中、缩放、焦点）—— 那些各有各的调用点（指针路由 / 设置面板 /
+ * 键盘接线）。契约越小，"谁在什么时候碰它"越清楚。
+ */
+export interface ChromeFrameTarget {
+  /** 每帧：把触屏能力同步到键位提示的显隐上。 */
+  update(): void;
+}
 
 /** 主循环要驱动的界面对象。 */
 export interface CanvasHost {
@@ -41,18 +52,17 @@ export interface CanvasHost {
     confirm(): void;
   };
   /**
-   * 返回箭头（整屏界面共用，左上角）。
+   * **当前这一屏的边角控件**（齿轮 / 返回箭头）—— 由那一屏自己的
+   * `frame()` 调它的 `update()`（键位提示跟着唯一 flag 走）。
    *
-   * ⚠️ 每帧要 `update()` 一次：键位提示的显隐跟着**触屏能力**走，
-   * 而那个能力值是装配后期才探测出来的（见 `ScreenControls` 的说明）。
+   * ⚠️ 四个界面各自持有自己的那一个（用户 2026-10-12："多个页面的齿轮，
+   * 应该分别定义"）。这里保留这个取值函数是为了**调试入口**与
+   * `main.ts` 的接线看得见"谁在台上"，主循环本身不直接调它 ——
+   * 战斗那一屏的齿轮归 `scene.update` 的帧部件。
    */
-  readonly back: {
-    update(): void;
-  };
+  readonly chrome: () => ChromeFrameTarget | undefined;
   /** 设置面板（每帧更新）。 */
   readonly settings: SettingsPanel;
-  /** 设置齿轮按钮（每帧更新）。 */
-  readonly settingsButton: SettingsButton;
   /** 触屏按钮层（每帧按快照更新文本）。 */
   readonly touch: TouchControls;
   /** 战斗场景（每帧把快照推给它）。 */
@@ -75,8 +85,8 @@ export interface CanvasHost {
   /**
    * **返回首页**（`Esc` / 点左上角箭头）。
    *
-   * ⚠️ 键盘那条路（`Esc`）走这里，触屏/鼠标那条路走 `ScreenControls`
-   * 自己的 `onBack` —— 两条路都落到 `game.ts` 里**同一个**闭包
+   * ⚠️ 键盘那条路（`Esc`）走这里，触屏/鼠标那条路走各屏 `ScreenChrome`
+   * 的 `onBack`（造界面时接到这里）—— 两条路都落到 `phaseFlow` 里**同一个**闭包
    * （`backToHome`），所以不会出现"按 `Esc` 回首页、点箭头去别处"。
    */
   readonly backToHome: () => void;
@@ -163,21 +173,20 @@ export function wireLoop(o: WireOptions): void {
        * 选角色 / 自由模式的右下角就会一直浮着双弧按钮（实测踩到）。
        */
       host.touch.frame();
-      host.settingsButton.update();
       host.settings.update();
-      /** 返回箭头的键位提示跟着触屏能力走（它也是每帧纠正的那一类）。 */
-      host.back.update();
       return;
     }
     const l = host.battle();
     if (l === undefined) return; // 理论上到不了；防一手崩溃
     l.frame(performance.now());
+    /**
+     * ⚠️ 战斗那一屏的齿轮由**场景**持有，所以它跟着 `scene.update` 里注册的
+     * 帧部件走（`parts/battleChrome.ts`）—— 这里不用再调一次。
+     */
     host.scene.update(l.snapshot, l.logEntries);
     /** 触屏按钮的文本要跟着快照更新（冷却数字会变）。 */
     host.touch.frame(l.snapshot);
-    host.settingsButton.update();
     host.settings.update();
-    host.back.update();
   });
 
   /* ---------- 重开 / 返回 ----------

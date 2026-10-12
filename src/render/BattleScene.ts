@@ -38,6 +38,7 @@
 import type { Container } from 'pixi.js';
 import type { LogEntry } from '../app/logFormat';
 import type { LogReviewPanel } from '../ui/LogReviewPanel';
+import type { ScreenChrome } from '../ui/ScreenChrome';
 import { BossHeader } from './hud/bossHeader';
 import { CastBars } from './hud/castBars';
 import { LogArea } from './hud/logArea';
@@ -45,6 +46,7 @@ import { PlayerStatus } from './hud/playerStatus';
 import { ResultArea } from './hud/resultArea';
 import { StatusArea } from './hud/statusArea';
 import { FloatingTextLayer } from './FloatingTextLayer';
+import { BattleChromePart } from './parts/battleChrome';
 import { SceneStage } from './sceneStage';
 import { FrameRegistry } from './sceneTypes';
 import type { BattleSceneOptions } from './sceneTypes';
@@ -79,6 +81,20 @@ export class BattleScene {
   private readonly floating: FloatingTextLayer;
   /** 结算面板——**不随 UI 缩放**（现状如此）。 */
   private readonly resultArea: ResultArea;
+
+  /**
+   * **战斗界面自己的边角控件**（齿轮；这一屏没有返回箭头）。
+   *
+   * ⚠️ 用户 2026-10-12："stage 上理论上不挂任何小组件"、"多个页面的齿轮，
+   * 应该分别定义"、"UI 缩放要带上"。所以它挂在 **HUD 层**（见构造函数）、
+   * 由本场景持有并参与 `setUiScale` —— 与 `SkillBarView` / `BossHeader`
+   * 同一范式（各自实现 `setUiScale`，场景只转发）。
+   *
+   * ⚠️ 公开（而不是只留一个私有字段）：它是**输入路由的目标**
+   * （`canvasInput` 命中 / `settingsKeys` 焦点 / `settingsToggle` 显隐），
+   * 而那些接线住在 `app/`。与 `logReview` 暴露给输入层同一个理由。
+   */
+  readonly chrome: ScreenChrome;
 
   /**
    * 帧部件注册表（见 `FrameRegistry` / `FramePart`）。
@@ -141,6 +157,20 @@ export class BattleScene {
     this.statusArea = new StatusArea(pixi);
     hud.addChild(this.statusArea.root);
 
+    /**
+     * **战斗界面的齿轮**：造在 **HUD 层**（不是 `stage`，也不是 `root` 的
+     * 顶层）—— 因为它属于"战斗这一屏的界面"。
+     *
+     * ⚠️ 落点是**战斗日志下方**（`battleGearBoxAt`），不是四个边角之一：
+     * 右上角被 Boss 血条（贴顶、通栏）与 debuff 行占着。这个位置由
+     * `ScreenChrome` 的落位函数表达（引用 `LAYOUT.log`，日志一改它就跟着走）。
+     *
+     * ⚠️ 加在**最后** = 压在 HUD 之上、`resultArea` 之下（后者是 `root` 的
+     * 子节点，排在 `hud` 之后）。缩放走下面的 `setUiScale`。
+     */
+    this.chrome = options.createChrome(pixi);
+    hud.addChild(this.chrome.root);
+
     /* ---------- 结算面板 ----------
      * 单独一层、**加在 HUD 之后**，所以天然压在 HUD 之上。
      * 战斗进行中完全隐藏，所以它不占用任何视觉注意力。 */
@@ -167,6 +197,12 @@ export class BattleScene {
     this.statusArea.register(this.registry);
     this.logArea.register(this.registry);
     this.resultArea.register(this.registry);
+    /**
+     * ⚠️ 齿轮也注册成帧部件（`BattleChromePart`）：键位提示的显隐跟着
+     * "键盘 / 触屏"这个唯一 flag 走，每帧读一次就不需要"切换方式时通知
+     * 所有界面的所有齿轮"那张订阅表 —— 与 `ScreenChrome.update` 的说明同源。
+     */
+    this.registry.add(new BattleChromePart(this.chrome));
   }
 
   /**
@@ -179,6 +215,20 @@ export class BattleScene {
    */
   get logReview(): LogReviewPanel {
     return this.logArea.review;
+  }
+
+  /**
+   * **战斗界面的齿轮命中**（指针路由用）。
+   *
+   * ⚠️ 用户 2026-10-12："stage 上理论上不挂任何小组件"、"多个页面的齿轮，
+   * 应该分别定义" —— 所以这个齿轮住在**本场景的 HUD 层**，而"它在哪里、
+   * 什么时候可点"也由场景自己回答。`app/canvasInput.ts` 只转调这一句，
+   * 不再认识任何一个具体的按钮对象。
+   *
+   * @returns 是否命中（命中即已经触发"打开设置"）
+   */
+  hitTestChrome(px: number, py: number): boolean {
+    return this.chrome.hitTest(px, py);
   }
 
   /**
@@ -225,6 +275,9 @@ export class BattleScene {
    *   `hud/playerStatus.ts`  `setUiScale(scale)`
    *   `hud/logArea.ts`       `setUiScale(scale)`
    *   `skillBar.ts`          `setUiScale(scale)`（更早就独立了）
+   *   `ui/ScreenChrome.ts`   `setUiScale(scale)`（战斗界面的齿轮 —— 用户
+   *                          2026-10-12："UI 缩放要带上"。它原先挂在 stage 上，
+   *                          完全不受缩放影响，实测三张不同缩放的图 md5 相同）
    *
    * ⚠️ **不缩放的三块**（现状如此，本次纯搬运不改行为）：
    * `SceneStage`／`FloatingTextLayer`（战场与飘字，见 `UiLayout` 的设计前提）、
@@ -238,6 +291,7 @@ export class BattleScene {
     this.castBars.setUiScale(scale);
     this.playerStatus.setUiScale(scale);
     this.logArea.setUiScale(scale);
+    this.chrome.setUiScale(scale);
   }
 
   /**
