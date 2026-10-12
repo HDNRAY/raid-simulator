@@ -397,8 +397,13 @@ describe('logReview：渲染层的接线（源码扫描）', () => {
     expect(review).not.toMatch(/key === 'log\./);
   });
 
-  it('一局结束把**整份 view** 传进去（BattleScene 那一行）', () => {
-    const scene = read('render/BattleScene.ts');
-    expect(scene).toMatch(/this\.logPanel\.update\(ctx\.logEntries, ctx\.view\)/);
+  it('一局结束把**整份 view** 传进去（日志区域的注册那一行）', () => {
+    /**
+     * ⚠️ 断言的是"这段接线存在"，不是"它在哪个文件里" ——
+     * 按屏幕区域拆分之后，日志的接线从 `BattleScene.ts` 搬到了
+     * `render/hud/logArea.ts`（纯搬运，行为不变）。
+     */
+    const area = read('render/hud/logArea.ts');
+    expect(area).toMatch(/this\.logPanel\.update\(ctx\.logEntries, ctx\.view\)/);
   });
 });

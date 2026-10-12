@@ -592,13 +592,18 @@ describe('面板外观统一', () => {
   it('【关键】日志面板与资源面板共用同一组外观参数', async () => {
     const { readFileSync } = await import('node:fs');
     const log = readFileSync(new URL('../../src/ui/LogPanel.ts', import.meta.url), 'utf8');
-    const scene = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
+    /**
+     * ⚠️ 玩家面板按**屏幕区域**拆分后从 `BattleScene.ts` 搬到了
+     * `render/hud/playerStatus.ts`（纯搬运）—— 断言的是"这段外观参数
+     * 存在"，不是"它在哪个文件里"，所以只是跟着搬家。
+     */
+    const panel = readFileSync(new URL('../../src/render/hud/playerStatus.ts', import.meta.url), 'utf8');
     // 两者都从共享常量展开，而不是各写 fill/line/fillAlpha
     expect(log).toMatch(/\.\.\.PANEL_STYLE/);
-    expect(scene).toMatch(/\.\.\.PANEL_STYLE/);
+    expect(panel).toMatch(/\.\.\.PANEL_STYLE/);
     // 而且都不该再出现"自己写的面板填充色"
     expect(log).not.toMatch(/fill: 0x0d0e16/);
-    expect(scene).not.toMatch(/fill: 0x0c0c14/);
+    expect(panel).not.toMatch(/fill: 0x0c0c14/);
   });
 
   it('共享样式的透明度低于原先的两个值（需求："调低"）', () => {
@@ -608,10 +613,11 @@ describe('面板外观统一', () => {
 
   it('结算面板**故意**比常规面板不透明（它是结算，要挡住战斗画面）', async () => {
     const { readFileSync } = await import('node:fs');
-    const scene = readFileSync(new URL('../../src/render/BattleScene.ts', import.meta.url), 'utf8');
-    const idx = scene.indexOf('this.resultPanel = new Panel');
+    /** ⚠️ 结算面板同样按屏幕区域搬到了 `render/hud/resultArea.ts`。 */
+    const area = readFileSync(new URL('../../src/render/hud/resultArea.ts', import.meta.url), 'utf8');
+    const idx = area.indexOf('this.resultPanel = new Panel');
     expect(idx).toBeGreaterThan(0);
-    expect(scene.slice(idx, idx + 400)).toMatch(/fillAlpha: 0\.9/);
+    expect(area.slice(idx, idx + 400)).toMatch(/fillAlpha: 0\.9/);
   });
 
   it('日志面板在左侧信息柱顶端：不压 Boss 区、不压玩家区、让开右下角', () => {

@@ -9,29 +9,46 @@
  * 3. **元素小、信息密度高**：技能格 48、buff 图标 26、字号 11–20。
  *
  * 数据流单向：`update(view)` 只读传入的快照。
+ *
+ * ==================================================================
+ * 它现在**只做三件事**：持有各区域 / 决定层叠顺序 / 转发
+ * ==================================================================
+ *
+ * 需求（用户原话）："battlescene 就更不说了……如此复杂的页面，那么多小区域，
+ * 非要都放在一起……我给你 700 的限制不是为了限制而限制，是为了提醒你，
+ * 这个内容很多了，应该拆分，遵从关注分离"。
+ *
+ * 所以按**屏幕区域**切开了（每个区域 = 一个"造 + 画 + 缩放"的整体）：
+ *
+ *   `SceneStage`        战场层：背景 / 角色 / 闪光（**不随 UI 缩放**）
+ *   `hud/BossHeader`    Boss 顶栏：名字 / 阶段 / 计时 / 狂暴 + 血条 + 它的 buff 条
+ *   `hud/CastBars`      两条读条（Boss 预警 + 玩家读条）
+ *   `hud/PlayerStatus`  玩家面板：三根资源条 + 数值 + 玩家的 buff / debuff 条
+ *   `hud/LogArea`       战斗日志
+ *   `hud/StatusArea`    屏幕中下的状态提示 + 眩晕横幅
+ *   `SkillBarView`      技能栏（早就独立，自己实现 `setUiScale`）
+ *   `FloatingTextLayer` 飘字（早就独立）
+ *   `hud/ResultArea`    结算面板（**不随 UI 缩放**）
+ *
+ * ⚠️ 这次拆分的重点**不是"文件短了"**，而是：`setUiScale` 原先的 80 行
+ * 是"场景逐个元素手调" —— 那说明"谁该知道自己多大"放错了地方。
+ * 现在每个区域自己实现 `setUiScale(scale)`，场景只转发（见下面的说明）。
  */
 
-import type { Container, Graphics } from 'pixi.js';
-import { PALETTE } from './theme';
-import { CastBar } from '../ui/CastBar';
-import { LogPanel } from '../ui/LogPanel';
-import { drawBackground } from './background';
-import { BackdropPart } from './parts/backdrop';
-import { SkillBarView } from './skillBar';
-import { IconStrip } from './IconStrip';
+import type { Container } from 'pixi.js';
+import type { LogEntry } from '../app/logFormat';
+import { BossHeader } from './hud/bossHeader';
+import { CastBars } from './hud/castBars';
+import { LogArea } from './hud/logArea';
+import { PlayerStatus } from './hud/playerStatus';
+import { ResultArea } from './hud/resultArea';
+import { StatusArea } from './hud/statusArea';
 import { FloatingTextLayer } from './FloatingTextLayer';
-import { BossTopBarPart } from './parts/bossTopBar';
-import { BossCastBarPart } from './parts/bossCastBar';
-import { PlayerPanelPart } from './parts/playerPanel';
-import { PlayerCastBarPart } from './parts/playerCastBar';
-import { PlayerActorPart } from './parts/playerActor';
-import { StatusLinePart, StunBannerPart } from './parts/statusLine';
-import { FlashPart } from './parts/flash';
+import { SceneStage } from './sceneStage';
 import { FrameRegistry } from './sceneTypes';
-import { renderResultPanel, type ResultRefs } from './resultPanel';
 import type { BattleSceneOptions } from './sceneTypes';
-import { FONT, LAYOUT, LOGICAL } from '../ui/layout';
-import { UiLayout } from '../ui/uiLayout';
+import { SkillBarView } from './skillBar';
+import type { BattleSnapshotView } from './viewModel';
 
 /**
  * 类型从这里**重新导出**，所以 `import { BattleSceneOptions } from
@@ -40,107 +57,27 @@ import { UiLayout } from '../ui/uiLayout';
  */
 export type { BattleSceneOptions, TranslateFn } from './sceneTypes';
 
-
-
-import { Bar, Label, PANEL_STYLE, Panel } from '../ui/primitives';
-import { BossSprite } from './actors/BossSprite';
-import { ACTOR_POS } from './actorLayout';
-import type { BattleSnapshotView } from './viewModel';
-import type { LogEntry } from '../app/logFormat';
-
-/* ================================================================== *
- * 背景
- * ================================================================== */
-
-
-/* ================================================================== *
- * 图标条（buff / debuff 通用）
- * ================================================================== */
-
-
-/* ================================================================== *
- * 技能栏
- * ================================================================== */
-
-
-/* ================================================================== *
- * 飘字
- * ================================================================== */
-
-
-/* ================================================================== *
- * 主场景
- * ================================================================== */
-
 export class BattleScene {
   readonly root: Container;
 
-  private readonly boss: BossSprite;
-  /** 该 Boss 的战斗背景（按 `bossId` 换图，配错/漏配回退程序化夜空）。 */
-  private readonly backdrop: BackdropPart;
-  private readonly playerAnim: Graphics;
-  /** 玩家部件（构造时自己决定是否加载贴图形象）。 */
-  private playerActor: PlayerActorPart | undefined;
-  /** 玩家图形的外层容器（只用于闪避位移） */
-  private readonly playerRoot: Container;
-  private readonly flashOverlay: Graphics;
-
-  /* 顶栏 */
-  private readonly bossName: Label;
-  private readonly bossPhase: Label;
-  private readonly bossHpBar: Bar;
-  private readonly bossHpText: Label;
-  private readonly timerLabel: Label;
-  private readonly enrageBadge: Label;
-  /** 「眩晕中」横幅（玩家被完全锁死时）。 */
-  private readonly stunBanner: Label;
-
-  /* 预警条 */
-  /** 战斗日志（屏幕右侧） */
-  private readonly logPanel: LogPanel;
-  /** Boss 预警条（与玩家读条共用 `ui/CastBar.ts`） */
-  private readonly castBar: CastBar;
-  /** 玩家读条（同一个组件，换配色） */
-  private readonly playerCastBar: CastBar;
-
-  /* 玩家面板 */
-  private readonly playerPanel: Panel;
-  private readonly playerName: Label;
-  private readonly hpBar: Bar;
-  private readonly hpText: Label;
-  private readonly hpLabel: Label;
-  private readonly energyBar: Bar;
-  private readonly energyLabel: Label;
-  private readonly energyText: Label;
-  private readonly douqiBar: Bar;
-  private readonly douqiLabel: Label;
-  private readonly douqiText: Label;
-
-  /* 图标条 */
-  private readonly bossBuffs: IconStrip;
-  /** Boss 的减益条（右上）—— 与增益条分开，位置本身就是分类。 */
-  private readonly bossDebuffs: IconStrip;
-  private readonly playerBuffs: IconStrip;
-  /** 玩家的减益条（在增益条上面一行）。 */
-  private readonly playerDebuffs: IconStrip;
-  /** UI 缩放系数（默认 1）——只影响 UI 部件，不影响画布与战斗画面 */
-  private uiScale = 1;
-  /** 是否显示键名（触屏隐藏）。见 `FrameContext.showKeyHints`。 */
-  private showKeyHints = true;
-
+  /** 战场层（背景 / 角色 / 闪光）——**不随 UI 缩放**（见 `SceneStage`）。 */
+  private readonly stage: SceneStage;
+  /** Boss 顶栏。 */
+  private readonly bossHeader: BossHeader;
+  /** 两条读条。 */
+  private readonly castBars: CastBars;
+  /** 玩家面板。 */
+  private readonly playerStatus: PlayerStatus;
+  /** 战斗日志。 */
+  private readonly logArea: LogArea;
+  /** 状态提示 + 眩晕横幅——**不随 UI 缩放**（现状如此）。 */
+  private readonly statusArea: StatusArea;
+  /** 技能栏（自己实现 `setUiScale`，见 `skillBar.ts`）。 */
   private readonly skillBar: SkillBarView;
+  /** 飘字（自己就是帧部件）。 */
   private readonly floating: FloatingTextLayer;
-  private readonly statusLabel: Label;
-  private readonly statusSub: Label;
-
-  /* 结算面板 */
-  private readonly resultLayer: Container;
-  private readonly resultDim: Graphics;
-  private readonly resultPanel: Panel;
-  private readonly resultTitle: Label;
-  private readonly resultReason: Label;
-  private readonly resultStats: Label;
-  private readonly resultHint: Label;
+  /** 结算面板——**不随 UI 缩放**（现状如此）。 */
+  private readonly resultArea: ResultArea;
 
   /**
    * 帧部件注册表（见 `FrameRegistry` / `FramePart`）。
@@ -149,6 +86,11 @@ export class BattleScene {
    * （比如玩家姿态的 `lastPose` 已经跟着 `PlayerActorPart` 走了）。
    */
   private readonly registry = new FrameRegistry();
+
+  /** UI 缩放系数（默认 1）——只影响 UI 部件，不影响画布与战斗画面 */
+  private uiScale = 1;
+  /** 是否显示键名（触屏隐藏）。见 `FrameContext.showKeyHints`。 */
+  private showKeyHints = true;
 
   private readonly options: BattleSceneOptions;
 
@@ -159,242 +101,35 @@ export class BattleScene {
     this.root = new pixi.Container();
     app.stage.addChild(this.root);
 
-    /* ---------- 背景 ---------- */
-    const background = new pixi.Graphics();
-    drawBackground(background);
-    this.root.addChild(background);
+    /* ---------- 战场层（必须在 HUD 之下） ---------- */
+    this.stage = new SceneStage(pixi, this.root);
 
     /**
-     * **该 Boss 的背景图**（`bossBackdrops.ts` 的配对表）。
+     * **HUD 的层叠顺序 = `addChild` 的顺序**：
+     * 顶栏 → 日志 → 读条 → 玩家面板 → 技能栏 → 飘字 → 状态提示。
      *
-     * ⚠️ 它的容器必须加在 `background` **之后**、角色之前：
-     * 图要盖住程序化夜空，但不能盖住角色。图没就绪时它只有夜空，
-     * 与上面的 `background` 完全重合（看不出接缝）。
+     * ⚠️ 与拆分前逐行 `hud.addChild(...)` 的顺序一致 —— 面板是**后绘制**的，
+     * 所以"玩家读条在面板上方、两者不重叠"这条约束
+     * （见 `LAYOUT.playerCastBar` 的说明）仍然成立。
+     *
+     * ⚠️ 唯一一处例外：`stunBanner` 原先很早（排在 Boss 血条之前）就加进
+     * HUD 了，现在跟着 `StatusArea` 排在最后。该矩形（480,300 附近）不与
+     * 任何其它 HUD 节点重叠，所以外观不变 —— 见 `hud/statusArea.ts`。
      */
-    this.backdrop = new BackdropPart(pixi);
-    this.root.addChild(this.backdrop.root);
-
-    /* ---------- 角色（Boss 左、玩家右，中间留空给飘字） ---------- */
-    /** ⚠️ 站位（含"互换过"的由来）在 `actorLayout.ACTOR_POS` —— 唯一真相。 */
-    this.boss = new BossSprite(pixi, { ...ACTOR_POS.boss });
-    this.root.addChild(this.boss.root);
-
-    /**
-     * 玩家图形外面套一层容器，**只为了能整体位移**：闪避是"横移一下再复位"，
-     * 而 `drawPlayer` 是在固定 `cx` 处绘制路径的。移动容器的 `x` 几乎零成本，
-     * 比每帧按偏移重绘整套多边形便宜得多（60fps 下白算几十次 fill）。
-     */
-    this.playerRoot = new pixi.Container();
-    this.playerAnim = new pixi.Graphics();
-    this.playerRoot.addChild(this.playerAnim);
-    this.root.addChild(this.playerRoot);
-
-    /* ---------- 全屏闪光 ---------- */
-    this.flashOverlay = new pixi.Graphics();
-    this.flashOverlay.rect(0, 0, LOGICAL.width, LOGICAL.height).fill(0xffffff);
-    this.flashOverlay.alpha = 0;
-    this.root.addChild(this.flashOverlay);
-
-    /* ---------- HUD ---------- */
     const hud = new pixi.Container();
     this.root.addChild(hud);
 
-    const bb = LAYOUT.bossBar;
-    this.bossName = new Label(pixi, { x: bb.x + 2, y: bb.y, size: FONT.title, color: PALETTE.text });
-    this.bossPhase = new Label(pixi, { x: bb.x + 2, y: bb.y + 1, size: FONT.small, color: PALETTE.textDim });
-    this.timerLabel = new Label(pixi, {
-      x: LOGICAL.width - 8,
-      y: bb.y,
-      size: FONT.title,
-      color: 0xf0c060,
-      anchorX: 1,
-    });
-    this.enrageBadge = new Label(pixi, {
-      x: LOGICAL.width - LAYOUT.timer.w - 10,
-      y: bb.y + 3,
-      size: FONT.small,
-      color: PALETTE.danger.bright,
-      anchorX: 1,
-    });
-    this.stunBanner = new Label(pixi, {
-      x: LAYOUT.stunBanner.x,
-      y: LAYOUT.stunBanner.y,
-      size: FONT.warn,
-      color: 0xff70d0,
-      anchorX: 0.5,
-      anchorY: 0.5,
-      kai: true,
-    });
-    hud.addChild(this.bossName.root, this.bossPhase.root, this.timerLabel.root, this.enrageBadge.root, this.stunBanner.root);
+    this.bossHeader = new BossHeader(pixi, translate);
+    hud.addChild(this.bossHeader.root);
 
-    const bh = LAYOUT.bossHp;
-    this.bossHpBar = new Bar(pixi, {
-      x: bh.x,
-      y: bh.y,
-      w: bh.w,
-      h: bh.h,
-      color: PALETTE.hp.base,
-      darkColor: PALETTE.hp.dark,
-      brightColor: PALETTE.hp.bright,
-    });
-    // 血量文字放在**名字那一行**（血条上方），不再压在血条上 ——
-    // 压在血条上会和 buff 图标、进度条抢位置
-    this.bossHpText = new Label(pixi, {
-      x: LOGICAL.width - LAYOUT.timer.w - 10,
-      y: bb.y + 3,
-      size: FONT.small,
-      color: 0xd8d0d8,
-      anchorX: 1,
-    });
-    hud.addChild(this.bossHpBar.root, this.bossHpText.root);
+    this.logArea = new LogArea(pixi, translate);
+    hud.addChild(this.logArea.root);
 
-    this.bossBuffs = new IconStrip(pixi, LAYOUT.bossBuffs, translate);
-    hud.addChild(this.bossBuffs.root);
-    this.bossDebuffs = new IconStrip(pixi, LAYOUT.bossDebuffs, translate);
-    hud.addChild(this.bossDebuffs.root);
+    this.castBars = new CastBars(pixi);
+    hud.addChild(this.castBars.root);
 
-    /* 战斗日志（右侧）—— 画在 HUD 下层，避免压住技能栏与资源面板 */
-    this.logPanel = new LogPanel({
-      pixi,
-      translate: (key, params) => {
-        try {
-          return translate(key, params);
-        } catch {
-          return key;
-        }
-      },
-    });
-    hud.addChild(this.logPanel.root);
-
-    /* Boss 预警条 */
-    /**
-     * 读条用**共用组件**（`ui/CastBar.ts`）。
-     *
-     * Boss 与玩家原先各写一份，于是"修了一处忘了另一处"。
-     * 现在两者都是这一个组件，层叠顺序（底 → 填充 → 描边 → 文字）
-     * 只在一处定义。
-     */
-    this.castBar = new CastBar({
-      pixi,
-      rect: LAYOUT.castBar,
-      fill: 0xe8542c,
-      track: 0x2a0c0e,
-      line: PALETTE.danger.base,
-      labelColor: 0xffe8c0,
-      timeColor: 0xffd0b0,
-      // Boss 预警条**不显示剩余秒数**？不 —— 它是最需要读的信息，保留
-      showTime: true,
-    });
-    hud.addChild(this.castBar.root);
-
-    /* 玩家读条 */
-    /**
-     * 同一个 `CastBar` 组件，只是换配色（暖金 = "自己的动作"，
-     * 红色留给 Boss 的威胁提示）。
-     *
-     * ⚠️ 它必须放在玩家面板**上方**、不能重叠 —— 面板是后绘制的，
-     * 重叠会把读条盖住（见 `LAYOUT.playerCastBar` 的说明）。
-     */
-    this.playerCastBar = new CastBar({
-      pixi,
-      rect: LAYOUT.playerCastBar,
-      fill: 0xb8860f,
-      track: 0x2a1c06,
-      line: 0xd8a840,
-      labelColor: 0xffffff,
-      timeColor: 0xffffff,
-      showTime: true,
-    });
-    hud.addChild(this.playerCastBar.root);
-
-    /* 玩家面板：生命 / 缠 / 炁 **垂直排列** */
-    const pf = LAYOUT.player;
-    this.playerPanel = new Panel(pixi, {
-      x: pf.x,
-      y: pf.y,
-      w: pf.w,
-      h: pf.h,
-      ...PANEL_STYLE,
-    });
-    /**
-     * 面板标题去掉了（原来是「你」）。
-     *
-     * 场面上只有一个主角，"你"是冗余信息；去掉之后顶部那一行
-     * 正好让给自己的读条。
-     */
-    this.playerName = new Label(pixi, { x: pf.x + 8, y: pf.y + 4, size: FONT.body, color: PALETTE.text });
-    this.playerName.root.visible = false;
-
-    // 三根条的几何：等距垂直排列，每根 16 高（够画出内阴影与文字）
-    /**
-     * 三根资源条的位置**全部来自布局表**（`LAYOUT.playerBars`）。
-     *
-     * 踩过的坑：这些数字原先写死在这里（条高 16、间距 12、起始 +32），
-     * 于是"面板加高到 140 之后底部空出 36px"这种问题**既看不见也算不出来**
-     * —— 只能靠截图肉眼发现（用户就是这么发现的）。
-     *
-     * 现在 `stride = 20`、最后一根条距底部 `bottom = 14`，
-     * 所以浪费的纵向空间是固定且**可断言的**（见布局测试）。
-     */
-    const { h: barH, top: barsTop, stride } = LAYOUT.playerBars;
-    const barX = pf.x + 8;
-    const barW = pf.w - 16;
-    const barY = (row: number): number => pf.y + barsTop + row * stride;
-
-    this.hpBar = new Bar(pixi, {
-      x: barX, y: barY(0), w: barW, h: barH,
-      color: PALETTE.hp.base, darkColor: PALETTE.hp.dark, brightColor: PALETTE.hp.bright,
-    });
-    this.energyBar = new Bar(pixi, {
-      x: barX, y: barY(1), w: barW, h: barH,
-      color: PALETTE.energy.base, darkColor: PALETTE.energy.dark, brightColor: PALETTE.energy.bright,
-    });
-    this.douqiBar = new Bar(pixi, {
-      x: barX, y: barY(2), w: barW, h: barH,
-      color: PALETTE.douqi.base, darkColor: PALETTE.douqi.dark, brightColor: PALETTE.douqi.bright,
-    });
-
-    // 每条左侧一个单字标签（生/精/炁），右侧数值
-         /** 三根条上的文字垂直居中（原先贴着条顶边，偏上）。 */
-    const textMidY = (row: number): number => barY(row) + barH / 2;
-    const lbl = (row: number, color: number): Label =>
-      new Label(pixi, { x: barX + 4, y: textMidY(row), size: FONT.small, color, kai: true, anchorY: 0.5 });
-    this.hpLabel = lbl(0, 0xffe0e0);
-    this.energyLabel = lbl(1, 0xe0ffe0);
-    this.douqiLabel = lbl(2, 0xfff0d0);
-    const val = (row: number, stroke: number): Label =>
-      new Label(pixi, {
-        x: barX + barW - 4,
-        y: textMidY(row),
-        size: FONT.small,
-        color: 0xffffff,
-        anchorX: 1,
-        anchorY: 0.5,
-        stroke,
-        strokeWidth: 3,
-      });
-    this.hpText = val(0, 0x2a0808);
-    this.energyText = val(1, 0x0a1408);
-    this.douqiText = val(2, 0x2a1a04);
-
-    hud.addChild(
-      this.playerPanel.root,
-      this.playerName.root,
-      this.hpBar.root,
-      this.energyBar.root,
-      this.douqiBar.root,
-      this.hpLabel.root,
-      this.energyLabel.root,
-      this.douqiLabel.root,
-      this.hpText.root,
-      this.energyText.root,
-      this.douqiText.root,
-    );
-
-    this.playerBuffs = new IconStrip(pixi, LAYOUT.playerBuffs, translate);
-    hud.addChild(this.playerBuffs.root);
-    this.playerDebuffs = new IconStrip(pixi, LAYOUT.playerDebuffs, translate);
-    hud.addChild(this.playerDebuffs.root);
+    this.playerStatus = new PlayerStatus(pixi, translate);
+    hud.addChild(this.playerStatus.root);
 
     this.skillBar = new SkillBarView(pixi, translate);
     hud.addChild(this.skillBar.root);
@@ -402,91 +137,14 @@ export class BattleScene {
     this.floating = new FloatingTextLayer(pixi);
     hud.addChild(this.floating.root);
 
-    this.statusLabel = new Label(pixi, {
-      x: LAYOUT.status.x,
-      y: LAYOUT.status.y,
-      size: FONT.warn,
-      color: 0xffffff,
-      anchorX: 0.5,
-      stroke: 0x000000,
-      strokeWidth: 4,
-    });
-    this.statusSub = new Label(pixi, {
-      x: LAYOUT.status.x,
-      y: LAYOUT.status.y + FONT.warn + 4,
-      size: FONT.body,
-      color: PALETTE.interrupt.bright,
-      anchorX: 0.5,
-      stroke: 0x000000,
-      strokeWidth: 3,
-    });
-    hud.addChild(this.statusLabel.root, this.statusSub.root);
+    this.statusArea = new StatusArea(pixi);
+    hud.addChild(this.statusArea.root);
 
     /* ---------- 结算面板 ----------
-     * 单独一层，压在 HUD 之上。战斗进行中完全隐藏，
-     * 所以它不占用任何视觉注意力。 */
-    this.resultLayer = new pixi.Container();
-    this.resultLayer.visible = false;
-
-    this.resultDim = new pixi.Graphics();
-    this.resultDim.rect(0, 0, LOGICAL.width, LOGICAL.height).fill({ color: 0x000000, alpha: 0.62 });
-    this.resultLayer.addChild(this.resultDim);
-
-    const rw = LAYOUT.result.w;
-    const rh = LAYOUT.result.h;
-    const rx = Math.round((LOGICAL.width - rw) / 2);
-    const ry = Math.round((LOGICAL.height - rh) / 2) - 20;
-    /**
-     * 结算面板**故意比其它面板不透明**（0.97）：它是"结算"，
-     * 需要挡住背后的战斗画面让人专心看结果 —— 所以显式覆盖透明度，
-     * 而不是跟着 `PANEL_STYLE` 走。
-     */
-    this.resultPanel = new Panel(pixi, {
-      x: rx,
-      y: ry,
-      w: rw,
-      h: rh,
-      fill: 0x0e0e16,
-      line: 0x6a6c80,
-      fillAlpha: 0.97,
-      radius: 4,
-    });
-    this.resultTitle = new Label(pixi, {
-      x: LOGICAL.width / 2,
-      y: ry + 18,
-      size: FONT.big,
-      color: 0xffffff,
-      anchorX: 0.5,
-    });
-    this.resultReason = new Label(pixi, {
-      x: LOGICAL.width / 2,
-      y: ry + 54,
-      size: FONT.body,
-      color: 0xa0a0b4,
-      anchorX: 0.5,
-    });
-    this.resultStats = new Label(pixi, {
-      x: rx + 24,
-      y: ry + 84,
-      size: FONT.small,
-      color: 0xd0d0dc,
-    });
-    this.resultHint = new Label(pixi, {
-      x: LOGICAL.width / 2,
-      y: ry + rh - 26,
-      size: FONT.small,
-      color: 0x80d0a0,
-      anchorX: 0.5,
-    });
-    this.resultLayer.addChild(
-      this.resultPanel.root,
-      this.resultTitle.root,
-      this.resultReason.root,
-      this.resultStats.root,
-      this.resultHint.root,
-    );
-    // 加到 HUD 之后（同一父级），所以天然压在 HUD 之上
-    this.root.addChild(this.resultLayer);
+     * 单独一层、**加在 HUD 之后**，所以天然压在 HUD 之上。
+     * 战斗进行中完全隐藏，所以它不占用任何视觉注意力。 */
+    this.resultArea = new ResultArea(pixi);
+    this.root.addChild(this.resultArea.root);
 
     this.registerFrameParts();
   }
@@ -494,85 +152,28 @@ export class BattleScene {
   /**
    * **注册帧部件**（需求："ui 的各个部分注册在 tick 上"）。
    *
-   * ⚠️ **注册顺序 = 绘制顺序**：背景/角色 → HUD → 读条 → 技能栏 →
-   * 飘字 → 闪光 → 结算。飘字要盖在面板上、结算要盖在所有东西上。
+   * ⚠️ **注册顺序 = 广播顺序**（`FrameRegistry` 保序）。它**不决定层叠**
+   * —— 谁盖在谁上面由上面 `addChild` 的顺序决定。两件事分开之后，
+   * "飘字要盖在面板上、结算要盖在所有东西上"读场景的加入顺序就够了。
    */
   private registerFrameParts(): void {
-    this.registry.add(new BossTopBarPart({
-      bossName: this.bossName,
-      bossPhase: this.bossPhase,
-      timerLabel: this.timerLabel,
-      bossHpBar: this.bossHpBar,
-      bossHpText: this.bossHpText,
-      enrageBadge: this.enrageBadge,
-      bossBuffs: this.bossBuffs,
-      bossDebuffs: this.bossDebuffs,
-    }));
-    this.registry.add(new BossCastBarPart(this.castBar));
-    this.registry.add(new PlayerPanelPart({
-      playerName: this.playerName,
-      hpBar: this.hpBar,
-      energyBar: this.energyBar,
-      douqiBar: this.douqiBar,
-      hpLabel: this.hpLabel,
-      energyLabel: this.energyLabel,
-      douqiLabel: this.douqiLabel,
-      hpText: this.hpText,
-      energyText: this.energyText,
-      douqiText: this.douqiText,
-      playerBuffs: this.playerBuffs,
-      playerDebuffs: this.playerDebuffs,
-    }));
-    this.registry.add(new PlayerCastBarPart(this.playerCastBar));
-    // 第 3 参 = 加载贴图形象（拿不到就回退到程序化绘制）
-    this.playerActor = new PlayerActorPart(this.playerRoot, this.playerAnim, true);
-    this.registry.add(this.playerActor);
+    this.bossHeader.register(this.registry);
+    this.castBars.register(this.registry);
+    this.playerStatus.register(this.registry);
+    this.stage.register(this.registry);
     this.registry.add(this.skillBar);
     this.registry.add(this.floating);
-    this.registry.add(new StatusLinePart(this.statusLabel, this.statusSub));
-    this.registry.add(new StunBannerPart(this.stunBanner));
-    this.registry.add(new FlashPart(this.flashOverlay));
-    this.registry.add({
-      name: 'logPanel',
-      render: (ctx) => this.logPanel.update(ctx.logEntries, ctx.view),
-    });
-    // Boss 形象自己就是帧部件（读哪些字段见 `BossSprite.render`）
-    this.registry.add(this.boss);
-    this.registry.add({
-      name: 'result',
-      /**
-       * ⚠️ 结算文案的装配在 `render/resultPanel.ts`（纯文字，不碰节点
-       * 生命周期）。这里只把需要写的标签交出去。
-       */
-      render: (ctx) =>
-        renderResultPanel(this.resultRefs(), ctx.view, ctx.translate, ctx.showKeyHints),
-    });
+    this.statusArea.register(this.registry);
+    this.logArea.register(this.registry);
+    this.resultArea.register(this.registry);
   }
 
-  /**
-   * 结算面板。
-   *
-   * ⚠️ 它是**唯一用闭包注册**的部件：它要改 5 个自己持有的字段
-   * （标题/原因/统计/提示），字段太多不值得为它单独开一个文件传 6 个引用。
-   * 闭包把它留在场景里，同时仍然走注册机制 —— 顺序照样由注册决定。
-   */
   /**
    * 是否显示键名（触屏传 `false`）。见 `FrameContext.showKeyHints`。
    *
    * ⚠️ 触屏时**整条技能栏都隐藏**：双弧按钮承担了它的全部职责
    * （技能字 + 冷却 + 代价），同时显示会重叠。
    */
-  /** 结算面板要写的那几个标签（交给 `renderResultPanel`）。 */
-  private resultRefs(): ResultRefs {
-    return {
-      resultLayer: this.resultLayer,
-      resultTitle: this.resultTitle,
-      resultReason: this.resultReason,
-      resultStats: this.resultStats,
-      resultHint: this.resultHint,
-    };
-  }
-
   setShowKeyHints(show: boolean): void {
     this.showKeyHints = show;
     this.skillBar.root.visible = show;
@@ -581,98 +182,49 @@ export class BattleScene {
   /**
    * **换这一局的出战形象**（进战斗 / 重开时调用）。
    *
-   * 需求："无论角色还是 boss，我都希望加载 完整的 idle 和 attack 的动画"。
-   *
-   * ⚠️ 为什么不塞进 `BattleSceneOptions` 的构造参数：`BattleScene` 只在
-   * `bootstrap()` 里建**一次**，而一局战斗的出战单位是**可变的**
-   * （备战界面选完才知道，重开还能换）。放构造参数就必须重建整个场景，
-   * 那会把 Pixi 的舞台、toupper 层、设置面板全部跟着换一遍。
+   * ⚠️ 完整的说明（为什么不能塞进构造参数）在 `sceneStage.ts` 的
+   * `setAppearance` 上 —— 那里才是"出战单位是可变的"这条知识的归属。
    *
    * @param playerId 玩家单位 id（`data/roster.ts`）
    * @param bossId Boss 单位 id
    */
   setAppearance(playerId: string, bossId: string): void {
-    this.playerActor?.setCharacter(playerId);
-    this.boss.setCharacter(bossId);
-    this.backdrop.setBoss(bossId);
+    this.stage.setAppearance(playerId, bossId);
   }
 
   /**
    * **UI 缩放**（需求："缩放游戏 UI……战斗画面和战斗文字保持不变"）。
    *
    * 只作用于 UI 部件，**不碰画布尺寸**（仍是 960×540 逻辑分辨率），
-   * 所以角色、场景、飘字不受影响。目前作用于技能栏 + 玩家面板。
+   * 所以角色、场景、飘字不受影响。
+   *
+   * ==================================================================
+   * ⚠️ 这里**只转发系数** —— "谁该知道自己多大"由各区域自己决定
+   * ==================================================================
+   *
+   * 拆分前它是 80 行"逐个元素手调"：面板矩形、三根资源条、每个标签的
+   * `setSize` / `root.x` / `root.y`、Boss 顶栏、四条图标条、两条读条……
+   * 全排在场景里。那说明这块知识**放错了地方**。
+   *
+   * 现在每个区域自己实现同名方法（签名一致，见各自的文件）：
+   *   `hud/bossHeader.ts`    `setUiScale(scale)`
+   *   `hud/castBars.ts`      `setUiScale(scale)`
+   *   `hud/playerStatus.ts`  `setUiScale(scale)`
+   *   `hud/logArea.ts`       `setUiScale(scale)`
+   *   `skillBar.ts`          `setUiScale(scale)`（更早就独立了）
+   *
+   * ⚠️ **不缩放的三块**（现状如此，本次纯搬运不改行为）：
+   * `SceneStage`／`FloatingTextLayer`（战场与飘字，见 `UiLayout` 的设计前提）、
+   * `StatusArea`、`ResultArea`。
    */
   setUiScale(scale: number): void {
     if (scale === this.uiScale) return;
     this.uiScale = scale;
     this.skillBar.setUiScale(scale);
-
-    const ui = new UiLayout(scale);
-    const pf = ui.playerPanel;
-    this.playerPanel.set({ x: pf.x, y: pf.y, w: pf.w, h: pf.h });
-
-    /**
-     * 资源条与文字**一起重排**。
-     *
-     * ⚠️ 字必须跟着走：只放大框不挪字，会出现"面板很大、字挤在角上"。
-     * 条的几何走 `Bar.setRect`（它会重置缓存强制重绘），
-     * 文字走 `anchorY: 0.5` + 条中线 —— 所以这里只改坐标，不改偏移。
-     */
-    const { h: barH, top: barsTop, stride } = ui.playerBars;
-    const barX = pf.x + ui.len(8);
-    const barW = pf.w - ui.len(16);
-    const bars: Array<{ bar: Bar; label: Label; text: Label }> = [
-      { bar: this.hpBar, label: this.hpLabel, text: this.hpText },
-      { bar: this.energyBar, label: this.energyLabel, text: this.energyText },
-      { bar: this.douqiBar, label: this.douqiLabel, text: this.douqiText },
-    ];
-    /**
-     * 字号也要跟着缩放 —— 只放大框不放大字，会变成"面板很大、字很小"。
-     * `Label.setSize` 会触发纹理重光栅化，所以只在缩放变化时调
-     * （`setUiScale` 本身就有"值没变就 return"的短路）。
-     */
-    const textSize = ui.len(FONT.small);
-    for (const [row, entry] of bars.entries()) {
-      const y = pf.y + barsTop + row * stride;
-      entry.bar.setRect({ x: barX, y, w: barW, h: barH });
-      const midY = y + barH / 2;
-      entry.label.setSize(textSize);
-      entry.label.root.x = barX + ui.len(4);
-      entry.label.root.y = midY;
-      entry.text.setSize(textSize);
-      entry.text.root.x = barX + barW - ui.len(4);
-      entry.text.root.y = midY;
-    }
-
-    /* ---------- Boss 相关（需求："boss 相关面板 buff，读条"） ---------- */
-    const bb = ui.bossBar;
-    this.bossName.setSize(ui.len(FONT.body));
-    this.bossName.root.x = bb.x + ui.len(2);
-    this.bossName.root.y = bb.y;
-    this.bossPhase.setSize(ui.len(FONT.small));
-    this.timerLabel.setSize(ui.len(FONT.small));
-    this.timerLabel.root.y = bb.y + ui.len(3);
-
-    /**
-     * ⚠️ Boss 血条的**位置**在顶栏矩形里算，但条的宽度还要扣掉右侧
-     * 计时器的占位 —— 这里沿用它原来的比例：血量条占顶栏宽度减去
-     * 一个固定右缩进。缩放后同样成立（两者都乘了系数）。
-     */
-    const bh = ui.bossHp;
-    this.bossHpBar.setRect({ x: bh.x, y: bh.y, w: bh.w, h: bh.h });
-    this.bossHpText.setSize(ui.len(FONT.small));
-
-    // Boss 的 buff 条（图标方块 + 标签）也按系数走
-    this.bossBuffs.setUiScale(scale, ui.bossBuffs);
-    this.bossDebuffs.setUiScale(scale, ui.bossDebuffs);
-
-    // 两处读条（Boss 预警 + 玩家读条）
-    this.castBar.setRect(ui.castBar, scale);
-    this.playerCastBar.setRect(ui.playerCastBar, scale);
-
-    // 日志面板
-    this.logPanel.setUiScale(scale, ui.logPanel);
+    this.bossHeader.setUiScale(scale);
+    this.castBars.setUiScale(scale);
+    this.playerStatus.setUiScale(scale);
+    this.logArea.setUiScale(scale);
   }
 
   /**
@@ -693,7 +245,3 @@ export class BattleScene {
     });
   }
 }
-
-/* ================================================================== *
- * 小工具
- * ================================================================== */
