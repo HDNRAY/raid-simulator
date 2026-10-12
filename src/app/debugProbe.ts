@@ -127,7 +127,14 @@ export interface RaidBattleApi {
   readonly settings: {
     readonly open: (tab?: 'general' | 'keys') => void;
     readonly close: () => void;
-    readonly openIn: (px: number, py: number) => boolean;
+    /**
+     * 用逻辑坐标点一下（验证命中测试与布局一致）。
+     *
+     * ⚠️ 返回 `void`（不是 `boolean`）—— 与 `src/types/global.d.ts` 的
+     * 公开契约一致：命中与否是 `SettingsPanel` 的内部细节，调试入口
+     * 只负责"把这次点击喂给它"。
+     */
+    readonly openIn: (px: number, py: number) => void;
     readonly isOpen: () => boolean;
     readonly capturing: () => string | undefined;
     readonly focus: () => unknown;
@@ -148,7 +155,14 @@ export interface RaidBattleApi {
  * ⚠️ 各入口由调用方注入**函数**而不是值 —— 这样"惰性"仍然成立
  * （例如 `touchButtonCenter` 依赖的 `touch` 在主流程里声明得较晚，
  * 直接传值会遇到 TDZ）。
+ *
+ * ⚠️ 泛型 `A` 的用意：`RaidBattleApi` 只是这个门面的**子集说明**
+ * （它把 `settings.openIn` 写成返回 `boolean`），而 `src/types/global.d.ts`
+ * 是真正的消费者契约。让返回值原样穿过去，就不需要在调用处写一个
+ * 会把类型收窄成子集的中间变量 —— 那种中间变量会让"塞进去的对象"与
+ * "脚本读到的对象"漂移，而这正是本仓库最不想看到的。
  */
-export function installRaidBattleApi(api: RaidBattleApi): void {
+export function installRaidBattleApi<A extends RaidBattleApi>(api: A): A {
   (globalThis as { __raidBattle?: RaidBattleApi }).__raidBattle = api;
+  return api;
 }
