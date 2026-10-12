@@ -48,7 +48,7 @@ import { FONT } from '../layout';
 import { Label, type PixiCtor } from '../primitives';
 import { wrapText, type MeasureText } from './wrapText';
 import { FONT_FAMILY, PALETTE, css } from '../../render/theme';
-import { skillDetailViewport } from './keyGridLayout';
+import { skillDetailContentRect, skillDetailViewport } from './keyGridLayout';
 import {
   clampOffset,
   scrollFraction,
@@ -95,12 +95,16 @@ const SCROLLBAR_PAD = 10;
 /**
  * 详情块的**行数**（= 滚动数学里的 `rows`）。
  *
- * ⚠️ 它是**算出来的**（可视高 / 行距）：详情区的高度由
- * `keyGridLayout.skillDetailViewport()` 推出来，写死行数会在几何一变时
- * 立刻错位。
+ * ⚠️ 它是**算出来的**（**内框**高 / 行距）：高度由
+ * `keyGridLayout.skillDetailContentRect()` 推出来（外框减 padding），
+ * 写死行数会在几何一变时立刻错位。
+ *
+ * ⚠️ 必须用**内框**：用户要求给说明加 padding（`SKILL_DETAIL.padding`），
+ * 上下那两圈是从"看得见的空间"里扣掉的 —— 拿外框高算行数就会在滚到底时
+ * **把最后一行裁掉**（差的就是那 2×padding）。
  */
 function viewRows(): number {
-  return Math.max(1, Math.floor(skillDetailViewport().h / LINE_H));
+  return Math.max(1, Math.floor(skillDetailContentRect().h / LINE_H));
 }
 
 export class SkillDetail {
@@ -145,16 +149,20 @@ export class SkillDetail {
     pixi: PixiCtor,
     private readonly translate: TranslateFn,
   ) {
-    const vp = skillDetailViewport();
+    const inner = skillDetailContentRect();
     this.root = new pixi.Container();
 
     /** 背景 + 滚动条：压在文字下面（先 addChild）。 */
     this.frame = new pixi.Graphics();
     this.root.addChild(this.frame);
 
+    /**
+     * ⚠️ 内容容器挂在**内框**的左上角：文字四周那圈留白就是
+     * `SKILL_DETAIL.padding`（背景仍然铺外框，见 `drawFrame`）。
+     */
     this.content = new pixi.Container();
-    this.content.x = vp.x;
-    this.content.y = vp.y;
+    this.content.x = inner.x;
+    this.content.y = inner.y;
     this.root.addChild(this.content);
 
     const line = (row: number, size: number, color: number): Label =>
@@ -220,13 +228,17 @@ export class SkillDetail {
   }
 
   /**
-   * 说明折行的可用宽度：详情区宽 - 滚动条让位。
+   * 说明折行的可用宽度：**内框**宽 - 滚动条让位。
+   *
+   * ⚠️ 内框 = 外框减 `SKILL_DETAIL.padding`（左右各一圈）—— 用户要求加
+   * padding，而**折行必须按减完之后的宽度算**，否则长行会压到右边框上
+   * （绘制时再挪一下是治不了的：已经把行折错了）。
    *
    * ⚠️ 与 `drawFrame` 画滚动条用的那个 `SCROLLBAR_PAD` 同源 ——
    * 两处各减一次就会让最长的那行压在滚动条上。
    */
   private descWidth(): number {
-    return Math.max(1, skillDetailViewport().w - SCROLLBAR_PAD);
+    return Math.max(1, skillDetailContentRect().w - SCROLLBAR_PAD);
   }
 
   /** 能不能滚（内容比可视区多）。 */
@@ -264,7 +276,7 @@ export class SkillDetail {
     this.offset = 0;
     this.drag = null;
     this.frame.clear();
-    this.content.y = skillDetailViewport().y;
+    this.content.y = skillDetailContentRect().y;
     this.content.visible = false;
   }
 
@@ -367,7 +379,8 @@ export class SkillDetail {
    */
   private drawMoreHint(): void {
     if (!this.scrollable()) return;
-    const vp = skillDetailViewport();
+    /** ⚠️ 摆在内框的右下角（外框那圈是 padding，提示贴到边上就白加了）。 */
+    const vp = skillDetailContentRect();
     /**
      * ⚠️ 按**当前偏移**选方向：滚到底时还说"往下滚"就是在骗人
      * （玩家会一直拖）。两条都在 `settings.*` 里（i18n 规范 I1）。
@@ -382,10 +395,10 @@ export class SkillDetail {
 
   /** 把偏移套到内容上，并画滚动条。 */
   private applyOffset(): void {
-    const vp = skillDetailViewport();
     const rows = viewRows();
     this.offset = clampOffset(this.offset, this.totalRows, rows);
-    this.content.y = vp.y - this.offset * LINE_H;
+    /** ⚠️ 从**内框**顶开始上移（留白不参与滚动 —— 它是边框，不是内容）。 */
+    this.content.y = skillDetailContentRect().y - this.offset * LINE_H;
     this.drawFrame();
   }
 

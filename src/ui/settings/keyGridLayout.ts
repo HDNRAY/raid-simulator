@@ -195,6 +195,41 @@ export function skillDetailViewport(): Rect {
 }
 
 /**
+ * 详情区**文字那块内框**（外框减掉 `SKILL_DETAIL.padding`）。
+ *
+ * ==================================================================
+ * ⚠️ 为什么必须有它（而不是在画的时候把字挪 8px）
+ * ==================================================================
+ *
+ * 用户要求"技能说明加一点点 padding"，但详情区这一块有两处**吃可用空间**
+ * 的数学：
+ *
+ *   - `wrapText` 的**折行宽度**（`SkillDetail.descWidth`）
+ *   - `scrollWindow` 的**可见行数**（`SkillDetail.viewRows` = 可用高 / 行高）
+ *
+ * 只在绘制时平移文字的话：折行仍按**旧宽度**算（长行会压到右边框或溢出），
+ * 可见行数仍按**旧高度**算（滚到底时最后一行被裁）。所以 padding 要**先进
+ * 几何**，两处再从内框取空间 —— 与 `skillDetailViewport` 同一条纪律。
+ *
+ * ⚠️ 外框（`skillDetailViewport`）仍然是**背景 / 滚动条 / 命中与拖拽归属**
+ * 的矩形：滚轮与拖拽在那一圈留白上也该有效（它是这块面板的一部分）。
+ */
+export function skillDetailContentRect(): Rect {
+  const outer = skillDetailViewport();
+  const pad = SKILL_DETAIL.padding;
+  /**
+   * ⚠️ 两侧各减一个 padding；`Math.max(1, ...)` 是"几何被改小"时的兜底
+   * （与 `scrollWindow.safeRows` 同一条纪律：宁可退化，也不返回负数）。
+   */
+  return {
+    x: outer.x + pad,
+    y: outer.y + pad,
+    w: Math.max(1, outer.w - pad * 2),
+    h: Math.max(1, outer.h - pad * 2),
+  };
+}
+
+/**
  * 一格的位置。
  *
  * ⚠️ 默认参数是**桌面**那套（`keyGridMetrics(true)`）—— 老的调用点

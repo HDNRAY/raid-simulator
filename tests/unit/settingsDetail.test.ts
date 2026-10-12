@@ -9,7 +9,7 @@ import {
   DETAIL_TOP,
   DETAIL_BOTTOM,
 } from '../../src/ui/settings/settingsGeometry';
-import { skillDetailViewport } from '../../src/ui/settings/keyGridLayout';
+import { skillDetailContentRect, skillDetailViewport } from '../../src/ui/settings/keyGridLayout';
 import { flattenCatalog } from '../../src/i18n/translator';
 import { zhCN } from '../../src/i18n/locales/zh-CN';
 import { resetButtonRect, touchResetButtonRect } from '../../src/ui/settings/logic';
@@ -168,6 +168,61 @@ describe('② 详情区的可视范围（"格阵下沿..提示行上沿"那一�
      */
     expect(vp.y + vp.h).toBeLessThanOrEqual(SETTINGS_PANEL.y + DETAIL_BOTTOM);
     expect(vp.w).toBe(SKILL_DETAIL.w);
+  });
+
+  it('⚠️ 文字内框 = 外框减 `SKILL_DETAIL.padding`（四周各一圈）', () => {
+    /**
+     * 用户 2026-10-12："技能 说明 加一点点padding"。
+     *
+     * ⚠️ padding **不是绘制时挪一下**：折行宽度与可见行数都要从**内框**算
+     * （见下面两条）。
+     */
+    const outer = skillDetailViewport();
+    const inner = skillDetailContentRect();
+    const pad = SKILL_DETAIL.padding;
+    expect(pad).toBeGreaterThan(0);
+    expect(inner.x).toBe(outer.x + pad);
+    expect(inner.y).toBe(outer.y + pad);
+    expect(inner.w).toBe(outer.w - pad * 2);
+    expect(inner.h).toBe(outer.h - pad * 2);
+  });
+
+  it('⚠️ 折行宽度用**内框**：一段"旧宽放得下、新宽放不下"的文字会多折一行', () => {
+    /**
+     * 每个字固定 10px 的假测量（折行逻辑与字体无关）。
+     *
+     * 38 字 = 380px：**外框**宽下（400 - 10 让位 = 390）是一行，
+     * **内框**宽下（384 - 10 = 374）必须折成两行 —— 若 padding 没进折行
+     * 数学，这里就会是 1 行，而画面上的长行会压到右边框上。
+     */
+    const measure = (v: string): number => [...v].length * 10;
+    const text = '啊'.repeat(38);
+    const inner = skillDetailContentRect();
+    expect(wrapText({ text, width: inner.w - 10, measure })).toHaveLength(2);
+    /** 而且每一行都**不超内框宽**（10px 让位是给滚动条的）。 */
+    for (const line of wrapText({ text, width: inner.w - 10, measure })) {
+      expect(measure(line)).toBeLessThanOrEqual(inner.w - 10);
+    }
+  });
+
+  it('⚠️ 可见行数用**内框**高 —— 滚到底时最后一行不会被 padding 裁掉', () => {
+    /**
+     * 行高 22（`SkillDetail.LINE_H`；那边注释里写着为什么是 22）。
+     *
+     * 不变量：`可见行数 × 行高 ≤ 内框高` —— 滚到底（`offset = total - rows`）
+     * 时最后一行的下沿正好落在内框底边上，不多不少。
+     * ⚠️ 若有人拿**外框**高算行数，这个不等式就会破（那一行被画到
+     * padding 里 / 被裁掉）。
+     */
+    const LINE_H = 22;
+    const inner = skillDetailContentRect();
+    const outer = skillDetailViewport();
+    const rowsInner = Math.floor(inner.h / LINE_H);
+    expect(rowsInner * LINE_H).toBeLessThanOrEqual(inner.h);
+    /** 外框算出来的行数**确实更多**（否则这条断言没有意义）。 */
+    const rowsOuter = Math.floor(outer.h / LINE_H);
+    expect(rowsOuter).toBeGreaterThan(rowsInner);
+    expect(rowsOuter * LINE_H).toBeGreaterThan(inner.h);
   });
 
   it('高度**够滚**（至少 3 行文字；否则说明会被截断）', () => {
