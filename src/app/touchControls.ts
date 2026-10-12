@@ -45,7 +45,7 @@ import {
   TOUCH_BUTTON_DIAMETER,
   touchButtonCenter,
 } from '../render/touchButtonLayer';
-import { detectBrowserPlatform, type PlatformCaps } from '../render/platform';
+import { capsOf, type OperationMode, type PlatformCaps } from '../render/platform';
 import type { BattleSnapshotView, SkillSlotView } from '../render/viewModel';
 import { withStaticSlots } from './touchStaticSlots';
 import type { TranslateFn } from '../i18n/translator';
@@ -121,6 +121,14 @@ export interface TouchControlsOptions {
    */
   readonly currentSkillIds: () => ReadonlySet<string> | undefined;
   /**
+   * **当前操作方式**（唯一 flag，见 `render/platform`）。
+   *
+   * ⚠️ 是**取值函数**：用户可以在「通用」页把方式切过去，而触屏控件
+   * （布局 + 按钮层 + 输入源）的生命周期比一局长得多 —— 传快照就会
+   * 停在构造那一刻。
+   */
+  readonly mode: () => OperationMode;
+  /**
    * **没上技能栏**的按钮要用的静态槽位（名字 / 代价 / 固有冷却）。
    *
    * ==================================================================
@@ -138,10 +146,16 @@ export interface TouchControlsOptions {
 }
 
 export interface TouchControls {
-  readonly caps: PlatformCaps;
   readonly layout: TouchLayout;
   readonly layer: TouchButtonLayer;
-  /** 触屏输入源。非触屏设备上是 `undefined`。 */
+  /**
+   * 触屏输入源。
+   *
+   * ⚠️ **总是建出来的**（即使当前是键盘方式）：操作方式是用户能在
+   * 「通用」页切的东西，而"按下时再判"比"构造时判一次"少一条会漂的
+   * 分支 —— 切到触屏之后不必重建控件。非触屏方式下
+   * `onPointerDown` 直接返回 `false`（见那里），输入源拿不到事件。
+   */
   readonly input: InputSource | undefined;
   /**
    * 处理一次按下。返回 `true` 表示**已被触屏按钮消费**，
@@ -179,11 +193,16 @@ export interface TouchControls {
 /**
  * 创建触屏控件。
  *
- * 非触屏设备上 `layer` 仍然是可用的空层（调用方不必到处判空），
- * 但 `input` 是 `undefined`、`layer.root.visible` 永远是 `false`。
+ * 非触屏方式下 `layer` 仍然是可用的空层（调用方不必到处判空）：
+ * `layer.root.visible` 每帧都会按**当前操作方式**重新判一次。
  */
 export function createTouchControls(options: TouchControlsOptions): TouchControls {
-  const caps = detectBrowserPlatform();
+  /**
+   * ⚠️ `caps` 每次**现读**（不是构造期的快照）：操作方式是「通用」页能切
+   * 的，切完之后按钮层 / 命中区 / 输入路由都要跟着变 —— 这正是"唯一 flag"
+   * 的意思：没有第二处缓存它的地方。
+   */
+  const caps = (): PlatformCaps => capsOf(options.mode());
   /**
    * 按钮表 = **用户选的技能** ∩ 这一局真的有的技能。
    *
@@ -223,7 +242,7 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
    * 后者会把空洞压掉，第 3 个键位上的技能就跑到第 2 个位置去了。
    */
   layer.setButtons(slotsFromButtons(layout.current()));
-  layer.root.visible = caps.touch;
+  layer.root.visible = caps().touch;
 
   /**
    * 命中区域由**按钮层**的几何算出来 —— 因为"按钮画在哪"只有它知道。
@@ -232,7 +251,7 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
    * （那正是"唯一真相"要避免的）。
    */
   const hitAreas = (): readonly TouchHitArea[] => {
-    if (!caps.touch) return [];
+    if (!caps().touch) return [];
     const buttons = layout.current();
     const radius = TOUCH_BUTTON_DIAMETER / 2;
     const derived = options.derivedSkill();
@@ -258,14 +277,16 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
       .filter((a): a is TouchHitArea => a !== undefined);
   };
 
-  const input: TouchInputSource | undefined = caps.touch
-    ? createTouchInput({
-        layout,
-        currentTick: options.currentTick,
-        hitAreas,
-        isCapturing: options.isSettingsOpen,
-      })
-    : undefined;
+  /**
+   * ⚠️ **总是建出来**（见 `TouchControls.input` 的说明）：操作方式是可切的，
+   * 而"这一层能不能吃到事件"由 `onPointerDown` 里的 `caps().touch` 判定。
+   */
+  const input: TouchInputSource = createTouchInput({
+    layout,
+    currentTick: options.currentTick,
+    hitAreas,
+    isCapturing: options.isSettingsOpen,
+  });
 
   /** 布局变化 → 按钮层跟着重画（"监听变化"的另一个落点）。 */
   const offLayout = layout.subscribe((buttons) => {
@@ -273,7 +294,6 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
   });
 
   return {
-    caps,
     layout,
     layer,
     input,
@@ -289,20 +309,33 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
        * 见文件头的"点击路由"说明。
        */
       if (options.isSettingsOpen()) return false;
-      if (input === undefined) return false;
+      /**
+       * ⚠️ **键盘方式下触屏按钮不吃指针**：输入源现在是"总是建出来"的
+       * （见 `TouchControls.input`），所以这道闸门必须在这里 ——
+       * 否则键盘用户点画布会莫名其妙放出技能。
+       */
+      if (!caps().touch) return false;
       return input.pointerDown(pointerId, px, py);
     },
 
     onPointerUp(pointerId) {
-      input?.pointerUp(pointerId);
+      input.pointerUp(pointerId);
     },
 
     onPointerCancel(pointerId) {
-      input?.pointerCancel(pointerId);
+      input.pointerCancel(pointerId);
     },
 
     frame(view) {
-      if (!caps.touch) return;
+      /**
+       * ⚠️ 切回键盘方式时要**主动隐藏**（早退不能省掉这一句）：按钮层
+       * 的显隐是每帧算的，切方式没有事件 —— 这里漏一次，双弧就会一直
+       * 留在屏幕上，而键盘方式下它们既不该看也点不动。
+       */
+      if (!caps().touch) {
+        layer.root.visible = false;
+        return;
+      }
       /**
        * ⚠️ **非战斗的一切 phase 都隐藏按钮层**（首页 / 选角色 / 自由模式）。
        *
@@ -355,12 +388,12 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
        * 不是"键 → 技能"的映射），但接口为了与键盘一致要求一个参数。
        * 传空数组，语义是"没有键盘绑定"。
        */
-      input?.setBindings([]);
+      input.setBindings([]);
     },
 
     dispose() {
       offLayout();
-      input?.dispose();
+      input.dispose();
       layer.dispose();
     },
   };

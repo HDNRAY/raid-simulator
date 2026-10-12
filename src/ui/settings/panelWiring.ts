@@ -31,6 +31,7 @@ import {
   type PanelDispatch,
 } from './panelDispatch';
 import type { Direction, SettingsFocus, SettingsTab } from './logic';
+import type { OperationMode } from '../../render/platform';
 
 /**
  * 面板对外的**动作面**（点击与按键共用同一份）。
@@ -43,17 +44,12 @@ import type { Direction, SettingsFocus, SettingsTab } from './logic';
 export interface PanelActions {
   readonly close: () => void;
   readonly switchTab: (tab: SettingsTab) => void;
-  /** 恢复**键盘**键位（底部那个按钮在非触屏设备上的行为）。 */
+  /** 「通用」页切操作方式（唯一 flag 的写入点）。 */
+  readonly switchOperationMode: (mode: OperationMode) => void;
+  /** 恢复**键盘**键位（键盘块那个按钮）。 */
   readonly resetKeys: () => void;
-  /** 恢复**触屏**键位（同一个按钮在触屏设备上的行为）。 */
+  /** 恢复**触屏**键位（触屏块那个按钮）。 */
   readonly resetTouch: () => void;
-  /**
-   * 是不是触屏设备 —— 只用来决定那个按钮恢复谁。
-   *
-   * ⚠️ 函数而不是值：能力值由 `touchCapsSource` 在触屏层构造后**回填**
-   * （见 `app/settingsSetup.ts`），构造期读到的是占位值。
-   */
-  readonly touch: () => boolean;
   /** 提示一行（已翻译的文案）。 */
   readonly notice: (text: string) => void;
   /** 把某个技能改绑到某个键（收尾由 `finishCapture` 做）。 */
@@ -82,9 +78,9 @@ export function runPanelClick(action: PanelDispatch, a: PanelActions): boolean {
   return executePanelDispatch(action, {
     close: a.close,
     switchTab: a.switchTab,
+    switchOperationMode: a.switchOperationMode,
     resetKeys: a.resetKeys,
     resetTouch: a.resetTouch,
-    touch: a.touch,
     notice: a.notice,
     swapSlots: a.swapSlots,
     focusSkill: a.focusSkill,
@@ -106,9 +102,9 @@ export function runPanelKey(
   return executeKeyPanelAction(input, {
     close: a.close,
     switchTab: a.switchTab,
+    switchOperationMode: a.switchOperationMode,
     resetKeys: a.resetKeys,
     resetTouch: a.resetTouch,
-    touch: a.touch,
     notice: a.notice,
     rebind: a.rebind,
     selectSlot: a.selectSlot,

@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { resetDoneKey, resetLabelKey, resetTargetFor } from '../../src/ui/settings/resetButton';
 import { wrapText } from '../../src/ui/settings/wrapText';
 import { slotLookOf, slotStateOf } from '../../src/render/slotLook';
 import { PALETTE } from '../../src/render/theme';
@@ -11,6 +10,10 @@ import {
   DETAIL_BOTTOM,
 } from '../../src/ui/settings/settingsGeometry';
 import { skillDetailViewport } from '../../src/ui/settings/keyGridLayout';
+import { flattenCatalog } from '../../src/i18n/translator';
+import { zhCN } from '../../src/i18n/locales/zh-CN';
+import { resetButtonRect, touchResetButtonRect } from '../../src/ui/settings/logic';
+import { TOUCH_PREVIEW } from '../../src/ui/settings/settingsGeometry';
 
 /**
  * 这一轮（2026-10-12）新抽出来的三块**纯逻辑**：详情区的滚动/颜色/恢复默认。
@@ -85,22 +88,38 @@ describe('⑤ 触屏圆钮与技能栏共用同一套槽位配色（唯一真相
   });
 });
 
-describe('⑥ 唯一的「恢复默认」按设备分流（用户 2026-10-12 定案）', () => {
-  it('触屏 → 触屏键位；非触屏 → 键盘键位', () => {
-    expect(resetTargetFor(true)).toBe('touch');
-    expect(resetTargetFor(false)).toBe('keys');
+describe('⑥ 两块各自的「恢复默认」（用户 2026-10-12 二次定案）', () => {
+  /**
+   * ⚠️ 上一版是"**一个**按钮 + 按设备分流"（`resetButton.resetTargetFor`），
+   * 那个纯函数随这一轮**删掉了**：探测故意偏保守，于是触屏笔记本上
+   * 键盘键位恢复不了（用户报的正是它）。
+   *
+   * 现在"恢复什么"由"**点在哪个块里的按钮**"决定 —— 两件事都是结构性的：
+   *
+   *   键盘块（`resetButtonRect`）      → `settings.keysReset`  / `keysResetDone`
+   *   触屏块（`touchResetButtonRect`） → `settings.touchReset` / `touchResetDone`
+   *
+   * 所以这里守两条：**位置**（两个不相交的矩形）与**文案来源**（i18n key）。
+   */
+  it('两个恢复按钮在**各自那块配置旁**（矩形不相交）', () => {
+    const a = resetButtonRect();
+    const b = touchResetButtonRect();
+    const overlap = a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    expect(overlap).toBe(false);
   });
 
-  it('文案与通知都按目标取 **i18n key**（渲染层不硬编码）', () => {
-    expect(resetLabelKey('keys')).toBe('settings.keysReset');
-    expect(resetLabelKey('touch')).toBe('settings.touchReset');
-    expect(resetDoneKey('keys')).toBe('settings.keysResetDone');
-    expect(resetDoneKey('touch')).toBe('settings.touchResetDone');
+  it('触屏那个按钮贴在键位预览块下方（不与预览重叠）', () => {
+    const b = touchResetButtonRect();
+    const previewBottom = SETTINGS_PANEL.y + TOUCH_PREVIEW.top + TOUCH_PREVIEW.h;
+    expect(b.y).toBeGreaterThanOrEqual(previewBottom);
   });
 
-  it('两条 i18n key **都还在**（功能都保留，只是不同时出现）', () => {
-    expect(resetLabelKey('keys')).not.toBe(resetLabelKey('touch'));
-    expect(resetDoneKey('keys')).not.toBe(resetDoneKey('touch'));
+  it('两条 i18n key **都还在**、而且文案不同（两块各自一套）', () => {
+    const keys = flattenCatalog(zhCN);
+    expect(keys.get('settings.keysReset')).toBeTruthy();
+    expect(keys.get('settings.touchReset')).toBeTruthy();
+    expect(keys.get('settings.keysReset')).not.toBe(keys.get('settings.touchReset'));
+    expect(keys.get('settings.keysResetDone')).not.toBe(keys.get('settings.touchResetDone'));
   });
 });
 

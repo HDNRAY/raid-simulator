@@ -22,11 +22,11 @@ import { createSettingsToggle, type SettingsToggle } from './settingsToggle';
 import { settingsOriginOf } from './phaseLogic';
 import { clampUiScale } from '../render/scaling';
 import { translateSafe } from './translate';
+import type { OperationMode } from '../render/platform';
 import type { SettingsStore } from './settingsStore';
 import type { ContentRegistry } from '../core/content/registry';
 import type { KeyBinding } from '../input/keyboard';
 import type { BattleLoop } from './battleLoop';
-import type { TouchCapsSource } from './touchSetup';
 import type { GameState } from './flow';
 
 /** 设置装配需要的外部依赖。 */
@@ -35,7 +35,13 @@ export interface SettingsSetupDeps {
   readonly app: {
     readonly stage: { addChild(child: unknown): unknown };
   };
-  readonly registry: ContentRegistry;
+  /**
+   * **当前出战角色的注册表**（取值函数）—— 「按键」页按它列技能
+   * （用户 2026-10-12："根据当前选的人，设置里决定显示谁的技能"）。
+   *
+   * ⚠️ 是取值函数：备战界面改人选之后，键位表要跟着换。
+   */
+  readonly registry: () => ContentRegistry;
   readonly settingsStore: SettingsStore;
   /** 当前战斗循环（备战阶段为 `undefined`）。 */
   readonly battle: () => BattleLoop | undefined;
@@ -61,6 +67,14 @@ export interface SettingsSetupDeps {
    */
   readonly onTouchButtonsChanged: (next: readonly string[]) => void;
   /**
+   * 用户在「通用」页切了**操作方式**（键盘 / 触屏）—— 唯一 flag 的写入点。
+   *
+   * ⚠️ 面板**不自己存**这件事：它要同时改 `GameState.operationMode`、
+   * 存档、以及键位表读哪一份（那三件事分属不同模块）—— 所以面板只发通知，
+   * 落点在 `game.ts` 的 `applyOperationMode`。
+   */
+  readonly onOperationModeChanged: (mode: OperationMode) => void;
+  /**
    * 与触屏输入源无关的那部分可变状态。
    *
    * ⚠️ `phase` / `bindings` / `touchButtons` / `uiScale` /
@@ -77,6 +91,7 @@ export interface SettingsSetupDeps {
     | 'bindings'
     | 'touchButtons'
     | 'uiScale'
+    | 'operationMode'
     | 'settingsButtonFocused'
     | 'handlingKeyDown'
   >;
@@ -87,42 +102,25 @@ export interface SettingsSetup {
   readonly settings: SettingsPanel;
   readonly settingsButton: SettingsButton;
   readonly settingsToggle: SettingsToggle;
-  readonly touchCapsSource: TouchCapsSource;
 }
 
 /**
  * 造设置面板 + 齿轮按钮 + 开关。
  *
- * ⚠️ **顺序是刻意的**（原先散在 `main.ts` 里，这里一次说清）：
- *   1. `touchCapsSource` 先占位 —— 设置面板**必须先于** `touch` 构造
- *      （它要接收 `touch` 的能力值）。`touchSetup.ts` 建好触屏层后会回填它。
- *   2. 面板 → 齿轮 → 开关。
- *   3. 开关只能读 `battle()?.isPaused`（**取值函数**，不是构造期的值）——
+ * ⚠️ **顺序**：
+ *   1. 面板 → 齿轮 → 开关。
+ *   2. 开关只能读 `battle()?.isPaused`（**取值函数**，不是构造期的值）——
  *      所以"设置比战斗循环晚"或"比它早"都不影响 `isPaused` 的解析：
  *      它只在 `open()` / `close()` 时被调用，那时战斗状态已经就绪。
+ *
+ * ⚠️ **不再有"能力值转交点"**：操作方式住在 `GameState.operationMode`
+ * （唯一 flag），面板与触屏层都只是它的读者 —— 没有"谁先构造谁产出"，
+ * 也就没有占位值/回填（见 `touchSetup.ts` 文件头那段）。
  */
 export function createSettingsSetup(d: SettingsSetupDeps): SettingsSetup {
-  /**
-   * 触屏**能力值**的转交点。
-   *
-   * ⚠️ 设置面板**必须先于** `touch` 构造（它要按能力值决定是否显示键位
-   * 提示），而能力值只有触屏层建好才知道。用一个**常量对象**当转交点：
-   * `const` 符合 lint，且不依赖"首次渲染足够晚"这种隐含前提。
-   */
-  const touchCapsSource: TouchCapsSource = {
-    showKeyHints: true,
-    /**
-     * ⚠️ 触屏层建好之前先当**非触屏**（保守）：那一刻玩家还没看到面板，
-     * 而"把触屏设备当桌面"最坏的后果是底部那个按钮的**文案**在首帧是
-     * 键盘那套 —— 反正马上会被 `touchSetup` 回填。反过来（先当触屏）
-     * 会让桌面用户在第一帧看到触屏文案，更容易被误认成 bug。
-     */
-    touch: false,
-  };
-
   const settings = new SettingsPanel(
     buildSettingsOptions({
-      registry: d.registry,
+      getRegistry: () => d.registry(),
       getBindings: () => d.state.bindings,
       setBindings: (next) => {
         d.state.bindings = next;
@@ -150,12 +148,13 @@ export function createSettingsSetup(d: SettingsSetupDeps): SettingsSetup {
       },
       snapshot: () => d.battle()?.snapshot,
       translate: translateSafe,
-      getShowKeyHints: () => touchCapsSource.showKeyHints,
       /**
-       * ⚠️ 与 `getShowKeyHints` 一样是**函数**（能力值在触屏层构造后才
-       * 回填）—— 而它只服务一件事：底部那个唯一的「恢复默认」恢复谁。
+       * ⚠️ **唯一 flag**（`GameState.operationMode`）：面板要用它回答
+       * "显示键盘绑定还是触屏键位"、"要不要拼键名"两个问题 ——
+       * 两个视图都从这一个值派生，没有第二个来源。
        */
-      getTouchCapable: () => touchCapsSource.touch,
+      getOperationMode: () => d.state.operationMode,
+      onOperationMode: (mode) => d.onOperationModeChanged(mode),
       pixi: { Container, Graphics, Sprite, Text },
       close: () => settingsToggle.close(),
       capture: (handler) => d.battle()?.inputSource?.capture(handler),
@@ -189,5 +188,5 @@ export function createSettingsSetup(d: SettingsSetupDeps): SettingsSetup {
     setPaused: (value) => d.battle()?.setPaused(value),
   });
 
-  return { settings, settingsButton, settingsToggle, touchCapsSource };
+  return { settings, settingsButton, settingsToggle };
 }

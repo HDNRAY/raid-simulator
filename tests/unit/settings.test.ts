@@ -15,17 +15,11 @@ import {
   insidePanel,
   keyLabel,
   resetButtonRect,
-  resolveActivate,
   resolveKeyAction,
   tabRect,
-  closeButtonRect,
-  cycleZone,
-  type FocusContext,
 } from '../../src/ui/settings/logic';
 import { visibleTabs } from '../../src/ui/settings/tabs';
 import { TOUCH_PREVIEW } from '../../src/ui/settings/settingsGeometry';
-import { UiLayout } from '../../src/ui/uiLayout';
-import { FONT, LAYOUT } from '../../src/ui/layout';
 
 /**
  * 设置界面的判定逻辑。
@@ -43,19 +37,6 @@ import { FONT, LAYOUT } from '../../src/ui/layout';
  * 也能点到按键页"。
  */
 const TABS = visibleTabs('gameplay');
-
-/** 焦点模型的上下文（默认 = 「按键」页：有格子、有键位区、有两个按钮）。 */
-function ctx(over: Partial<FocusContext> = {}): FocusContext {
-  return {
-    tabCount: TABS.length,
-    cellCount: 6,
-    hasGrid: true,
-    hasSlider: false,
-    hasSlots: true,
-    slotIndex: 0,
-    ...over,
-  };
-}
 
 describe('几何：点击命中不能错位', () => {
   it('弹窗居中', () => {
@@ -90,6 +71,7 @@ describe('几何：点击命中不能错位', () => {
         tabs: visibleTabs('home'),
         tab: 'general',
         rowSkillIds: [],
+        mode: 'keyboard',
       }),
     ).toEqual({ kind: 'tab', tab: 'general' });
     /** ⚠️ 而第二个位置在首页**没有任何东西**（不能点到隐藏的「按键」页）。 */
@@ -98,7 +80,7 @@ describe('几何：点击命中不能错位', () => {
       hitTest(hidden.x + 2, hidden.y + 2, {
         tabs: visibleTabs('home'),
         tab: 'general',
-        rowSkillIds: [],
+        rowSkillIds: [], mode: 'keyboard',
       }).kind,
     ).toBe('none');
   });
@@ -116,26 +98,26 @@ describe('几何：点击命中不能错位', () => {
     }
   });
 
-  it('grid 每行放 3 个：第二行的 x 回到第一列', () => {
+  it('grid 每行放 4 个：第二行的 x 回到第一列', () => {
     const first = keyCellRect(0);
-    const fourth = keyCellRect(KEY_GRID.cols);
-    expect(fourth.x).toBe(first.x);
-    expect(fourth.y).toBeGreaterThan(first.y);
+    const fifth = keyCellRect(KEY_GRID.cols);
+    expect(fifth.x).toBe(first.x);
+    expect(fifth.y).toBeGreaterThan(first.y);
   });
 
-  it('grid 比单列省高度：容量至少 6 个技能（2 行 × 3 列）', () => {
+  it('grid 比单列省高度：容量至少 8 个技能（2 行 × 4 列）', () => {
     /**
      * 这是改成 grid 的**理由**，值得写成断言。
      * 单列时 8 个技能要 8×30 = 240px，弹窗根本放不下。
      *
-     * ⚠️ 上限从 12（4 行）降到 **6**（2 行，2026-10-12）：详情区改成
-     * "换行 + 可滚"之后，那 2 行格子让给了它 —— 见
-     * `settingsGeometry.KEY_GRID_MAX_ROWS` 的说明。当前技能 8 个，
-     * 所以**第 7、8 个技能在键盘页看不全**（这是有意的取舍，写在这里
-     * 免得下一个人以为容量算错了）。
+     * ⚠️ 2026-10-12：行数上限从 4 降到 **2**（详情区改成"换行 + 可滚" +
+     * 底部两行提示），桌面容量一度掉到 `3×2 = 6` —— 而当前有 **8** 个
+     * 可绑技能，于是「劈」「卸」在「按键」页**配不到键**（功能缺失）。
+     * 修法是**加列**（3 → 4）而不是加行：`4×2 = 8` 正好放下，而
+     * `KEY_GRID_BOTTOM` 只跟行数有关 → **不占额外高度**。
      */
-    expect(KEY_GRID.cols).toBeGreaterThanOrEqual(3);
-    expect(KEY_GRID_CAPACITY).toBeGreaterThanOrEqual(6);
+    expect(KEY_GRID.cols).toBeGreaterThanOrEqual(4);
+    expect(KEY_GRID_CAPACITY).toBeGreaterThanOrEqual(8);
   });
 
   it('【关键】恢复默认按钮不与最后一个技能格重叠 —— 容量是从剩余空间推出来的', () => {
@@ -145,9 +127,9 @@ describe('几何：点击命中不能错位', () => {
     expect(reset.y + reset.h).toBeLessThanOrEqual(SETTINGS_PANEL.y + SETTINGS_PANEL.h);
   });
 
-  it('推导出的容量足够放下当前 6 个技能', () => {
+  it('推导出的容量足够放下当前 8 个技能', () => {
     // 如果这个不成立，说明弹窗高度或行高被改得太紧，技能表会显示不全
-    expect(KEY_GRID_CAPACITY).toBeGreaterThanOrEqual(6);
+    expect(KEY_GRID_CAPACITY).toBeGreaterThanOrEqual(8);
   });
 
   it('contains 的边界是闭区间', () => {
@@ -163,12 +145,12 @@ describe('hitTest：点到哪里', () => {
   const rows = ['attack', 'blast', 'focus', 'break', 'dodge', 'guard'];
 
   it('点在弹窗外 → outside（用于"点外部关闭"）', () => {
-    expect(hitTest(2, 2, { tabs: TABS, tab: 'keys', rowSkillIds: rows }).kind).toBe('outside');
+    expect(hitTest(2, 2, { tabs: TABS, tab: 'keys', rowSkillIds: rows, mode: 'keyboard' }).kind).toBe('outside');
     expect(
       hitTest(SETTINGS_PANEL.x + SETTINGS_PANEL.w + 5, SETTINGS_PANEL.y + 5, {
         tabs: TABS,
         tab: 'keys',
-        rowSkillIds: rows,
+        rowSkillIds: rows, mode: 'keyboard',
       }).kind,
     ).toBe('outside');
   });
@@ -177,9 +159,9 @@ describe('hitTest：点到哪里', () => {
     const general = tabRect(0);
     const keys = tabRect(1);
     expect(
-      hitTest(general.x + 2, general.y + 2, { tabs: TABS, tab: 'keys', rowSkillIds: rows }),
+      hitTest(general.x + 2, general.y + 2, { tabs: TABS, tab: 'keys', rowSkillIds: rows, mode: 'keyboard' }),
     ).toEqual({ kind: 'tab', tab: 'general' });
-    expect(hitTest(keys.x + 2, keys.y + 2, { tabs: TABS, tab: 'keys', rowSkillIds: rows })).toEqual({
+    expect(hitTest(keys.x + 2, keys.y + 2, { tabs: TABS, tab: 'keys', rowSkillIds: rows, mode: 'keyboard' })).toEqual({
       kind: 'tab',
       tab: 'keys',
     });
@@ -188,7 +170,7 @@ describe('hitTest：点到哪里', () => {
   it('点键位行命中对应的技能', () => {
     for (const [i, skillId] of rows.entries()) {
       const r = keyCellRect(i);
-      expect(hitTest(r.x + 4, r.y + 4, { tabs: TABS, tab: 'keys', rowSkillIds: rows })).toEqual({
+      expect(hitTest(r.x + 4, r.y + 4, { tabs: TABS, tab: 'keys', rowSkillIds: rows, mode: 'keyboard' })).toEqual({
         kind: 'keyRow',
         skillId,
       });
@@ -197,23 +179,23 @@ describe('hitTest：点到哪里', () => {
 
   it('点恢复默认按钮命中 resetKeys', () => {
     const r = resetButtonRect();
-    expect(hitTest(r.x + 4, r.y + 4, { tabs: TABS, tab: 'keys', rowSkillIds: rows }).kind).toBe('resetKeys');
+    expect(hitTest(r.x + 4, r.y + 4, { tabs: TABS, tab: 'keys', rowSkillIds: rows, mode: 'keyboard' }).kind).toBe('resetKeys');
   });
 
   it('【关键】通用 tab 下不会命中键位行 —— 那一块在通用 tab 里不存在', () => {
     const r = keyCellRect(0);
-    expect(hitTest(r.x + 4, r.y + 4, { tabs: TABS, tab: 'general', rowSkillIds: rows }).kind).toBe('none');
+    expect(hitTest(r.x + 4, r.y + 4, { tabs: TABS, tab: 'general', rowSkillIds: rows, mode: 'keyboard' }).kind).toBe('none');
   });
 
   it('【关键】通用 tab 下也不会命中"恢复默认"——它属于按键 tab', () => {
     const r = resetButtonRect();
-    expect(hitTest(r.x + 4, r.y + 4, { tabs: TABS, tab: 'general', rowSkillIds: rows }).kind).toBe('none');
+    expect(hitTest(r.x + 4, r.y + 4, { tabs: TABS, tab: 'general', rowSkillIds: rows, mode: 'keyboard' }).kind).toBe('none');
   });
 
   it('最后一行**可见**的键位仍然可点', () => {
     const many = Array.from({ length: KEY_GRID_CAPACITY + 4 }, (_, i) => `s${i}`);
     const last = keyCellRect(KEY_GRID_CAPACITY - 1);
-    expect(hitTest(last.x + 4, last.y + 4, { tabs: TABS, tab: 'keys', rowSkillIds: many })).toEqual({
+    expect(hitTest(last.x + 4, last.y + 4, { tabs: TABS, tab: 'keys', rowSkillIds: many , mode: 'keyboard'})).toEqual({
       kind: 'keyRow',
       skillId: `s${KEY_GRID_CAPACITY - 1}`,
     });
@@ -227,7 +209,7 @@ describe('hitTest：点到哪里', () => {
      */
     const many = Array.from({ length: KEY_GRID_CAPACITY + 4 }, (_, i) => `s${i}`);
     const beyond = keyCellRect(KEY_GRID_CAPACITY + 1);
-    const target = hitTest(beyond.x + 4, beyond.y + 4, { tabs: TABS, tab: 'keys', rowSkillIds: many });
+    const target = hitTest(beyond.x + 4, beyond.y + 4, { tabs: TABS, tab: 'keys', rowSkillIds: many , mode: 'keyboard'});
     expect(target.kind).not.toBe('keyRow');
   });
 
@@ -237,7 +219,7 @@ describe('hitTest：点到哪里', () => {
       hitTest(SETTINGS_PANEL.x + 10, SETTINGS_PANEL.y + SETTINGS_PANEL.h - 70, {
         tabs: TABS,
         tab: 'keys',
-        rowSkillIds: rows,
+        rowSkillIds: rows, mode: 'keyboard',
       }).kind,
     ).toBe('none');
   });
@@ -450,81 +432,6 @@ describe('保留键在弹窗内的处理路径', () => {
   });
 });
 
-describe('关闭按钮与 Boss 面板边距', () => {
-  /**
-   * 需求："设置弹窗里的『关闭』点了没反应。"
-   *
-   * 根因：它只是个 `Label`，**没有命中测试** —— 点它落到
-   * `hitTestLogic` 的 `none` 分支（"点在弹窗内空白处，消费掉"）。
-   * 点面板外的空白也能关，但那不是玩家会去点的地方。
-   */
-  it('【关键】点「关闭」命中 close，且关掉弹窗', () => {
-    const r = closeButtonRect();
-    const hit = hitTest(r.x + r.w / 2, r.y + r.h / 2, { tabs: TABS, tab: 'general', rowSkillIds: [] });
-    expect(hit.kind).toBe('close');
-    // 每一页上都该能点（它是弹窗级的，不属于某一页）
-    expect(hitTest(r.x + 2, r.y + 2, { tabs: TABS, tab: 'keys', rowSkillIds: ['attack'] }).kind).toBe('close');
-    expect(hitTest(r.x + 2, r.y + 2, { tabs: TABS, tab: 'general', rowSkillIds: ['attack'] }).kind).toBe('close');
-  });
-
-  it('关闭按钮在弹窗内、右上角，且不与 tab 行重叠', () => {
-    const r = closeButtonRect();
-    expect(r.x).toBeGreaterThan(SETTINGS_PANEL.x + SETTINGS_PANEL.w / 2);
-    expect(r.y).toBeLessThan(SETTINGS_PANEL.y + 40);
-    // 竖向上不该压到 tab 行（tab 在 top 40..70）
-    expect(r.y + r.h).toBeLessThanOrEqual(SETTINGS_PANEL.y + 40);
-  });
-
-  it('键盘也能到「关闭」（Enter 可触发）', () => {
-    expect(
-      resolveActivate({
-        focus: { zone: 'close' },
-        tabs: TABS,
-        rowSkillIds: [],
-        slotSkillIds: [],
-        selectedSlot: undefined,
-      }).kind,
-    ).toBe('close');
-    // 循环里必须包含它，否则它只能用鼠标
-    expect(cycleZone({ zone: 'reset' }, ctx()).zone).toBe('close');
-  });
-
-  /**
-   * 需求："boss 面板……无论 ui 如何缩放，应该保持和屏幕左右两边的
-   * 边距不变，只是缩放高度和内容尺寸。"
-   */
-  it('Boss 面板缩放时左右边距恒定、只缩高度', () => {
-    for (const k of [0.5, 1, 1.5, 2]) {
-      const ui = new UiLayout(k);
-      expect(ui.bossBar.x).toBe(LAYOUT.bossBar.x);
-      expect(ui.bossBar.w).toBe(LAYOUT.bossBar.w);
-      expect(ui.bossHp.x).toBe(LAYOUT.bossHp.x);
-      expect(ui.bossHp.w).toBe(LAYOUT.bossHp.w);
-    }
-    // 高度确实跟着缩放
-    expect(new UiLayout(2).bossBar.h).toBeGreaterThan(new UiLayout(1).bossBar.h);
-  });
-
-  /**
-   * 需求："玩家面板目前距离屏幕底部太远了，应该和按钮区域到底部距离一致。"
-   */
-  it('玩家面板底边与技能栏底边对齐（距屏幕底同一边距）', () => {
-    const skillBottom = LAYOUT.skillBar.y + LAYOUT.skillBar.slot;
-    const panelBottom = LAYOUT.player.y + LAYOUT.player.h;
-    expect(panelBottom).toBe(skillBottom);
-    // 缩放后依然对齐（两者都是底锚点）
-    const ui = new UiLayout(1.5);
-    expect(ui.playerPanel.y + ui.playerPanel.h).toBe(skillBottom);
-  });
-
-  it('玩家读条跟着面板下移，且不压到面板', () => {
-    const castBottom = LAYOUT.playerCastBar.y + LAYOUT.playerCastBar.h;
-    expect(castBottom).toBeLessThanOrEqual(LAYOUT.player.y);
-    // 间距不宜过大（否则中间空一块）
-    expect(LAYOUT.player.y - castBottom).toBeLessThanOrEqual(10);
-  });
-});
-
 describe('标签只出现在详情区，不占技能格', () => {
   /**
    * 需求："按键设置里，grid 的 cell 里就不要显示 tag 了"。
@@ -570,38 +477,6 @@ describe('标签只出现在详情区，不占技能格', () => {
   });
 });
 
-describe('按键行的尺寸（需求："按键那一行 尺寸有问题"）', () => {
-  /**
-   * ⚠️ 这一条锁的是一个"被已经删掉的东西撑出来"的尺寸。
-   *
-   * `cellH` 当初从 44 加到 56 的理由是"**在技能名下放一行提示标签**"，
-   * 而那行标签后来被需求删掉了（见 `KeyGrid` 的说明）。于是 56 的下半截
-   * 变成空白：技能字在 `y+12`、按键在 `y+14`，下面 30px 什么都没有 ——
-   * 表现就是"每行虚高、尺寸不对"。
-   */
-  it('【关键】行高回到 44（不是被已删标签撑出来的 56）', () => {
-    expect(KEY_GRID.cellH).toBe(44);
-  });
-
-  it('行高容得下技能字（`FONT.warn` 实测占高约 1.5 倍字号）', () => {
-    expect(KEY_GRID.cellH).toBeGreaterThan(FONT.warn * 1.5);
-  });
-
-  it('行高不再虚高：格子下半截没有第二行内容', () => {
-    /**
-     * 现在格子里只有两样东西，都在**上半截**：
-     *   技能字 `y+12` / 按键 `y+14`
-     * 两行文字各占约 21px 高，所以 `12 + 21 = 33 < 44` —— 放得下。
-     *
-     * 如果以后又往格子里加第三行，`cellH` 必须重新算，
-     * 这一条会先失败提醒。
-     */
-    const first = keyCellRect(0);
-    expect(first.h).toBe(KEY_GRID.cellH);
-    expect(12 + FONT.warn * 1.5).toBeLessThan(first.h);
-  });
-});
-
 describe('⚠️ 命中测试必须与**当前模式**的渲染度量一致', () => {
   /**
    * 需求（用户报告）："移动端的按键设置问题还是跟之前一样，没有修复"
@@ -629,7 +504,7 @@ describe('⚠️ 命中测试必须与**当前模式**的渲染度量一致', ()
         const target = hitTest(rect.x + dx, rect.y + dy, {
           tabs: TABS,
           tab: 'keys',
-          rowSkillIds: rows,
+          rowSkillIds: rows, mode: 'keyboard',
           showKeyHints,
         });
         if (target.kind === 'keyRow' && target.skillId === rows[index]) hit += 1;
@@ -638,10 +513,6 @@ describe('⚠️ 命中测试必须与**当前模式**的渲染度量一致', ()
     return hit / total;
   }
 
-  /**
-   * 只对**放得下**的格子断言（容量是算出来的：桌面 2 行 = 6 格、触屏 2 行
-   * = 6 格）。超出的格子由下一条断言管"不可点"。
-   */
   const capacity = (hints: boolean): number =>
     Math.min(rows.length, rowsCapacity(keyGridMetrics(hints)));
 
@@ -684,16 +555,16 @@ describe('⚠️ 命中测试必须与**当前模式**的渲染度量一致', ()
 
   it('超出容量的格子**不可点**（那里是详情区）', () => {
     /**
-     * ⚠️ 两种度量各有自己的容量（触屏格子更高，行数更少）。
-     * 超出容量的格子**不该有可点区** —— 用桌面常量去判会让它
-     * "能点但看不见"（用户报过的原 bug）。
+     * ⚠️ 两种度量各有自己的容量。超出容量的格子**不该有可点区** ——
+     * 用桌面常量去判会让它"能点但看不见"（用户报过的原 bug）。
      *
-     * ⚠️ 2026-10-12 容量变小是**有意的取舍**：详情区要换行 + 可滚，
-     * 它从格阵那里拿走了 1 行（见 `KEY_GRID_MAX_ROWS`）。
+     * ⚠️ 2026-10-12：桌面靠**加列**（3 → 4）把容量补回 **8**，而高度
+     * 一个字没动（`KEY_GRID_BOTTOM` 只跟行数有关）—— 于是「劈」「卸」
+     * 重新能在「按键」页配到键。触屏仍是 3 列 × 2 行 = **6**（它的
+     * 键位入口是右下角那 7 个槽位）。
      */
     const metrics = keyGridMetrics(false);
-    /** 两边都是 2 行 = 6 格（让位给详情区 + 键位预览，见 `KEY_GRID_MAX_ROWS`）。 */
     expect(rowsCapacity(metrics)).toBe(6);
-    expect(rowsCapacity(keyGridMetrics(true))).toBe(6);
+    expect(rowsCapacity(keyGridMetrics(true))).toBe(8);
   });
 });

@@ -30,6 +30,7 @@
 
 import { hitTest, type SettingsTab } from './logic';
 import type { KeyRow } from './rows';
+import type { OperationMode } from '../../render/platform';
 
 export interface HoverQuery {
   readonly tab: SettingsTab;
@@ -37,6 +38,14 @@ export interface HoverQuery {
   readonly tabs: readonly SettingsTab[];
   readonly rows: readonly KeyRow[];
   readonly showKeyHints: boolean;
+  /**
+   * **当前操作方式**（唯一 flag）—— 命中测试要按它判"哪一块"。
+   *
+   * ⚠️ 悬停本身只在**键盘方式**下发生（面板已经挡掉了触屏那套），但这里
+   * 仍要从调用方**收**这个值、不许写死 `'keyboard'`：写死就是第二个来源，
+   * 而命中测试一旦与渲染用的方式不一致，坐标就会对到别的块上。
+   */
+  readonly mode: OperationMode;
 }
 
 /**
@@ -60,6 +69,7 @@ export class HoverTracker {
       tabs: query.tabs,
       rowSkillIds: query.rows.map((r) => r.skillId),
       showKeyHints: query.showKeyHints,
+      mode: query.mode,
     });
     if (target.kind !== 'keyRow') {
       /** 光标离开网格 → 清掉记录（见文件头最后一段：不清就"选不动 A"）。 */

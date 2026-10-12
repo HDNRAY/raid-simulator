@@ -183,25 +183,35 @@ export interface SettingsDebugTarget {
    * （"点空了"看起来和"功能坏了"一模一样）。与 `touchButtonCenter`
    * 同一个理由。
    */
-  cellCenter(index: number): { readonly x: number; readonly y: number };
-  /**
-   * 右下角第 `index` 个**键位**的圆心（逻辑坐标，`undefined` = 越界）。
-   *
-   * ⚠️ 同上：它来自预览自己的几何（也就是 `touchGeometry` 的双弧等比变换），
-   * 脚本复制一份必然与实际漂开。
-   */
-  slotCenter(index: number): { readonly x: number; readonly y: number } | undefined;
-  /**
-   * 技能详情区的滚动状态（`offset` = 第一条可见行）。
-   *
-   * ⚠️ 给验证脚本"滚动前后对比"用 —— 截图证明不了内容位移了多少。
-   */
-  detailScroll(): {
-    readonly offset: number;
-    readonly total: number;
-    readonly rows: number;
-    readonly lines: readonly number[];
+  /** ⚠️ 探针整块在 `settings.probes`（面板不再逐个转发）。 */
+  readonly probes: {
+    cellCenter(index: number): { readonly x: number; readonly y: number };
+    slotCenter(index: number): { readonly x: number; readonly y: number } | undefined;
+    /** **触屏技能面**第 `index` 格（窗口内下标）的圆心。 */
+    pickerCellCenter(index: number): { readonly x: number; readonly y: number } | undefined;
+    detailScroll(): {
+      readonly offset: number;
+      readonly total: number;
+      readonly rows: number;
+      readonly lines: readonly number[];
+    };
   };
+}
+
+/** 返回箭头（`ScreenControls`）暴露给调试的最小面。 */
+export interface BackDebugTarget {
+  readonly visible: boolean;
+  readonly bounds: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+  /**
+   * `Esc` 提示的包围盒（触屏隐藏时也仍然算得出来）。
+   *
+   * ⚠️ 它回答的是这一轮的关键问题："提示贴在自己那一侧、且没有被画布边
+   * 裁掉" —— 那件事是 `IconButton.iconHintPlacement` **推**出来的，
+   * 而这个读数是它的硬证据（截图只能看出"看着像在角上"）。
+   */
+  readonly shortcutBounds:
+    | { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
+    | undefined;
 }
 
 /** 设置**按钮**暴露给调试的最小面（`SettingsButton` 满足它）。 */
@@ -247,6 +257,13 @@ export function settingsDebugApi(
     /** 右下角第 `index` 个键位的圆心（越界为 `null`）。 */
     slotCenter(index: number): { readonly x: number; readonly y: number } | null;
     /**
+     * **触屏技能面**第 `index` 格（**窗口内**下标）的圆心（越界为 `null`）。
+     *
+     * ⚠️ 它与 `cellCenter` 是**两个面**：触屏那套自己的技能面
+     * （`TouchSkillPicker`）不再借键盘格阵。
+     */
+    pickerCellCenter(index: number): { readonly x: number; readonly y: number } | null;
+    /**
      * 技能详情区的滚动状态（`offset` 变了 = 真的滚了）。
      *
      * `lines` = 名字 / 说明折了几行 / 代价 —— 用来验证"说明**换行**了"
@@ -284,10 +301,14 @@ export function settingsDebugApi(
       /** 当前键盘焦点（调试用）。 */
       focus: () => ({ ...getSettings().focusState }),
       /** 第 `index` 个技能格的圆心（真实点击的注入坐标）。 */
-      cellCenter: (index) => ({ ...getSettings().cellCenter(index) }),
+      cellCenter: (index) => ({ ...getSettings().probes.cellCenter(index) }),
       /** 第 `index` 个键位的圆心（没有则 null）。 */
-      slotCenter: (index) => getSettings().slotCenter(index) ?? null,
-      detailScroll: () => ({ ...getSettings().detailScroll() }),
+      slotCenter: (index) => getSettings().probes.slotCenter(index) ?? null,
+      pickerCellCenter: (index) => {
+        const c = getSettings().probes.pickerCellCenter(index);
+        return c === undefined ? null : { ...c };
+      },
+      detailScroll: () => ({ ...getSettings().probes.detailScroll() }),
       trace: () => [...getSettings().settingsTrace],
       setButtonFocused: (focused) => {
         const button = getButton();

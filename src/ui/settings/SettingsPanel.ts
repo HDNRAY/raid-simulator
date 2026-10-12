@@ -8,23 +8,21 @@
  */
 
 
-import type { Container, Graphics } from 'pixi.js';
-import { LOGICAL } from '../layout';
+import type { Container } from 'pixi.js';
 import { RebindSession } from './rebindSession';
-import { resolveKeyDispatch, resolvePanelDispatch } from './panelDispatch';
-import { runPanelClick, runPanelKey, type PanelActions } from './panelWiring';
+import { resolvePanelDispatch } from './panelDispatch';
+import { runPanelClick, type PanelActions } from './panelWiring';
 import { drawBody } from './settingsBody';
 import { buildPanelActions } from './panelActions';
-import {
-  dragScaleSlider,
-  isOnDetail,
-  isOnScaleSlider,
-  wheelDetail,
-  type PointerTargets,
-} from './panelInput';
+import { buildPanelPointerRoutes, type PanelPointerRoutes } from './panelInput';
+import { makeSettingsProbes, type SettingsProbes } from './panelProbes';
+import { routePanelKey } from './panelKeyRoute';
 import { HoverTracker } from './hoverTracker';
 import { PanelNotice } from './panelNotice';
+import { buildPanelParts } from './panelBuild';
 import { KeyGrid } from './KeyGrid';
+import { TouchSkillPicker } from './TouchSkillPicker';
+import { ModeSwitch } from './ModeSwitch';
 import { TouchSlotPreview } from './TouchSlotPreview';
 import { SkillDetail } from './SkillDetail';
 import { SettingsFrame } from './SettingsFrame';
@@ -35,13 +33,15 @@ import type { PixiCtor } from '../primitives';
 import type { TranslateFn } from '../../i18n/translator';
 import {
   INITIAL_FOCUS,
-  keyCellRect,
   keyGridMetrics,
   preferredTab,
   visibleTabs,
   type FocusContext,
   type SettingsFocus,
 } from './logic';
+import { buildFocusContext, rehomeFocus } from './panelFocus';
+import { pickerScroll } from './touchPickerLayout';
+import { capsOf, type OperationMode } from '../../render/platform';
 import type { SettingsOrigin, SettingsTab } from './tabs';
 
 export type { SettingsTab, SettingsOrigin };
@@ -79,23 +79,24 @@ export interface SettingsPanelOptions {
   /** 关闭弹窗 */
   readonly onClose: () => void;
   /**
-   * 是否显示键名（需求："移动端就不用显示快捷键信息了"）。
+   * **当前操作方式**（键盘 / 触屏）—— 全应用**唯一**的那个 flag。
    *
-   * ⚠️ 是**函数**：它来自平台探测，而触屏控件在设置面板**之后**才
-   * 创建 —— 固定值会永远是 `undefined`（键名照样画出来）。
+   * ⚠️ 面板用它回答三件事（都从这一个值派生，没有第二个来源）：
+   *   - 「按键」页画**键盘块**还是**触屏块**（`caps.touch`）
+   *   - 要不要拼键名提示（`caps.showKeyHints`）
+   *   - 「通用」页那个选择器该亮哪一个
+   *
+   * ⚠️ 是**函数**：玩家能在「通用」页当场切过去，快照会停在构造那一刻。
    */
-  readonly getShowKeyHints?: (() => boolean) | undefined;
+  readonly getOperationMode: () => OperationMode;
   /**
-   * 这台设备**是不是触屏**（`render/platform` 的能力探测，**不看 UA**）。
+   * 玩家在「通用」页切了操作方式。
    *
-   * ⚠️ 与 `getShowKeyHints` **分开**：两者今天反相关，但语义不同 ——
-   * 这个字段只回答"底部那个唯一的「恢复默认」恢复谁"
-   * （用户 2026-10-12："同一时间显示一个按钮……根据当前是否是触屏"）。
-   *
-   * ⚠️ 同样是**函数**：能力值由 `touchCapsSource` 在触屏层构造后回填，
-   * 固定值会永远读到占位。
+   * ⚠️ 面板**不自己写**（`GameState.operationMode` / 存档 / 换哪一份键位表
+   * 分属不同模块）—— 落点在 `app/game.ts` 的 `applyOperationMode`，
+   * 它切完会回调面板重画（`setOperationMode`）。
    */
-  readonly getTouchCapable?: (() => boolean) | undefined;
+  readonly onOperationMode: (mode: OperationMode) => void;
   /**
    * **触屏键位表**（**下标 = 键位号**，`''` = 空键位）。**从 `GameState` 读**，
    * 不在面板里留副本 —— 与键位表同一条纪律。
@@ -120,8 +121,6 @@ export interface SettingsPanelOptions {
 export class SettingsPanel {
   readonly root: Container;
 
-  private readonly dim: Graphics;
-
   /**
    * UI 缩放滑块。
    *
@@ -143,13 +142,24 @@ export class SettingsPanel {
   /** 外框：底板 + 标题 + 「关闭」 + tab 按钮（独立组件） */
   private readonly frame: SettingsFrame;
 
-  private readonly body: Container;
   /**
    * 按键页的技能格（独立组件，见 `KeyGrid` 的说明）。
    *
    * 原先格子的构造与绘制直接写在这里 —— "面板顺手把格子也画了"。
    */
   private readonly keyGrid: KeyGrid;
+  /**
+   * **触屏技能面**（触屏方式下两步交互的第二步，独立组件）。
+   *
+   * ⚠️ 它与 `keyGrid` 是**两个组件、两套状态机**（用户："里面的实现有一半
+   * 都不一样"）：键盘格的点击是"改键"，这一面是"绑到已选中的键位"。
+   * 共用的是**技能池 / 文案来源 / 滚动数学**，不是交互。
+   */
+  private readonly picker: TouchSkillPicker;
+  /**
+   * 「通用」页的**操作方式**选择器（键盘 / 触屏）—— 唯一 flag 的用户入口。
+   */
+  private readonly modeSwitch: ModeSwitch;
   /**
    * 右下角的**模拟键位**（触屏键位配置，独立组件）。
    *
@@ -184,6 +194,17 @@ export class SettingsPanel {
   private focus: SettingsFocus = INITIAL_FOCUS;
   private visible = false;
   /**
+   * **触屏技能面当前窗口的第一个技能下标**。
+   *
+   * ⚠️ 这份状态住在面板（不在组件里）：命中测试、焦点激活、渲染三处都要
+   * 用它，而它一变就得三处一起变 —— 组件自己留一份就会出现"看着是这个
+   * 技能、点下去绑了别的"（滚动过的列表最容易出这种错）。
+   *
+   * ⚠️ 由 `picker` 组件负责**钳位**（`picker.clampOffset`，池子换角色变小
+   * 时），面板只在滚动时写它。
+   */
+  private pickerOffset = 0;
+  /**
    * **改键会话**（等按键 → 收尾 → 写回）。
    *
    * ⚠️ 整块搬到了 `./rebindSession`（这个文件又顶到 700 行上限，
@@ -209,29 +230,57 @@ export class SettingsPanel {
     this.root = new pixi.Container();
     this.root.visible = false;
 
-    this.dim = new pixi.Graphics();
-    this.dim.rect(0, 0, LOGICAL.width, LOGICAL.height).fill({ color: 0x000000, alpha: 0.66 });
-    this.root.addChild(this.dim);
-
-    this.frame = new SettingsFrame(pixi, (key, params) => this.options.translate(key, params));
-    this.root.addChild(this.frame.root);
-
-    /* ---- 内容区 ---- */
-    this.body = new pixi.Container();
-    this.root.addChild(this.body);
-
-    this.keyGrid = new KeyGrid(pixi, (key, params) => this.options.translate(key, params));
-    this.body.addChild(this.keyGrid.root);
-
-    this.footer = new KeysFooter(
-      pixi,
-      (key, params) => this.options.translate(key, params),
-      () => this.notice.text,
+    /**
+     * ⚠️ 部件怎么造整块在 `./panelBuild`（这一轮又顶到 700 行 —— AGENTS.md
+     * §3 的横向切割：那是"面板由哪些部件组成"这一个关注点）。
+     */
+    const parts = buildPanelParts(
+      {
+        pixi,
+        translate: options.translate,
+        noticeText: () => this.notice.text,
+        getUiScale: options.getUiScale,
+        onUiScale: options.onUiScale,
+      },
+      this.root,
     );
-    this.body.addChild(this.footer.root);
+    /**
+     * ⚠️ `dim` / `body` 不在这里存字段：它们只被 `partBuild` 挂进场景树，
+     * 面板自己不读（Pixi 的容器树持有引用）。存一份没人读的字段只会让
+     * "谁在用它"看起来比实际复杂。
+     */
+    this.frame = parts.frame;
+    this.keyGrid = parts.grid;
+    this.picker = parts.picker;
+    this.modeSwitch = parts.modeSwitch;
+    this.preview = parts.preview;
+    this.detail = parts.detail;
+    this.footer = parts.footer;
+    this.scaleSlider = parts.slider;
 
-    this.preview = new TouchSlotPreview(pixi, options.translate);
-    this.body.addChild(this.preview.root);
+    this.probes = makeSettingsProbes({
+      showKeyHints: () => this.showKeyHintsNow,
+      detailScroll: () => this.detail.scrollState(),
+      slotCenter: (index) => this.preview.centerOf(index),
+      rowCount: () => this.options.getRows().length,
+    });
+    this.settingsTrace = this.probes.trace;
+
+    this.pointers = buildPanelPointerRoutes({
+      visible: () => this.visible,
+      tab: () => this.tab,
+      mode: () => this.options.getOperationMode(),
+      setUiScale: (value) => this.options.onUiScale(value),
+      redraw: () => this.redraw(),
+      wheelDetail: (deltaY, deltaMode) => this.detail.wheel(deltaY, deltaMode),
+      wheelPicker: (delta) => this.scrollPicker(delta),
+      rowCount: () => this.options.getRows().length,
+      detailPointer: (phase, pointerId, py) => {
+        if (phase === 'down') this.detail.pointerDown(pointerId, py);
+        else if (phase === 'move') this.detail.pointerMove(pointerId, py);
+        else this.detail.pointerUp(pointerId);
+      },
+    });
 
     this.rebind = new RebindSession({
       translate: options.translate,
@@ -240,20 +289,8 @@ export class SettingsPanel {
       rows: () => this.options.getRows(),
       notice: (text) => this.notice.set(text),
       redraw: () => this.redraw(),
-      trace: (line) => this.pushTrace(line),
+      trace: (line) => this.probes.pushTrace(line),
     });
-
-    /* ---------- 通用页：UI 缩放滑块 ---------- */
-    this.detail = new SkillDetail(pixi, (key, params) => this.options.translate(key, params));
-    this.body.addChild(this.detail.root);
-
-    this.scaleSlider = new ScaleSlider({
-      pixi,
-      translate: options.translate,
-      get: options.getUiScale,
-      set: options.onUiScale,
-    });
-    this.body.addChild(this.scaleSlider.root);
 
     this.drawFrame();
   }
@@ -263,9 +300,23 @@ export class SettingsPanel {
     return this.tab === 'general';
   }
 
-  /** 当前 tab 有没有技能格（只有「按键」页有）。 */
+  /** 当前 tab 有没有**键盘**技能格（「按键」页 + 键盘方式）。 */
   private get hasGrid(): boolean {
-    return this.tab !== 'general';
+    return this.tab !== 'general' && !this.touchMode;
+  }
+
+  /** 当前 tab 有没有**触屏**那一套（技能面 + 键位预览）。 */
+  private get hasTouchBlock(): boolean {
+    return this.tab !== 'general' && this.touchMode;
+  }
+
+  /**
+   * **当前操作方式**（唯一 flag）—— 面板所有"键盘 / 触屏"的分支都读它。
+   *
+   * ⚠️ 每次都**现读**（函数）：玩家能在「通用」页当场切过去。
+   */
+  private get touchMode(): boolean {
+    return capsOf(this.options.getOperationMode()).touch;
   }
 
   /**
@@ -287,38 +338,40 @@ export class SettingsPanel {
   /**
    * 焦点模型要的"这一页有什么"。
    *
-   * ⚠️ 只在这里算一次并喂给 `moveFocus` / `cycleZone` —— 焦点模型不认识
-   * tab 的语义（见 `focus.FocusContext`），判断留在这一处。
+   * ⚠️ 算术搬到了 `./panelFocus`（纯函数、可在 node 里测）：列数按**当前
+   * 这一屏**取（桌面 4 / 触屏 3）、格子数封顶在容量上。这两条各有一次
+   * 真实的 bug 形态，写在那个文件头。
    */
   private focusContext(): FocusContext {
-    return {
-      tabCount: this.tabs.length,
-      cellCount: this.options.getRows().length,
+    return buildFocusContext({
+      rows: this.options.getRows(),
+      metrics: keyGridMetrics(this.showKeyHintsNow),
       hasGrid: this.hasGrid,
+      hasPicker: this.hasTouchBlock,
       hasSlider: this.hasSlider,
-      hasSlots: this.hasGrid,
-      slotIndex: this.preview.selected ?? 0,
-    };
+      hasMode: this.hasSlider,
+      tabCount: this.tabs.length,
+      selectedSlot: this.preview.selected,
+    });
   }
 
   get isOpen(): boolean {
     return this.visible;
   }
 
-  /** 按键轨迹（环形缓冲，供调试探针读取）。
+  /**
+   * **给调试探针看的那几样**（轨迹 / 滚动状态 / 格与键位的圆心）——
+   * 实现在 `./panelProbes`（这个文件顶到 700 行，AGENTS.md §3 的横向切割）。
    *
-   * 保留它是因为"按键没生效"这类问题**只能靠事件序列定位** ——
-   * 我这次排查"一次 Enter 同时进入改键并完成绑定"就是靠它，
-   * 日志一眼看出 `startCapture` 之后紧跟 `finishCapture(enter)`。
-   * 截图和单元测试都看不到这个层面的信息。
    */
-  readonly settingsTrace: string[] = [];
+  /**
+   * **公开**：`app/debugApi` 直接读它（`settings.probes.cellCenter(i)` 这类）
+   * —— 面板不再为每个探针各留一个转发方法。
+   */
+  readonly probes: SettingsProbes;
 
-  /** 记一行轨迹（环形缓冲，最多 40 行）。 */
-  private pushTrace(line: string): void {
-    this.settingsTrace.push(line);
-    if (this.settingsTrace.length > 40) this.settingsTrace.shift();
-  }
+  /** 按键轨迹（调试探针用）—— 与 `probes.trace` 是同一个数组。 */
+  readonly settingsTrace: string[];
 
   /** 正在等待按键的技能 id（调试探针用）。 */
   get capturingSkillId(): string | undefined {
@@ -328,38 +381,6 @@ export class SettingsPanel {
   /** 当前键盘焦点（调试探针用）。 */
   get focusState(): SettingsFocus {
     return this.focus;
-  }
-
-  /**
-   * 技能详情区的滚动状态（调试探针用）。
-   *
-   * ⚠️ 存在的理由与 `settingsTrace` 一样：**"滚了没有"看不出来** ——
-   * 滚动前后各拍一张图只能证明"内容位置不同"，证明不了"是谁动的、
-   * 还能不能继续滚"。验证脚本读它做前后对比。
-   */
-  detailScroll(): {
-    readonly offset: number;
-    readonly total: number;
-    readonly rows: number;
-    readonly lines: readonly number[];
-  } {
-    return this.detail.scrollState();
-  }
-
-  /**
-   * 第 `index` 个技能格的圆心（逻辑坐标）—— 验证脚本注入真实点击用。
-   *
-   * ⚠️ 走的是**渲染/命中同一份度量**（`keyGridMetrics(showKeyHintsNow)`），
-   * 不是另算一份。见 `debugApi.SettingsDebugTarget.cellCenter` 的说明。
-   */
-  cellCenter(index: number): { readonly x: number; readonly y: number } {
-    const rect = keyCellRect(index, keyGridMetrics(this.showKeyHintsNow));
-    return { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
-  }
-
-  /** 第 `index` 个**键位**的圆心（键位预览自己的几何，越界返回 `undefined`）。 */
-  slotCenter(index: number): { readonly x: number; readonly y: number } | undefined {
-    return this.preview.centerOf(index);
   }
 
 
@@ -395,24 +416,43 @@ export class SettingsPanel {
     this.tab = preferredTab(this.origin, tab);
     this.resetTransientState();
     this.notice.clear();
-    /**
-     * ⚠️ **焦点不能停在这一页没有的区域上**：从首页打开的设置只剩
-     * 「通用」页（没有技能格、没有键位区），而 `INITIAL_FOCUS` 是
-     * "第一个技能格" —— 不挪走的话，在首页按 `Enter` 会对一个**看不见的**
-     * 技能开始改键（界面像死了）。
-     */
-    if (!this.hasGrid && (this.focus.zone === 'grid' || this.focus.zone === 'slots')) {
-      this.focus = this.hasSlider ? { zone: 'slider' } : { zone: 'tabs', index: 0 };
-    }
+    this.rehomeFocus();
     this.redraw();
   }
 
   /**
-   * 当前是否显示键名（决定网格度量）。
-   * ⚠️ 命中测试与渲染必须用同一个值，否则可点区与画出的位置错开。
+   * **操作方式变了**（由 `app/game.ts` 的 `applyOperationMode` 在写状态 +
+   * 存档之后回调）。
+   *
+   * ⚠️ 面板只做两件事：把焦点挪到一个**现在存在**的区、重画。它**不写**
+   * 那个 flag（唯一来源在 `GameState.operationMode`）—— 也不去改键位表
+   * （那是落点的事，理由写在 `SettingsPanelOptions.onOperationMode`）。
+   */
+  setOperationMode(): void {
+    this.resetTransientState();
+    this.pickerOffset = 0;
+    this.rehomeFocus();
+    this.redraw();
+  }
+
+  /**
+   * 焦点换家：切页 / 切操作方式之后，别让焦点停在一个画不出来的区上。
+   *
+   * ⚠️ 判定整块在 `./panelFocus.rehomeFocus`（纯函数、有单测）—— 那里写着
+   * 两个真实的 bug 形态（首页打开、切方式）。
+   */
+  private rehomeFocus(): void {
+    this.focus = rehomeFocus(this.focus, this.focusContext());
+  }
+
+  /**
+   * 当前是否显示键名（= **是不是键盘方式**）。
+   *
+   * ⚠️ 它是唯一 flag 的**派生**（`capsOf(mode).showKeyHints`），不是第二个
+   * 来源 —— 命中测试与渲染必须用同一个值，否则可点区与画出的位置错开。
    */
   private get showKeyHintsNow(): boolean {
-    return this.options.getShowKeyHints?.() !== false;
+    return capsOf(this.options.getOperationMode()).showKeyHints;
   }
 
   /**
@@ -436,7 +476,8 @@ export class SettingsPanel {
       focus: this.focus,
       capturingSkillId: this.rebind.skillId,
       showKeyHints: this.showKeyHintsNow,
-      touch: this.touchCapable(),
+      mode: this.options.getOperationMode(),
+      pickerOffset: this.pickerOffset,
     });
 
     return runPanelClick(action, this.panelActions());
@@ -447,9 +488,9 @@ export class SettingsPanel {
     return buildPanelActions({
       close: () => this.options.onClose(),
       switchTab: (tab) => this.setTab(tab),
+      switchOperationMode: (mode) => this.options.onOperationMode(mode),
       resetKeys: () => this.options.onResetKeys(),
       resetTouch: () => this.options.onResetTouchButtons?.(),
-      touch: () => this.touchCapable(),
       notice: (text) => this.notice.set(this.options.translate(text)),
       rebind: (skillId, key) => this.options.onRebind(skillId, key),
       swapSlots: (from, to) => this.options.onSwapSlots(from, to),
@@ -500,16 +541,20 @@ export class SettingsPanel {
    * 需求要求合并这两者；悬停也走同一条路径，所以"鼠标划过"与
    * "方向键移动"看到的是同一个高亮、同一份详情。
    *
+   * ⚠️ 只在**键盘方式**生效：触屏方式下技能格不画（那一块是
+   * `TouchSkillPicker`，它的交互是"选中键位之后点技能"，没有悬停语义）。
+   *
    * ⚠️ 去重（"同一格的重复 hover 忽略"）在 `./hoverTracker` ——
    * 那段语义踩过坑（方向键刚移走焦点就被拽回来），所以它有自己的注释与测试。
    */
   hoverSkill(px: number, py: number): void {
-    if (!this.visible || this.tab !== 'keys') return;
+    if (!this.visible || this.tab !== 'keys' || this.touchMode) return;
     const skillId = this.hover.skillAt(px, py, {
       tab: this.tab,
       tabs: this.tabs,
       rows: this.options.getRows(),
       showKeyHints: this.showKeyHintsNow,
+      mode: this.options.getOperationMode(),
     });
     if (skillId !== undefined) this.setFocusToSkill(skillId);
   }
@@ -528,102 +573,58 @@ export class SettingsPanel {
     this.redraw();
   }
 
-  /** 指针输入要读/改的那点状态（转发给 `./panelInput`，见那里的说明）。 */
-  private pointerTargets(): PointerTargets {
-    return {
-      visible: this.visible,
-      tab: this.tab,
-      setUiScale: (value) => this.options.onUiScale(value),
-      redraw: () => this.redraw(),
-      wheelDetail: (deltaY, deltaMode) => this.detail.wheel(deltaY, deltaMode),
-    };
-  }
-
-  /** 逻辑坐标是否落在通用页的滑块上（`canvasInput` 用它决定开始拖拽）。 */
-  isOnScaleSlider(px: number, py: number): boolean {
-    return isOnScaleSlider(this.pointerTargets(), px, py);
-  }
-
-  /** 逻辑坐标是否落在**技能详情区**上（`canvasInput` 用它决定拖拽滚动）。 */
-  isOnDetail(px: number, py: number): boolean {
-    return isOnDetail(this.pointerTargets(), px, py);
-  }
-
-  /** 详情区滚轮；**滚得动才算消费**（调用方据此 `preventDefault`）。 */
-  wheelDetail(px: number, py: number, deltaY: number, deltaMode: number): boolean {
-    return wheelDetail(this.pointerTargets(), px, py, deltaY, deltaMode);
-  }
+  /**
+   * **指针路由表**（拖滑块 / 滚详情 / 滚技能面 / 拖详情）—— 判断全在
+   * `./panelInput`，这里只把面板那点状态接进去。
+   *
+   * ⚠️ 依赖一律传**取值函数**（见 `buildPanelPointerRoutes` 的说明）。
+   * `app/canvasInput` 直接问 `settings.pointers.*` —— 面板不再自己留
+   * 七个转发方法（那七段判断本来就在 `panelInput` 里）。
+   */
+  /** ⚠️ **公开**：`app/canvasInput` 直接问它（见 `buildPanelPointerRoutes`）。 */
+  readonly pointers: PanelPointerRoutes;
 
   /**
-   * 详情区**拖拽滚动**的三个阶段（一个入口：它们是同一次手势；分开写会
-   * 让"漏接一个阶段"表现成"拖到一半就断"，很难查）。坐标**只认逻辑 Y**。
+   * 把触屏技能面滚一段（鼠标滚轮 / 键盘越界都用它）。
+   *
+   * ⚠️ 偏移**只有这一处写入**（面板持有）—— 命中测试、焦点激活、渲染读的
+   * 是同一个值；组件自己留一份副本就会出现"看着是这个技能、点下去绑了
+   * 别的"。钳位与边界数学在 `ui/scrollWindow`（`pickerScroll` 转发）。
    */
-  detailPointer(phase: 'down' | 'move' | 'up', pointerId: number, py = 0): void {
-    if (phase === 'down') this.detail.pointerDown(pointerId, py);
-    else if (phase === 'move') this.detail.pointerMove(pointerId, py);
-    else this.detail.pointerUp(pointerId);
-  }
-
-  /** 拖拽滑块到某个横坐标（由 `canvasInput` 在 `pointermove` 时调用）。 */
-  dragScaleSlider(px: number): void {
-    dragScaleSlider(this.pointerTargets(), px);
+  private scrollPicker(delta: number): void {
+    const next = pickerScroll(this.pickerOffset, delta, this.options.getRows().length);
+    if (next === this.pickerOffset) return;
+    this.pickerOffset = next;
+    this.redraw();
   }
 
   /**
    * 键盘输入（弹窗打开时由主循环转发过来）。
    *
-   * **决策与执行**都在 `./panelDispatch`（纯函数，可单测）；这里只把面板的
-   * 各个能力接进去，并套用"焦点变了 / 要调滑块"这两个结果。
-   *
-   * @returns 是否消费了这次按键
+   * ⚠️ 整块在 `./panelKeyRoute`（这个文件顶到 700 行，AGENTS.md §3 的横向
+   * 切割：那是"一次按键怎么走完"这一个关注点）。面板只把状态接进去。
    */
   handleKey(key: string): boolean {
-    if (!this.visible) return false;
-
-    const rows = this.options.getRows();
-    const dispatch = resolveKeyDispatch({
-      visible: this.visible,
+    return routePanelKey({
       key,
-      capturingSkillId: this.rebind.skillId,
-      focus: this.focus,
-      rowSkillIds: rows.map((r) => r.skillId),
-      tabs: this.tabs,
-      slotSkillIds: this.touchSlots(),
-      /**
-       * ⚠️ **选中了键位时，技能格上的 `Enter` 是"绑到这个键位"**，
-       * 没选中时才是改键 —— 判定在 `focus.resolveActivate`（与鼠标同一份）。
-       */
-      selectedSlot: this.preview.selected,
-      touch: this.touchCapable(),
+      visible: () => this.visible,
+      focus: () => this.focus,
+      assignFocus: (next) => {
+        this.focus = next;
+      },
+      rows: () => this.options.getRows(),
+      tabs: () => this.tabs,
+      touchSlots: () => this.touchSlots(),
+      selectedSlot: () => this.preview.selected,
+      capturingSkillId: () => this.rebind.skillId,
+      pickerOffset: () => this.pickerOffset,
+      actions: () => this.panelActions(),
+      nudgeSlider: (direction) => this.scaleSlider.nudge(direction),
+      selectSlot: (index) => this.preview.select(index),
+      scrollPicker: (delta) => this.scrollPicker(delta),
+      pushTrace: (line) => this.probes.pushTrace(line),
+      redraw: () => this.redraw(),
     });
-    this.pushTrace(dispatch.trace);
-
-    const result = runPanelKey(
-      { action: dispatch.action, activate: dispatch.activate, key },
-      this.panelActions(),
-    );
-
-    if (result.focus !== undefined) {
-      this.focus = result.focus;
-      /**
-       * ⚠️ **键盘走到键位区 = 选中那个键位**（与"点一下键位"同一件事）。
-       *
-       * 不这么做的话，方向键移进键位区之后还得再按一次 `Enter` 才生效，
-       * 而提示写的是"点键位 → 点技能" —— 键盘那条路就多了一步、
-       * 也就是 §3b 说的"功能不对等"。
-       * `Enter` 在这里的语义只剩"**取消选中**"（见 `focus.resolveActivate`）。
-       */
-      if (result.focus.zone === 'slots') this.preview.select(result.focus.index);
-    }
-    if (result.nudgeSlider !== undefined) this.scaleSlider.nudge(result.nudgeSlider);
-    /**
-     * ⚠️ `redraw === false` 时**不要重画** —— 那是 `ignore`（什么都没改）。
-     * 按住一个与设置无关的键会连续打到这里（`settingsKeys` 不过滤
-     * `event.repeat`），无条件重画等于按按键重复率重绘整个面板。
-     * 详见 `KeyExecutionResult.redraw` 的说明。
-     */
-    if (result.redraw !== false) this.redraw();
-    return result.consumed;
   }
 
   /** 停捕获 + 取消选中键位（切页 / 关面板时统一走它）。 */
@@ -632,29 +633,19 @@ export class SettingsPanel {
     this.preview.deselect();
   }
 
-  /**
-   * 这台设备**是不是触屏**（决定底部那个唯一的「恢复默认」恢复谁）。
-   *
-   * ⚠️ 唯一真相是 `SettingsPanelOptions.getTouchCapable`（来自
-   * `render/platform` 的能力探测，**不看 UA**）。
-   *
-   * ⚠️ 它**不是** `!showKeyHints` 的别名：两个字段今天恰好反相关
-   * （见 `render/platform.detectPlatform` 的说明），但"显示不显示键名"
-   * 与"恢复哪套键位"是两件事 —— 所以 `getTouchCapable` 缺失时才退回这个
-   * 近似（而不是反过来让 `showKeyHints` 承担语义）。
-   */
-  private touchCapable(): boolean {
-    const explicit = this.options.getTouchCapable?.();
-    if (explicit !== undefined) return explicit;
-    return this.options.getShowKeyHints !== undefined && !this.showKeyHintsNow;
-  }
-
   /** 每帧调用：提示的倒计时（到点自己消失，见 `PanelNotice`）。 */
   update(): void {
     if (this.notice.tick()) this.redraw();
   }
 
   private redraw(): void {
+    /**
+     * ⚠️ **先给焦点"换家 + 钳下标"**：玩家在备战界面换角色之后技能表会变
+     * （用户 2026-10-12："根据当前选的人，设置里决定显示谁的技能"），
+     * 而焦点可能停在一个**这一屏画不出来**的格子上 —— 那时详情区是空的、
+     * `Enter` 会"对空气改键"。判定在 `./panelFocus.rehomeFocus`（纯函数）。
+     */
+    this.focus = rehomeFocus(this.focus, this.focusContext());
     this.drawFrame();
     this.drawBody();
   }
@@ -667,19 +658,27 @@ export class SettingsPanel {
 
   /** 画外框 / 内容区（实现在 `SettingsFrame` 与 `./settingsBody`）。 */
   private drawBody(): void {
-    this.footer.setTouch(this.touchCapable());
+    /**
+     * ⚠️ 池子变小（换角色）时把技能面的窗口偏移拉回合法范围 ——
+     * **只有这一处**能改它（命中测试与焦点都读同一个值）。
+     */
+    this.pickerOffset = pickerScroll(this.pickerOffset, 0, this.options.getRows().length);
     drawBody(
       {
         grid: this.keyGrid,
+        picker: this.picker,
         slider: this.scaleSlider,
+        modeSwitch: this.modeSwitch,
         preview: this.preview,
         detail: this.detail,
         footer: this.footer,
         rows: this.options.getRows(),
         slots: this.touchSlots(),
+        pickerOffset: this.pickerOffset,
       },
       {
         tab: this.tab,
+        mode: this.options.getOperationMode(),
         focus: this.focus,
         capturingSkillId: this.rebind.skillId,
         showKeyHints: this.showKeyHintsNow,

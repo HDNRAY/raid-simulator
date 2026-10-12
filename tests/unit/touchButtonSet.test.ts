@@ -38,6 +38,7 @@ import {
   keyCellRect,
   keyGridMetrics,
   resetButtonRect,
+  touchResetButtonRect,
   resolveActivate,
   resolveKeyAction,
 } from '../../src/ui/settings/logic';
@@ -48,6 +49,7 @@ import {
   touchButtonCenter,
 } from '../../src/render/touchGeometry';
 import { previewSlotCenter, previewSlotRadius } from '../../src/ui/settings/touchPreview';
+import { pickerCellRect, pickerMetrics } from '../../src/ui/settings/touchPickerLayout';
 
 /** 与 `app/deps.ts` 同一条构造方式（同一份内容）。 */
 function testRegistry() {
@@ -132,11 +134,23 @@ function panelInput(
     selectedSlot: undefined,
     focus: { zone: 'grid', index: 0 },
     capturingSkillId: undefined,
-    /** 默认桌面；触屏那条分支由专门的用例显式传 `true`。 */
-    touch: false,
+    /** 默认 = **键盘方式**；触屏那两个块由专门的用例显式传 `mode: 'touch'`。 */
+    mode: 'keyboard',
+    pickerOffset: 0,
     showKeyHints: true,
     ...over,
   };
+}
+
+/**
+ * **触屏技能面**第 `index` 格的圆心（窗口偏移 0 —— 与渲染同一份几何）。
+ *
+ * ⚠️ 它是触屏那套**自己的**技能面（`touchPickerLayout`），与键盘格阵
+ * （`keyCellRect`）不是同一个面。
+ */
+function pickerCellCenter(index: number): { px: number; py: number } {
+  const r = pickerCellRect(index, pickerMetrics(ROWS.length));
+  return { px: r.x + r.w / 2, py: r.y + r.h / 2 };
 }
 
 /** 第 `index` 个格子的中心（按桌面度量 —— 与渲染同源）。 */
@@ -190,10 +204,10 @@ describe('两步交互：点键位 → 点技能 → 绑定（用户 2026-10-12 
   it('键位是可点的 —— 它是"配触屏按钮"唯一的入口（触屏玩家也点得到）', () => {
     for (let i = 0; i < TOUCH_BUTTON_CAPACITY; i += 1) {
       const c = previewSlotCenter(i)!;
-      expect(hitTest(c.x, c.y, { tabs: TABS, tab: 'keys', rowSkillIds: ROWS })).toEqual({
-        kind: 'slot',
-        index: i,
-      });
+      /** ⚠️ 键位区只属于**触屏方式**那一块（键盘方式下它整块不画）。 */
+      expect(
+        hitTest(c.x, c.y, { tabs: TABS, tab: 'keys', rowSkillIds: ROWS, mode: 'touch' }),
+      ).toEqual({ kind: 'slot', index: i });
     }
     /** 键位圆的直径要够手指点（>= 44px 的可点下限）。 */
     expect(previewSlotRadius() * 2).toBeGreaterThanOrEqual(44);
@@ -201,31 +215,50 @@ describe('两步交互：点键位 → 点技能 → 绑定（用户 2026-10-12 
 
   it('点键位 → selectSlot；再点它 → deselectSlot（不清空内容）', () => {
     const c = previewSlotCenter(3)!;
-    expect(resolvePanelDispatch(panelInput({ px: c.x, py: c.y }))).toEqual({
+    expect(resolvePanelDispatch(panelInput({ px: c.x, py: c.y, mode: 'touch' }))).toEqual({
       kind: 'selectSlot',
       index: 3,
     });
     expect(
-      resolvePanelDispatch(panelInput({ px: c.x, py: c.y, selectedSlot: 3 })),
+      resolvePanelDispatch(panelInput({ px: c.x, py: c.y, mode: 'touch', selectedSlot: 3 })),
     ).toEqual({ kind: 'deselectSlot' });
   });
 
-  it('【关键】选中键位后点技能 = 绑上去（同一格不选中时仍是"只选中技能"）', () => {
+  it('【关键】选中键位后点**触屏技能面**上的技能 = 绑上去', () => {
+    /**
+     * ⚠️ 触屏那套的第二步走的是**它自己的技能面**（`TouchSkillPicker`），
+     * 不再借键盘格阵 —— 用户："虽然都是 按键 tab，但是里面的实现**有一半
+     * 都不一样**"。键盘格阵上的点击**永远是改键**（见下一条）。
+     */
+    const at = pickerCellCenter(1);
+    expect(
+      resolvePanelDispatch(
+        panelInput({ ...at, mode: 'touch', selectedSlot: 2, slotSkillIds: ['', ''] }),
+      ),
+    ).toEqual({ kind: 'assignTouchSlot', slot: 2, skillId: 'blast' });
+  });
+
+  it('键盘格阵上的点击**永远是改键**（不随触屏选中状态变）', () => {
     /** ⚠️ 用**没有焦点**的那一格：点已聚焦的格子本来是"进改键"。 */
     const at = cellCenter(1);
-    expect(
-      resolvePanelDispatch(panelInput({ ...at, selectedSlot: 2, slotSkillIds: ['', ''] })),
-    ).toEqual({ kind: 'assignTouchSlot', slot: 2, skillId: 'blast' });
     expect(resolvePanelDispatch(panelInput(at))).toEqual({
       kind: 'focusSkill',
       skillId: 'blast',
     });
+    /** 点**已聚焦**的那一格 = 进改键（与有没有选中触屏键位无关）。 */
+    const focused = cellCenter(0);
+    expect(resolvePanelDispatch(panelInput(focused))).toEqual({
+      kind: 'captureSkill',
+      skillId: 'attack',
+    });
   });
 
   it('【关键】点回该键位上已有的技能 = 取下（清空键位的唯一入口）', () => {
-    const at = cellCenter(0);
+    const at = pickerCellCenter(0);
     expect(
-      resolvePanelDispatch(panelInput({ ...at, selectedSlot: 0, slotSkillIds: ['attack'] })),
+      resolvePanelDispatch(
+        panelInput({ ...at, mode: 'touch', selectedSlot: 0, slotSkillIds: ['attack'] }),
+      ),
     ).toEqual({ kind: 'clearTouchSlot', slot: 0 });
   });
 
@@ -234,14 +267,16 @@ describe('两步交互：点键位 → 点技能 → 绑定（用户 2026-10-12 
    * 就可以了，根据当前是否是触屏。" —— 所以**位置只有一个**
    * （`resetButtonRect`），恢复什么由 `touch` 决定。
    */
-  it('同一个按钮：桌面恢复键位、触屏恢复触屏键位（位置相同）', () => {
-    const r = resetButtonRect();
-    const at = { px: r.x + 4, py: r.y + 4 };
-    expect(resolvePanelDispatch(panelInput({ ...at, touch: false }))).toEqual({
+  it('【关键】两块各自的按钮只管自己那一份（作用域互不污染）', () => {
+    const kb = resetButtonRect();
+    expect(resolvePanelDispatch(panelInput({ px: kb.x + 4, py: kb.y + 4 }))).toEqual({
       kind: 'resetKeys',
       notice: 'keysResetDone',
     });
-    expect(resolvePanelDispatch(panelInput({ ...at, touch: true }))).toEqual({
+    const tp = touchResetButtonRect();
+    expect(
+      resolvePanelDispatch(panelInput({ px: tp.x + 4, py: tp.y + 4, mode: 'touch' })),
+    ).toEqual({
       kind: 'resetTouch',
       notice: 'touchResetDone',
     });
@@ -255,35 +290,44 @@ describe('两步交互：点键位 → 点技能 → 绑定（用户 2026-10-12 
    * ⚠️ 断言"同一句激活在不同状态下给出两种动作"：只测鼠标会漏掉
    * "键盘被顺手做成只能改键"或反之，而那种不一致截图上看不出来。
    */
-  it('【关键】同一个 `Enter`：没选键位 = 改键，选了键位 = 绑到它', () => {
-    const base = { tabs: TABS, rowSkillIds: ['a'], slotSkillIds: ['', ''] } as const;
+  it('【关键】键盘技能格上的 `Enter` **永远是改键**（不随选中状态变）', () => {
+    /**
+     * 用户原话："**键盘 使用之前的 快捷键绑定方式**"。
+     *
+     * ⚠️ 上一版这里有一条"选中了触屏键位 → 绑到它"的分流，于是同一个格子
+     * 上的 `Enter` 含义随触屏状态变 —— 用户报的困惑正是它，也明确否掉了。
+     * 所以**三种状态**都断言成同一个动作。
+     */
+    const base = { tabs: TABS, rowSkillIds: ['a'], slotSkillIds: ['', ''], pickerOffset: 0 } as const;
+    for (const selectedSlot of [undefined, 0, 1]) {
+      expect(
+        resolveActivate({ ...base, focus: { zone: 'grid', index: 0 }, selectedSlot }),
+      ).toEqual({ kind: 'startCapture', skillId: 'a' });
+    }
+  });
+
+  it('触屏技能面上的 `Enter` 才是"绑到已选中的键位"（另一块自己的区）', () => {
+    const base = { tabs: TABS, rowSkillIds: ['a'], slotSkillIds: ['', ''], pickerOffset: 0 } as const;
     expect(
-      resolveActivate({
-        ...base,
-        focus: { zone: 'grid', index: 0 },
-        selectedSlot: undefined,
-      }),
-    ).toEqual({ kind: 'startCapture', skillId: 'a' });
-    expect(
-      resolveActivate({ ...base, focus: { zone: 'grid', index: 0 }, selectedSlot: 1 }),
+      resolveActivate({ ...base, focus: { zone: 'picker', index: 0 }, selectedSlot: 1 }),
     ).toEqual({ kind: 'assignTouchSlot', slot: 1, skillId: 'a' });
     /** 那个键位上已经有它 → 取下。 */
     expect(
-      resolveActivate({ ...base, focus: { zone: 'grid', index: 0 }, selectedSlot: 0 }),
-    ).toEqual({ kind: 'assignTouchSlot', slot: 0, skillId: 'a' });
-    expect(
       resolveActivate({
-        tabs: TABS,
-        rowSkillIds: ['a'],
+        ...base,
         slotSkillIds: ['a'],
-        focus: { zone: 'grid', index: 0 },
+        focus: { zone: 'picker', index: 0 },
         selectedSlot: 0,
       }),
     ).toEqual({ kind: 'clearTouchSlot', slot: 0 });
+    /** ⚠️ 没选中键位时什么都不做（绑定状态必须先建立）。 */
+    expect(
+      resolveActivate({ ...base, focus: { zone: 'picker', index: 0 }, selectedSlot: undefined }),
+    ).toEqual({ kind: 'none' });
   });
 
   it('键位区按 Enter 选中它，再按一次取消选中', () => {
-    const base = { tabs: TABS, rowSkillIds: ROWS, slotSkillIds: [] } as const;
+    const base = { tabs: TABS, rowSkillIds: ROWS, slotSkillIds: [], pickerOffset: 0 } as const;
     expect(
       resolveActivate({ ...base, focus: { zone: 'slots', index: 4 }, selectedSlot: undefined }),
     ).toEqual({ kind: 'selectSlot', index: 4 });
@@ -293,19 +337,23 @@ describe('两步交互：点键位 → 点技能 → 绑定（用户 2026-10-12 
   });
 
   /**
-   * ⚠️ 那个唯一的按钮在**焦点模型**里只有一种激活：`resetKeys`。
-   * "恢复键盘还是触屏"由执行层按设备分流（`./resetButton.resetTargetFor`）
-   * —— 焦点模型不认识设备，那是它不该知道的事。
+   * ⚠️ **两块各自的恢复按钮**在焦点模型里各是一种激活：
+   * `reset`（键盘块）→ `resetKeys`；`touchReset`（触屏块）→ `resetTouch`。
+   * 焦点模型**不认识设备** —— 恢复什么由"焦点在哪个区"结构性决定。
    */
-  it('「恢复默认」的 Enter = resetKeys（设备分流在执行层）', () => {
-    const base = { tabs: TABS, rowSkillIds: [], slotSkillIds: [], selectedSlot: undefined } as const;
+  it('键盘块的 Enter = resetKeys，触屏块 = resetTouch（不按设备分流）', () => {
+    const base = { tabs: TABS, rowSkillIds: [], slotSkillIds: [], pickerOffset: 0, selectedSlot: undefined } as const;
     expect(resolveActivate({ ...base, focus: { zone: 'reset' } })).toEqual({ kind: 'resetKeys' });
+    expect(resolveActivate({ ...base, focus: { zone: 'touchReset' } })).toEqual({
+      kind: 'resetTouch',
+    });
   });
 
   it('两个 tab 的助记键都还能用（`T` 已删 —— 触屏不再是独立页）', () => {
     expect(resolveActivate({
       tabs: TABS,
       rowSkillIds: [],
+      pickerOffset: 0,
       slotSkillIds: [],
       selectedSlot: undefined,
       focus: { zone: 'tabs', index: 0 },
@@ -313,6 +361,7 @@ describe('两步交互：点键位 → 点技能 → 绑定（用户 2026-10-12 
     expect(resolveActivate({
       tabs: TABS,
       rowSkillIds: [],
+      pickerOffset: 0,
       slotSkillIds: [],
       selectedSlot: undefined,
       focus: { zone: 'tabs', index: 1 },

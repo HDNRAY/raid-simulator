@@ -24,8 +24,11 @@
  * 共享几何常量（**叶子模块**，见那里的说明 —— 留在这会造循环依赖）。
  * 转发出去，外部 import 路径不变。
  */
-import { SETTINGS_PANEL, RESET_BUTTON } from './settingsGeometry';
+import { SETTINGS_PANEL, RESET_BUTTON, TOUCH_PREVIEW, TOUCH_RESET_BUTTON, OPERATION_MODE_ROW } from './settingsGeometry';
 import { MNEMONIC_KEYS } from './keyNames';
+import type { OperationMode } from '../../render/platform';
+import { OPERATION_MODE_ORDER } from './operationModeRow';
+import { pickerCellAt, pickerMetrics } from './touchPickerLayout';
 /**
  * ⚠️ `tab` 的**可见集合**是"按从哪打开取值"的（用户 2026-10-12：
  * "首页点开的设置，可以不要 按键tab"），真相在 `./tabs`。这里只转发类型，
@@ -62,9 +65,23 @@ export {
   HINT_BLOCK_TOP,
   DETAIL_BOTTOM,
   TOUCH_PREVIEW,
+  TOUCH_RESET_BUTTON,
+  TOUCH_PICKER,
+  OPERATION_MODE_ROW,
   hintLineY,
   bottomAreaTop,
 } from './settingsGeometry';
+/**
+ * 操作方式选择器的**顺序与文案**（`./operationModeRow`）—— 命中测试、
+ * 绘制、面板三处都要那张表，转发一次省得各写一遍路径。
+ */
+export {
+  OPERATION_MODE_ORDER,
+  operationModeAt,
+  operationModeLabelKey,
+  operationModeStorageValue,
+} from './operationModeRow';
+export type { OperationMode } from '../../render/platform';
 /**
  * ⚠️ **焦点模型搬到了 `./focus`**（这一轮加了"触屏键位"这个新的焦点区，
  * 几何/命中与焦点模型本来就不是一件事，按 AGENTS.md §3 的顺序先横向切割）。
@@ -199,6 +216,48 @@ export function resetButtonRect(): Rect {
   };
 }
 
+/**
+ * **触屏那一份**「恢复默认」的矩形（贴在键位预览下面）。
+ *
+ * ⚠️ 与 `resetButtonRect()` 是**两个块各自的按钮**（不再"按设备分流"）：
+ * 哪个按钮被点，就恢复它所在那一块 —— 见 `settingsGeometry.RESET_BUTTON`
+ * 里那段"为什么不再是同一个按钮"。
+ */
+export function touchResetButtonRect(): Rect {
+  return {
+    x: SETTINGS_PANEL.x + TOUCH_RESET_BUTTON.x,
+    y: SETTINGS_PANEL.y + TOUCH_PREVIEW.top + TOUCH_PREVIEW.h + TOUCH_RESET_BUTTON.gap,
+    w: TOUCH_RESET_BUTTON.w,
+    h: TOUCH_RESET_BUTTON.h,
+  };
+}
+
+/**
+ * 「通用」页**操作方式**选择器里第 `index` 个按钮的矩形（0 = 键盘、1 = 触屏）。
+ *
+ * ⚠️ 顺序就是 `ui/settings/operationMode.KEYS_VIEWS` 那张表 —— 命中测试与
+ * 绘制都从它取，不各写一遍三元表达式。
+ */
+export function operationModeRect(index: number): Rect {
+  return {
+    x:
+      SETTINGS_PANEL.x +
+      OPERATION_MODE_ROW.x +
+      index * (OPERATION_MODE_ROW.w + OPERATION_MODE_ROW.gap),
+    y: SETTINGS_PANEL.y + OPERATION_MODE_ROW.top,
+    w: OPERATION_MODE_ROW.w,
+    h: OPERATION_MODE_ROW.h,
+  };
+}
+
+/** 「操作方式」那行标签的位置（画布坐标，左上角）。 */
+export function operationModeLabelPos(): { readonly x: number; readonly y: number } {
+  return {
+    x: SETTINGS_PANEL.x + OPERATION_MODE_ROW.x,
+    y: SETTINGS_PANEL.y + OPERATION_MODE_ROW.labelTop,
+  };
+}
+
 export function contains(rect: Rect, px: number, py: number): boolean {
   return px >= rect.x && px <= rect.x + rect.w && py >= rect.y && py <= rect.y + rect.h;
 }
@@ -221,18 +280,33 @@ export type ClickTarget =
   | { readonly kind: 'outside' }
   | { readonly kind: 'tab'; readonly tab: SettingsTab }
   /**
-   * 唯一那个「恢复默认」按钮。⚠️ 恢复的是**键盘键位还是触屏键位**，由
-   * 设备能力决定（`./resetButton.resetTargetFor`）—— 命中测试不判这件事。
+   * **键盘块**那一个「恢复默认」（提示文字下面）。
+   *
+   * ⚠️ 恢复的是**键盘键位** —— 这件事实由"点在哪个块里"决定，**不由**
+   * 任何设备判断决定（上一版正是按设备分流，于是触屏笔记本上键盘键位
+   * 恢复不了）。触屏块那个见 `resetTouch`。
    */
   | { readonly kind: 'resetKeys' }
+  /** **触屏块**那一个「恢复默认」（键位预览下面）—— 恢复触屏键位。 */
+  | { readonly kind: 'resetTouch' }
+  /** 「通用」页的操作方式按钮（`?touch=` 之外的用户入口）。 */
+  | { readonly kind: 'operationMode'; readonly mode: OperationMode }
   | { readonly kind: 'keyRow'; readonly skillId: string }
   /**
-   * 右下角**模拟键位**上的一个槽位（两步交互的第一步）。
+   * 右下角**模拟键位**上的一个槽位（触屏两步交互的第一步）。
    *
-   * ⚠️ 它与 `keyRow` 是**两个区**：`keyRow` 是技能表，`slot` 是键位表。
-   * 先点 `slot` 再点 `keyRow` = 绑定（判定在 `slotActions.resolveSlotBind`）。
+   * ⚠️ 它与 `keyRow` 是**两个区**，与 `touchSkill` 也是两个区：
+   * 触屏技能面（`touchSkill`）是触屏那套**自己的**技能选择面，
+   * 不再借键盘格阵当它的技能表（那正是上一版把两套缝在一起的根源）。
    */
   | { readonly kind: 'slot'; readonly index: number }
+  /**
+   * **触屏技能面**上的一个技能（触屏两步交互的第二步）。
+   *
+   * ⚠️ 只有"已经选中了一个键位"（绑定状态）时它才有意义 —— 判定在
+   * `panelDispatch`（`slotActions.resolveSlotBind`，与键盘那条路共用）。
+   */
+  | { readonly kind: 'touchSkill'; readonly skillId: string }
   /** 通用页的 UI 缩放滑块（支持鼠标点击/拖动） */
   | { readonly kind: 'scaleSlider' }
   /** 右上角的关闭 */
@@ -260,7 +334,23 @@ export function hitTest(
     readonly tabs: readonly SettingsTab[];
     readonly rowSkillIds: readonly string[];
     /**
-     * 是否显示键名 —— 它**决定网格度量**（桌面 3 列 44 高 / 触屏 3 列 64 高）。
+     * **当前操作方式**（唯一 flag）——决定「按键」页判哪一块：
+     * 键盘块（技能格 + 键盘默认）还是触屏块（键位预览 + 技能面 + 触屏默认）。
+     *
+     * ⚠️ 这是**唯一**的分流依据：不传 / 传坏值就会让两个块的命中区同时
+     * 生效（点到看不见的东西）。
+     */
+    readonly mode: OperationMode;
+    /**
+     * **触屏技能面**当前滚到第几个技能（窗口偏移）。
+     *
+     * ⚠️ 必须由调用方给：窗口偏移是那一块自己的状态（`TouchSkillPicker`），
+     * 命中测试不能自己推 —— 推一份就会出现"看着是这个技能、点下去绑了别的"
+     * （滚动过的列表最容易出这种错）。
+     */
+    readonly pickerOffset?: number | undefined;
+    /**
+     * 是否显示键名 —— 它**决定网格度量**（桌面 4 列 44 高 / 触屏 3 列 64 高）。
      *
      * ⚠️ 必须传，否则命中测试与渲染**用的不是同一套格子**。
      * 踩过的坑（实测）：`hitTest` 默认走桌面度量，而 `KeyGrid` 在触屏下
@@ -280,42 +370,57 @@ export function hitTest(
     if (contains(tabRect(i), px, py)) return { kind: 'tab', tab };
   }
 
-  /**
-   * 通用页的滑块**要支持鼠标**（需求："ui 缩放的 slider 还是要支持鼠标"）。
-   * 命中测试放在 tab 判断之后、按键页分支之前 —— 它只属于通用页。
-   */
-  if (options.tab === 'general' && contains(uiScaleSliderRect(), px, py)) {
-    return { kind: 'scaleSlider' };
+  if (options.tab === 'general') {
+    /**
+     * 通用页的两样：UI 缩放滑块（要支持鼠标，需求点名）与操作方式选择器。
+     *
+     * ⚠️ 顺序**无所谓**（两者不重叠），但都排在 tab 判断之后 ——
+     * 与老的滑块判定同一条纪律。
+     */
+    if (contains(uiScaleSliderRect(), px, py)) return { kind: 'scaleSlider' };
+    for (const [index, mode] of OPERATION_MODE_ORDER.entries()) {
+      if (contains(operationModeRect(index), px, py)) return { kind: 'operationMode', mode };
+    }
+    return { kind: 'none' };
   }
 
-  if (options.tab !== 'general') {
+  /* ---- 「按键」页：按操作方式判**其中一块**（两块不同时出现） ---- */
+  if (options.mode === 'touch') {
     /**
-     * ⚠️ **只有一个**「恢复默认」按钮（用户 2026-10-12："恢复默认和触屏
-     * 默认 同一时间显示一个按钮就可以了，根据当前是否是触屏"）。
-     * "恢复什么"由设备能力决定 —— 判定在 `./resetButton.resetTargetFor`，
-     * 不在命中测试里（它只管"点到了按钮"）。
+     * 触屏块：预览（键位）→ 技能面（第二步）→ 它自己的恢复按钮。
+     *
+     * ⚠️ 恢复按钮**先于**键位与技能面判定：它在预览块的下方、不与圆重叠，
+     * 但"按钮优先于内容区"是整页一致的顺序（键盘块那边也是）。
      */
-    if (contains(resetButtonRect(), px, py)) return { kind: 'resetKeys' };
+    if (contains(touchResetButtonRect(), px, py)) return { kind: 'resetTouch' };
     /**
-     * ⚠️ **模拟键位**先于技能格判定：它在格阵之外（右下角），但判定顺序
-     * 放在这里能保证"以后有人把它挪到格子上"时**不会**变成"点键位改键"。
+     * ⚠️ 键位（`slot`）**先于**技能面判定：它们在面板里是两块不重叠的区域，
+     * 但判定顺序固定下来能保证"以后有人挪动它们"时不会变成"点键位 = 绑技能"。
      */
     const slot = previewSlotAt(px, py);
     if (slot !== undefined) return { kind: 'slot', index: slot };
-    /**
-     * ⚠️ 用**当前模式**的度量与容量 —— 渲染那边（`KeyGrid`）就是这么算的，
-     * 两处必须同源。用桌面常量 `KEY_GRID_CAPACITY` 会让触屏的第 3 行
-     * 整个不可点。
-     *
-     * ⚠️ 判据是"**不是通用页**"而不是"是按键页"：技能格现在两页都有
-     * （「按键」= 键盘键位，「触屏」= 按钮集合），逐页列举必然漏一个新页。
-     */
-    const metrics = keyGridMetrics(options.showKeyHints !== false);
-    const capacity = rowsCapacity(metrics);
-    for (const [i, skillId] of options.rowSkillIds.entries()) {
-      if (i >= capacity) break;
-      if (contains(keyCellRect(i, metrics), px, py)) return { kind: 'keyRow', skillId };
+    const cell = pickerCellAt(px, py, pickerMetrics(options.rowSkillIds.length));
+    if (cell !== undefined) {
+      const skillId = options.rowSkillIds[(options.pickerOffset ?? 0) + cell];
+      if (skillId !== undefined) return { kind: 'touchSkill', skillId };
     }
+    return { kind: 'none' };
+  }
+
+  /**
+   * ⚠️ **键盘块**那一个「恢复默认」：恢复的是**键盘键位**（与设备无关）。
+   * 触屏那块不显示，所以它的按钮也不在这里判 —— 两块是互斥的。
+   */
+  if (contains(resetButtonRect(), px, py)) return { kind: 'resetKeys' };
+  /**
+   * ⚠️ 用**当前模式**的度量与容量 —— 渲染那边（`KeyGrid`）就是这么算的，
+   * 两处必须同源。
+   */
+  const metrics = keyGridMetrics(options.showKeyHints !== false);
+  const capacity = rowsCapacity(metrics);
+  for (const [i, skillId] of options.rowSkillIds.entries()) {
+    if (i >= capacity) break;
+    if (contains(keyCellRect(i, metrics), px, py)) return { kind: 'keyRow', skillId };
   }
 
   return { kind: 'none' };

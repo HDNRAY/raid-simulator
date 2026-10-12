@@ -52,6 +52,7 @@ import {
   SETTINGS_PANEL,
   KEY_GRID,
   TOUCH_CELL_H,
+  TOUCH_GRID_COLS,
   KEY_GRID_BOTTOM,
   KEY_GRID_BOTTOM_TOUCH,
   DETAIL_TOP,
@@ -79,26 +80,38 @@ export interface GridMetrics {
 /**
  * 按模式给出网格度量。
  *
+ * | 模式 | 列 | 行 | 容量 | 格高 |
+ * |---|---|---|---|---|
+ * | 桌面（显示键名） | 4 | 2 | **8** | 44 |
+ * | 触屏（隐藏键名） | 3 | 2 | 6 | 64 |
+ *
+ * ⚠️ 桌面 4 列是为了"一屏配得到每一个可绑技能"（当前 8 个 —— 见
+ * `settingsGeometry.KEY_GRID.cols`）；触屏那 6 格对触屏玩家够用：
+ * 他们配键位的地方是右下角那 7 个槽位（`TOUCH_PREVIEW`）。
+ *
+ * ⚠️ **格子宽度一律从面板宽度算**（`面板宽 - 两侧内缩 - 列间隙`），
+ * 不写死：写死的话改列数时两处必然漂（"画出来的格子"与"能点到的格子"
+ * 错开正是本仓库踩过的坑，见 `settings.test.ts` 那条命中回归）。
+ * `KEY_GRID.cellW` 只作为**桌面度量的默认值**（供 `keyCellRect` 的默认参数
+ * 与几何断言引用），不参与这里的分支。
+ *
  * @param showKeyHints 桌面为 `true`（要显示键名），触屏为 `false`。
  */
 export function keyGridMetrics(showKeyHints: boolean): GridMetrics {
   const { gapX, gapY, inset, top } = KEY_GRID;
-  if (showKeyHints) {
-    return {
-      cols: KEY_GRID.cols,
-      cellW: KEY_GRID.cellW,
-      cellH: KEY_GRID.cellH,
-      gapX,
-      gapY,
-      inset,
-      top,
-    };
-  }
-  const cols = KEY_GRID.cols;
+  const cols = showKeyHints ? KEY_GRID.cols : TOUCH_GRID_COLS;
   const cellW = Math.floor(
     (SETTINGS_PANEL.w - inset * 2 - gapX * (cols - 1)) / cols,
   );
-  return { cols, cellW, cellH: TOUCH_CELL_H, gapX, gapY, inset, top };
+  return {
+    cols,
+    cellW,
+    cellH: showKeyHints ? KEY_GRID.cellH : TOUCH_CELL_H,
+    gapX,
+    gapY,
+    inset,
+    top,
+  };
 }
 
 /**

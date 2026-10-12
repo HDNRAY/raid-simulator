@@ -166,5 +166,11 @@ export const CONTROL_VISIBILITY = {
  * 唯一真相；这里只负责 `Phase → SettingsOrigin` 这一步翻译。
  */
 export function settingsOriginOf(phase: Phase): SettingsOrigin {
-  return phase === 'home' ? 'home' : 'gameplay';
+  if (phase === 'home') return 'home';
+  /**
+   * ⚠️ **选角色屏也没有「按键」页**（用户 2026-10-12："肉鸽选人界面的设置
+   * 也是没有按键的"）—— 那一刻还没决定用谁，技能表还没定。
+   */
+  if (phase === 'characterSelect') return 'characterSelect';
+  return 'gameplay';
 }

@@ -27,7 +27,6 @@ import {
   resolveActivate,
   resolveKeyAction,
   resolveRowTap,
-  uiScaleFromPointer,
   type ActivateAction,
   type Direction,
   type FocusContext,
@@ -35,7 +34,7 @@ import {
 } from './logic';
 import type { SettingsTab } from './tabs';
 import { resolveSlotBind, resolveSlotTap } from './slotActions';
-import { resetDoneKey, resetTargetFor } from './resetButton';
+import type { OperationMode } from '../../render/platform';
 
 /** 焦点此刻落在哪个技能格上（不在格子上、或下标越界时为 undefined）。 */
 export function focusedSkillIdOf(
@@ -60,6 +59,9 @@ export type PanelDispatch =
   | { readonly kind: 'none' }
   | { readonly kind: 'close' }
   | { readonly kind: 'switchTab'; readonly tab: SettingsTab }
+  /** 「通用」页切操作方式（唯一 flag 的用户入口）。 */
+  | { readonly kind: 'switchOperationMode'; readonly mode: OperationMode }
+  /** **键盘块**那一个「恢复默认」—— 只恢复键盘键位。 */
   | { readonly kind: 'resetKeys'; readonly notice: 'keysResetDone' }
   /**
    * 正在改键时点到另一个格子：**换按钮位**。
@@ -88,11 +90,11 @@ export type PanelDispatch =
   | { readonly kind: 'assignTouchSlot'; readonly slot: number; readonly skillId: string }
   | { readonly kind: 'clearTouchSlot'; readonly slot: number }
   /**
-   * 触屏设备上的「恢复默认」—— 同一个按钮，恢复的是**触屏键位**。
+   * **触屏块**那一个「恢复默认」—— 只恢复触屏键位。
    *
-   * ⚠️ 与 `resetKeys` 是**同一个按钮的两个结果**（用户 2026-10-12：
-   * "同一时间显示一个按钮……根据当前是否是触屏"）。哪一个是它，
-   * 由 `resetTargetFor(touch)` 决定 —— 纯函数，有单测。
+   * ⚠️ 与 `resetKeys` 是**两个块各自的按钮**（不再"同一个按钮按设备
+   * 分流"）：哪个按钮被点，就恢复它所在那一块 —— 见
+   * `settingsGeometry.RESET_BUTTON` 里那段"为什么不再是同一个按钮"。
    */
   | { readonly kind: 'resetTouch'; readonly notice: 'touchResetDone' }
   /** 拖 / 点 UI 缩放滑块：由横坐标反算倍数。 */
@@ -116,13 +118,17 @@ export interface PanelDispatchInput {
   /** 是否显示键名 —— 它决定网格度量，必须与渲染同源（见 `logic.ts` 的 `hitTest`）。 */
   readonly showKeyHints: boolean;
   /**
-   * 是不是触屏设备（`render/platform` 的能力探测）。
+   * **当前操作方式**（唯一 flag，`render/platform`）。
    *
-   * ⚠️ 只用来回答一件事："底部那个「恢复默认」按钮恢复谁"
-   * （`./resetButton.resetTargetFor`）。**不要**在这里顺手加别的
-   * `if (touch)` —— 那会让这个字段变成第二个 `showKeyHints`。
+   * ⚠️ 它只回答一件事："「按键」页判**哪一块**的命中区"（键盘块还是触屏块）。
+   * **不要**在这里顺手加别的 `if (touch)` —— "恢复哪一套键位"已经改成
+   * "看点是哪个块里的按钮"，与设备无关（见 `./resetButton` 的删除说明）。
    */
-  readonly touch: boolean;
+  readonly mode: OperationMode;
+  /**
+   * 触屏技能面当前窗口的第一个技能下标（见 `logic.hitTest` 的同名字段）。
+   */
+  readonly pickerOffset: number;
 }
 
 /**
@@ -137,6 +143,8 @@ export function resolvePanelDispatch(input: PanelDispatchInput): PanelDispatch {
     tab: input.tab,
     tabs: input.tabs,
     rowSkillIds: input.rowSkillIds,
+    mode: input.mode,
+    pickerOffset: input.pickerOffset,
     showKeyHints: input.showKeyHints,
   });
 
@@ -145,38 +153,47 @@ export function resolvePanelDispatch(input: PanelDispatchInput): PanelDispatch {
       return { kind: 'close' };
     case 'tab':
       return { kind: 'switchTab', tab: target.tab };
-    case 'resetKeys': {
-      /**
-       * ⚠️ 命中测试只知道"点到了那个按钮"；**恢复什么**要按设备分流 ——
-       * 用户 2026-10-12："恢复默认和触屏默认 同一时间显示一个按钮就可以
-       * 了，根据当前是否是触屏。"
-       *
-       * 判定在 `./resetButton.resetTargetFor`（纯函数、可单测），
-       * 这里只做接线。
-       */
-      const target = resetTargetFor(input.touch);
-      return target === 'touch'
-        ? { kind: 'resetTouch', notice: 'touchResetDone' }
-        : { kind: 'resetKeys', notice: 'keysResetDone' };
-    }
+    case 'operationMode':
+      /** 「通用」页切操作方式（唯一 flag 的用户入口）。 */
+      return { kind: 'switchOperationMode', mode: target.mode };
+    /**
+     * ⚠️ **两块各自的按钮，各自恢复自己那一份** —— 命中测试已经决定了
+     * "点的是哪一块里的按钮"，这里不需要任何设备判断（上一版正是把
+     * "恢复什么"交给设备探测，于是触屏笔记本上键盘键位恢复不了）。
+     */
+    case 'resetKeys':
+      return { kind: 'resetKeys', notice: 'keysResetDone' };
+    case 'resetTouch':
+      return { kind: 'resetTouch', notice: 'touchResetDone' };
     case 'slot':
       /** ① 点键位：选中 / 取消选中（判定在 `slotActions`）。 */
       return resolveSlotTap(input.selectedSlot, target.index);
+    /*
+     * ② 点**触屏技能面**上的技能 = 绑到已选中的键位（触屏那套自己的两步
+     * 交互第二步）。
+     *
+     * ⚠️ 没有选中键位时**什么都不做**（不猜"你想绑到第几个"）——
+     * 绑定状态由第一步明确建立。判定走 `slotActions.resolveSlotBind`
+     * （键盘那条路用同一个函数）。
+     */
+    case 'touchSkill':
+      return input.selectedSlot === undefined
+        ? { kind: 'none' }
+        : resolveSlotBind(input.selectedSlot, input.slotSkillIds, target.skillId);
     case 'keyRow': {
       /**
        * ==============================================================
-       * ② 已选中键位时：点技能 = **绑到这个键位**（用户要的两步交互）
+       * 键盘格阵：**永远是改键**（用户："键盘 使用之前的快捷键绑定方式"）
        * ==============================================================
        *
-       * ⚠️ 这里**先于** `resolveRowTap` 分流：那一套（选中 → 再点进改键）
-       * 是"改键"的语义，在"已经选中了一个键位"的时候不该抢走这次点击 ——
-       * 玩家那一刻的意图明确是"把这个技能放到那个键位上"。
+       * ⚠️ 上一版这里有一条"已经选中了触屏键位 → 绑到那个键位"的分流，
+       * 于是同一个格子上的点击含义**随触屏状态变** ✗ —— 玩家报的困惑
+       * 正是它。触屏那套现在有**自己的**技能面（`touchSkill`），
+       * 键盘格阵不再兼职。
        *
-       * 判定在 `slotActions.resolveSlotBind`（键盘那条路用同一个函数）。
+       * 判定在 `rebind.resolveRowTap`（正在改键 → 换位；点已选中的格子 →
+       * 进改键；其它 → 只选中）。
        */
-      if (input.selectedSlot !== undefined) {
-        return resolveSlotBind(input.selectedSlot, input.slotSkillIds, target.skillId);
-      }
       const action = resolveRowTap({
         focusedSkillId: focusedSkillIdOf(input.focus, input.rowSkillIds),
         capturingSkillId: input.capturingSkillId,
@@ -184,8 +201,8 @@ export function resolvePanelDispatch(input: PanelDispatchInput): PanelDispatch {
       });
       if (action.kind === 'bind') {
         /**
-         * ⚠️ 触屏要的是**换位置**，不是换键 —— 触屏按钮顺序来自绑定表
-         * 顺序，而改键只换键、不动顺序。详见 `app/bindingActions.ts`。
+         * ⚠️ 改键时点到另一格 = **换按钮位**（技能栏槽位顺序）。
+         * 详见 `app/bindingActions.ts`。
          */
         const from = input.rowSkillIds.findIndex((id) => id === input.capturingSkillId);
         const to = input.rowSkillIds.findIndex((id) => id === action.skillId);
@@ -233,13 +250,13 @@ export interface KeyDispatchInput {
   readonly tabs: readonly SettingsTab[];
   /** 触屏槽位表（下标 = 槽位，`''` = 空）—— 见 `focus.slots`。 */
   readonly slotSkillIds: readonly string[];
-  /** 当前选中的键位（`Enter` 在技能格上时决定"改键"还是"绑键位"）。 */
+  /** 当前选中的键位（`Enter` 在触屏技能面上时决定"绑到哪个键位"）。 */
   readonly selectedSlot: number | undefined;
   /**
-   * 是不是触屏设备 —— `Enter` 落在那个唯一的「恢复默认」上时，决定
-   * 恢复键盘键位还是触屏键位（见 `./resetButton`）。
+   * 触屏技能面当前窗口的第一个技能下标 —— `Enter` 落在那一面上时，
+   * 焦点是**窗口内**的下标，技能 id 要按它取（见 `focus.resolveActivate`）。
    */
-  readonly touch: boolean;
+  readonly pickerOffset: number;
 }
 
 /** `handleKey` 的决策结果：面板拿 `action` / `activate` 去执行，`trace` 记轨迹。 */
@@ -278,6 +295,7 @@ export function resolveKeyDispatch(input: KeyDispatchInput): KeyPanelDispatch {
           rowSkillIds: input.rowSkillIds,
           slotSkillIds: input.slotSkillIds,
           selectedSlot: input.selectedSlot,
+          pickerOffset: input.pickerOffset,
         })
       : undefined;
 
@@ -316,360 +334,16 @@ export function resolveCycleFocus(input: {
 }
 
 /* ------------------------------------------------------------------ *
- * 点击 · 执行
- * ------------------------------------------------------------------ */
-
-/**
- * `resolvePanelDispatch` 的结果要碰的那些外部世界。
- *
- * 面板把这些接进来，执行层就**不碰 Pixi** —— 于是"点一下会发生什么"
- * 整个决策 + 执行都在本文件里，可以直接单测（`SettingsPanel.ts` 那种
- * 自己构造 Pixi 对象的类在 jsdom 里不好跑，见 `logic.ts` 文件头）。
+ * 执行（点击 / 按键）
+ * ------------------------------------------------------------------ *
+ * ⚠️ 整块搬到了 `./panelExecute`（本文件又一次顶到 700 —— AGENTS.md §3 的
+ * 横向切割：决策与执行本来就是两件事）。这里**转发**，外部 import 路径不变
+ * —— 与 `keyNames` / `rebind` / `focus` 那几次同一个做法。
  */
-export interface PanelActionBindings {
-  readonly close: () => void;
-  readonly switchTab: (tab: SettingsTab) => void;
-  /** 恢复**键盘**键位（那个按钮在非触屏设备上的行为）。 */
-  readonly resetKeys: () => void;
-  /** 恢复**触屏**键位（同一个按钮在触屏设备上的行为）。 */
-  readonly resetTouch: () => void;
-  /** 是不是触屏设备 —— 那个按钮恢复谁（见 `./resetButton`）。 */
-  readonly touch: () => boolean;
-  /** 提示文案（来自 i18n），执行层只负责把它交给 `notice`。 */
-  readonly notice: (text: string) => void;
-  readonly swapSlots: (from: number, to: number) => void;
-  readonly focusSkill: (skillId: string) => void;
-  readonly startCapture: (skillId: string) => void;
-  /** 选中 / 取消选中一个触屏键位（两步交互的第一步）。 */
-  readonly selectSlot: (index: number) => void;
-  readonly deselectSlot: () => void;
-  /** 把技能绑到某个键位（含交换 / 顶掉）。 */
-  readonly assignTouchSlot: (slot: number, skillId: string) => void;
-  /** 取下某个键位上的技能。 */
-  readonly clearTouchSlot: (slot: number) => void;
-  readonly uiScale: (value: number) => void;
-  /** 执行完之后画一遍（面板的重绘入口）。 */
-  readonly redraw: () => void;
-}
-
-/**
- * 把 `PanelDispatch` 执行掉。
- *
- * @returns 是否消费了这次点击（与老 `hitTest` 的返回值同义）。
- */
-export function executePanelDispatch(
-  action: PanelDispatch,
-  do_: PanelActionBindings,
-): boolean {
-  switch (action.kind) {
-    case 'close':
-      do_.close();
-      return true;
-    case 'switchTab':
-      do_.switchTab(action.tab);
-      return true;
-    case 'resetKeys':
-      do_.resetKeys();
-      do_.notice('settings.keysResetDone');
-      do_.redraw();
-      return true;
-    case 'resetTouch':
-      do_.resetTouch();
-      do_.notice('settings.touchResetDone');
-      do_.redraw();
-      return true;
-    case 'selectSlot':
-      do_.selectSlot(action.index);
-      do_.redraw();
-      return true;
-    case 'deselectSlot':
-      do_.deselectSlot();
-      do_.redraw();
-      return true;
-    case 'assignTouchSlot':
-      /**
-       * ⚠️ **绑完就取消选中**（"这次指派完成了"）。
-       *
-       * 不取消的话，下一次点技能会**静默**改掉这个键位 —— 玩家只是想
-       * 看看别的技能，结果把刚配好的键位换了。要配下一个键位就再点一个，
-       * 反正每配一个键位本来就要点一次它。
-       */
-      do_.assignTouchSlot(action.slot, action.skillId);
-      do_.deselectSlot();
-      do_.redraw();
-      return true;
-    case 'clearTouchSlot':
-      /** ⚠️ 取下之后**保留选中**：玩家多半是想换一个技能放上来。 */
-      do_.clearTouchSlot(action.slot);
-      do_.redraw();
-      return true;
-    case 'swapSlots':
-      /**
-       * `from`/`to` 任一为 -1 时**只重画、不改焦点** —— 老代码就是这个
-       * 形状（`if (from >= 0 && to >= 0) { ... }` 之后无条件 `redraw()`）。
-       */
-      if (action.from >= 0 && action.to >= 0) {
-        do_.swapSlots(action.from, action.to);
-      }
-      do_.redraw();
-      return true;
-    case 'captureSkill':
-      /**
-       * ⚠️ 顺序是"先选中、再进改键" —— 与键盘的"方向键选中 → Enter"
-       * 完全一致（见 `resolveRowTap` 的说明）。
-       */
-      do_.focusSkill(action.skillId);
-      do_.startCapture(action.skillId);
-      do_.redraw();
-      return true;
-    case 'focusSkill':
-      do_.focusSkill(action.skillId);
-      return true;
-    case 'setScaleFromPointer':
-      /**
-       * 鼠标点/拖滑块：由横坐标直接反算倍数（点到哪跳到哪）。
-       *
-       * 需求："ui 缩放的 slider 还是要支持鼠标。"
-       * 拖动也能用，因为主循环每次 pointerdown / pointermove 都会
-       * 走到这里 —— 面板不需要自己维护"是否在拖"的状态。
-       */
-      do_.uiScale(uiScaleFromPointer(action.px));
-      do_.redraw();
-      return true;
-    case 'none':
-      // 点在弹窗内的空白处：消费掉，不穿透到战斗
-      return true;
-  }
-}
-
-/* ------------------------------------------------------------------ *
- * 按键 · 执行
- * ------------------------------------------------------------------ */
-
-/** `executeKeyPanelAction` 要碰的那些外部世界（与 `PanelActionBindings` 分开定义）。 */
-export interface KeyActionBindings {
-  readonly close: () => void;
-  readonly switchTab: (tab: SettingsTab) => void;
-  /** 恢复**键盘**键位（底部那个按钮在非触屏设备上的行为）。 */
-  readonly resetKeys: () => void;
-  /** 恢复**触屏**键位（同一个按钮在触屏设备上的行为）。 */
-  readonly resetTouch: () => void;
-  /**
-   * 是不是触屏设备 —— 唯一用途是"那个按钮恢复谁"。
-   *
-   * ⚠️ 用**函数**而不是值：面板可能在构造之后才拿到能力值
-   * （`touchCapsSource` 的回填，见 `app/settingsSetup.ts`）。
-   */
-  readonly touch: () => boolean;
-  /** 提示文案（来自 i18n）。 */
-  readonly notice: (text: string) => void;
-  /** 把某个技能改绑到某个键（收尾由 `finishCapture` 做）。 */
-  readonly rebind: (skillId: string, key: string) => void;
-  /** 选中 / 取消选中 / 绑定 / 取下——触屏键位的两步交互（与鼠标同一份判定）。 */
-  readonly selectSlot: (index: number) => void;
-  readonly deselectSlot: () => void;
-  readonly assignTouchSlot: (slot: number, skillId: string) => void;
-  readonly clearTouchSlot: (slot: number) => void;
-  readonly startCapture: (skillId: string, triggerKey?: string) => void;
-  readonly stopCapture: () => void;
-  readonly finishCapture: (key: string) => void;
-  readonly moveFocus: (direction: 'up' | 'down' | 'left' | 'right') => SettingsFocus | undefined;
-  readonly cycleFocus: (back: boolean) => SettingsFocus;
-  readonly nudgeSlider: (direction: -1 | 1) => void;
-  /** 焦点是否需要更新（undefined = 不变）。 */
-  readonly redraw: () => void;
-}
-
-/**
- * 一次按键的**执行结果**（纯数据，面板照着改状态）。
- */
-export interface KeyExecutionResult {
-  readonly consumed: boolean;
-  /** 焦点的新值（undefined = 不变）。 */
-  readonly focus?: SettingsFocus | undefined;
-  /** 滑块要调的方向（undefined = 不动滑块）。 */
-  readonly nudgeSlider?: -1 | 1 | undefined;
-  /**
-   * 这次按键是否需要重画。**省略即"需要"** —— 只有确实什么都没改的
-   * 路径（`ignore`）才显式给 `false`。
-   *
-   * ==================================================================
-   * ⚠️ 为什么要有这个字段（重构时踩的回归）
-   * ==================================================================
-   *
-   * 重构把"各分支自己重画"改成了"`handleKey` 末尾统一重画一次"。
-   * 那样更不容易漏重画，但**把 `ignore` 也带上了**，而原来的 `ignore`
-   * 分支是不重画的。
-   *
-   * 这在本作里不是小事 —— `settingsKeys` 的 keydown **没有过滤
-   * `event.repeat`**，所以**按住一个与设置无关的键，会以按键重复率
-   * 反复重画整个设置面板**（几百个 Pixi 对象）。旧代码按住是零开销。
-   */
-  readonly redraw?: boolean | undefined;
-}
-
-export interface KeyPanelActionInput {
-  readonly action: KeyAction;
-  /** `action.kind === 'activate'` 时由 `resolveKeyDispatch` 解析好的动作。 */
-  readonly activate: KeyPanelDispatch['activate'];
-  /** 触发这次激活的**原始键名**（`startCapture` 要靠它作废那一次按键）。 */
-  readonly key: string;
-}
-
-/**
- * 把 `resolveKeyDispatch` 的结果执行成数据。
- *
- * 命令式的东西（开/关弹窗、改键）走 `do_`；会改变面板状态的东西
- * （焦点、滑块）走返回值 —— 于是这个函数自身**没有隐藏状态**。
- */
-export function executeKeyPanelAction(
-  input: KeyPanelActionInput,
-  do_: KeyActionBindings,
-): KeyExecutionResult {
-  const { action } = input;
-  switch (action.kind) {
-    case 'cancelCapture':
-      do_.stopCapture();
-      return { consumed: true };
-    case 'closePanel':
-      do_.close();
-      return { consumed: true };
-    case 'capture':
-      /**
-       * ==============================================================
-       * 由**面板自己**完成捕获，不依赖输入层
-       * ==============================================================
-       *
-       * 原先这里只 `return true`（"捕获模式下输入层直接回调"）—— 那个
-       * 假设**在备战界面不成立**：
-       *
-       *   `main.ts` 的接线是 `capture: (h) => battle()?.inputSource?.capture(h)`，
-       *   而**备战界面上 `battle()` 是 `undefined`**（还没开局）。
-       *   于是捕获回调根本没注册，`finishCapture` 永远收不到键 ——
-       *   表现为"点进改键了、按键毫无反应"。
-       *
-       * 而设置齿轮**就在备战界面上**，所以最常规的路径 100% 坏。
-       *
-       * 面板本来就通过 `handleKey` 收到每一个按键，所以直接在这里收尾：
-       *   - 备战界面：没有输入层 → 全靠这里 ✅
-       *   - 战斗界面：面板先处理（`settingsKeys` 在**捕获阶段**），
-       *     收尾时 `stopCapture()` 已经 `onCapture(undefined)`，
-       *     于是输入层在冒泡阶段**不会**再投递一次 → 不会双重绑定 ✅
-       */
-      do_.finishCapture(action.key);
-      return { consumed: true };
-    case 'mnemonic': {
-      /**
-       * 助记键直达（G / K / R / S）。
-       *
-       * ⚠️ 每个分支都**同时移动焦点** —— 否则按完 G 之后 `Enter` 还会
-       * 作用在原位置上，玩家会觉得"键没生效"。
-       */
-      switch (action.target) {
-        case 'tabGeneral':
-          do_.switchTab('general');
-          return { consumed: true, focus: { zone: 'tabs', index: 0 } };
-        case 'tabKeys':
-          do_.switchTab('keys');
-          return { consumed: true, focus: { zone: 'tabs', index: 1 } };
-        case 'resetKeys':
-          // 恢复默认属于按键页 —— 先切过去，玩家才看得到结果
-          do_.switchTab('keys');
-          do_.resetKeys();
-          do_.notice('settings.keysResetDone');
-          return { consumed: true };
-        case 'slider':
-          /**
-           * UI 缩放只在通用页存在，所以先切页 —— 否则焦点会落在一个
-           * 不可见的控件上（那正是之前「滑块漏到按键页」那类 bug 的温床）。
-           */
-          do_.switchTab('general');
-          return { consumed: true, focus: { zone: 'slider' } };
-      }
-    }
-    case 'move': {
-      /**
-       * slider 焦点下，**左右是"调值"而不是"移动焦点"**。
-       *
-       * 需求："设置的通用里，加一个 UI 缩放的 slide，可以调整所有 UI 的比例"，
-       * 而本项目要求"几乎全键盘可操作"，所以 slider 必须能纯键盘调。
-       * 上下仍然用于离开这一项（回 tab 行 / 去恢复按钮）。
-       */
-      const next = do_.moveFocus(action.direction);
-      if (next === undefined) {
-        return {
-          consumed: true,
-          nudgeSlider: action.direction === 'right' ? 1 : -1,
-        };
-      }
-      return { consumed: true, focus: next };
-    }
-    case 'cycle':
-      return { consumed: true, focus: do_.cycleFocus(action.back) };
-    case 'activate': {
-      /** ⚠️ 把键传下去：`startCapture` 要靠它作废"触发改键的那一次按键"。 */
-      const activate = input.activate;
-      if (activate === undefined) return { consumed: true };
-      switch (activate.kind) {
-        case 'switchTab':
-          do_.switchTab(activate.tab);
-          return { consumed: true };
-        case 'startCapture':
-          do_.startCapture(activate.skillId, input.key);
-          return { consumed: true };
-        /**
-         * ============================================================
-         * 触屏键位的两步交互（键盘这条路与鼠标**同一份判定**）
-         * ============================================================
-         *
-         * ⚠️ 这里**不改焦点**：
-         *   - `selectSlot` 时焦点本来就在键位区（Enter 是它解析出来的）
-         *   - `assignTouchSlot` 时焦点在技能格上，而"绑完就取消选中"
-         *     之后玩家接着按方向键就是在技能格之间走 —— 正是他想要的
-         */
-        case 'selectSlot':
-          do_.selectSlot(activate.index);
-          return { consumed: true };
-        case 'deselectSlot':
-          do_.deselectSlot();
-          return { consumed: true };
-        case 'assignTouchSlot':
-          do_.assignTouchSlot(activate.slot, activate.skillId);
-          do_.deselectSlot();
-          return { consumed: true };
-        case 'clearTouchSlot':
-          do_.clearTouchSlot(activate.slot);
-          return { consumed: true };
-        /**
-         * 底部那个**唯一**的「恢复默认」。
-         *
-         * ⚠️ 焦点模型只回答"玩家按了那个按钮"（`resetKeys`）；"恢复键盘
-         * 还是触屏"在这里按**设备能力**分流 —— 用户 2026-10-12：
-         * "同一时间显示一个按钮……根据当前是否是触屏"。
-         * 判定在 `./resetButton.resetTargetFor`（纯函数、可单测）。
-         */
-        case 'resetKeys': {
-          const target = resetTargetFor(do_.touch());
-          if (target === 'touch') do_.resetTouch();
-          else do_.resetKeys();
-          do_.notice(resetDoneKey(target));
-          return { consumed: true };
-        }
-        case 'close':
-          do_.close();
-          return { consumed: true };
-        case 'none':
-          return { consumed: true };
-      }
-    }
-    case 'ignore':
-      /**
-       * ⚠️ 唯一显式 `redraw: false` 的路径。
-       *
-       * 什么都没改就没有重画的理由，而按住键会**以按键重复率**打到这里
-       * （`settingsKeys` 不过滤 `event.repeat`）。详见 `KeyExecutionResult.redraw`。
-       */
-      return { consumed: true, redraw: false };
-  }
-}
-
+export type {
+  KeyActionBindings,
+  KeyExecutionResult,
+  KeyPanelActionInput,
+  PanelActionBindings,
+} from './panelExecute';
+export { executeKeyPanelAction, executePanelDispatch } from './panelExecute';

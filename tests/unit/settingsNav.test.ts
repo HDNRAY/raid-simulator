@@ -35,10 +35,16 @@ const TABS = visibleTabs('gameplay');
 function ctx(over: Partial<FocusContext> = {}): FocusContext {
   return {
     tabCount: TABS.length,
-    cellCount: 6,
+    cellCount: 8,
     hasGrid: true,
+    hasPicker: false,
+    hasMode: false,
+    hasReset: true,
+    hasTouchReset: false,
+    pickerCount: 0,
     hasSlider: false,
-    hasSlots: true,
+    /** ⚠️ 键位区 / 技能面同属**触屏块** —— 键盘方式下不出现（见 `focus.ts` 文件头）。 */
+    hasSlots: false,
     slotIndex: 0,
     ...over,
   };
@@ -53,17 +59,14 @@ describe('弹窗内的键盘导航：没有只能用鼠标的死角', () => {
     expect(moveFocus(first, 'left', ctx())).toEqual(first);
   });
 
-  it('网格第一行往上 → 到 tab 行；最后一行往下 → 到**键位区**，再往下才是按钮', () => {
+  it('网格第一行往上 → tab 行；最后一行往下 → **它自己那块**的恢复按钮', () => {
     expect(moveFocus({ zone: 'grid', index: 0 }, 'up', ctx())).toEqual({ zone: 'tabs', index: 0 });
     const lastRow: SettingsFocus = { zone: 'grid', index: KEY_GRID.cols * 2 };
-    expect(moveFocus(lastRow, 'down', ctx())).toEqual({ zone: 'slots', index: 0 });
-    /** 键位区再往下才是底部按钮（顺序：格阵 → 键位 → 按钮）。 */
-    expect(moveFocus({ zone: 'slots', index: 3 }, 'down', ctx())).toEqual({ zone: 'reset' });
-  });
-
-  it('没有键位区时（理论上不该发生）网格往下直接到按钮', () => {
-    const lastRow: SettingsFocus = { zone: 'grid', index: KEY_GRID.cols * 2 };
-    expect(moveFocus(lastRow, 'down', ctx({ hasSlots: false }))).toEqual({ zone: 'reset' });
+    /**
+     * ⚠️ 键盘方式下格阵**没有**键位区可去（那是触屏块的区）——
+     * 往下就是键盘那一份「恢复默认」（见 `focus.ts` 的 `moveFocus`）。
+     */
+    expect(moveFocus(lastRow, 'down', ctx())).toEqual({ zone: 'reset' });
   });
 
   it('焦点不会落到看不见的格子上', () => {
@@ -72,31 +75,57 @@ describe('弹窗内的键盘导航：没有只能用鼠标的死角', () => {
      * 向下移动不能把焦点放到那个空位上 —— 否则玩家按 Enter
      * 会"对空气改键"。
      */
-    const odd = 4; // 4 个格子、3 列 → 第二行只有 1 个
-    const secondRowStart: SettingsFocus = { zone: 'grid', index: 2 };
+    const odd = 6; // 6 个格子、4 列 → 第二行只有 2 个（第 5、6 个）
+    const secondRowStart: SettingsFocus = { zone: 'grid', index: 4 };
     expect(moveFocus(secondRowStart, 'down', ctx({ cellCount: odd, hasSlots: false }))).toEqual({
       zone: 'reset',
     });
   });
 
-  it('"恢复默认"往上回到键位区，往左回到网格/键位区', () => {
-    expect(moveFocus({ zone: 'reset' }, 'up', ctx())).toEqual({ zone: 'slots', index: 0 });
-    /** ⚠️ 没有键位区时才回网格（旧行为），有键位区时它就是"上面那一块"。 */
-    expect(moveFocus({ zone: 'reset' }, 'left', ctx({ hasSlots: false }))).toEqual({
+  /**
+   * ==================================================================
+   * ⚠️ 桌面 4 列、触屏 3 列（`FocusContext.gridCols`）
+   * ==================================================================
+   *
+   * `cellCount` 两边可能一样（技能表相同），而"↓ 跳几格"必须按**当前这一屏**
+   * 算 —— 模型里读 `KEY_GRID.cols`（桌面常量）会让触屏的焦点**斜着跳**：
+   * 按 ↓ 落到旁边一列上。
+   */
+  it('【关键】↓ 按**当前这一屏**的列数走（模型不吃桌面常量）', () => {
+    /**
+     * `FocusContext.gridCols` 由 `buildFocusContext` 按**这一屏的度量**填
+     * （`keyGridMetrics(...).cols`）。这里用一个显式的 3 列上下文，证明
+     * "↓ 跳几格"跟着它走 —— 模型里读 `KEY_GRID.cols` 会让换列数时**斜着跳**。
+     */
+    const three = ctx({ gridCols: 3, cellCount: 6, gridRows: 2 });
+    expect(moveFocus({ zone: 'grid', index: 0 }, 'down', three)).toEqual({
       zone: 'grid',
-      index: 5,
+      index: 3,
+    });
+    /** 桌面那套是 4 列（`KEY_GRID.cols`），同一格往下跳 4。 */
+    expect(moveFocus({ zone: 'grid', index: 0 }, 'down', ctx())).toEqual({
+      zone: 'grid',
+      index: KEY_GRID.cols,
     });
   });
 
-  /**
-   * ⚠️ 用户 2026-10-12："恢复默认和触屏默认 **同一时间显示一个按钮**
-   * 就可以了，根据当前是否是触屏。" —— 所以 `reset` 右边**没有**第二个
-   * 按钮了，"右"在这里就是**停在原地**（不是绕回、也不是跳走）。
-   */
-  it('「恢复默认」右边没有第二个按钮：右 = 停在原地', () => {
+  it('格阵行数上限由容量给（`gridRows`）—— 焦点不越过画得出来的行', () => {
+    /**
+     * 技能比格子多时，焦点必须停在**画得出来**的那几行里：`row < rows-1`
+     * 才允许往下走，否则会"对空气改键"。
+     */
+    const capped = ctx({ cellCount: 8, gridCols: 4, gridRows: 1 });
+    expect(moveFocus({ zone: 'grid', index: 0 }, 'down', capped)).toEqual({ zone: 'reset' });
+  });
+
+  it('键盘那块「恢复默认」：上回到格阵最后一行，左右**停在原地**', () => {
+    /**
+     * ⚠️ 2026-10-12 二次定案：两块**各自**一个恢复按钮（不再"一个按钮按设备
+     * 分流"）—— 所以 `reset` 右边**没有**第二个按钮，左右就是停在原地。
+     */
+    expect(moveFocus({ zone: 'reset' }, 'up', ctx())).toEqual({ zone: 'grid', index: 7 });
     expect(moveFocus({ zone: 'reset' }, 'right', ctx())).toEqual({ zone: 'reset' });
-    expect(moveFocus({ zone: 'reset' }, 'left', ctx())).toEqual({ zone: 'slots', index: 0 });
-    expect(moveFocus({ zone: 'reset' }, 'up', ctx())).toEqual({ zone: 'slots', index: 0 });
+    expect(moveFocus({ zone: 'reset' }, 'left', ctx())).toEqual({ zone: 'reset' });
   });
 
   it('键位区内左右在 0..容量-1 之间走（两端不绕回）', () => {
@@ -116,14 +145,15 @@ describe('弹窗内的键盘导航：没有只能用鼠标的死角', () => {
   it('Tab 循环所有可用区域（含关闭按钮），Shift+Tab 反向', () => {
     const a = cycleZone({ zone: 'tabs', index: 0 }, ctx());
     expect(a.zone).toBe('grid');
+    /**
+     * ⚠️ 键盘方式下**没有** `slots`（键位区/技能面是触屏那块）——
+     * Tab 顺序是 tabs → grid → reset → close → tabs。
+     */
     const b = cycleZone(a, ctx());
-    expect(b.zone).toBe('slots');
-    const c = cycleZone(b, ctx());
-    expect(c.zone).toBe('reset');
-    /** ⚠️ `reset` 之后**直接**是 `close`（那个第二个按钮已删，见上一条）。 */
-    expect(cycleZone(c, ctx()).zone).toBe('close');
+    expect(b.zone).toBe('reset');
+    expect(cycleZone(b, ctx()).zone).toBe('close');
     expect(cycleZone({ zone: 'close' }, ctx()).zone).toBe('tabs');
-    // 反向：tabs ← close（顺序是 tabs → grid → slots → reset → close → tabs）
+    // 反向：tabs ← close（顺序是 tabs → grid → reset → close → tabs）
     expect(cycleZone({ zone: 'tabs', index: 0 }, ctx(), true).zone).toBe('close');
   });
 

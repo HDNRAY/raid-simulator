@@ -18,6 +18,7 @@
 import type { PanelActions } from './panelWiring';
 import type { Direction, FocusContext, SettingsFocus } from './focus';
 import { resolveCycleFocus, resolveMoveFocus } from './panelDispatch';
+import type { OperationMode } from '../../render/platform';
 import type { KeyRow } from './rows';
 
 /**
@@ -31,12 +32,12 @@ export interface PanelActionDeps {
   /** 关闭弹窗。 */
   readonly close: () => void;
   readonly switchTab: (tab: Parameters<PanelActions['switchTab']>[0]) => void;
-  /** 恢复**键盘**键位（底部那个按钮在非触屏设备上的行为）。 */
+  /** 「通用」页切操作方式（唯一 flag 的写入点）。 */
+  readonly switchOperationMode: (mode: OperationMode) => void;
+  /** 恢复**键盘**键位（键盘块那个按钮）。 */
   readonly resetKeys: () => void;
-  /** 恢复**触屏**键位（同一个按钮在触屏设备上的行为）。 */
+  /** 恢复**触屏**键位（触屏块那个按钮）。 */
   readonly resetTouch: () => void;
-  /** 是不是触屏设备（决定那个按钮恢复谁）。 */
-  readonly touch: () => boolean;
   /** 提示一行（已翻译的文案）。 */
   readonly notice: (text: string) => void;
   readonly rebind: (skillId: string, key: string) => void;
@@ -74,14 +75,14 @@ export function buildPanelActions(d: PanelActionDeps): PanelActions {
   return {
     close: () => d.close(),
     switchTab: (tab) => d.switchTab(tab),
+    switchOperationMode: (mode) => d.switchOperationMode(mode),
     /**
-     * ⚠️ 两个恢复都接上：**哪一个会被调用**由设备能力决定
-     * （`./resetButton.resetTargetFor`，在 `panelDispatch` 里分流）——
-     * 所以这里不再是"两个按钮各接一个"。
+     * ⚠️ 两个恢复**各自接给自己的那一块**——"哪个会被调用"由"点在哪个块
+     * 里的按钮"决定（见 `focus` 的 `reset` / `touchReset` 两个区），
+     * 不再由任何设备判断分流。
      */
     resetKeys: () => d.resetKeys(),
     resetTouch: () => d.resetTouch(),
-    touch: () => d.touch(),
     notice: (text) => d.notice(text),
     rebind: (skillId, key) => d.rebind(skillId, key),
     swapSlots: (from, to) => {

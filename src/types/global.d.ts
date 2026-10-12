@@ -69,6 +69,8 @@ declare global {
         cellCenter(index: number): { readonly x: number; readonly y: number };
         /** 右下角第 `index` 个**键位**的圆心（越界为 `null`）。 */
         slotCenter(index: number): { readonly x: number; readonly y: number } | null;
+        /** **触屏技能面**第 `index` 格（窗口内下标）的圆心。 */
+        pickerCellCenter(index: number): { readonly x: number; readonly y: number } | null;
         trace(): readonly string[];
         /**
          * 打开/关掉**齿轮按钮**的键盘焦点并立刻重绘（截图用）。
@@ -174,6 +176,17 @@ declare global {
         bounds(): { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
         /** 箭头中心的逻辑坐标 —— 注入点击时用它，别手写数字。 */
         center(): { readonly x: number; readonly y: number };
+        /**
+         * `Esc` 提示的**包围盒**（逻辑坐标；触屏隐藏时也仍然算得出来）。
+         *
+         * ⚠️ 提示的位置是**推导**出来的（`IconButton.iconHintPlacement`：
+         * 按按钮在画布哪一半决定贴哪个角），这个读数是那条推导在**真实
+         * 布局**下的证据 —— 截图只能看出"看着像在角上"，看不出它有没有
+         * 被画布边裁掉。
+         */
+        shortcutBounds():
+          | { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
+          | null;
       };
       /**
        * **复盘（战报）那层** + 当前的**输入归属**（调试 / 验证用）。

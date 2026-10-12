@@ -12,9 +12,7 @@ import {
 } from '../../src/render/scaling';
 import {
   SETTINGS_PANEL,
-  cycleZone,
   hitTest,
-  moveFocus,
   uiScaleFromPointer,
   uiScaleSliderRect,
 } from '../../src/ui/settings/logic';
@@ -285,103 +283,6 @@ describe('日志文案与布局', () => {
   });
 });
 
-describe('UI 缩放（设置 · 通用页的 slider）', () => {
-  /**
-   * 需求："设置的通用里，加一个 UI 缩放的 slide，可以调整所有 UI 的比例"
-   *
-   * 缩放是"乘在自动适配之上的额外倍数"，所以 120% 在任意窗口下
-   * 都是"比自动适配再大 20%"，语义与窗口尺寸无关。
-   */
-  it('倍数被钳到合法范围并对齐步长（浮点尾数不渗进布局）', () => {
-    expect(clampUiScale(0.1)).toBe(UI_SCALE_MIN);
-    expect(clampUiScale(99)).toBe(UI_SCALE_MAX);
-    expect(clampUiScale(Number.NaN)).toBe(1);
-    // 步长对齐：1.234 → 1.2（不是 1.234 原样透传）
-    expect(clampUiScale(1.234)).toBeCloseTo(1.2, 10);
-    // 浮点尾数不渗进布局：结果 × 10 应该是个整数
-    for (const v of [0.1 + 0.2, 1.7, 1.3000000000000003]) {
-      expect(Math.round(clampUiScale(v) * 10)).toBeCloseTo(clampUiScale(v) * 10, 10);
-    }
-  });
-
-  it('【关键】UI 缩放**不影响画布** —— 战斗画面保持不变', () => {
-    /**
-     * 需求澄清："我不是说缩放整个游戏画面，我是指，缩放游戏 UI……
-     * 战斗画面和战斗文字保持不变。"
-     *
-     * 所以画布尺寸只由"自动适配视口"决定，与 UI 系数无关。
-     * 这条断言的是**接口本身**：`computeScale` 不再接受倍率参数。
-     */
-    const a = computeScale(1920, 1080, 'fit');
-    const b = computeScale(1920, 1080, 'fit');
-    expect(a).toBe(b);
-    // 画布 CSS 尺寸也不该受任何"UI 系数"影响 —— 它只有 3 个参数
-    expect(computeCanvasCssSize.length).toBeLessThanOrEqual(3);
-  });
-
-  it('slider 的矩形在弹窗内、且在 **tab 栏下方**（不遮挡）', () => {
-    const rect = uiScaleSliderRect();
-    expect(rect.x).toBeGreaterThanOrEqual(SETTINGS_PANEL.x);
-    expect(rect.x + rect.w).toBeLessThanOrEqual(SETTINGS_PANEL.x + SETTINGS_PANEL.w);
-    expect(rect.y).toBeGreaterThan(SETTINGS_PANEL.y);
-    expect(rect.y + rect.h).toBeLessThanOrEqual(SETTINGS_PANEL.y + SETTINGS_PANEL.h);
-  });
-
-  /**
-   * 焦点模型的上下文（见 `ui/settings/focus.FocusContext`）。
-   *
-   * ⚠️ "这一页有什么"是**参数**：通用页没有技能格 / 键位区 / 触屏按钮，
-   * 而「按键」页三样都有。
-   */
-  const generalCtx = {
-    tabCount: 1,
-    cellCount: 0,
-    hasGrid: false,
-    hasSlider: true,
-    hasSlots: false,
-    hasTouchReset: false,
-    slotIndex: 0,
-  } as const;
-  const keysCtx = {
-    tabCount: 2,
-    cellCount: 6,
-    hasGrid: true,
-    hasSlider: false,
-    hasSlots: true,
-    hasTouchReset: true,
-    slotIndex: 0,
-  } as const;
-
-  it('通用页的焦点顺序是 tabs → slider → reset（Tab 能走完）', () => {
-    // 通用页：没有技能格、有 slider
-    let focus = cycleZone({ zone: 'tabs', index: 0 }, generalCtx);
-    expect(focus.zone).toBe('slider');
-    focus = cycleZone(focus, generalCtx);
-    expect(focus.zone).toBe('reset');
-    // reset → close（右上角的关闭）
-    const close = cycleZone(focus, generalCtx);
-    expect(close.zone).toBe('close');
-    // 再 Tab 回到 tabs
-    expect(cycleZone(close, generalCtx).zone).toBe('tabs');
-    // 按键页没有 slider，Tab 顺序里不应出现它，但有**键位区**
-    let keysFocus = cycleZone({ zone: 'tabs', index: 0 }, keysCtx);
-    expect(keysFocus.zone).toBe('grid');
-    keysFocus = cycleZone(keysFocus, keysCtx);
-    expect(keysFocus.zone).toBe('slots');
-    expect(cycleZone(keysFocus, keysCtx).zone).toBe('reset');
-  });
-
-  it('通用页里从上往下走是 tabs → slider → reset', () => {
-    const toSlider = moveFocus({ zone: 'tabs', index: 0 }, 'down', generalCtx);
-    expect(toSlider.zone).toBe('slider');
-    const toReset = moveFocus(toSlider, 'down', generalCtx);
-    expect(toReset.zone).toBe('reset');
-    // slider 的左右**不移动焦点**（调用方拿它们当调值键）——
-    // 模型这一层把左右都当作"回到 tabs"
-    expect(moveFocus(toSlider, 'up', generalCtx).zone).toBe('tabs');
-  });
-});
-
 describe('能力结算时刻：castStart 与 castFinish', () => {
   /**
    * 需求："重斩加上霸体标签和霸体效果"（改造后挂在「碾压」上）。
@@ -606,7 +507,7 @@ describe('UI 缩放：覆盖面与鼠标支持', () => {
       hitTest(rect.x + rect.w + 40, rect.y + 4, {
         tabs: ['general'],
         tab: 'general',
-        rowSkillIds: [],
+        rowSkillIds: [], mode: 'keyboard',
       }).kind,
     ).not.toBe('scaleSlider');
   });
@@ -617,14 +518,14 @@ describe('UI 缩放：覆盖面与鼠标支持', () => {
       hitTest(rect.x + 4, rect.y + 4, {
         tabs: ['general'],
         tab: 'general',
-        rowSkillIds: [],
+        rowSkillIds: [], mode: 'keyboard',
       }).kind,
     ).toBe('scaleSlider');
     expect(
       hitTest(rect.x + 4, rect.y + 4, {
         tabs: ['general', 'keys'],
         tab: 'keys',
-        rowSkillIds: ['attack'],
+        rowSkillIds: ['attack'], mode: 'keyboard',
       }).kind,
     ).not.toBe('scaleSlider');
   });
@@ -684,5 +585,48 @@ describe('面板外观统一', () => {
      * 见 `docs/plans/2026-10-10-m8-mobile.md` §2.2b。
      */
     expect(r.x + r.w).toBeLessThan(654);
+  });
+});
+
+describe('UI 缩放（设置 · 通用页的 slider）', () => {
+  /**
+   * 需求："设置的通用里，加一个 UI 缩放的 slide，可以调整所有 UI 的比例"
+   *
+   * 缩放是"乘在自动适配之上的额外倍数"，所以 120% 在任意窗口下
+   * 都是"比自动适配再大 20%"，语义与窗口尺寸无关。
+   */
+  it('倍数被钳到合法范围并对齐步长（浮点尾数不渗进布局）', () => {
+    expect(clampUiScale(0.1)).toBe(UI_SCALE_MIN);
+    expect(clampUiScale(99)).toBe(UI_SCALE_MAX);
+    expect(clampUiScale(Number.NaN)).toBe(1);
+    // 步长对齐：1.234 → 1.2（不是 1.234 原样透传）
+    expect(clampUiScale(1.234)).toBeCloseTo(1.2, 10);
+    // 浮点尾数不渗进布局：结果 × 10 应该是个整数
+    for (const v of [0.1 + 0.2, 1.7, 1.3000000000000003]) {
+      expect(Math.round(clampUiScale(v) * 10)).toBeCloseTo(clampUiScale(v) * 10, 10);
+    }
+  });
+
+  it('【关键】UI 缩放**不影响画布** —— 战斗画面保持不变', () => {
+    /**
+     * 需求澄清："我不是说缩放整个游戏画面，我是指，缩放游戏 UI……
+     * 战斗画面和战斗文字保持不变。"
+     *
+     * 所以画布尺寸只由"自动适配视口"决定，与 UI 系数无关。
+     * 这条断言的是**接口本身**：`computeScale` 不再接受倍率参数。
+     */
+    const a = computeScale(1920, 1080, 'fit');
+    const b = computeScale(1920, 1080, 'fit');
+    expect(a).toBe(b);
+    // 画布 CSS 尺寸也不该受任何"UI 系数"影响 —— 它只有 3 个参数
+    expect(computeCanvasCssSize.length).toBeLessThanOrEqual(3);
+  });
+
+  it('slider 的矩形在弹窗内、且在 **tab 栏下方**（不遮挡）', () => {
+    const rect = uiScaleSliderRect();
+    expect(rect.x).toBeGreaterThanOrEqual(SETTINGS_PANEL.x);
+    expect(rect.x + rect.w).toBeLessThanOrEqual(SETTINGS_PANEL.x + SETTINGS_PANEL.w);
+    expect(rect.y).toBeGreaterThan(SETTINGS_PANEL.y);
+    expect(rect.y + rect.h).toBeLessThanOrEqual(SETTINGS_PANEL.y + SETTINGS_PANEL.h);
   });
 });

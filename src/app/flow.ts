@@ -38,6 +38,7 @@ import type { CharacterSelectScreen } from '../ui/CharacterSelectScreen';
 import type { ScreenControls } from '../ui/ScreenControls';
 import type { SettingsButton } from '../ui/settings/SettingsButton';
 import type { KeyBinding } from '../input/keyboard';
+import type { OperationMode } from '../render/platform';
 
 /**
  * 当前阶段（**界面路由**）。
@@ -136,6 +137,19 @@ export interface GameState {
    */
   touch: TouchControls | undefined;
 
+  /**
+   * **操作方式**（键盘 / 触屏）—— 全应用**唯一**的那个 flag。
+   *
+   * ⚠️ 面板（画哪一块）、触屏层（显隐 / 吃不吃指针）、场景与齿轮（键名提示）、
+   * 输入方式与存储（读哪一份键位表）**都读它**。任何"键盘还是触屏"的新判断
+   * 都从这里派生（`render/platform.capsOf`），**不许**再引入第二个来源。
+   *
+   * ⚠️ 写入点只有一处：`game.ts` 的 `applyOperationMode`（「通用」页那个
+   * 选择器会调它）。启动时的初值由 `render/platform.resolveOperationMode`
+   * 解析（`?touch=` 覆盖 > 存档 > 默认键盘）。
+   */
+  operationMode: OperationMode;
+
   /** UI 缩放的当前值（设置里的 slider）。 */
   uiScale: number;
 
@@ -195,6 +209,17 @@ export function createGameState(
    * 而面板比触屏层早 —— 回填的窗口里玩家能看到一组错的按钮。
    */
   touchButtons: readonly string[],
+  /**
+   * **操作方式**（键盘 / 触屏）—— 全应用**唯一**的那个 flag。
+   *
+   * ⚠️ 与 `touchButtons` 同一个理由的**参数**而不是回填：`settingsSetup`
+   * （面板要按它决定画哪一块）与装配期就在跑的界面都读它，回填会让首帧
+   * 看到另一套。
+   *
+   * ⚠️ 它是**可变**的（「通用」页能切）—— 写入点只有 `game.ts` 的
+   * `applyOperationMode`。
+   */
+  operationMode: OperationMode,
 ): GameState {
   return {
     loop: undefined,
@@ -209,6 +234,7 @@ export function createGameState(
     prepare: undefined,
     bindings,
     touchButtons,
+    operationMode,
     touch: undefined,
     uiScale: 1,
     settingsButtonFocused: () => false,

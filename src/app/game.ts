@@ -51,17 +51,7 @@
 
 import { Container, Graphics, Sprite, Text } from 'pixi.js';
 import { BattleScene } from '../render/BattleScene';
-import { PrepareScreen } from '../ui/PrepareScreen';
-import { HomeScreen } from '../ui/HomeScreen';
-import { CharacterSelectScreen } from '../ui/CharacterSelectScreen';
-import { ScreenControls } from '../ui/ScreenControls';
-import {
-  BOSS_POOL,
-  BOSS_ROSTER,
-  PLAYER_ROSTER,
-  resolveBossId,
-  resolvePlayerId,
-} from '../data/roster';
+import { BOSS_POOL, resolveBossId, resolvePlayerId } from '../data/roster';
 import { translator } from '../i18n/translator';
 import { observeStage } from '../render/sizes';
 import { UI_SCALE_MAX, UI_SCALE_MIN, type ScalingMode } from '../render/scaling';
@@ -77,7 +67,10 @@ import { installDebugApi } from './debugApiSetup';
 import { wireLoop } from './loopWiring';
 import { wireCanvasPointer } from './canvasInput';
 import { wireSettingsKeys } from './settingsKeys';
-import { translateSafe } from './translate';
+import { buildScreens } from './screenSetup';
+import { readUrlParams } from './urlParams';
+import { switchOperationMode } from './operationMode';
+import { capsOf, type OperationMode } from '../render/platform';
 import type { BattleLoop } from './battleLoop';
 import type { GameDeps } from './deps';
 import type { Phase } from './flow';
@@ -112,7 +105,16 @@ export interface CreateGameDeps {
 export function createGame(o: CreateGameDeps): GameHandle {
   const { app, stage } = o;
   const d = o.deps;
-  const state = createGameState(d.bindings, d.touchButtons);
+  const state = createGameState(d.bindings, d.touchButtons, d.inputMode);
+
+  /**
+   * **要不要显示键名提示** = "现在是不是键盘方式"（唯一 flag 的派生）。
+   *
+   * ⚠️ 提成一个取值函数：`home` / `select` / `ScreenControls` / 场景 /
+   * 设置面板 / 指针路由六处都要它，各写一遍 `capsOf(...)` 就是六份会漂的
+   * 派生 —— 而"唯一 flag"的意义正是**只有一处**回答这个问题。
+   */
+  const showKeyHintsNow = (): boolean => capsOf(state.operationMode).showKeyHints;
 
   /* ---------- 场景 ---------- */
   const scene = new BattleScene({
@@ -156,23 +158,11 @@ export function createGame(o: CreateGameDeps): GameHandle {
 
   /* ---------- 一局战斗 ---------- */
   /**
-   * **跳过备战界面直接进战斗**：`?prepare=skip`（端到端脚本用）。
-   *
-   * ⚠️ 用 URL 参数而不是"再加一个调试方法"：后者是**旁路**，而备战界面是
-   * 真实入口的一部分（"点开始"本身也会坏）。走参数则与玩家同一条路。
-   * ⚠️ 只有显式带这个参数才生效 —— 线上地址没有它，玩家路径一字未变。
+   * **启动开关**（`?prepare=skip` / `?boss=` / `?noai=1`）—— 读法与语义
+   * 整块在 `./urlParams`（`game.ts` 又一次顶到 700 行，AGENTS.md §3 的横向
+   * 切割）。这里只取结果。
    */
-  const params = new URLSearchParams(globalThis.location.search);
-  const skipPrepare = params.get('prepare') === 'skip';
-
-  /**
-   * `?boss=lust` —— 指定对手（截图 / 调试用）。
-   *
-   * ⚠️ 与 `?prepare=skip` 配合使用：`?prepare=skip&boss=lust` 直接开一局
-   * 打色欲。单独给 `?boss=` 只在跳过备战时才有意义（否则备战界面会按
-   * 存储里的选择走）。
-   */
-  const bossParam = params.get('boss');
+  const url = readUrlParams(globalThis.location.search);
 
   /**
    * **当前选中的出战单位**（备战界面的选择，进战斗时读到）。
@@ -199,7 +189,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
     registryFor: d.registryFor,
     getBindings: () => state.bindings,
     getSelection: () => selection,
-    noAi: params.get('noai') === '1',
+    noAi: url.noAi,
     timeLimitMs: TIME_LIMIT_MS,
     touchInput: () => state.touch?.input,
   });
@@ -388,81 +378,26 @@ export function createGame(o: CreateGameDeps): GameHandle {
     enterBattle(playerId, bossId);
   };
 
-  /* ---------- 首页（默认入口） ---------- */
+  /* ---------- 整屏界面（首页 / 选角色 / 自由模式 / 返回箭头） ---------- */
   /**
-   * 需求："有一个**新的首页**，首页可以选进入肉鸽模式，或者自由" +
-   * "默认入口：首页"。
-   *
-   * ⚠️ 首页只是**路由**：它不通向半成品，所以现在就能当默认入口。
+   * ⚠️ 四个界面怎么建整块在 `./screenSetup`（`game.ts` 顶到 700 行，
+   * AGENTS.md §3 的横向切割）。这里只负责**回填给 `state`** ——
+   * `applyPhase` 的定义早于它们，所有访问点都容忍 `undefined`（见 `flow.ts`）。
    */
-  const home = new HomeScreen({
-    pixi: { Container, Graphics, Sprite, Text },
-    translate: translateSafe,
-    showKeyHints: () => state.touch?.caps.showKeyHints ?? true,
-    onPick: (action) => {
-      /**
-       * 「自由模式」= 原来的备战界面（标题已改成「自由模式」）；
-       * 「肉鸽模式」= 先选角色（设计稿 §3.1：**进入肉鸽才是选角色**）。
-       */
-      if (action === 'free') switchTo('prepare');
-      else switchTo('characterSelect');
-    },
-  });
-  state.home = home;
-  app.stage.addChild(home.root);
-
-  /* ---------- 选角色屏（肉鸽模式的第一屏） ---------- */
-  const select = new CharacterSelectScreen({
-    pixi: { Container, Graphics, Sprite, Text },
-    translate: translateSafe,
-    players: PLAYER_ROSTER,
-    initialPlayerId: selection.playerId,
-    showKeyHints: () => state.touch?.caps.showKeyHints ?? true,
-    onStart: (playerId: string) => startRoguelikeRun(playerId),
-  });
-  state.select = select;
-  app.stage.addChild(select.root);
-
-  /* ---------- 备战界面（自由模式） ---------- */
-  const prepare = new PrepareScreen({
-    pixi: { Container, Graphics, Sprite, Text },
-    translate: translateSafe,
-    players: PLAYER_ROSTER,
-    bosses: BOSS_ROSTER,
+  const screens = buildScreens({
+    app,
+    showKeyHints: showKeyHintsNow,
+    switchTo,
+    startRun: (playerId) => startRoguelikeRun(playerId),
+    onPrepareStart: (playerId, bossId) => onPrepareStart(playerId, bossId),
+    rememberPick: (playerId, bossId) => d.settingsStore.savePick(playerId, bossId),
+    backToHome,
     initial: { playerId: selection.playerId, bossId: selection.bossId },
-    onStart: (playerId: string, bossId: string) => onPrepareStart(playerId, bossId),
-    onChange: (playerId: string, bossId: string) => d.settingsStore.savePick(playerId, bossId),
   });
-  state.prepare = prepare;
-  app.stage.addChild(prepare.root);
-
-  /* ---------- 返回箭头（整屏界面共用） ---------- */
-  /**
-   * 需求（用户 2026-10-12）："肯定要加返回啊" + "把设置的快捷键改成别的
-   * 比如 f1"（`Esc` 腾出来做返回）。
-   *
-   * ⚠️ **触屏对等**（AGENTS.md §3b）：`Esc` 只有键盘按得出，所以这一屏
-   * 左上角必须有一个**可见、可点**的箭头 —— 它就是本组件。
-   *
-   * ⚠️ 它挂在 stage 上（与设置齿轮同一层），**不画进任何一个屏**：
-   * 两个界面共用一份实现，否则"选角色屏的箭头能点、自由模式的不行"
-   * 只是时间问题。
-   *
-   * ⚠️ 显隐的唯一写入点仍是 `applyPhase`（上面那行
-   * `CONTROL_VISIBILITY.back`）；本对象自己**不**决定何时可见。
-   */
-  const back = new ScreenControls({
-    pixi: { Container, Graphics, Sprite, Text },
-    showKeyHints: () => state.touch?.caps.showKeyHints ?? true,
-    /**
-     * ⚠️ 与键盘 `Esc` 走**同一个**闭包（`backToHome`）—— 目标相位、
-     * "战斗里不做事"这些判断只有一份，不会出现"按 Esc 回首页、
-     * 点箭头去别处"。
-     */
-    onBack: () => backToHome(),
-  });
-  state.back = back;
-  app.stage.addChild(back.root);
+  state.home = screens.home;
+  state.select = screens.select;
+  state.prepare = screens.prepare;
+  state.back = screens.back;
 
   /**
    * ⚠️ 开局默认在**首页**：一次性把三个界面与战斗场景的显隐摆好
@@ -477,16 +412,36 @@ export function createGame(o: CreateGameDeps): GameHandle {
    * ⚠️ **`?prepare=skip` 照旧直接进战斗**（不经过首页）：截图工具依赖它
    * （见文件头那段说明）。`?boss=` / `?noai=1` 的行为也一字未变。
    */
-  if (skipPrepare) enterBattle(selection.playerId, resolveBossId(bossParam ?? selection.bossId));
+  if (url.skipPrepare) enterBattle(selection.playerId, resolveBossId(url.boss ?? selection.bossId));
+
+  /**
+   * **操作方式**唯一的运行期写入点 —— 五件事整块在 `./operationMode`
+   * （`game.ts` 顶到 700 行，AGENTS.md §3：拆 util + 注释一起搬）。
+   */
+  const applyOperationMode = (mode: OperationMode): void => {
+    switchOperationMode(
+      {
+        state,
+        store: d.settingsStore,
+        registry: d.registry,
+        scene,
+        settingsButton,
+        settings,
+      },
+      mode,
+    );
+  };
 
   /* ---------- 设置面板 / 齿轮 / 开关 ---------- */
   const settingsSetup = createSettingsSetup({
     app,
-    registry: d.registry,
+    /** ⚠️ 按**当前选的人**取注册表（「按键」页只列他真能按出来的技能）。 */
+    registry: () => d.registryFor(selection.playerId),
     state,
     settingsStore: d.settingsStore,
     battle,
     scene,
+    onOperationModeChanged: (mode) => applyOperationMode(mode),
     /**
      * ⚠️ **改键的同步**（loop 由 `settingsSetup` 自己做）：画面技能格的
      * 键位提示。
@@ -499,7 +454,11 @@ export function createGame(o: CreateGameDeps): GameHandle {
      * `let`，而那正是"两处真相"的开端。
      */
     onBindingsChanged: () => {
-      if (state.touch !== undefined) scene.setShowKeyHints(state.touch.caps.showKeyHints);
+      /**
+     * ⚠️ 键名提示读的是**唯一 flag**（不是触屏控件的 caps）——
+     * 触屏控件不再是它的拥有者（见 `render/platform.ts` 文件头）。
+     */
+    scene.setShowKeyHints(showKeyHintsNow());
     },
     /**
      * ⚠️ **触屏按钮集合的同步**（另一条改动线）：触屏层按新集合重画。
@@ -510,7 +469,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
       state.touch?.setButtons(next);
     },
   });
-  const { settings, settingsButton, settingsToggle, touchCapsSource } = settingsSetup;
+  const { settings, settingsButton, settingsToggle } = settingsSetup;
   /** 回填给 `applyPhase`（它的定义早于这一句，见 `flow.ts` 的说明）。 */
   state.settingsButton = settingsButton;
 
@@ -536,9 +495,9 @@ export function createGame(o: CreateGameDeps): GameHandle {
     isBattleActive: () => state.phase === 'battle',
     /** ⚠️ 按钮集合是**用户自己选的**，与键位表无关（见 `touchLayout`）。 */
     touchSkillIds: () => state.touchButtons,
+    mode: () => state.operationMode,
     scene,
     settingsButton,
-    capsSource: touchCapsSource,
   });
   state.touch = touch;
 
@@ -579,13 +538,15 @@ export function createGame(o: CreateGameDeps): GameHandle {
    */
   wireCanvasPointer({
     canvas: app.canvas,
-    home,
-    select,
-    prepare,
-    back,
+    home: screens.home,
+    select: screens.select,
+    prepare: screens.prepare,
+    back: screens.back,
     settings,
     settingsButton,
     touch,
+    /** ⚠️ 唯一 flag 的派生（"点屏幕离开战斗"只在触屏方式生效）。 */
+    showKeyHints: showKeyHintsNow,
     phase: () => state.phase,
     settingsOpen: () => settingsToggle.isOpen(),
     /**
@@ -645,10 +606,10 @@ export function createGame(o: CreateGameDeps): GameHandle {
       wireLoop({
         state,
         host: {
-          home,
-          select,
-          prepare,
-          back,
+          home: screens.home,
+          select: screens.select,
+          prepare: screens.prepare,
+          back: screens.back,
           settings,
           settingsButton,
           touch,
@@ -677,10 +638,10 @@ export function createGame(o: CreateGameDeps): GameHandle {
         settings,
         settingsButton,
         settingsToggle,
-        home,
-        select,
-        prepare,
-        back,
+        home: screens.home,
+        select: screens.select,
+        prepare: screens.prepare,
+        back: screens.back,
         touch,
         /**
          * ⚠️ **输入归属**（调试 / 验证用）：一份纯函数的结果，脚本据此

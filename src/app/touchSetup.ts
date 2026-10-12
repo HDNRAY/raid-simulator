@@ -1,5 +1,5 @@
 /**
- * **触屏层的装配**（能力探测 + 布局 + 输入源 + 双弧按钮层）。
+ * **触屏层的装配**（布局 + 输入源 + 双弧按钮层）。
  *
  * ==================================================================
  * 为什么单独一个文件
@@ -7,42 +7,35 @@
  *
  * `createTouchControls`（`app/touchControls.ts`）已经把所有触屏逻辑收在
  * 它自己里面了，这一段剩下的是**接线**：把"当前战斗 / 设置是否打开 /
- * 是否在战斗 / 当前派生技 / **用户选的按钮集合**"这些活的量喂给它，再把
- * 它产出的能力值发给别的部件（技能格的键提示、齿轮按钮的快捷键提示）。
+ * 是否在战斗 / 当前派生技 / **用户选的按钮集合** / **当前操作方式**"
+ * 这些活的量喂给它，再把它产出的能力值发给别的部件（键名提示、齿轮按钮
+ * 的快捷键提示）。
  *
- * 抽出来之后 `createGame()` 里只剩一句 `createTouchSetup(...)`，
- * 而**"谁先谁后"的约束**（面板先于触屏、触屏先于回填能力值）集中可见。
+ * 抽出来之后 `createGame()` 里只剩一句 `createTouchSetup(...)`。
+ *
+ * ==================================================================
+ * ⚠️ 这里**不再**有"能力值回填"（2026-10-12）
+ * ==================================================================
+ *
+ * 原先这里放了一个 `TouchCapsSource` 转交点：设置面板先于触屏层构造，
+ * 所以面板先拿一个占位的能力值（`{showKeyHints:true, touch:false}`），
+ * 等触屏层建好再由本文件**回填**。
+ *
+ * 现在整个"键盘 / 触屏"由一个**显式的操作方式**决定（唯一 flag，
+ * 见 `render/platform.ts`），而它由 `GameState.operationMode` 持有 ——
+ * 面板与触屏层都只是它的**读者**。于是：
+ *
+ *   - 没有"谁先构造"的约束了（两边读的是同一个值，谁都不产出它）
+ *   - 没有回填，也就没有"首帧读到占位值"那半帧的错帧
+ *   - ⚠️ **切换操作方式时**本文件不必被调用：`caps()` 每次现读
+ *     （见 `createTouchControls` 里的说明）
  */
 
 import { Container, Graphics, Sprite, Text, type Application } from 'pixi.js';
 import { createTouchControls, derivedOfSnapshot, type TouchControls } from './touchControls';
 import { translateSafe } from './translate';
+import { capsOf, type OperationMode } from '../render/platform';
 import type { BattleLoop } from './battleLoop';
-
-/**
- * 触屏**能力值**的转交点。
- *
- * ⚠️ 它存在的唯一理由是**构造顺序**：设置面板必须先于触屏层构造（面板要
- * 按能力值决定是否显示键位提示），而能力值只有触屏层建好才知道。所以先在
- * `settingsSetup.ts` 里造一个占位对象，这里建好之后**回填**它。
- * 用 `const` 对象而不是 `let` 函数 —— 符合 lint，也不依赖"首次渲染
- * 足够晚"这种隐含前提。
- *
- * ⚠️ 它**不再**携带"触屏按钮预览"：按钮现在由玩家在设置页自己配
- * （见 `input/touchLayout.ts` 文件头），预览被真正的编辑器取代了。
- */
-export interface TouchCapsSource {
-  /** 是否显示键位提示（触屏为 `false`）。 */
-  showKeyHints: boolean;
-  /**
-   * 主输入设备是不是手指（`render/platform` 的能力探测）。
-   *
-   * ⚠️ 与 `showKeyHints` 一起回填，但**不是**它的反义词：设置页拿它决定
-   * 底部那个唯一的「恢复默认」恢复键盘还是触屏键位
-   * （用户 2026-10-12："同一时间显示一个按钮……根据当前是否是触屏"）。
-   */
-  touch: boolean;
-}
 
 /** 触屏装配需要的外部依赖。 */
 export interface TouchSetupDeps {
@@ -60,11 +53,16 @@ export interface TouchSetupDeps {
    * ⚠️ 与键盘绑定表无关（用户 2026-10-12 推翻了原来的派生）。
    */
   readonly touchSkillIds: () => readonly string[];
-  /** 触屏的能力值变化要通知的部件。 */
+  /**
+   * **当前操作方式**（唯一 flag）—— 触屏层的显隐 / 命中 / 输入路由都读它。
+   *
+   * ⚠️ 取值函数：用户在「通用」页切过去之后，本层下一帧就跟着变
+   * （不需要重建控件，也不需要回到这里重新装配一遍）。
+   */
+  readonly mode: () => OperationMode;
+  /** 键名提示变化要通知的部件（场景里的技能栏 / 齿轮按钮）。 */
   readonly scene: { setShowKeyHints(show: boolean): void };
   readonly settingsButton: { setShowShortcut(show: boolean): void };
-  /** 能力值的转交点（本函数负责回填）。 */
-  readonly capsSource: TouchCapsSource;
 }
 
 /**
@@ -79,6 +77,7 @@ export function createTouchSetup(d: TouchSetupDeps): TouchControls {
     pixi: { Container, Graphics, Sprite, Text },
     translate: translateSafe,
     touchSkillIds: d.touchSkillIds,
+    mode: d.mode,
     currentTick: () => d.battle()?.engineState.snapshot.tick ?? 0,
     isSettingsOpen: d.isSettingsOpen,
     /** 非战斗阶段（首页 / 选角色 / 自由模式）触屏按钮也要藏。 */
@@ -114,13 +113,10 @@ export function createTouchSetup(d: TouchSetupDeps): TouchControls {
     staticSlot: (skillId, index) => d.battle()?.slotViewOf(skillId, index),
   });
 
-  /** 回填能力值（见 `TouchCapsSource` 的说明）。两个字段一起填。 */
-  d.capsSource.showKeyHints = touch.caps.showKeyHints;
-  d.capsSource.touch = touch.caps.touch;
-
+  const caps = capsOf(d.mode());
   touch.setButtons(d.touchSkillIds());
-  d.scene.setShowKeyHints(touch.caps.showKeyHints);
-  d.settingsButton.setShowShortcut(touch.caps.showKeyHints);
+  d.scene.setShowKeyHints(caps.showKeyHints);
+  d.settingsButton.setShowShortcut(caps.showKeyHints);
   d.app.stage.addChild(touch.layer.root);
 
   return touch;

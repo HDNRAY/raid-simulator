@@ -60,21 +60,38 @@
  */
 
 import { DEFAULT_BINDINGS, type KeyBinding } from '../input/keyboard';
+import type { OperationMode } from '../render/platform';
 
 /**
  * 存储键。
  *
  * ⚠️ 带**版本后缀**：以后结构变了就换 `v2`，老键自然作废 ——
  * 比在解析时猜"这是哪一版"可靠得多。
+ *
+ * 键的**归属**：`BINDING_KEYS` 是"每种形态各一份**配置**"，
+ * `KEY_OPERATION_MODE` 是"用哪种形态"本身 —— 后者是唯一 flag 的存档。
  */
-/** 设备形态 —— 决定读写哪一份键位。 */
-export type InputMode = 'keyboard' | 'touch';
+/**
+ * 设备形态 —— 决定读写哪一份键位。
+ *
+ * ⚠️ **就是** `render/platform.OperationMode`（全应用唯一的那个"键盘 /
+ * 触屏"flag）。这里只转发这个**类型名**，不另立一个同形状的类型：
+ * 两个名字会让人以为是两件事，于是迟早有人只改一处。
+ */
+export type InputMode = OperationMode;
 
 const BINDING_KEYS: Readonly<Record<InputMode, string>> = {
   keyboard: 'raid.bindings.keyboard.v1',
   touch: 'raid.bindings.touch.v1',
 };
 const KEY_UI_SCALE = 'raid.uiScale.v1';
+/**
+ * **操作方式**（键盘 / 触屏）—— 用户自己在「通用」页切的，刷新后还记得。
+ *
+ * ⚠️ 它是**唯一 flag 的存档**（`?touch=1/0` 优先级更高，见
+ * `render/platform.resolveOperationMode`）。
+ */
+const KEY_OPERATION_MODE = 'raid.operationMode.v1';
 /**
  * **触屏按钮集合**（技能 id 数组，顺序即双弧上的槽位）。
  *
@@ -90,6 +107,21 @@ const KEY_BOSS = 'raid.pick.boss.v1';
 export interface StorageLike {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+}
+
+/**
+ * 读"上次的操作方式"存档 —— 键名**只有这一处**。
+ *
+ * ⚠️ 独立函数而不是 `SettingsStore` 的方法：解析操作方式发生在
+ * **构造 `SettingsStore` 之前**（那个对象要按模式读键位表），
+ * 而键名属于本模块的知识，不该让调用方自己拼字符串。
+ */
+export function savedOperationMode(storage: StorageLike | undefined): string | null {
+  try {
+    return storage?.getItem(KEY_OPERATION_MODE) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -308,8 +340,23 @@ export class SettingsStore {
   constructor(
     private readonly storage: StorageLike | undefined,
     /** 当前设备形态 —— 决定读/写哪一份键位。 */
-    private readonly mode: InputMode,
+    private modeValue: InputMode,
   ) {}
+
+  /**
+   * 当前形态（**可变**：用户可以在「通用」页把操作方式切过去）。
+   *
+   * ⚠️ 用取值函数而不是 `readonly` 字段：切换之后**同一份存储对象**
+   * 要接着服务另一种形态（读那份键位、写那份键位）—— 重建一个 store
+   * 会让"谁在什么时候换过"散到别处。
+   */
+  get mode(): InputMode {
+    return this.modeValue;
+  }
+
+  setMode(mode: InputMode): void {
+    this.modeValue = mode;
+  }
 
   get bindings(): string | null {
     try {
@@ -348,8 +395,27 @@ export class SettingsStore {
       this.storage?.setItem(BINDING_KEYS.touch, '');
       this.storage?.setItem(KEY_UI_SCALE, '');
       this.storage?.setItem(KEY_TOUCH_BUTTONS, '');
+      this.storage?.setItem(KEY_OPERATION_MODE, '');
     } catch {
       /* 同上 */
+    }
+  }
+
+  /**
+   * 存档里的**操作方式**（原始字符串，交给
+   * `render/platform.parseSavedMode` 校验 —— 存取器不做语义解析，
+   * 与 `uiScaleRaw` / `playerIdRaw` 同一条纪律）。
+   */
+  get operationModeRaw(): string | null {
+    return this.rawOf(KEY_OPERATION_MODE);
+  }
+
+  /** 记住用户选的**操作方式**（刷新后接着用这一种）。 */
+  saveOperationMode(mode: InputMode): void {
+    try {
+      this.storage?.setItem(KEY_OPERATION_MODE, mode);
+    } catch {
+      /* 配额满 / 隐私模式：存不上就算了，这次会话里仍然切得动 */
     }
   }
 

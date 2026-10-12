@@ -22,12 +22,13 @@ import {
 import { DEFAULT_PLAYER_ID } from '../data/roster';
 import { flattenCatalog } from '../i18n/translator';
 import { zhCN } from '../i18n/locales/zh-CN';
-import { detectBrowserPlatform } from '../render/platform';
+import { resolveOperationMode } from '../render/platform';
 import {
   SettingsStore,
   browserStorage,
   loadTouchButtons,
   parseBindings,
+  savedOperationMode,
   type InputMode,
 } from './settingsStore';
 import { touchButtonIdsFromBindings } from '../input/touchLayout';
@@ -139,14 +140,31 @@ export function createGameDeps(): GameDeps {
   };
 
   /**
-   * **用户设置的持久化**（键位表 + UI 缩放）。
+   * **操作方式**（键盘 / 触屏）—— 全应用唯一的那个 flag，**只在这里解析一次**。
    *
-   * ⚠️ 用 `detectBrowserPlatform().touch` 而不是 `touch.caps.touch`：
-   * 后者要等 `createTouchControls`（在下面），而 `SettingsPanel` 也是用
-   * `detectBrowserPlatform()` 判定的 —— **同源，不会出现两套判定**。
+   * 优先级（`render/platform.resolveOperationMode`，纯函数、有单测）：
+   *
+   *   1. `?touch=1` / `?touch=0`  —— 强制覆盖（截图验证 / 用户自救）
+   *   2. 存档里的选择（「通用」页切的）
+   *   3. `'keyboard'`            —— 默认
+   *
+   * ⚠️ 这里**不再**有任何 `matchMedia` 探测（那一套整块删掉了，见
+   * `render/platform.ts` 文件头"这里曾经是能力探测，为什么删了"）。
+   * 各消费者（设置面板 / 触屏层 / 场景键名提示 / 存储）读的是**同一个值**
+   * —— 面板拿到的是 `getOperationMode()` 取值函数，所以用户在「通用」页
+   * 切过去时它们一起变。
    */
-  const inputMode: InputMode = detectBrowserPlatform().touch ? 'touch' : 'keyboard';
-  const settingsStore = new SettingsStore(browserStorage(), inputMode);
+  const storage = browserStorage();
+  const inputMode: InputMode = resolveOperationMode(
+    globalThis.location?.search ?? '',
+    savedOperationMode(storage),
+  );
+  const settingsStore = new SettingsStore(storage, inputMode);
+  /**
+   * ⚠️ 存档里记的选择与本次解析出来的值**可能不同**（`?touch=` 覆盖了它）。
+   * 但**不在这里写回**：覆盖是"这一次会话"的事，不该悄悄改掉玩家的偏好
+   * ——「通用」页切一次才写。
+   */
   const validSkillIds = new Set(registry.skills.keys());
   const bindings: readonly KeyBinding[] = parseBindings(settingsStore.bindings, validSkillIds);
 

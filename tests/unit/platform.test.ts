@@ -1,66 +1,75 @@
 import { describe, expect, it } from 'vitest';
 import {
-  detectPlatform,
-  type PlatformCaps,
-  type PlatformProbe,
+  capsOf,
+  operationModeOverride,
+  parseSavedMode,
+  resolveOperationMode,
 } from '../../src/render/platform';
 
 /**
- * 把一组"命中哪些媒体查询"装成探测接口。
+ * 操作方式 = **全应用唯一的 flag**（用户 2026-10-12："所有 决定 是 键盘
+ * 还是触屏的 只用唯一 flag"）。
  *
- * ⚠️ 这不是绕过类型检查 —— 它把"这里是一份构造出来的探测结果"
- * 写在了名字上，而且只有这一处（AGENTS.md §1 的"有名字的构造器"）。
+ * ⚠️ 这一组测试**故意不测任何 `matchMedia`**：探测那一套已经按用户要求
+ * 整块删掉了（见 `render/platform.ts` 文件头）。剩下要守的是两件事：
+ *
+ *   1. 三个来源的**优先级**（URL > 存档 > 默认 `keyboard`）
+ *   2. `caps` 是**派生**出来的（`showKeyHints` 不是第二个来源）
  */
-function probeOf(hits: readonly string[], hasPointerEvents = true): PlatformProbe {
-  const set = new Set(hits);
-  return { matches: (q) => set.has(q), hasPointerEvents };
-}
 
-const capsOf = (hits: readonly string[], hasPointerEvents = true): PlatformCaps =>
-  detectPlatform(probeOf(hits, hasPointerEvents));
+describe('操作方式（唯一 flag）', () => {
+  it('默认是键盘 —— 用户接受"真手机第一次进来默认键盘界面"', () => {
+    expect(resolveOperationMode('', null)).toBe('keyboard');
+  });
 
-describe('平台能力探测', () => {
-  it('桌面（细指针 + 能悬停）：不是触屏，显示键名提示', () => {
-    const caps = capsOf([]);
+  it('存档里的选择生效（「通用」页切过之后）', () => {
+    expect(resolveOperationMode('', 'touch')).toBe('touch');
+    expect(resolveOperationMode('', 'keyboard')).toBe('keyboard');
+  });
+
+  it('坏存档 / 旧版本写的别的值 → 当"没存过"（回落默认）', () => {
+    expect(parseSavedMode('mobile')).toBeUndefined();
+    expect(parseSavedMode('')).toBeUndefined();
+    expect(parseSavedMode(null)).toBeUndefined();
+    expect(resolveOperationMode('', 'true')).toBe('keyboard');
+  });
+
+  it('【关键】`?touch=1` / `?touch=0` 覆盖存档', () => {
+    expect(resolveOperationMode('?touch=1', 'keyboard')).toBe('touch');
+    expect(resolveOperationMode('?touch=0', 'touch')).toBe('keyboard');
+    expect(resolveOperationMode('?prepare=skip&touch=1', null)).toBe('touch');
+    expect(resolveOperationMode('?touch=0&boss=lust', 'touch')).toBe('keyboard');
+  });
+
+  it('参数只认 1 / 0 —— 别的值当"没给"（一个含义过载的参数比没有更糟）', () => {
+    expect(operationModeOverride('?touch=true')).toBeUndefined();
+    expect(operationModeOverride('?touch=')).toBeUndefined();
+    expect(operationModeOverride('?touch=2')).toBeUndefined();
+    expect(resolveOperationMode('?touch=true', 'touch')).toBe('touch');
+  });
+});
+
+describe('caps 是 flag 的派生（不是第二个来源）', () => {
+  it('键盘：showKeyHints 为真、touch 为假', () => {
+    const caps = capsOf('keyboard');
+    expect(caps.mode).toBe('keyboard');
     expect(caps.touch).toBe(false);
     expect(caps.showKeyHints).toBe(true);
   });
 
-  it('手机（粗指针 + 不能悬停）：是触屏，不显示键名提示', () => {
-    const caps = capsOf(['(pointer: coarse)', '(hover: none)']);
+  it('触屏：反过来', () => {
+    const caps = capsOf('touch');
+    expect(caps.mode).toBe('touch');
     expect(caps.touch).toBe(true);
     expect(caps.showKeyHints).toBe(false);
   });
 
-  it('【关键】只命中 `pointer: coarse` 也算触屏', () => {
-    // 有些设备（接了触控板的平板）`hover: none` 不命中
-    const caps = capsOf(['(pointer: coarse)']);
-    expect(caps.touch).toBe(true);
-  });
-
-  it('【关键】只命中 `hover: none` 也算触屏', () => {
-    // 补充信号：宁可多认成触屏（代价只是不显示键名提示）
-    const caps = capsOf(['(hover: none)']);
-    expect(caps.touch).toBe(true);
-  });
-
-  it('没有 Pointer Events 时不算触屏 —— 触屏输入层根本没法工作', () => {
-    /**
-     * 需求要求触屏支持"按住"，而按住靠 `pointerId` 跟踪多指。
-     * 没有 Pointer Events 就退化成"只能点一下"，那时**不该**
-     * 把键名提示藏起来（用户其实还得用键盘）。
-     */
-    const caps = capsOf(['(pointer: coarse)', '(hover: none)'], false);
-    expect(caps.touch).toBe(false);
-    expect(caps.showKeyHints).toBe(true);
-  });
-
-  it('showKeyHints 与 touch 反相关，但**是两个字段**', () => {
-    const desktop = capsOf([]);
-    const mobile = capsOf(['(pointer: coarse)']);
-    expect(desktop.showKeyHints).toBe(!desktop.touch);
-    expect(mobile.showKeyHints).toBe(!mobile.touch);
-    // 形状断言：两个字段都存在（将来可以各自独立变化）
-    expect(Object.keys(desktop).sort()).toEqual(['showKeyHints', 'touch']);
+  it('两个字段都与 mode 反/正相关 —— 形状上没有第三个来源', () => {
+    for (const mode of ['keyboard', 'touch'] as const) {
+      const caps = capsOf(mode);
+      expect(caps.touch).toBe(mode === 'touch');
+      expect(caps.showKeyHints).toBe(mode === 'keyboard');
+      expect(Object.keys(caps).sort()).toEqual(['mode', 'showKeyHints', 'touch']);
+    }
   });
 });

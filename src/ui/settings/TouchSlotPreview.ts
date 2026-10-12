@@ -28,6 +28,8 @@ import { FONT } from '../layout';
 import { Label, type PixiCtor } from '../primitives';
 import { PALETTE } from '../../render/theme';
 import { TOUCH_BUTTON_CAPACITY } from '../../render/touchGeometry';
+import { touchResetButtonRect } from './logic';
+import { ResetDefaultButton } from './ResetDefaultButton';
 import {
   previewCaptionX,
   previewCaptionY,
@@ -50,6 +52,13 @@ export class TouchSlotPreview {
 
   private readonly translate: TranslateFn;
   private readonly caption: Label;
+  /**
+   * **触屏那一份**「恢复默认」—— 就贴在这块预览下面。
+   *
+   * ⚠️ 它属于**这个块**（不是"按设备分流的那个按钮"）：点了它只恢复触屏
+   * 键位，与当前是什么设备无关（见 `settingsGeometry.RESET_BUTTON`）。
+   */
+  private readonly reset: ResetDefaultButton;
   private readonly slots: SlotView[] = [];
   /** 当前**选中**（"待绑定"）的键位；`undefined` = 没选中。 */
   private selectedIndex: number | undefined;
@@ -64,6 +73,10 @@ export class TouchSlotPreview {
       color: PALETTE.textDim,
     });
     this.root.addChild(this.caption.root);
+
+    this.reset = new ResetDefaultButton(pixi, touchResetButtonRect());
+    this.reset.setText(translate('settings.touchReset'));
+    this.root.addChild(this.reset.root);
 
     /**
      * ⚠️ 槽位视图**一次建满容量**（7 个），之后只改文本与描边 ——
@@ -126,12 +139,15 @@ export class TouchSlotPreview {
    * @param slotSkillIds 槽位表（下标 = 槽位，`''` = 空）
    * @param nameOf 取技能名（已翻译；取不到就给空）
    * @param focusIndex 键盘焦点所在的槽位（`undefined` = 焦点不在键位区）
+   * @param resetFocused 键盘焦点是否在**这一块自己的**「恢复默认」上
    */
   update(
     slotSkillIds: readonly string[],
     nameOf: (skillId: string) => string,
     focusIndex: number | undefined,
+    resetFocused: boolean,
   ): void {
+    this.reset.setFocused(resetFocused);
     for (const [i, slot] of this.slots.entries()) {
       const skillId = slotSkillIds[i] ?? '';
       const bound = skillId !== '';

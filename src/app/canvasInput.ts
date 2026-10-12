@@ -61,11 +61,19 @@ export interface CanvasInputTargets {
   readonly settingsButton: SettingsButton;
   /** 触屏控件（按钮层 + 输入源）。 */
   readonly touch: {
-    readonly caps: { readonly showKeyHints: boolean };
     onPointerDown(pointerId: number, px: number, py: number): boolean;
     onPointerUp(pointerId: number): void;
     onPointerCancel(pointerId: number): void;
   };
+  /**
+   * **要不要显示键名提示** = "现在是不是键盘方式"（唯一 flag 的派生）。
+   *
+   * ⚠️ 这里读它（而不是从 `touch.caps` 掏）有两个理由：
+   *   1. 唯一 flag 的**读法只有一种**（`render/platform.capsOf`）——
+   *      触屏控件不再是它的拥有者，也就不该再从它身上取
+   *   2. 是**取值函数**：玩家在「通用」页切过去之后，这一层下一帧就跟着变
+   */
+  showKeyHints(): boolean;
   /** 当前阶段。 */
   phase(): Phase;
   settingsOpen(): boolean;
@@ -228,7 +236,7 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
      * 没有这个守卫就会"在首页点一下屏幕就被送去选角色 / 备战界面"。
      * 现在这个守卫由"输入层是 battle"承担（非战斗相位不可能返回 `battle`）。
      */
-    if (battleExitOnPointer(layer, reviewConsumed) && !t.touch.caps.showKeyHints && t.battleEnded()) {
+    if (battleExitOnPointer(layer, reviewConsumed) && !t.showKeyHints() && t.battleEnded()) {
       t.backFromBattle();
       return;
     }
@@ -253,10 +261,10 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
      * 控件"，而滚动是一次手势（按下 → 移动 → 松开），要自己记 id。
      */
     const consumed = t.settings.hitTest(px, py);
-    draggingSlider = consumed && t.settings.isOnScaleSlider(px, py);
-    if (consumed && t.settings.isOnDetail(px, py)) {
+    draggingSlider = consumed && t.settings.pointers.isOnScaleSlider(px, py);
+    if (consumed && t.settings.pointers.isOnDetail(px, py)) {
       detailDragId = event.pointerId;
-      t.settings.detailPointer('down', event.pointerId, py);
+      t.settings.pointers.detailPointer('down', event.pointerId, py);
     }
   };
 
@@ -272,7 +280,7 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
     }
     /** 拖滑块优先 —— 一次手势一旦从滑块开始，就不要再被悬停抢走。 */
     if (draggingSlider) {
-      t.settings.dragScaleSlider(px);
+      t.settings.pointers.dragScaleSlider(px);
       return;
     }
     /**
@@ -280,7 +288,7 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
      * 不许把"能滚"做成只有滚轮能用）。
      */
     if (detailDragId === event.pointerId) {
-      t.settings.detailPointer('move', event.pointerId, py);
+      t.settings.pointers.detailPointer('move', event.pointerId, py);
       return;
     }
     /**
@@ -300,7 +308,7 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
   const endDetailDrag = (event: PointerEvent): void => {
     if (detailDragId !== event.pointerId) return;
     detailDragId = null;
-    t.settings.detailPointer('up', event.pointerId);
+    t.settings.pointers.detailPointer('up', event.pointerId);
   };
 
   const endDrag = (event: PointerEvent): void => {
@@ -337,7 +345,15 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
   const onWheel = (event: WheelEvent): void => {
     if (!t.settingsOpen()) return;
     const { px, py } = at(event);
-    if (!t.settings.wheelDetail(px, py, event.deltaY, event.deltaMode)) return;
+    /**
+     * ⚠️ **两块各问一次**：技能详情区（键盘方式）与**触屏技能面**（触屏方式）
+     * —— 同一页只画一块（互斥），谁滚得动谁就吃掉这次滚轮（并让页面别跟着滚）。
+     * 两边都"滚不动"时**不拦**：那一下不属于面板。
+     */
+    const consumed =
+      t.settings.pointers.wheelDetail(px, py, event.deltaY, event.deltaMode) ||
+      t.settings.pointers.wheelPicker(px, py, event.deltaY);
+    if (!consumed) return;
     event.preventDefault();
   };
 

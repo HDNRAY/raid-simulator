@@ -39,7 +39,20 @@ export type SettingsTab = 'general' | 'keys';
  * ⚠️ 只有两个值，因为判据只有一条："此时有没有技能可以配"。
  * `home` = 首页（没有任何战斗上下文）→ 只剩「通用」页。
  */
-export type SettingsOrigin = 'home' | 'gameplay';
+export type SettingsOrigin =
+  /** 首页（没有任何战斗上下文）。 */
+  | 'home'
+  /**
+   * **选角色屏**（肉鸽模式的第一屏）。
+   *
+   * ⚠️ 用户 2026-10-12："肉鸽选人界面的设置也是没有按键的" —— 与首页同理：
+   * 那一刻**还没决定用谁**，技能表也就还没定，所以没有可配的东西。
+   * ⚠️ 它**不是** `home` 的别名：两个相位的语义不同（首页是"还没开局"，
+   * 这里是"正在选人"），共用会让人以后想给其中一个加页时无从下手。
+   */
+  | 'characterSelect'
+  /** 自由模式 / 战斗中（这时"这一局"已经定了）。 */
+  | 'gameplay';
 
 /**
  * 每一页的**展示顺序** —— tab 位置的唯一真相。
@@ -55,7 +68,8 @@ export const ALL_SETTINGS_TABS: readonly SettingsTab[] = ['general', 'keys'];
  * 首页没有「按键」页：那里没有技能、没有技能栏，也就没有可配的东西。
  */
 export function visibleTabs(origin: SettingsOrigin): readonly SettingsTab[] {
-  return origin === 'home' ? ['general'] : ['general', 'keys'];
+  /** ⚠️ **只有 gameplay 有「按键」页**（其余来源都没有技能可配）。 */
+  return origin === 'gameplay' ? ['general', 'keys'] : ['general'];
 }
 
 /** 这个来源下这一页在不在。（`hitTest` / 助记键都要问它。） */

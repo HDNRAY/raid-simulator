@@ -29,6 +29,7 @@ import {
   homeDebugApi,
   prepareDebugApi,
   settingsDebugApi,
+  type BackDebugTarget,
 } from './debugApi';
 import { clampUiScale } from '../render/scaling';
 import { backButtonCenter } from '../ui/ScreenControls';
@@ -90,10 +91,7 @@ export interface DebugApiDeps {
    * 脚本要验证"点得通"必须注入真实 `PointerEvent`（坐标从 `center()` 拿），
    * 走的才是玩家那条路（见 `global.d.ts` 里 `back` 的说明）。
    */
-  readonly back: {
-    readonly visible: boolean;
-    readonly bounds: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
-  };
+  readonly back: BackDebugTarget;
   /** 触屏按钮几何的唯一真相（`touchButtonCenter` 从它反查）。 */
   readonly touch: TouchControls;
   /** 重开一局（`restart` 从它走 `enterBattle`）。 */
@@ -191,6 +189,12 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
       visible: () => d.back.visible,
       bounds: () => ({ ...d.back.bounds }),
       center: () => backButtonCenter(),
+      /**
+       * ⚠️ `null` 而不是 `undefined`：它要跨 `Runtime.evaluate` 的
+       * JSON 边界，而 `undefined` 在那里会被丢掉（"没有提示"与"忘了返回"
+       * 长得一样）。与 `settings.slotCenter` 同一条约定。
+       */
+      shortcutBounds: () => d.back.shortcutBounds ?? null,
     },
     /** 重开一局（端到端脚本用；见 `global.d.ts` 的说明）。 */
     restart: () => d.restart(),

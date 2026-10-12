@@ -28,10 +28,20 @@ import { rebindWithSwap, swapSlots } from './bindingActions';
 import { buildKeyRows } from './keyRows';
 import type { ContentRegistry } from '../core/content/registry';
 import { EMPTY_SNAPSHOT } from '../render/viewModel';
+import type { OperationMode } from '../render/platform';
 import type { TranslateFn } from '../i18n/translator';
 
 export interface SettingsOptionsDeps {
-  readonly registry: ContentRegistry;
+  /**
+   * **当前出战角色的注册表**（取值函数）。
+   *
+   * ⚠️ 用户 2026-10-12："备战界面，**根据当前选的人**，设置里决定显示谁的
+   * 技能" —— 所以键位行必须按**当前选中的角色**过滤，而不是用全局那张表
+   * （那样林晚风也能给「截」绑一个她按不出来的键）。
+   *
+   * ⚠️ 是**取值函数**：备战界面改人选之后，下一次 `getRows()` 就该换表。
+   */
+  readonly getRegistry: () => ContentRegistry;
   /** 当前键位表（读引用，改键会替换它）。 */
   readonly getBindings: () => readonly KeyBinding[];
   /** 写入新键位表（同时同步到 loop / 存储 —— 见文件头）。 */
@@ -47,9 +57,16 @@ export interface SettingsOptionsDeps {
   readonly snapshot: () => unknown;
   /** ⚠️ 用共享的 `TranslateFn`（带 `params`）—— 收窄成只收 `key` 会让占位符漏到界面上。 */
   readonly translate: TranslateFn;
-  readonly getShowKeyHints: () => boolean;
-  /** 是不是触屏设备（决定那个唯一的「恢复默认」恢复谁 —— 见 `resetButton`）。 */
-  readonly getTouchCapable: () => boolean;
+  /**
+   * **当前操作方式**（唯一 flag，见 `render/platform`）。
+   *
+   * ⚠️ 面板要用它回答两件事（都从这一个值派生）：
+   *   - 「按键」页显示**键盘绑定**还是**触屏键位**（`caps.touch`）
+   *   - 要不要拼键名提示（`caps.showKeyHints`）
+   */
+  readonly getOperationMode: () => OperationMode;
+  /** 用户在「通用」页切了操作方式（落点在 `game.ts` 的 `applyOperationMode`）。 */
+  readonly onOperationMode: (mode: OperationMode) => void;
   readonly pixi: SettingsPanelOptions['pixi'];
   /** 关闭面板（由 `settingsToggle` 处理"恢复暂停"）。 */
   readonly close: () => void;
@@ -71,9 +88,12 @@ export function buildSettingsOptions(d: SettingsOptionsDeps): SettingsPanelOptio
   const t = d.translate;
   return {
     pixi: d.pixi,
-    /** 「按键」页要读的两样：能力值（是否拼键名）与触屏键位表本身。 */
-    getShowKeyHints: () => d.getShowKeyHints(),
-    getTouchCapable: () => d.getTouchCapable(),
+    /**
+     * ⚠️ 唯一 flag 的**读写口**：「按键」页显示哪一块、要不要拼键名，
+     * 以及「通用」页那个"操作方式"选择器 —— 都走这两个函数。
+     */
+    getOperationMode: () => d.getOperationMode(),
+    onOperationMode: (mode) => d.onOperationMode(mode),
     getTouchSlots: () => d.getTouchSkillIds(),
     /**
      * ⚠️ **透传 `params`** —— 只写 `(key) => t(key)` 会把占位符参数吃掉，
@@ -83,7 +103,7 @@ export function buildSettingsOptions(d: SettingsOptionsDeps): SettingsPanelOptio
     getRows: () =>
       buildKeyRows({
         bindings: d.getBindings(),
-        registry: d.registry,
+        registry: d.getRegistry(),
         snapshotOf: () => (d.snapshot() ?? EMPTY_SNAPSHOT) as never,
         translate: t,
       }),

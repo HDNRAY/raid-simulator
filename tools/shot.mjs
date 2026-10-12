@@ -18,6 +18,10 @@
  *
  * ⚠️ 用环境变量而不是再写一个脚本：拍图流程只有一处，两份必然漂移。
  *
+ * ⚠️ **操作方式（键盘 / 触屏）用 URL 参数给**：`?touch=1` / `?touch=0`
+ * （页面里的唯一 flag，见 `render/platform.ts`）—— 不再需要"伪装成触屏
+ * 设备"那套 `matchMedia` 包装（它随探测整块删掉了）。
+ *
  * ==================================================================
  * `RAID_SHOT_KEYS`：截图前"按"几个键
  * ==================================================================
@@ -158,40 +162,16 @@ try {
   await send('Runtime.enable');
   await send('Page.enable');
   /**
-   * 可选：**伪装成触屏设备**（`RAID_SHOT_TOUCH=1`）。
+   * ⚠️ **不再有 `RAID_SHOT_TOUCH`**（2026-10-12 删）：页面里那套
+   * `matchMedia` 能力探测**整块删掉了**（用户："所有 决定 是 键盘还是触屏的
+   * 只用唯一 flag"）。要拍触屏那一套就用 URL：
    *
-   * 用途：验证"触屏与键盘功能必须对等"（AGENTS.md §3b）的那几条路 ——
-   * 页面的能力探测走 `matchMedia('(pointer: coarse)')`，桌面 headless 上
-   * 它是假，所以"点屏幕离开战斗"这类**只在触屏生效**的分支测不到。
-   * ⚠️ 只改媒体查询与 touch 支持，不改 UA（本仓库的能力探测不看 UA）。
+   *   `?touch=1`  → 强制触屏方式
+   *   `?touch=0`  → 强制键盘方式
+   *
+   * ⚠️ 这里**不再**包装 `window.matchMedia`：那会成为"第二个真相"
+   * （页面已经不读它，包了也只是自欺）。
    */
-  if (process.env.RAID_SHOT_TOUCH === '1') {
-    /**
-     * 让页面的**能力探测**认为这是触屏设备。
-     *
-     * ⚠️ 做法是**在应用启动前**把 `window.matchMedia` 包装一层，只对
-     * `pointer: coarse` / `hover: none` 两个查询返回 `matches: true`。
-     * 理由：本仓库的探测本来就只看这两个媒体查询（`render/platform.ts`，
-     * 刻意不看 UA），所以这是"照它自己的判据喂它"，不是旁路。
-     *
-     * ⚠️ 不用 CDP 的 `setTouchEmulationEnabled` / `setDeviceMetricsOverride`：
-     * 它们会改掉事件模型，脚本后面注入的 `PointerEvent` 就到不了画布的
-     * 监听器（实测：拖拽与点击全失效）。
-     */
-    await send('Page.addScriptToEvaluateOnNewDocument', {
-      source: `(() => {
-        const real = window.matchMedia.bind(window);
-        window.matchMedia = (q) => {
-          if (q === '(pointer: coarse)' || q === '(hover: none)') {
-            return { matches: true, media: q, onchange: null,
-              addListener() {}, removeListener() {},
-              addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; } };
-          }
-          return real(q);
-        };
-      })();`,
-    });
-  }
   await send('Page.navigate', { url: PAGE_URL });
   /**
    * 页面加载后的**等待时长**（`RAID_SHOT_WAIT_MS`，默认 3400ms）。

@@ -87,27 +87,23 @@ export class ScreenControls {
       color: PALETTE.textDim,
       brightColor: PALETTE.focus,
       /**
-       * 与设置齿轮**同一套视觉语言**：提示缩小、带黑色描边、贴在图标**左上角**
-       * （`corner` 模式）。这里没有 `focusRing` —— 返回不参与键盘焦点
-       * （`F1` 那个流程只管齿轮），画一圈永远不会亮的环只会误导。
+       * 与设置齿轮**同一套视觉语言、同一个组件**（`IconButton`）：提示缩小、
+       * 带黑色描边、压住图标的一个角（`corner` 模式）。这里没有 `focusRing`
+       * —— 返回不参与键盘焦点（`F1` 那个流程只管齿轮），画一圈永远不会亮的
+       * 环只会误导。
+       *
+       * ⚠️ **没有 `hintCorner`，也没有任何偏移** —— 提示贴图标的哪一个角由
+       * `IconButton` 按"按钮在画布哪一半"推出来：齿轮在右上角 → 提示贴它的
+       * 左上角；本按钮在左上角 → 提示贴**右上角**，两边都朝画布内侧展开，
+       * 谁都不会被画布边裁掉。
+       *
+       * 旧版这里写的是 `hintOffset: { dx: 34, dy: 22 }` —— 那是拿手调数字
+       * 去补"箭头贴在画布边上、提示没地方放"这个真实约束，于是两个角落各
+       * 一套算法（迟早不一致）。参数已删，见 `IconButton` 的
+       * `iconHintPlacement`。
        */
       shortcut: ESC_SHORTCUT,
       hintSide: 'corner',
-      /**
-       * ⚠️ 提示要**往右往下挪**：这一屏的箭头挂在画布**左上角**，
-       * `IconButton` 的默认角落偏移（`+12 / +12`，按右上角的齿轮量的）
-       * 会让 `Esc` 的字形伸到画布外面 —— 实测连着两版都被裁掉
-       * （第一版裁顶部，第二版裁左边）。
-       *
-       * 提示的锚点是**右下角**（`anchor = (1,1)`），所以它在画布上的位置是
-       * `(box.iconX + 12 + dx, box.iconY + 12 + dy)` 往左上展开。
-       * 实测（`RAID_SHOT_TEXT=1` 的 dump）：`(dx, dy) = (8, 8)` 与 `(12, 14)`
-       * 时提示的左边都在画布外（`x = 32`，而 "Escape" 约 37px 宽 → 左缘 `-5`）。
-       *
-       * 取 `+34 / +22` 之后锚点在 `(54, 54)`、字形约占 `x 17..54, y 40..54`：
-       * 全部落在画布内，而且仍在左上的"角落"那一带（不会跑到标题旁边）。
-       */
-      hintOffset: { dx: 34, dy: 22 },
       anchor: { x: MARGIN + ARROW_SIZE / 2, y: MARGIN + ARROW_SIZE / 2 },
       onClick: () => options.onBack(),
     });
@@ -139,6 +135,17 @@ export class ScreenControls {
   /** 可点区域（调试探针读它，用来在截图脚本里精确点中）。 */
   get bounds(): { readonly x: number; readonly y: number; readonly w: number; readonly h: number } {
     return this.button.bounds;
+  }
+
+  /**
+   * `Esc` 提示的**包围盒**（逻辑坐标；触屏隐藏时仍然算得出来）。
+   *
+   * ⚠️ 它**不是**给布局用的，是给验证用的：提示的落位全在
+   * `IconButton.iconHintPlacement` 里推出来，"贴右上角、且没伸出画布"
+   * 这条结论需要一个读得到的数（见 `__raidBattle.back.shortcutBounds`）。
+   */
+  get shortcutBounds(): { readonly x: number; readonly y: number; readonly w: number; readonly h: number } | undefined {
+    return this.button.hintBounds;
   }
 
   /** 每帧：键位提示跟着触屏能力走（能力值晚于构造才知道）。 */
