@@ -66,6 +66,17 @@ export type PanelDispatch =
   | { readonly kind: 'focusSkill'; readonly skillId: string }
   /** 选中它**并且**开始改键（再点一次已选中的格子，等价键盘的 Enter）。 */
   | { readonly kind: 'captureSkill'; readonly skillId: string }
+  /**
+   * 「触屏」页：**放上 / 取下**这个技能的触屏按钮。
+   *
+   * ⚠️ 与 `captureSkill` 是同一格上的两种语义，按**当前 tab** 分流：
+   * 「按键」页点格子 = 改键；「触屏」页点格子 = 增删按钮。
+   * 需求："点一下技能格 = 放上 / 取下"（⚠️ **不要**"请按一个键"——
+   * 那对触屏毫无意义，正是这次要解开的死结）。
+   */
+  | { readonly kind: 'toggleTouch'; readonly skillId: string }
+  /** 「触屏」页的「恢复默认」：回到"默认键位表里那些有键的技能"。 */
+  | { readonly kind: 'resetTouch'; readonly notice: 'touchResetDone' }
   /** 拖 / 点 UI 缩放滑块：由横坐标反算倍数。 */
   | { readonly kind: 'setScaleFromPointer'; readonly px: number };
 
@@ -102,8 +113,29 @@ export function resolvePanelDispatch(input: PanelDispatchInput): PanelDispatch {
     case 'tab':
       return { kind: 'switchTab', tab: target.tab };
     case 'resetKeys':
-      return { kind: 'resetKeys', notice: 'keysResetDone' };
+      /**
+       * 「恢复默认」在**两页含义不同**：按键页恢复键位，触屏页恢复按钮集合。
+       * 判据是当前 tab —— 按钮只画一次（`KeysFooter`），文案不变，
+       * 但点下去做什么由这一页决定。
+       */
+      return input.tab === 'touch'
+        ? { kind: 'resetTouch', notice: 'touchResetDone' }
+        : { kind: 'resetKeys', notice: 'keysResetDone' };
     case 'keyRow': {
+      /**
+       * ==============================================================
+       * 「触屏」页：**点一下 = 放上 / 取下**（需求原文）
+       * ==============================================================
+       *
+       * ⚠️ 这里**先于** `resolveRowTap` 分流：那一套（选中 → 再点进改键）
+       * 是"改键"的语义，在触屏页上完全不适用 —— 触屏玩家按不出键，
+       * 而那正是原来的死结（配按钮的地方要求你按一个键）。
+       *
+       * 需求："触屏原生：点一下技能格 = 放上 / 取下。不要做成『请按一个键』"。
+       */
+      if (input.tab === 'touch') {
+        return { kind: 'toggleTouch', skillId: target.skillId };
+      }
       const action = resolveRowTap({
         focusedSkillId: focusedSkillIdOf(input.focus, input.rowSkillIds),
         capturingSkillId: input.capturingSkillId,
@@ -156,6 +188,8 @@ export interface KeyDispatchInput {
   /** 当前焦点（`activate` 要靠它解析出"激活了谁"）。 */
   readonly focus: SettingsFocus;
   readonly rowSkillIds: readonly string[];
+  /** 当前页 —— 决定"激活"是改键还是增删触屏按钮（见 `resolveActivate`）。 */
+  readonly tab: SettingsTab;
 }
 
 /** `handleKey` 的决策结果：面板拿 `action` / `activate` 去执行，`trace` 记轨迹。 */
@@ -168,7 +202,9 @@ export interface KeyPanelDispatch {
   readonly activate:
     | { readonly kind: 'switchTab'; readonly tab: SettingsTab }
     | { readonly kind: 'startCapture'; readonly skillId: string }
+    | { readonly kind: 'toggleTouch'; readonly skillId: string }
     | { readonly kind: 'resetKeys' }
+    | { readonly kind: 'resetTouch' }
     | { readonly kind: 'close' }
     | { readonly kind: 'none' }
     | undefined;
@@ -194,7 +230,7 @@ export function resolveKeyDispatch(input: KeyDispatchInput): KeyPanelDispatch {
   const trace = `handleKey(${input.key}) cap=${input.capturingSkillId ?? '-'} -> ${action.kind}`;
   const activate =
     action.kind === 'activate'
-      ? resolveActivate(input.focus, input.rowSkillIds)
+      ? resolveActivate(input.focus, input.rowSkillIds, input.tab)
       : undefined;
 
   return { action, activate, trace };
@@ -254,11 +290,15 @@ export interface PanelActionBindings {
   readonly close: () => void;
   readonly switchTab: (tab: SettingsTab) => void;
   readonly resetKeys: () => void;
+  /** 「触屏」页：恢复默认按钮集合。 */
+  readonly resetTouch: () => void;
   /** 提示文案（来自 i18n），执行层只负责把它交给 `notice`。 */
   readonly notice: (text: string) => void;
   readonly swapSlots: (from: number, to: number) => void;
   readonly focusSkill: (skillId: string) => void;
   readonly startCapture: (skillId: string) => void;
+  /** 「触屏」页：放上 / 取下这个技能的按钮。 */
+  readonly toggleTouch: (skillId: string) => void;
   readonly uiScale: (value: number) => void;
   /** 执行完之后画一遍（面板的重绘入口）。 */
   readonly redraw: () => void;
@@ -283,6 +323,21 @@ export function executePanelDispatch(
     case 'resetKeys':
       do_.resetKeys();
       do_.notice('settings.keysResetDone');
+      do_.redraw();
+      return true;
+    case 'resetTouch':
+      do_.resetTouch();
+      do_.notice('settings.touchResetDone');
+      do_.redraw();
+      return true;
+    case 'toggleTouch':
+      /**
+       * ⚠️ **先选中、再切换** —— 与 `captureSkill` 同一形状：
+       * 玩家的手指点在哪一格，详情区就该显示哪一格，同时按钮被增删。
+       * 只切换不改焦点的话，触屏上（没有 hover）详情会停在上一次点的技能。
+       */
+      do_.focusSkill(action.skillId);
+      do_.toggleTouch(action.skillId);
       do_.redraw();
       return true;
     case 'swapSlots':
@@ -333,10 +388,14 @@ export interface KeyActionBindings {
   readonly close: () => void;
   readonly switchTab: (tab: SettingsTab) => void;
   readonly resetKeys: () => void;
+  /** 「触屏」页：恢复默认按钮集合。 */
+  readonly resetTouch: () => void;
   /** 提示文案（来自 i18n）。 */
   readonly notice: (text: string) => void;
   /** 把某个技能改绑到某个键（收尾由 `finishCapture` 做）。 */
   readonly rebind: (skillId: string, key: string) => void;
+  /** 「触屏」页：放上 / 取下这个技能的按钮。 */
+  readonly toggleTouch: (skillId: string) => void;
   readonly startCapture: (skillId: string, triggerKey?: string) => void;
   readonly stopCapture: () => void;
   readonly finishCapture: (key: string) => void;
@@ -439,6 +498,9 @@ export function executeKeyPanelAction(
         case 'tabKeys':
           do_.switchTab('keys');
           return { consumed: true, focus: { zone: 'tabs', index: 1 } };
+        case 'tabTouch':
+          do_.switchTab('touch');
+          return { consumed: true, focus: { zone: 'tabs', index: 2 } };
         case 'resetKeys':
           // 恢复默认属于按键页 —— 先切过去，玩家才看得到结果
           do_.switchTab('keys');
@@ -484,9 +546,20 @@ export function executeKeyPanelAction(
         case 'startCapture':
           do_.startCapture(activate.skillId, input.key);
           return { consumed: true };
+        case 'toggleTouch':
+          /**
+           * ⚠️ 与点击那条路**同一个语义**（放上 / 取下）。
+           * 键盘这条路不用动焦点 —— 焦点本来就在这一格（Enter 是它解析出来的）。
+           */
+          do_.toggleTouch(activate.skillId);
+          return { consumed: true };
         case 'resetKeys':
           do_.resetKeys();
           do_.notice('settings.keysResetDone');
+          return { consumed: true };
+        case 'resetTouch':
+          do_.resetTouch();
+          do_.notice('settings.touchResetDone');
           return { consumed: true };
         case 'close':
           do_.close();

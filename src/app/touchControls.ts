@@ -34,14 +34,15 @@
 import type { PixiCtor } from './../ui/primitives';
 import type { InputSource } from '../input/keyboard';
 import { createTouchInput, type TouchHitArea, type TouchInputSource } from '../input/touchInput';
-import { createTouchLayout, touchButtonsFromBindings, type TouchLayout } from '../input/touchLayout';
+import { createTouchLayout, type TouchButton, type TouchLayout } from '../input/touchLayout';
 import {
   TouchButtonLayer,
   TOUCH_BUTTON_DIAMETER,
   touchButtonCenter,
 } from '../render/touchButtonLayer';
 import { detectBrowserPlatform, type PlatformCaps } from '../render/platform';
-import type { BattleSnapshotView } from '../render/viewModel';
+import type { BattleSnapshotView, SkillSlotView } from '../render/viewModel';
+import { withStaticSlots } from './touchStaticSlots';
 import type { TranslateFn } from '../i18n/translator';
 
 /**
@@ -61,8 +62,15 @@ export function derivedOfSnapshot(
 export interface TouchControlsOptions {
   readonly pixi: PixiCtor;
   readonly translate: TranslateFn;
-  /** 键盘输入源的键位表 —— 触屏按钮**从它推导**（唯一真相）。 */
-  readonly bindings: readonly { readonly key: string; readonly skillId: string }[];
+  /**
+   * **用户选的触屏按钮技能 id**（顺序即槽位）。
+   *
+   * ⚠️ 与**键盘绑定表无关**（用户 2026-10-12 推翻了原来的派生）：
+   * 它来自设置页「触屏」页的增删，存 `raid.touchButtons.v1`。
+   * 这里再按 `currentSkillIds`（这一局真的有的技能）过滤一次 ——
+   * 那是"别画出按不出东西的按钮"这条既有纪律，见下面 `buttonsOf`。
+   */
+  readonly touchSkillIds: () => readonly string[];
   readonly currentTick: () => number;
   /** 设置面板是否打开（打开时触屏按钮让出输入权）。 */
   readonly isSettingsOpen: () => boolean;
@@ -91,16 +99,14 @@ export interface TouchControlsOptions {
    */
   readonly derivedSkill: () => { readonly skillId: string; readonly sourceSkillId: string } | undefined;
   /**
-   * **这一局真的有哪些技能**（引擎注册表里的 id 集合）。
-   *
+   * **这一局真的有哪些技能**（引擎注册表里的 id 集合）。   *
    * ==================================================================
    * 为什么触屏按钮要按它过滤（2026-10-12）
    * ==================================================================
    *
-   * 触屏按钮由键位表机械派生（AGENTS.md §3b），而键位表是**整场游戏**
-   * 的（Q 斩 / S 防 / A 避……）。但两个角色带的技能不一样 ——
-   * 凯丽**没有「防」也没有「避」**。不过滤的话她的双弧上会多出两个
-   * 按下去什么都不发生的按钮（`skillRejected`），而玩家只会觉得是 bug。
+   * 按钮集合来自**用户的选择**（整场游戏的技能池），但两个角色带的技能
+   * 不一样 —— 凯丽**没有「防」也没有「避」**。不过滤的话她的双弧上会多出
+   * 两个按下去什么都不发生的按钮（`skillRejected`），而玩家只会觉得是 bug。
    *
    * ⚠️ 判据取**引擎的**技能集（`BattleLoop.engineState.skillIds`），
    * 不是"再抄一份角色表"：引擎收到的技能表就是这一局的真相
@@ -108,6 +114,21 @@ export interface TouchControlsOptions {
    * 非战斗阶段（还没有 loop）返回 `undefined` = 不过滤。
    */
   readonly currentSkillIds: () => ReadonlySet<string> | undefined;
+  /**
+   * **没上技能栏**的按钮要用的静态槽位（名字 / 代价 / 固有冷却）。
+   *
+   * ==================================================================
+   * 为什么需要它（2026-10-12 实测踩到）
+   * ==================================================================
+   *
+   * 按钮上的文字来自快照的 `skills`，而那张表只有**上了技能栏**的技能。
+   * 触屏按钮现在可以是任何可选技能（包括没绑键的，那正是这次解开的死结），
+   * 所以新放上去的按钮原先会画成一个**空圆**。
+   *
+   * ⚠️ 由调用方按**引擎注册表**造（`app/touchStaticSlots.ts`）——
+   * 这里不自己去翻内容，与 `currentSkillIds` 走同一个来源。
+   */
+  readonly staticSlot: (skillId: string, index: number) => SkillSlotView | undefined;
 }
 
 export interface TouchControls {
@@ -132,8 +153,13 @@ export interface TouchControls {
    * 见 `frame` 实现里"显隐的唯一写入点"那段说明。
    */
   readonly frame: (view?: BattleSnapshotView) => void;
-  /** 键位表变了 → 按钮跟着变（这是"监听变化"的落点之一）。 */
-  readonly setBindings: (bindings: readonly { readonly key: string; readonly skillId: string }[]) => void;
+  /**
+   * **按钮集合变了** → 布局跟着变（设置页「触屏」页增删的就是它）。
+   *
+   * ⚠️ 参数是**用户选的技能 id**（不是键位表）：这是那条被推翻的派生
+   * 关系的接口面 —— 只要它还收"绑定表"，就一定有人再把它当真相源。
+   */
+  readonly setButtons: (skillIds: readonly string[]) => void;
   /**
    * 按 `skillId` 反查按钮圆心（端到端脚本用）。
    *
@@ -153,20 +179,17 @@ export interface TouchControls {
 export function createTouchControls(options: TouchControlsOptions): TouchControls {
   const caps = detectBrowserPlatform();
   /**
-   * 按钮表 = 键位表 ∩ 这一局真的有的技能。
+   * 按钮表 = **用户选的技能** ∩ 这一局真的有的技能。
    *
-   * ⚠️ 抽成一处并在**构造**与 `setBindings` **两处都用**：两处各写一遍
-   * 过滤，必然会出现"建局时对了、改键后又漏回来"（见 `currentSkillIds`）。
+   * ⚠️ 抽成一处并在**构造**与 `setButtons` **两处都用**：两处各写一遍
+   * 过滤，必然会出现"建局时对了、改完按钮后又漏回来"（见 `currentSkillIds`）。
    */
-  const buttonsOf = (
-    bindings: readonly { readonly key: string; readonly skillId: string }[],
-  ): ReturnType<typeof touchButtonsFromBindings> => {
+  const buttonsOf = (skillIds: readonly string[]): readonly TouchButton[] => {
     const owned = options.currentSkillIds();
-    return touchButtonsFromBindings(
-      owned === undefined ? bindings : bindings.filter((b) => owned.has(b.skillId)),
-    );
+    const usable = owned === undefined ? skillIds : skillIds.filter((id) => owned.has(id));
+    return usable.map((skillId, index) => ({ index, skillId }));
   };
-  const layout = createTouchLayout(buttonsOf(options.bindings));
+  const layout = createTouchLayout(buttonsOf(options.touchSkillIds()));
   const layer = new TouchButtonLayer({
     pixi: options.pixi,
     translate: options.translate,
@@ -181,8 +204,8 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
   /**
    * 命中区域由**按钮层**的几何算出来 —— 因为"按钮画在哪"只有它知道。
    *
-   * ⚠️ 这里不缓存：`touchButtonsFromBindings` 每次都可能给出不同的
-   * 数量，缓存会让命中区域与画面脱节（那正是"唯一真相"要避免的）。
+   * ⚠️ 这里不缓存：用户随时可能增删按钮，缓存会让命中区域与画面脱节
+   * （那正是"唯一真相"要避免的）。
    */
   const hitAreas = (): readonly TouchHitArea[] => {
     if (!caps.touch) return [];
@@ -279,22 +302,32 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
       if (hidden) return;
       /** 非战斗阶段不会有快照；真发生了就只更新显隐（防一手崩溃）。 */
       if (view === undefined) return;
-      layer.update(view);
+      /**
+       * ⚠️ **先补齐"没上技能栏"的按钮**，再推给按钮层 ——
+       * 否则那些按钮会画成空圆（见 `staticSlot` 的说明）。
+       */
+      layer.update(
+        withStaticSlots(
+          view,
+          layout.current().map((b) => b.skillId),
+          options.staticSlot,
+        ),
+      );
     },
 
-    setBindings(bindings) {
+    setButtons(skillIds) {
       /**
-       * 键位表是唯一真相 —— 它变了两件事跟着变：
+       * 用户选的按钮集合是唯一真相 —— 它变了两件事跟着变：
        *   1. `TouchLayout`（进而按钮层重画）
        *   2. 触屏输入源的合成 key 表
        *
        * ⚠️ **先按"这一局有哪些技能"过滤**（见 `currentSkillIds` 的说明）：
-       * 键位表是整场游戏的，而按钮只该出现这一局按得出来的技能。
+       * 集合是整场游戏的，而按钮只该出现这一局按得出来的技能。
        */
-      layout.set(buttonsOf(bindings));
+      layout.set(buttonsOf(skillIds));
       /**
-       * `setBindings` 在触屏输入源里**不读参数**（按钮是从布局推导的，
-       * 不是玩家配的），但接口为了与键盘一致要求一个参数。
+       * `setBindings` 在触屏输入源里**不读参数**（按钮是从布局来的，
+       * 不是"键 → 技能"的映射），但接口为了与键盘一致要求一个参数。
        * 传空数组，语义是"没有键盘绑定"。
        */
       input?.setBindings([]);

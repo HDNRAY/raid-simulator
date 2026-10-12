@@ -38,6 +38,7 @@ import type {
 } from '../types';
 import { aggregateFlags, applyBuff } from '../buffs';
 import { runTriggers } from './triggers';
+import { casterGainsDouqiFromDamage } from './holds';
 import {
   applyDamage,
   applyHeal,
@@ -270,11 +271,22 @@ export function resolveHit(
           }
 
           /**
-           * 炁按伤害换算：**造成伤害的人**与**受到伤害的人**各得一份。
+           * 缠按伤害换算：**造成伤害的人**与**受到伤害的人**各得一份。
            * 放在这里（而不是内容里）才能覆盖所有伤害来源。
+           *
+           * ⚠️ **但用缠付账的技能不给施放者回缠**（规则 C，2026-10-12）：
+           * 回缠按伤害算 ⇒ 代价 50 缠的「劈」（45 伤）会退回 `45 × 0.5 = 22`
+           * —— **退回自己 44% 的代价**，用缠的大招一直在自我返还。判据是
+           * "**这个技能的代价里含 `douqi`**"（`casterGainsDouqiFromDamage`），
+           * 只看静态内容，不读时间/随机、不改 rng 消耗顺序。
+           *
+           * ⚠️ **挨打方照旧回缠**（下面 `target` 那行不动）—— "挨打攒缠"
+           * 是另一件事，用户确认过两边都是 `伤害 × 0.5`。
            */
           if (result.amount > 0) {
-            ctx.gainDouqiFromDamage(actor.id, result.amount, ctx.state.tick);
+            if (casterGainsDouqiFromDamage(skill)) {
+              ctx.gainDouqiFromDamage(actor.id, result.amount, ctx.state.tick);
+            }
             ctx.gainDouqiFromDamage(target.id, result.amount, ctx.state.tick);
           }
           break;

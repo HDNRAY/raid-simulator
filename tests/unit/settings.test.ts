@@ -40,12 +40,15 @@ describe('几何：点击命中不能错位', () => {
     expect(SETTINGS_PANEL.y + SETTINGS_PANEL.h / 2).toBeCloseTo(270, 0);
   });
 
-  it('两个 tab 不重叠、且都在弹窗内', () => {
+  it('三个 tab 不重叠、且都在弹窗内', () => {
     const a = tabRect(0);
     const b = tabRect(1);
+    const c = tabRect(2);
     expect(a.x + a.w).toBeLessThanOrEqual(b.x);
+    expect(b.x + b.w).toBeLessThanOrEqual(c.x);
     expect(insidePanel(a.x + 1, a.y + 1)).toBe(true);
     expect(insidePanel(b.x + 1, b.y + 1)).toBe(true);
+    expect(insidePanel(c.x + 1, c.y + 1)).toBe(true);
   });
 
   it('技能格按 grid 排布，两两不重叠', () => {
@@ -111,7 +114,7 @@ describe('hitTest：点到哪里', () => {
     ).toBe('outside');
   });
 
-  it('点两个 tab 各自命中正确的 tab', () => {
+  it('点两个 tab 各自命中正确的 tab（第三个 tab 见 touchButtonSet.test.ts）', () => {
     const general = tabRect(0);
     const keys = tabRect(1);
     expect(
@@ -412,16 +415,16 @@ describe('弹窗内的键盘导航：没有只能用鼠标的死角', () => {
   });
 
   it('Enter 激活：tab 行切换 tab、格子上开始改键、按钮上恢复默认', () => {
-    expect(resolveActivate({ zone: 'tabs', index: 0 }, [])).toEqual({
+    expect(resolveActivate({ zone: 'tabs', index: 0 }, [], 'keys')).toEqual({
       kind: 'switchTab',
       tab: 'general',
     });
-    expect(resolveActivate({ zone: 'tabs', index: 1 }, [])).toEqual({
+    expect(resolveActivate({ zone: 'tabs', index: 1 }, [], 'keys')).toEqual({
       kind: 'switchTab',
       tab: 'keys',
     });
-    expect(resolveActivate({ zone: 'reset' }, [])).toEqual({ kind: 'resetKeys' });
-    expect(resolveActivate({ zone: 'grid', index: 1 }, ['a', 'b'])).toEqual({
+    expect(resolveActivate({ zone: 'reset' }, [], 'keys')).toEqual({ kind: 'resetKeys' });
+    expect(resolveActivate({ zone: 'grid', index: 1 }, ['a', 'b'], 'keys')).toEqual({
       kind: 'startCapture',
       skillId: 'b',
     });
@@ -492,8 +495,9 @@ describe('关闭按钮与 Boss 面板边距', () => {
     const r = closeButtonRect();
     const hit = hitTest(r.x + r.w / 2, r.y + r.h / 2, { tab: 'general', rowSkillIds: [] });
     expect(hit.kind).toBe('close');
-    // 两个 tab 上都该能点（它是弹窗级的，不属于某一页）
+    // 每一页上都该能点（它是弹窗级的，不属于某一页）
     expect(hitTest(r.x + 2, r.y + 2, { tab: 'keys', rowSkillIds: ['attack'] }).kind).toBe('close');
+    expect(hitTest(r.x + 2, r.y + 2, { tab: 'touch', rowSkillIds: ['attack'] }).kind).toBe('close');
   });
 
   it('关闭按钮在弹窗内、右上角，且不与 tab 行重叠', () => {
@@ -505,7 +509,7 @@ describe('关闭按钮与 Boss 面板边距', () => {
   });
 
   it('键盘也能到「关闭」（Enter 可触发）', () => {
-    expect(resolveActivate({ zone: 'close' }, []).kind).toBe('close');
+    expect(resolveActivate({ zone: 'close' }, [], 'keys').kind).toBe('close');
     // 循环里必须包含它，否则它只能用鼠标
     const fromReset = cycleZone({ zone: 'reset' }, 0);
     expect(fromReset.zone).toBe('close');

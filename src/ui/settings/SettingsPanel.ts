@@ -9,8 +9,7 @@
 
 
 import type { Container, Graphics } from 'pixi.js';
-import { FONT, LOGICAL } from '../layout';
-import { PALETTE } from '../../render/theme';
+import { LOGICAL } from '../layout';
 import { isReservedKey, reservedKeyLabel } from '../../input/keyboard';
 import { beginCapture, classifyCaptureKey, endCapture, type CaptureState } from './captureState';
 import {
@@ -80,8 +79,15 @@ export interface SettingsPanelOptions {
    * 创建 —— 固定值会永远是 `undefined`（键名照样画出来）。
    */
   readonly getShowKeyHints?: (() => boolean) | undefined;
-  /** 触屏按钮的技能名 key（只读预览）。**从 `TouchLayout` 读**，不留副本。 */
-  readonly getTouchSkills?: (() => readonly string[]) | undefined;
+  /**
+   * **触屏按钮集合**（技能 id，顺序即双弧槽位）。**从 `GameState` 读**，
+   * 不在面板里留副本 —— 与键位表同一条纪律。
+   */
+  readonly getTouchSkillIds?: (() => readonly string[]) | undefined;
+  /** 「触屏」页点一下格子 = 放上 / 取下。 */
+  readonly onToggleTouchButton?: ((skillId: string) => void) | undefined;
+  /** 「触屏」页的「恢复默认」= 恢复默认按钮集合。 */
+  readonly onResetTouchButtons?: (() => void) | undefined;
   /** 读当前 UI 缩放倍数（1 = 自动适配） */
   readonly getUiScale: () => number;
   /** UI 缩放变了（调用方负责把它应用到画布尺寸上） */
@@ -111,8 +117,6 @@ export class SettingsPanel {
    */
   /** 选中技能的详情（独立组件，见 `SkillDetail`） */
   private readonly detail: SkillDetail;
-  /** 触屏按钮的只读预览（需求："暂时就不给玩家自由编辑了"）。 */
-  private readonly touchPreview: InstanceType<PixiCtor['Text']>;
 
   /** 外框：底板 + 标题 + 「关闭」 + tab 按钮（独立组件） */
   private readonly frame: SettingsFrame;
@@ -185,12 +189,6 @@ export class SettingsPanel {
     this.body.addChild(this.footer.root);
 
     /* ---------- 通用页：UI 缩放滑块 ---------- */
-    this.touchPreview = new pixi.Text({
-      text: '',
-      style: { fontFamily: 'sans-serif', fontSize: FONT.small, fill: PALETTE.text },
-    });
-    this.touchPreview.visible = false;
-    this.body.addChild(this.touchPreview);
     this.detail = new SkillDetail(pixi, (key, params) => this.options.translate(key, params));
     this.body.addChild(this.detail.root);
 
@@ -210,9 +208,9 @@ export class SettingsPanel {
     return this.tab === 'general';
   }
 
-  /** 当前 tab 有没有技能格（只有按键页有）。 */
+  /** 当前 tab 有没有技能格（「按键」与「触屏」两页都有）。 */
   private hasGrid(): boolean {
-    return this.tab === 'keys';
+    return this.tab !== 'general';
   }
 
   get isOpen(): boolean {
@@ -290,6 +288,11 @@ export class SettingsPanel {
       close: () => this.options.onClose(),
       switchTab: (tab) => this.setTab(tab),
       resetKeys: () => this.options.onResetKeys(),
+      /**
+       * ⚠️ 「恢复默认」两页含义不同（见 `resolvePanelDispatch`）——
+       * 面板只负责把对应那条接上，判定在纯函数里。
+       */
+      resetTouch: () => this.options.onResetTouchButtons?.(),
       notice: (key) => this.setNotice(this.options.translate(key)),
       swapSlots: (from, to) => {
         this.stopCapture();
@@ -297,6 +300,7 @@ export class SettingsPanel {
       },
       focusSkill: (skillId) => this.setFocusToSkill(skillId),
       startCapture: (skillId) => this.startCapture(skillId),
+      toggleTouch: (skillId) => this.options.onToggleTouchButton?.(skillId),
       uiScale: (value) => this.options.onUiScale(value),
       redraw: () => this.redraw(),
     });
@@ -395,6 +399,11 @@ export class SettingsPanel {
       capturingSkillId: this.capture.skillId,
       focus: this.focus,
       rowSkillIds: rows.map((r) => r.skillId),
+      /**
+       * ⚠️ 当前页决定 Enter / 空格是**改键**还是**增删触屏按钮** ——
+       * 见 `resolveActivate`。不带它的话，「触屏」页按 Enter 会去改键。
+       */
+      tab: this.tab,
     });
     this.settingsTrace.push(dispatch.trace);
     if (this.settingsTrace.length > 40) this.settingsTrace.shift();
@@ -405,8 +414,10 @@ export class SettingsPanel {
         close: () => this.options.onClose(),
         switchTab: (tab) => this.setTab(tab),
         resetKeys: () => this.options.onResetKeys(),
+        resetTouch: () => this.options.onResetTouchButtons?.(),
         notice: (text) => this.setNotice(this.options.translate(text)),
         rebind: (skillId, boundKey) => this.options.onRebind(skillId, boundKey),
+        toggleTouch: (skillId) => this.options.onToggleTouchButton?.(skillId),
         startCapture: (skillId, triggerKey) => this.startCapture(skillId, triggerKey),
         stopCapture: () => this.stopCapture(),
         finishCapture: (captured) => this.finishCapture(captured),
@@ -562,12 +573,10 @@ export class SettingsPanel {
   }
 
   private drawBody(): void {
-    this.keyGrid.setVisible(this.tab === 'keys');
-    /** 通用页的滑块 / 触屏预览 / 详情都在此隐藏 —— 这里只写隐藏，通用页
-     * 分支只写显示。⚠️ `touchPreview` 原先只在 `drawTouchPreview()` 里置位，
-     * 而那里只在通用分支被调用 → 回按键页后它停在显示状态并压住第一格。 */
+    this.keyGrid.setVisible(this.tab !== 'general');
+    /** 通用页的滑块 / 详情都在此隐藏 —— 这里只写隐藏，通用页
+     * 分支只写显示。 */
     this.scaleSlider.setVisible(false);
-    this.touchPreview.visible = false;
     this.detail.clear();
 
     if (this.tab === 'general') {
@@ -582,13 +591,13 @@ export class SettingsPanel {
        */
       this.scaleSlider.setVisible(true);
       this.scaleSlider.setFocused(this.focus.zone === 'slider');
-      this.drawTouchPreview();
       this.scaleSlider.redraw();
       return;
     }
 
-    /* ---- 按键 tab ---- */
+    /* ---- 按键 tab / 触屏 tab ---- */
     const rows = this.options.getRows();
+    const onTouchPage = this.tab === 'touch';
 
     /**
      * 格子交给组件画。
@@ -596,30 +605,30 @@ export class SettingsPanel {
      * ⚠️ 详情区由**格子驱动**（`onFocused` 回调）：焦点在哪一格就显示
      * 哪个技能。这样"画格子"与"显示谁"只有一个真相来源，
      * 不会再出现"点完格子、详情还停在上一个技能"。
+     *
+     * ⚠️ 触屏页要多喂一份**按钮集合**（格子右上角的勾 / 左上角的槽位号
+     * 靠它）—— 不传就是按键页的画法（见 `KeyGridState.touchSkillIds`）。
      */
-    this.keyGrid.update(rows, {
-      focusIndex: this.focus.zone === 'grid' ? this.focus.index : -1,
-      capturingSkillId: this.capture.skillId,
-      showKeyHints: this.options.getShowKeyHints?.() !== false,
-    }, (row) => this.drawDetail(row));
-
-    this.footer.updateKeys(
-      this.capture.skillId !== undefined,
-      this.focus.zone === 'reset',
-      this.options.getShowKeyHints?.() !== false,
+    this.keyGrid.update(
+      rows,
+      {
+        focusIndex: this.focus.zone === 'grid' ? this.focus.index : -1,
+        capturingSkillId: this.capture.skillId,
+        showKeyHints: this.showKeyHintsNow,
+        touchSkillIds: onTouchPage ? this.options.getTouchSkillIds?.() ?? [] : undefined,
+      },
+      (row) => this.drawDetail(row),
     );
-  }
 
-  /** 只读预览。⚠️ 无触屏按钮时隐藏（桌面上画它只会让人困惑）。 */
-  private drawTouchPreview(): void {
-    const skills = this.options.getTouchSkills?.() ?? [];
-    const r = uiScaleSliderRect();
-    const names = skills.map((k) => this.options.translate(k)).join(' ');
-    this.touchPreview.text =
-      skills.length === 0 ? '' : `${this.options.translate('settings.touchButtons')}: ${names}`;
-    this.touchPreview.x = r.x;
-    this.touchPreview.y = r.y + r.h + 10;
-    this.touchPreview.visible = skills.length > 0;
+    if (onTouchPage) {
+      this.footer.updateTouch(this.focus.zone === 'reset', this.showKeyHintsNow);
+    } else {
+      this.footer.updateKeys(
+        this.capture.skillId !== undefined,
+        this.focus.zone === 'reset',
+        this.showKeyHintsNow,
+      );
+    }
   }
 
   /** 空 tab 的占位：一行主文案 + 一行提示，避免一片空白让人以为坏了。 */

@@ -150,6 +150,27 @@ export const REVIEW_ROWS = Math.floor(
 export const REVIEW_ROWS_Y =
   REVIEW_RECT.y + REVIEW_HEADER_H + (REVIEW_RECT.h - REVIEW_HEADER_H - REVIEW_FOOTER_H - REVIEW_ROWS * REVIEW_ROW_H) / 2;
 
+/**
+ * **真正会随滚动变化的那块矩形**（列表区；表头 / 页脚不在内）。
+ *
+ * ⚠️ 它是"指针该不该由复盘吃掉"的**几何判据**
+ * （`app/inputRouter.ts` 的 `reviewConsumesPointer` 只认它）。
+ *
+ * 为什么不用整块 `REVIEW_RECT`：面板几乎占满屏幕（928×516 / 960×540），
+ * 用整块的话"面板**外**"只剩 12–16px 的边 —— 手指根本点不到，于是
+ * **触屏玩家出不去复盘**（AGENTS.md §3b"触屏与键盘功能必须对等"）。
+ *
+ * 表头（标题 / 结算摘要）与页脚（滚动提示 / 范围）本来就不参与滚动，
+ * 让它们**不**消费点击，正好成为"点这里 = 离开战斗"的那块地方：
+ * 桌面有 `Enter`，触屏就靠点这两条。
+ */
+export const REVIEW_ROWS_RECT = {
+  x: REVIEW_RECT.x,
+  y: REVIEW_ROWS_Y,
+  w: REVIEW_RECT.w,
+  h: REVIEW_ROWS * REVIEW_ROW_H,
+} as const;
+
 /** 正文列的左缘：`左内边距 → 时间列 → 空隙 → 色条 → 空隙 → 正文`。 */
 export const REVIEW_TEXT_X =
   REVIEW_RECT.x + REVIEW_PAD_X + REVIEW_TIME_W + REVIEW_GAP + REVIEW_BAR_W + REVIEW_GAP;

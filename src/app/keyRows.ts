@@ -58,6 +58,28 @@ export function isBindablePlayerSkill(skill: {
   return (skill.requires?.length ?? 0) === 0;
 }
 
+/**
+ * **可选技能池** —— 设置界面能列出来的那些技能 id。
+ *
+ * ==================================================================
+ * 为什么抽出来（用户 2026-10-12）
+ * ==================================================================
+ *
+ * 用户原话："触屏和键盘当然是 2 套……只是**可选技能是一样的**。"
+ *
+ * 这句话要落到**两个消费者**上：
+ *   1. 「按键」页列出的技能（`buildKeyRows`，键盘那套）
+ *   2. 触屏按钮集合的**校验池**（`app/deps.ts` 加载存档时用它丢坏数据）
+ *
+ * 两边各写一遍过滤，迟早会漂成"设置页列得出来、但存档一读就被丢掉"
+ * 或者反过来 —— 那正是这类 bug 最难查的形态。所以池子只有这一份。
+ */
+export function bindableSkillIdsOf(registry: ContentRegistry): ReadonlySet<string> {
+  return new Set(
+    [...registry.skills.values()].filter(isBindablePlayerSkill).map((s) => s.id),
+  );
+}
+
 export interface BuildKeyRowsOptions {
   readonly bindings: readonly KeyBinding[];
   readonly registry: ContentRegistry;

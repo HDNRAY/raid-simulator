@@ -8,14 +8,20 @@
  * 这一块有 60 多行，而且它是一整块**内聚的知识**："设置界面能改哪些
  * 东西、改了之后要同步到哪儿"。抽出来之后 `main.ts` 只剩
  * `new SettingsPanel(buildSettingsOptions({...}))` 一行，而"改键之后
- * 必须同步到 loop + touch + 存储"这类规则集中在一处 —— 少一处就会
- * 出现"改了键但触屏按钮没变"。
+ * 必须同步到 loop + 存储"这类规则集中在一处 —— 少一处就会出现
+ * "改了键但战斗里还是旧键"。
  *
- * ⚠️ 注意"三处同步"：`loop`（键盘输入）、`touch`（触屏按钮）、
- * `settingsStore`（持久化）。**改键 / 换位 / 恢复默认三条路径都要全做**。
+ * ⚠️ **两条改动线，互不派生**（用户 2026-10-12："触屏和键盘当然是 2 套"）：
+ *
+ *   键位表（`apply`）      改键 / 换位 / 恢复默认 → `loop` + `settingsStore`
+ *   按钮集合（`applyTouch`）触屏页增删 / 恢复默认 → 触屏层 + `settingsStore`
+ *
+ * ⚠️ 键位表那条**不再**同步触屏按钮：那是被推翻的派生
+ * （"没绑键的技能在触屏上就没有按钮"，而触屏又进不去改键）。
  */
 
 import { DEFAULT_BINDINGS, type KeyBinding } from '../input/keyboard';
+import { defaultTouchButtonIds, toggleTouchButtonId } from '../input/touchLayout';
 import type { SettingsPanelOptions } from './../ui/settings/SettingsPanel';
 import { rebindWithSwap, swapSlots } from './bindingActions';
 import { buildKeyRows } from './keyRows';
@@ -27,10 +33,11 @@ export interface SettingsOptionsDeps {
   readonly registry: ContentRegistry;
   /** 当前键位表（读引用，改键会替换它）。 */
   readonly getBindings: () => readonly KeyBinding[];
-  /** 写入新键位表（同时同步到 loop / touch / 存储 —— 见文件头）。 */
+  /** 写入新键位表（同时同步到 loop / 存储 —— 见文件头）。 */
   readonly setBindings: (next: readonly KeyBinding[]) => void;
   readonly settingsStore: {
     saveBindings(b: readonly KeyBinding[]): void;
+    saveTouchButtons(ids: readonly string[]): void;
     saveUiScale(v: number): void;
   };
   readonly getUiScale: () => number;
@@ -39,8 +46,6 @@ export interface SettingsOptionsDeps {
   readonly snapshot: () => unknown;
   /** ⚠️ 用共享的 `TranslateFn`（带 `params`）—— 收窄成只收 `key` 会让占位符漏到界面上。 */
   readonly translate: TranslateFn;
-  /** 触屏按钮的只读预览。 */
-  readonly getTouchSkills: () => readonly string[];
   readonly getShowKeyHints: () => boolean;
   readonly pixi: SettingsPanelOptions['pixi'];
   /** 关闭面板（由 `settingsToggle` 处理"恢复暂停"）。 */
@@ -49,16 +54,23 @@ export interface SettingsOptionsDeps {
   readonly capture: (handler: ((key: string) => void) | undefined) => void;
   /** 是否正由主监听器处理这次按键（是则跳过捕获，避免重复投递）。 */
   readonly isHandlingKeyDown: () => boolean;
+  /**
+   * **触屏按钮集合**（技能 id，顺序即槽位）—— 读的是 `GameState`，
+   * 与键盘绑定表**互不派生**（用户 2026-10-12 定案）。
+   */
+  readonly getTouchSkillIds: () => readonly string[];
+  /** 写入触屏按钮集合（同时同步到触屏层与存储 —— 见文件头）。 */
+  readonly setTouchSkillIds: (next: readonly string[]) => void;
 }
 
 /** 造一份设置面板选项。 */
 export function buildSettingsOptions(d: SettingsOptionsDeps): SettingsPanelOptions {
   const t = d.translate;
   return {
-    /** 触屏按钮的只读预览 —— 从布局读（唯一真相）。 */
-    getTouchSkills: () => d.getTouchSkills(),
-    getShowKeyHints: () => d.getShowKeyHints(),
     pixi: d.pixi,
+    /** 触屏页要读的两样：能力值（是否拼键名）与按钮集合本身。 */
+    getShowKeyHints: () => d.getShowKeyHints(),
+    getTouchSkillIds: () => d.getTouchSkillIds(),
     /**
      * ⚠️ **透传 `params`** —— 只写 `(key) => t(key)` 会把占位符参数吃掉，
      * 界面上的 `{seconds}` 就会原样显示出来（踩过，见 `main.ts` 的 `translateSafe`）。
@@ -77,6 +89,19 @@ export function buildSettingsOptions(d: SettingsOptionsDeps): SettingsPanelOptio
     /** 触屏换位（与改键分开：那个换键、这个换**位置**）。 */
     onSwapSlots: (from, to) => {
       apply(d, swapSlots(d.getBindings(), from, to));
+    },
+    /**
+     * 「触屏」页：**点一下格子 = 放上 / 取下**。
+     *
+     * ⚠️ 改的是**按钮集合**（`GameState.touchButtons`），与键位表无关 ——
+     * 这正是这次要切断的那条派生（"有键的技能才有按钮"）。
+     */
+    onToggleTouchButton: (skillId) => {
+      applyTouch(d, toggleTouchButtonId(d.getTouchSkillIds(), skillId));
+    },
+    /** 「触屏」页的「恢复默认」：回到"默认键位表里那些有键的技能"。 */
+    onResetTouchButtons: () => {
+      applyTouch(d, defaultTouchButtonIds());
     },
     onResetKeys: () => {
       /** 恢复默认**也覆盖存储**，否则刷新之后又变回玩家改过的键位。 */
@@ -107,4 +132,17 @@ export function buildSettingsOptions(d: SettingsOptionsDeps): SettingsPanelOptio
 function apply(d: SettingsOptionsDeps, next: readonly KeyBinding[]): void {
   d.setBindings([...next]);
   d.settingsStore.saveBindings(d.getBindings());
+}
+
+/**
+ * 触屏按钮改动的同步 —— 与 `apply` 同一条纪律：
+ *   `setTouchSkillIds`（内存 + 触屏层）→ `saveTouchButtons`（存储）。
+ *
+ * ⚠️ 与键位表**分开的两个函数**（不是给 `apply` 加一个参数）：
+ * 两者改的是不同的东西（键位表 vs 按钮集合），合在一起的签名会让人以为
+ * "改键也要写一遍按钮"，而那正是那条被推翻的派生关系。
+ */
+function applyTouch(d: SettingsOptionsDeps, next: readonly string[]): void {
+  d.setTouchSkillIds(next);
+  d.settingsStore.saveTouchButtons(next);
 }

@@ -146,8 +146,50 @@ const send = (m, p = {}) =>
 
 await send('Runtime.enable');
 await send('Page.enable');
+/**
+ * 可选：**伪装成触屏设备**（`RAID_SHOT_TOUCH=1`）。
+ *
+ * 用途：验证"触屏与键盘功能必须对等"（AGENTS.md §3b）的那几条路 ——
+ * 页面的能力探测走 `matchMedia('(pointer: coarse)')`，桌面 headless 上
+ * 它是假，所以"点屏幕离开战斗"这类**只在触屏生效**的分支测不到。
+ * ⚠️ 只改媒体查询与 touch 支持，不改 UA（本仓库的能力探测不看 UA）。
+ */
+if (process.env.RAID_SHOT_TOUCH === '1') {
+  /**
+   * 让页面的**能力探测**认为这是触屏设备。
+   *
+   * ⚠️ 做法是**在应用启动前**把 `window.matchMedia` 包装一层，只对
+   * `pointer: coarse` / `hover: none` 两个查询返回 `matches: true`。
+   * 理由：本仓库的探测本来就只看这两个媒体查询（`render/platform.ts`，
+   * 刻意不看 UA），所以这是"照它自己的判据喂它"，不是旁路。
+   *
+   * ⚠️ 不用 CDP 的 `setTouchEmulationEnabled` / `setDeviceMetricsOverride`：
+   * 它们会改掉事件模型，脚本后面注入的 `PointerEvent` 就到不了画布的
+   * 监听器（实测：拖拽与点击全失效）。
+   */
+  await send('Page.addScriptToEvaluateOnNewDocument', {
+    source: `(() => {
+      const real = window.matchMedia.bind(window);
+      window.matchMedia = (q) => {
+        if (q === '(pointer: coarse)' || q === '(hover: none)') {
+          return { matches: true, media: q, onchange: null,
+            addListener() {}, removeListener() {},
+            addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; } };
+        }
+        return real(q);
+      };
+    })();`,
+  });
+}
 await send('Page.navigate', { url: PAGE_URL });
-await sleep(3400);
+/**
+ * 页面加载后的**等待时长**（`RAID_SHOT_WAIT_MS`，默认 3400ms）。
+ *
+ * ⚠️ 默认值对应"一局 3.5 秒左右打完"那种快局。要看**结局之后**的界面
+ * （例如复盘 / 结算）时，一局可能要十几秒 —— 那时把等待加长，
+ * 而不是去写一个新的 e2e 脚本（AGENTS.md §4：这里只拍图）。
+ */
+await sleep(Number(process.env.RAID_SHOT_WAIT_MS ?? 3400));
 await send('Page.bringToFront').catch(() => {});
 
 const ev = async (expr) => {
@@ -171,6 +213,22 @@ for (const skill of SKILLS) {
 if (process.env.RAID_SHOT_EVAL) {
   const r = await ev(process.env.RAID_SHOT_EVAL);
   if (r !== undefined) console.log(`[eval] ${r}`);
+  await sleep(200);
+}
+
+/**
+ * 可选：**按键之前**再跑一段驱动脚本（`RAID_SHOT_EVAL_BEFORE`）。
+ *
+ * ⚠️ 与 `RAID_SHOT_EVAL` 分成两个变量，是为了"**前后对比**"：
+ * 滚动位置这类量只拍一张图看不出来（"滚了"和"重排了"长得一样），
+ * 需要按键前读一次、按键后再读一次（后者由 `RAID_SHOT_TEXT` 打）。
+ * 只有一个变量时，"按键后"拿不到对比基准。
+ *
+ * 与 `RAID_SHOT_EVAL` 同源：只能调页面已暴露的调试 API，不是求值后门。
+ */
+if (process.env.RAID_SHOT_EVAL_BEFORE) {
+  const r = await ev(process.env.RAID_SHOT_EVAL_BEFORE);
+  if (r !== undefined) console.log(`[eval-before] ${r}`);
   await sleep(200);
 }
 
@@ -219,7 +277,12 @@ if (process.env.RAID_SHOT_POINTER) {
     const rect = c.getBoundingClientRect();
     const x = rect.left + ${lx} * (rect.width / 960);
     const y = rect.top + ${ly} * (rect.width / 960);
-    const target = document.elementFromPoint(x, y) ?? c;
+    /**
+     * ⚠️ 直接用**画布**当目标，不用 elementFromPoint：战斗结束后
+     * elementFromPoint 可能命中画布之外的节点，事件就到不了画布的
+     * 监听器（实测：40s 后的点击全部丢失）。画布是唯一的目标。
+     */
+    const target = c;
     target.dispatchEvent(new PointerEvent('pointerdown', {
       clientX: x, clientY: y, pointerId: 1, pointerType: 'touch', bubbles: true, cancelable: true, isPrimary: true,
     }));
@@ -229,6 +292,42 @@ if (process.env.RAID_SHOT_POINTER) {
     return JSON.stringify({ ok: true, x, y, hit: target.tagName });
   })()`);
   console.log(`[pointer ${process.env.RAID_SHOT_POINTER}] ${r}`);
+  await sleep(400);
+}
+
+/**
+ * 可选：截图前在画布上**拖一下**（`RAID_SHOT_DRAG=x,y1,y2`，逻辑坐标）。
+ *
+ * 用途：验证**触屏 / 鼠标能不能滚动复盘**（AGENTS.md §3b：不许把功能做成
+ * 只有键盘能用）。`y1` → `y2` 是一次真实拖动，走页面的 `pointerdown` /
+ * `pointermove` / `pointerup` 路由 —— 与手指滑动同一条路。
+ *
+ * ⚠️ 与 `RAID_SHOT_POINTER` 同一条纪律：坐标是**逻辑坐标**，CSS 换算在
+ * 页面里做（别把 letterbox 的换算抄进脚本）。
+ */
+if (process.env.RAID_SHOT_DRAG) {
+  const [lx, y1, y2] = process.env.RAID_SHOT_DRAG.split(',').map((v) => Number(v.trim()));
+  const r = await ev(`(() => {
+    const c = document.querySelector('canvas');
+    const rect = c.getBoundingClientRect();
+    const k = rect.width / 960;
+    const x = rect.left + ${lx} * k;
+    const at = (ly) => rect.top + ly * k;
+    const opts = (y) => ({
+      clientX: x, clientY: at(y), pointerId: 7, pointerType: 'touch',
+      bubbles: true, cancelable: true, isPrimary: true,
+    });
+    /** ⚠️ 同 RAID_SHOT_POINTER：目标是画布本身，别用 elementFromPoint。 */
+    const target = c;
+    target.dispatchEvent(new PointerEvent('pointerdown', opts(${y1})));
+    /** 分几步移动：一步到位的话"拖拽中"的手势路径就测不到。 */
+    for (let i = 1; i <= 10; i += 1) {
+      target.dispatchEvent(new PointerEvent('pointermove', opts(${y1} + ((${y2} - ${y1}) * i) / 10)));
+    }
+    target.dispatchEvent(new PointerEvent('pointerup', opts(${y2})));
+    return JSON.stringify({ ok: true, from: ${y1}, to: ${y2} });
+  })()`);
+  console.log(`[drag ${process.env.RAID_SHOT_DRAG}] ${r}`);
   await sleep(400);
 }
 
@@ -253,6 +352,21 @@ if (process.env.RAID_SHOT_TEXT === '1') {
     back: window.__raidBattle.back.visible(),
     backCenter: window.__raidBattle.back.center(),
     backBounds: window.__raidBattle.back.bounds(),
+    status: window.__raidBattle.probe().status,
+    api: {
+      hasAct: typeof window.__raidBattle.act === 'function',
+      hasBindings: typeof window.__raidBattle.bindings === 'function',
+      hasRestart: typeof window.__raidBattle.restart === 'function',
+      hasProbe: typeof window.__raidBattle.probe === 'function',
+    },
+    logReview: {
+      layer: window.__raidBattle.logReview.layer(),
+      isOpen: window.__raidBattle.logReview.isOpen(),
+      pointerRatio: window.__raidBattle.logReview.pointerRatio(),
+      entryCount: window.__raidBattle.logReview.entryCount === undefined
+        ? null
+        : window.__raidBattle.logReview.entryCount(),
+    },
   })`);
   console.log(`[diag] ${diag}`);
   const dump = await ev(`(() => {

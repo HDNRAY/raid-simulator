@@ -35,6 +35,7 @@ import { backButtonCenter } from '../ui/ScreenControls';
 import { settingsAnchorOf } from './flow';
 import type { BattleLoop } from './battleLoop';
 import type { GameState } from './flow';
+import type { InputLayer } from './inputRouter';
 import type { SettingsPanel } from '../ui/settings/SettingsPanel';
 import type { SettingsButton } from '../ui/settings/SettingsButton';
 import type { SettingsToggle } from './settingsToggle';
@@ -56,7 +57,21 @@ type RaidBattleGlobal = NonNullable<Window['__raidBattle']>;
 export interface DebugApiDeps {
   readonly state: GameState;
   /** 场景（`setUiScale` 与面板滑块走同一条路）。 */
-  readonly scene: { setUiScale(scale: number): void };
+  readonly scene: {
+    setUiScale(scale: number): void;
+    /**
+     * 复盘那一层（`logReview` 入口读它）。
+     *
+     * ⚠️ 只暴露 `isOpen` / `pointerRatio` 两个**只读**查询，不暴露"滚" ——
+     * 那是一条旁路（脚本要滚必须注入真实按键 / 指针事件，走的才是玩家那条路）。
+     * 与 `back` 的处理同一个道理（见那里"没有点它的方法"的说明）。
+     */
+    readonly logReview: {
+      isOpen(): boolean;
+      /** 滚动位置比例（0 = 第一行，1 = 最后一行；截图前后对比用）。 */
+      pointerRatio(): number;
+    };
+  };
   /** Pixi 应用（探针 `stage` 暴露它的 `app.stage`）。 */
   readonly app: { readonly stage: unknown };
   readonly settings: SettingsPanel;
@@ -83,6 +98,14 @@ export interface DebugApiDeps {
   readonly touch: TouchControls;
   /** 重开一局（`restart` 从它走 `enterBattle`）。 */
   readonly restart: () => void;
+  /**
+   * **当前输入层** —— `inputRouter.activeInputLayer` 的活取值。
+   *
+   * ⚠️ 由调用方注入（而不是在这里自己拼判据）：那一份判据只能有一处，
+   * 调试入口再拼一遍就成了"两份会漂的真相" —— 而这次的 bug 正是
+   * "各模块各自拼一份"。
+   */
+  readonly layer: () => InputLayer;
 }
 
 /**
@@ -173,6 +196,19 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
     restart: () => d.restart(),
     /** 触屏按钮圆心（端到端脚本用）。 */
     touchButtonCenter: (skillId: string) => d.touch.centerOfSkill(skillId),
+    /**
+     * **输入归属 + 复盘状态**（验证脚本用）。
+     *
+     * ⚠️ 这两个读数合在一起才能证明"上下键归复盘"：
+     *   - `layer()` = `review`（不是 `battle`）→ 键盘没被设置按钮抢走
+     *   - `pointerRatio()` 变了 → 内容真的滚了
+     * 只截一张图分不清"滚了"和"重新排版了"。
+     */
+    logReview: {
+      layer: () => d.layer(),
+      isOpen: () => d.scene.logReview.isOpen(),
+      pointerRatio: () => d.scene.logReview.pointerRatio(),
+    },
     probe: () => {
       const l = battle();
       /** 备战阶段没有战斗可测：给一份零值快照，而不是 crash。 */

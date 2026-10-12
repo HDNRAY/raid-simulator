@@ -25,7 +25,7 @@ import type { SettingsStore } from './settingsStore';
 import type { ContentRegistry } from '../core/content/registry';
 import type { KeyBinding } from '../input/keyboard';
 import type { BattleLoop } from './battleLoop';
-import type { TouchPreviewSource } from './touchSetup';
+import type { TouchCapsSource } from './touchSetup';
 import type { GameState } from './flow';
 
 /** 设置装配需要的外部依赖。 */
@@ -46,20 +46,29 @@ export interface SettingsSetupDeps {
     setUiScale(scale: number): void;
   };
   /**
-   * 键位表被改之后的**另外两处同步**（`loop` 已经在上面做过）：
-   * 触屏按钮与画面技能格。
+   * 键位表被改之后的**另一处同步**（`loop` 已经在上面做过）：画面技能格
+   * 的键位提示。
+   *
+   * ⚠️ 它**不再**包含触屏按钮 —— 按钮集合与键位表互不派生，改键不该动它
+   * （见 `settingsPanelOptions.ts` 文件头）。
    */
   readonly onBindingsChanged: (next: readonly KeyBinding[]) => void;
   /**
+   * **触屏按钮集合**被改之后的同步（触屏层重画）。
+   *
+   * ⚠️ 与 `onBindingsChanged` 分开：两条改动线互不派生（用户 2026-10-12）。
+   */
+  readonly onTouchButtonsChanged: (next: readonly string[]) => void;
+  /**
    * 与触屏输入源无关的那部分可变状态。
    *
-   * ⚠️ `bindings` / `uiScale` / `settingsButtonFocused` / `handlingKeyDown`
-   * 都住在这里 —— 它们各自有**多个写入点**（改键、缩放滑块、键盘焦点），
-   * 拆成 `let` 就会在多模块间各持一份真相。
+   * ⚠️ `bindings` / `touchButtons` / `uiScale` / `settingsButtonFocused` /
+   * `handlingKeyDown` 都住在这里 —— 它们各自有**多个写入点**（改键、触屏页
+   * 增删、缩放滑块、键盘焦点），拆成 `let` 就会在多模块间各持一份真相。
    */
   readonly state: Pick<
     GameState,
-    'bindings' | 'uiScale' | 'settingsButtonFocused' | 'handlingKeyDown'
+    'bindings' | 'touchButtons' | 'uiScale' | 'settingsButtonFocused' | 'handlingKeyDown'
   >;
 }
 
@@ -68,16 +77,15 @@ export interface SettingsSetup {
   readonly settings: SettingsPanel;
   readonly settingsButton: SettingsButton;
   readonly settingsToggle: SettingsToggle;
-  readonly touchPreviewSource: TouchPreviewSource;
+  readonly touchCapsSource: TouchCapsSource;
 }
 
 /**
  * 造设置面板 + 齿轮按钮 + 开关。
  *
  * ⚠️ **顺序是刻意的**（原先散在 `main.ts` 里，这里一次说清）：
- *   1. `touchPreviewSource` 先占位 —— 设置面板**必须先于** `touch` 构造
- *      （它要接收 `touch` 的能力值），但预览数据又来自 `touch.layout`。
- *      `touchSetup.ts` 建好触屏层后会回填它。
+ *   1. `touchCapsSource` 先占位 —— 设置面板**必须先于** `touch` 构造
+ *      （它要接收 `touch` 的能力值）。`touchSetup.ts` 建好触屏层后会回填它。
  *   2. 面板 → 齿轮 → 开关。
  *   3. 开关只能读 `battle()?.isPaused`（**取值函数**，不是构造期的值）——
  *      所以"设置比战斗循环晚"或"比它早"都不影响 `isPaused` 的解析：
@@ -85,14 +93,13 @@ export interface SettingsSetup {
  */
 export function createSettingsSetup(d: SettingsSetupDeps): SettingsSetup {
   /**
-   * 触屏预览的数据源持有者。
+   * 触屏**能力值**的转交点。
    *
-   * ⚠️ 设置面板**必须先于** `touch` 构造（它要接收 `touch` 的能力值），
-   * 但预览数据又来自 `touch.layout`。用一个**常量对象**当转交点：
+   * ⚠️ 设置面板**必须先于** `touch` 构造（它要按能力值决定是否显示键位
+   * 提示），而能力值只有触屏层建好才知道。用一个**常量对象**当转交点：
    * `const` 符合 lint，且不依赖"首次渲染足够晚"这种隐含前提。
    */
-  const touchPreviewSource: TouchPreviewSource = {
-    read: () => [],
+  const touchCapsSource: TouchCapsSource = {
     showKeyHints: true,
   };
 
@@ -104,6 +111,11 @@ export function createSettingsSetup(d: SettingsSetupDeps): SettingsSetup {
         d.state.bindings = next;
         d.battle()?.setBindings(d.state.bindings);
         d.onBindingsChanged(next);
+      },
+      getTouchSkillIds: () => d.state.touchButtons,
+      setTouchSkillIds: (next) => {
+        d.state.touchButtons = next;
+        d.onTouchButtonsChanged(next);
       },
       settingsStore: d.settingsStore,
       getUiScale: () => d.state.uiScale,
@@ -121,8 +133,7 @@ export function createSettingsSetup(d: SettingsSetupDeps): SettingsSetup {
       },
       snapshot: () => d.battle()?.snapshot,
       translate: translateSafe,
-      getTouchSkills: () => touchPreviewSource.read(),
-      getShowKeyHints: () => touchPreviewSource.showKeyHints,
+      getShowKeyHints: () => touchCapsSource.showKeyHints,
       pixi: { Container, Graphics, Sprite, Text },
       close: () => settingsToggle.close(),
       capture: (handler) => d.battle()?.inputSource?.capture(handler),
@@ -151,5 +162,5 @@ export function createSettingsSetup(d: SettingsSetupDeps): SettingsSetup {
     setPaused: (value) => d.battle()?.setPaused(value),
   });
 
-  return { settings, settingsButton, settingsToggle, touchPreviewSource };
+  return { settings, settingsButton, settingsToggle, touchCapsSource };
 }

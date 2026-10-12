@@ -31,6 +31,12 @@ import { LOGICAL_H, LOGICAL_W } from '../render/scaling';
 import type { SettingsPanel } from '../ui/settings/SettingsPanel';
 import type { SettingsButton } from '../ui/settings/SettingsButton';
 import type { PrepareScreen } from '../ui/PrepareScreen';
+import {
+  activeInputLayer,
+  battleExitOnPointer,
+  reviewConsumesPointer,
+  type CanvasInputReviewSource,
+} from './inputRouter';
 import type { Phase } from './flow';
 
 /** 指针要路由到的对象。 */
@@ -63,6 +69,14 @@ export interface CanvasInputTargets {
   /** 当前阶段。 */
   phase(): Phase;
   settingsOpen(): boolean;
+  /**
+   * **复盘那一层**（一局结束后的全屏战报）。
+   *
+   * ⚠️ 它是"指针该归谁"的**第二个子模式**（第一个是设置面板）：
+   * `phase` 在一局结束后**仍然是 `battle`**，所以只看相位会让它永远
+   * 抢不到手势 —— 触屏滚不动复盘就是这么来的（见 `inputRouter`）。
+   */
+  review(): CanvasInputReviewSource;
   /** 打开设置（点齿轮）。 */
   openSettings(): void;
   /** 战斗已结束（用来判"点屏幕离开战斗"）。 */
@@ -95,8 +109,50 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
    */
   let draggingSlider = false;
 
+  /**
+   * 复盘拖拽**占住了这次手势**的指针 id。
+   *
+   * ⚠️ 两个作用：move / up 只转发给"开始拖的那个指针"，以及
+   * `pointercancel`（手指划出画布）与 `pointerup` 同义地结束拖拽。
+   */
+  let reviewDragId: number | null = null;
+
   const onDown = (event: PointerEvent): void => {
     const { px, py } = at(event);
+    /**
+     * 这次指针属于哪一层 —— **一次算清**，下面所有分支都问它。
+     * 算两次就可能出现"前半段判的是复盘、后半段判的是战斗"。
+     */
+    const layer = activeInputLayer({
+      phase: t.phase(),
+      settingsOpen: t.settingsOpen(),
+      reviewOpen: t.review().isOpen(),
+    });
+
+    /**
+     * ⓪ **复盘层先接**（它排在设置面板之后、其余一切之前）。
+     *
+     * ⚠️ 两种"想滚动却滚不动"的 bug 都在这一步一起修掉：
+     *   - **键盘路**：`settingsKeys` 原先只看相位，复盘开着时把 `↑`
+     *     吃去点亮设置按钮 → 复盘收不到上下键（用户在报的这条）
+     *   - **触屏路**：原先"结算中点屏幕 = 离开战斗"同样只看相位，
+     *     于是手指一碰屏幕就重开，复盘**永远拖不动**
+     *
+     * 现在两条路都问同一个判据：`reviewConsumesPointer`（层是 `review`
+     * **且**点在面板矩形内）。落在面板**外**的那一下仍按"点屏幕离开战斗"
+     * 处理 —— 那与结算面板的"点击屏幕再来一次"是同一条，行为不变。
+     */
+    const reviewConsumed = reviewConsumesPointer(
+      layer,
+      { x: px, y: py },
+      t.review().bounds(),
+      t.review().canScroll(),
+    );
+    if (reviewConsumed) {
+      reviewDragId = event.pointerId;
+      t.review().pointerDown(event.pointerId, py);
+      return;
+    }
 
     /**
      * ① **三个全屏界面**（首页 / 选角色 / 自由模式）盖住整屏 —— 先让
@@ -111,6 +167,9 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
      *
      * 这也违反 AGENTS.md §3b「触屏与键盘功能必须对等」：改键只有
      * `Enter` 一条路，而触屏**根本按不出 Enter**。
+     *
+     * ⚠️ **不判"复盘"**：复盘只可能出现在 `battle` 相位里，而那条路
+     * 上面 ⓪ 已经接过一次了。
      */
     if (t.phase() !== 'battle' && !t.settingsOpen()) {
       /**
@@ -149,13 +208,17 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
      *   - 不 `return`：会同时满足 `settingsButton.hitTest` → 一次点击
      *     **既开设置又静默重开**（实测 tick 663 → 43）
      *
-     * ⚠️ `t.phase() === 'battle'` 这个前置条件是**必需的**：`battleEnded()`
-     * 读的是 `state.loop`，而**非战斗阶段它是 `undefined`** ——
-     * `undefined !== 'running'` 为真，没有这个守卫就会"在首页点一下屏幕
-     * 就被送去选角色 / 备战界面"。原先靠 ① 无条件 `return` 挡住，
-     * 现在**显式写出来**，不再依赖分支顺序这种隐式前提。
+     * ⚠️ 判据是 `battleExitOnPointer(layer, reviewConsumed)` 而不是
+     * `phase === 'battle'`：复盘吃掉的那一下不该顺手把玩家带离战斗
+     * （触屏想拖拽却重开一局）；没被吃掉的那一下则照旧退出 ——
+     * 否则触屏玩家**出不去复盘**（键盘还有 `Enter`）。
+     *
+     * ⚠️ 它同时管住了另一件事：`battleEnded()` 读的是 `state.loop`，
+     * 而**非战斗阶段它是 `undefined`** —— `undefined !== 'running'` 为真，
+     * 没有这个守卫就会"在首页点一下屏幕就被送去选角色 / 备战界面"。
+     * 现在这个守卫由"输入层是 battle"承担（非战斗相位不可能返回 `battle`）。
      */
-    if (t.phase() === 'battle' && !t.touch.caps.showKeyHints && t.battleEnded()) {
+    if (battleExitOnPointer(layer, reviewConsumed) && !t.touch.caps.showKeyHints && t.battleEnded()) {
       t.backFromBattle();
       return;
     }
@@ -175,6 +238,14 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
 
   const onMove = (event: PointerEvent): void => {
     const { px, py } = at(event);
+    /**
+     * 复盘拖拽优先 —— 一次手势一旦从复盘开始，就不要再被悬停 / 滑块抢走。
+     * 复盘的滚动**只认逻辑 Y**（它不需要 X：拖动是竖直方向的）。
+     */
+    if (reviewDragId === event.pointerId) {
+      t.review().pointerMove(event.pointerId, py);
+      return;
+    }
     /** 拖滑块优先 —— 一次手势一旦从滑块开始，就不要再被悬停抢走。 */
     if (draggingSlider) {
       t.settings.dragScaleSlider(px);
@@ -187,11 +258,18 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
     t.settings.hoverSkill(px, py);
   };
 
+  const endReviewDrag = (event: PointerEvent): void => {
+    if (reviewDragId !== event.pointerId) return;
+    reviewDragId = null;
+    t.review().pointerUp(event.pointerId);
+  };
+
   const endDrag = (): void => {
     draggingSlider = false;
   };
 
   const onUp = (event: PointerEvent): void => {
+    endReviewDrag(event);
     t.touch.onPointerUp(event.pointerId);
     endDrag();
   };
@@ -201,6 +279,7 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
    * 不释放会让引擎一直按那个技能的代价扣资源。
    */
   const onCancel = (event: PointerEvent): void => {
+    endReviewDrag(event);
     t.touch.onPointerCancel(event.pointerId);
     endDrag();
   };

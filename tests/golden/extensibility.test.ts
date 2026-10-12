@@ -177,12 +177,14 @@ describe('可扩展性：新增一个技能只需要写数据', () => {
     const player = engine.snapshot.combatants.find((c) => c.id === 'player')!;
     expect(player.buffs.some((b) => b.defId === 'test-brand')).toBe(true);
     /**
-     * 炁 = 内容直接给的 25（`delta: 25`）
-     *      + 命中造成的伤害换算来的量（两段共 120 伤害 → 120 点炁）。
+     * 缠 = 内容直接给的 25（`delta: 25`）
+     *      + 命中造成的伤害换算来的量（两段 50 / 70，系数 **0.5**
+     *        且**向下取整** → `25 + 35 = 60`）。
      *
-     * 会被上限截断到 `makeCombatant` 的 100 —— 这正好验证了钳制。
+     * ⚠️ 2026-10-12 系数从 1 减半后这里从 100（被上限钳制）变成
+     * **85**（不再触顶）—— 断言值跟着改，钳制本身由别的用例覆盖。
      */
-    expect(player.resources.douqi).toBe(100);
+    expect(player.resources.douqi).toBe(85);
 
     // 目标被挂上 debuff（stack 模式）
     const dummy = engine.snapshot.combatants.find((c) => c.id === 'dummy')!;

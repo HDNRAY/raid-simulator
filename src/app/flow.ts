@@ -116,6 +116,19 @@ export interface GameState {
   bindings: readonly KeyBinding[];
 
   /**
+   * **触屏按钮集合**（技能 id，顺序即双弧槽位）。
+   *
+   * ⚠️ 与 `bindings` **互不派生**（用户 2026-10-12："触屏和键盘当然是
+   * 2 套……只是可选技能是一样的"）。它由设置页「触屏」页增删、
+   * 存 `raid.touchButtons.v1`。
+   *
+   * ⚠️ 放在 `GameState` 而不是 `TouchControls` 里：设置面板**先于**
+   * 触屏层构造（它要接收触屏的能力值），所以面板必须有一个**与触屏层
+   * 无关**的地方读这份选择。触屏层只是它的一个消费者（`setButtons`）。
+   */
+  touchButtons: readonly string[];
+
+  /**
    * 触屏控件（能力探测 + 布局 + 输入源 + 双弧按钮层）。与键盘并存。
    *
    * ⚠️ **先声明、后回填**：它由 `touchSetup.ts` 在设置面板之后建出来，
@@ -173,7 +186,16 @@ export interface GameState {
 }
 
 /** 造一份初始状态（各字段在装配期间被填）。 */
-export function createGameState(bindings: readonly KeyBinding[]): GameState {
+export function createGameState(
+  bindings: readonly KeyBinding[],
+  /**
+   * 初始触屏按钮集合。
+   *
+   * ⚠️ 是**参数**而不是"先给空、后面回填"：设置面板一构造就会读它，
+   * 而面板比触屏层早 —— 回填的窗口里玩家能看到一组错的按钮。
+   */
+  touchButtons: readonly string[],
+): GameState {
   return {
     loop: undefined,
     /**
@@ -186,6 +208,7 @@ export function createGameState(bindings: readonly KeyBinding[]): GameState {
     back: undefined,
     prepare: undefined,
     bindings,
+    touchButtons,
     touch: undefined,
     uiScale: 1,
     settingsButtonFocused: () => false,

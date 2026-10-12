@@ -37,6 +37,7 @@
 
 import type { Container } from 'pixi.js';
 import type { LogEntry } from '../app/logFormat';
+import type { LogReviewPanel } from '../ui/LogReviewPanel';
 import { BossHeader } from './hud/bossHeader';
 import { CastBars } from './hud/castBars';
 import { LogArea } from './hud/logArea';
@@ -166,6 +167,18 @@ export class BattleScene {
     this.statusArea.register(this.registry);
     this.logArea.register(this.registry);
     this.resultArea.register(this.registry);
+  }
+
+  /**
+   * **复盘那一层**（一局结束后的全屏战报）—— 给**输入路由**用。
+   *
+   * ⚠️ 只读地转出去，不在这里判任何东西：`phase` 在战斗结束后**仍然是
+   * `battle`**（见 `phaseLogic.Phase`，"不要新增 `'result'`"），
+   * 所以"复盘开着没有"是"谁该拿键盘 / 指针"的关键输入 ——
+   * 判据只有一处（`app/inputRouter.ts`），这里只负责把它递到那里。
+   */
+  get logReview(): LogReviewPanel {
+    return this.logArea.review;
   }
 
   /**

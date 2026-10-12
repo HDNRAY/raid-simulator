@@ -19,17 +19,31 @@
  * 任何一方都不许自己留副本。
  *
  * ==================================================================
- * 为什么按钮不由玩家自由排布
+ * ⚠️ 按钮集合是**用户自己选的**，不再从键位表派生（2026-10-12 用户定案）
  * ==================================================================
  *
- * 用户定案："暂时就不给玩家自由编辑了。"
+ * 原先按钮由**键位表**机械派生（"有键的技能"）。用户推翻了这条
+ * （"触屏和键盘**当然是 2 套**，连 localStorage 都是分 2 个 key 存的，
+ * 只是可选技能是一样的"），因为这个派生会让纯触屏玩家**进不去死结**：
  *
- * 所以按钮**从绑定表自动推导**（`fromBindings`）—— 与桌面技能格
- * 走同一条路（`slotsFromBindings`）。设置页只做**只读预览**。
+ *   技能没绑键 → 触屏上没有它的按钮 ✗
+ *   配按钮的地方是「按键」页 → 而触屏按不出键、进不去改键 ✗✗
  *
- * 将来要做编辑器时，只要换掉"谁调用 `set()`"，输入层与渲染层一行
- * 都不用改 —— 这正是把写入收敛成单一入口的收益。
+ * 现在按钮集合是**独立的一份用户选择**（`toggleTouchButtonId` 增删、
+ * 自己一个 localStorage key），输入层与渲染层依旧只认这里的
+ * `TouchLayout` —— 写入路径仍然收敛成 `set()` 一个。
+ *
+ * ⚠️ **可选技能仍是同一个池**：设置页列出的技能来自内容注册表
+ * （`app/keyRows.ts` 的 `buildKeyRows`），与键盘那套**同一张表**。
+ * 变的只是"选中的子集存在哪儿"，不是"能选什么"。
+ *
+ * 派生函数（`touchButtonIdsFromBindings`）**只剩两个用途**：
+ *   1. 老存档**迁移**一次（老玩家的按钮原本由它得出，不回填就会突然消失）
+ *   2. "恢复默认"的默认值（= 默认键位表里"有键"的技能）
+ * 任何运行期路径都**不许**再拿它当真相源。
  */
+
+import { DEFAULT_BINDINGS } from './keyboard';
 
 /** 一个触屏按钮位：按顺序第几个 + 放哪个技能。 */
 export interface TouchButton {
@@ -113,15 +127,49 @@ function normalize(list: readonly TouchButton[]): readonly TouchButton[] {
 }
 
 /**
- * 从**键位表**推导触屏按钮（与桌面技能格同一条路）。
+ * 从**键位表**推导按钮技能 id —— ⚠️ **只用于老存档迁移与"恢复默认"**。
  *
- * 有键的技能才上场 —— "闪"默认空键，所以它不出现在触屏上，
- * 但仍在设置页里可绑（设置页读的是绑定表）。
+ * 有键的技能才上场（与当年触屏按钮的来源完全一致），所以它给出的正是
+ * "老玩家第一次加载时应该看到的按钮"，以及"恢复默认"该回到的那一份。
+ *
+ * ⚠️ **它不是运行期的真相源**：按钮集合由用户用设置页选出来、存在
+ * 自己的 localStorage key 里（见文件头）。运行期任何地方再调用它，
+ * 就等于把那个"没绑键就没按钮"的死结接回来。
+ *
+ * ⚠️ 它**不过滤这一局有哪些技能** —— 那件事的主人是
+ * `app/touchControls.ts` 的 `currentSkillIds`（引擎的技能集）。
  */
-export function touchButtonsFromBindings(
+export function touchButtonIdsFromBindings(
   bindings: readonly { readonly key: string; readonly skillId: string }[],
-): readonly TouchButton[] {
-  return bindings
-    .filter((b) => b.key !== '')
-    .map((b, i) => ({ index: i, skillId: b.skillId }));
+): readonly string[] {
+  return bindings.filter((b) => b.key !== '').map((b) => b.skillId);
+}
+
+/**
+ * **默认**触屏按钮集合（设置页「恢复默认触屏按钮」用它）。
+ *
+ * 取的是**默认键位表**里"有键"的技能 —— 与老存档的迁移结果一致，
+ * 于是"恢复默认"给出的就是老玩家第一次加载时看到的那一份，两处不会漂。
+ */
+export function defaultTouchButtonIds(): readonly string[] {
+  return touchButtonIdsFromBindings(DEFAULT_BINDINGS);
+}
+
+/**
+ * **放上 / 取下**一个按钮（纯函数，返回新数组）。
+ *
+ * 顺序 = 双弧上的位置：新加的排在**最后**（外弧方向），
+ * 取下则直接删掉、后面的整体前移（顺序天然补位）。
+ *
+ * ⚠️ 空 id 直接原样返回：它只可能来自坏数据，而"加一个空技能按钮"
+ * 会让 `normalize` 在别处悄悄丢掉它 —— 在这里挡住更早也更清楚。
+ */
+export function toggleTouchButtonId(
+  current: readonly string[],
+  skillId: string,
+): readonly string[] {
+  if (skillId === '') return current;
+  return current.includes(skillId)
+    ? current.filter((id) => id !== skillId)
+    : [...current, skillId];
 }

@@ -20,10 +20,12 @@
  * 还按着暂停，界面却继续跑了。
  */
 
+import type { SettingsTab } from '../ui/settings/logic';
+
 export interface SettingsToggleTargets {
   /** 面板本体。 */
   readonly settings: {
-    open(tab: 'general' | 'keys'): void;
+    open(tab: SettingsTab): void;
     close(): void;
   };
   /** 齿轮按钮（面板打开时要藏起来）。 */
@@ -37,7 +39,7 @@ export interface SettingsToggleTargets {
 
 export interface SettingsToggle {
   isOpen(): boolean;
-  open(tab: 'general' | 'keys'): void;
+  open(tab: SettingsTab): void;
   close(): void;
   toggle(): void;
 }
@@ -56,7 +58,7 @@ export function createSettingsToggle(t: SettingsToggleTargets): SettingsToggle {
    */
   let pausedBefore = false;
 
-  const openSettings = (tab: 'general' | 'keys'): void => {
+  const openSettings = (tab: SettingsTab): void => {
     if (open) return;
     open = true;
     pausedBefore = t.isPaused();

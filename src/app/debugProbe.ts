@@ -15,6 +15,8 @@
  */
 
 import type { BattleEngine } from '../core/combat/battleState';
+/** ⚠️ tab 用 `SettingsTab`（面板有三个 tab）—— 见 `debugApi.ts` 的同名说明。 */
+import type { SettingsTab } from '../ui/settings/logic';
 
 /** 探针输出。字段名即端到端脚本读的名字。 */
 export interface ProbeSnapshot {
@@ -125,7 +127,7 @@ export interface RaidBattleApi {
   readonly stage: unknown;
   readonly setUiScale: (value: number) => void;
   readonly settings: {
-    readonly open: (tab?: 'general' | 'keys') => void;
+    readonly open: (tab?: SettingsTab) => void;
     readonly close: () => void;
     /**
      * 用逻辑坐标点一下（验证命中测试与布局一致）。

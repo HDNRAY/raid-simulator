@@ -206,9 +206,9 @@ describe('两套角色技能：按角色装配（定稿见 docs/specs/2026-10-12
     }
     expect(GUARD_THRESHOLD_BUFF.flags?.damageThreshold).toBe(GUARD_THRESHOLD);
     /**
-     * ⚠️ 按住代价的**每秒**杠杆（2 → **3 炁/秒**，用户定稿）在
-     * `data/balance.ts`；内容这里存的是**每逻辑步**的 0.3。
-     * 断言写成"由杠杆推导"而不是硬编码 0.3 —— 改杠杆时这条跟着变，
+     * ⚠️ 按住代价的**每秒**杠杆（2 → 3 → **15 炁/秒**，第五次修订）在
+     * `data/balance.ts`；内容这里存的是**每逻辑步**的 `1.5`。
+     * 断言写成"由杠杆推导"而不是硬编码 `1.5` —— 改杠杆时这条跟着变，
      * 而不是留下两个各写各的数字（那正是这次 10 倍偏差的成因）。
      */
     expect(GUARD.holdDrain?.perLogicTick).toBe(

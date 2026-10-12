@@ -12,8 +12,7 @@
  * ⚠️ 为什么是**两个存储键**（按设备分开）
  * ==================================================================
  *
- * 运行期键位表**仍然是一张**（触屏按钮由它机械派生 —— AGENTS.md §3b
- * "触屏按钮的配置入口就是按键页"），但**存储分两份**：
+ * 运行期键位表**仍然是一张**，但**存储分两份**：
  *
  *   `raid.bindings.keyboard.v1`  桌面
  *   `raid.bindings.touch.v1`     触屏
@@ -24,6 +23,23 @@
  *
  * ⚠️ 代价要清楚：同一个浏览器里**两端不再自动同步**（在桌面改的键位不会
  * 出现在触屏模式里）。这是有意的 —— 它换来的是"可以分别验证"。
+ *
+ * ==================================================================
+ * ⚠️ 触屏按钮集合是**第三个键**，而且与"键位表"是两回事（2026-10-12）
+ * ==================================================================
+ *
+ * 用户原话："触屏和键盘**当然是 2 套**，连 localStorage 都是分 2 个 key
+ * 存的，只是**可选技能是一样的**。"
+ *
+ *   `raid.bindings.*.v1`      键盘绑定表（键 → 技能）
+ *   `raid.touchButtons.v1`    **触屏按钮集合**（技能 id 数组，顺序即槽位）
+ *
+ * ⚠️ 这两份**互不派生**：触屏按钮不再是"有键的技能"（那会让没绑键的
+ * 技能在触屏上永远上不了场，而触屏又进不去改键）。可选技能同一个池，
+ * 选中子集各存各的。
+ *
+ * ⚠️ 触屏按钮**不按设备分两份**：它本来就是"触屏那一套配置"，
+ * 在电脑上配好、手机上打开就该在（键位表分两份是另一条理由，见上）。
  *
  * ==================================================================
  * ⚠️ `localStorage` 的内容是**未经验证的输入**
@@ -59,6 +75,13 @@ const BINDING_KEYS: Readonly<Record<InputMode, string>> = {
   touch: 'raid.bindings.touch.v1',
 };
 const KEY_UI_SCALE = 'raid.uiScale.v1';
+/**
+ * **触屏按钮集合**（技能 id 数组，顺序即双弧上的槽位）。
+ *
+ * ⚠️ 与键位表分开、且**不按设备分**：它就是"触屏那一套"配置本身。
+ * 见文件头那段说明。
+ */
+const KEY_TOUCH_BUTTONS = 'raid.touchButtons.v1';
 /** 上次选的人物 / 对手（备战界面用）。 */
 const KEY_PLAYER = 'raid.pick.player.v1';
 const KEY_BOSS = 'raid.pick.boss.v1';
@@ -136,6 +159,103 @@ export function serializeBindings(bindings: readonly KeyBinding[]): string {
   return JSON.stringify(bindings.map((b) => ({ skillId: b.skillId, key: b.key })));
 }
 
+/**
+ * 校验触屏按钮集合。
+ *
+ * @param raw `localStorage` 里的原始字符串（可能是 `null` / 坏 JSON）
+ * @param validSkillIds **可选技能池** —— 与设置页列出的技能**同一个池**
+ *   （用户要求："只是可选技能是一样的"）。不在池里的 id 一律丢弃。
+ * @returns 校验后的技能 id（顺序即槽位）；**`undefined` = 没有可用的存档**，
+ *   调用方据此走一次**迁移**（老玩家从旧的"有键的技能"初始化）。
+ *
+ * ⚠️ `undefined` 与 `[]` 是**两件事**，不能合并：
+ *   `undefined` = 没存过 / 读不出来 → 该迁移
+ *   `[]`        = 玩家**明确**把所有按钮都取下了 → 迁移会把它们全加回来 ✗
+ *
+ * ⚠️ 坏数据分两级（与 `parseBindings` 同一条纪律）：
+ *   - **单条**坏（不是字符串 / 空串 / 不在池里 / 重复）→ 丢掉那一条
+ *   - **整份**读不出来（坏 JSON / 不是数组）→ 当作"没存过"，交给迁移
+ *     （比"清空玩家的按钮"温和，而且迁移结果正是那个坏存档想表达的东西）
+ */
+export function parseTouchButtons(
+  raw: string | null,
+  validSkillIds: ReadonlySet<string>,
+): readonly string[] | undefined {
+  if (raw === null || raw === '') return undefined;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) return undefined;
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of parsed) {
+    if (typeof item !== 'string') continue;
+    if (item === '') continue;
+    if (!validSkillIds.has(item)) continue;
+    /** 同一个技能不能占两个按钮位（手改存储很容易造出来）。 */
+    if (seen.has(item)) continue;
+    seen.add(item);
+    out.push(item);
+  }
+  return out;
+}
+
+/** 序列化触屏按钮集合（就是一个 id 数组 —— 顺序是内容的一部分）。 */
+export function serializeTouchButtons(skillIds: readonly string[]): string {
+  return JSON.stringify(skillIds);
+}
+
+/**
+ * 触屏按钮集合的**加载结果**：最终集合 + 这次是不是走了迁移。
+ *
+ * `migrated` 让调用方知道"要不要写回存储"（迁移只做一次，见下）。
+ */
+export interface TouchButtonsLoad {
+  readonly skillIds: readonly string[];
+  /** `true` = 存储里没有可用存档，这次是从 `legacySkillIds` 迁移出来的。 */
+  readonly migrated: boolean;
+}
+
+/**
+ * **加载触屏按钮集合**：校验 + **老存档迁移一次**。
+ *
+ * ==================================================================
+ * 为什么要迁移（2026-10-12）
+ * ==================================================================
+ *
+ * 需求："老玩家（如果之前靠绑键盘键获得过触屏按钮）**第一次加载时从旧的
+ * 派生结果初始化一次**，否则他们的按钮会突然消失。"
+ *
+ * 迁移来源由调用方算好传进来（`legacySkillIds`，= "老存档里那些有键的
+ * 技能"）—— 这样本模块**不认识**那个派生函数，也就不会再有人拿它当
+ * 运行期的真相源（见 `input/touchLayout.ts` 文件头）。
+ *
+ * ⚠️ **只在没有可用存档时迁移**：
+ *   - 存过（哪怕存的是 `[]`）→ 用存档，**绝不回读派生**
+ *     （否则"玩家把所有按钮都取下了"会被迁移悄悄加回来）
+ *   - 没存过 / 读不出来 → 迁移，并由调用方**写回**，下次走常规路径
+ *
+ * ⚠️ 迁移结果也要按池子过滤：老的绑定表可能含池外 id（Boss 技 / 派生技），
+ * 而设置页根本给不出它们。
+ */
+export function loadTouchButtons(
+  raw: string | null,
+  validSkillIds: ReadonlySet<string>,
+  legacySkillIds: readonly string[],
+): TouchButtonsLoad {
+  const saved = parseTouchButtons(raw, validSkillIds);
+  if (saved !== undefined) return { skillIds: saved, migrated: false };
+  return {
+    skillIds: legacySkillIds.filter((id) => validSkillIds.has(id)),
+    migrated: true,
+  };
+}
+
 /** 读取 UI 缩放；不可用或越界则返回 `undefined`（调用方保留当前值）。 */
 export function parseUiScale(raw: string | null, min: number, max: number): number | undefined {
   if (raw === null || raw === '') return undefined;
@@ -193,8 +313,28 @@ export class SettingsStore {
       this.storage?.setItem(BINDING_KEYS.keyboard, '');
       this.storage?.setItem(BINDING_KEYS.touch, '');
       this.storage?.setItem(KEY_UI_SCALE, '');
+      this.storage?.setItem(KEY_TOUCH_BUTTONS, '');
     } catch {
       /* 同上 */
+    }
+  }
+
+  /**
+   * 触屏按钮集合的原始字符串。
+   *
+   * ⚠️ 这里**不做解析** —— 校验走 `parseTouchButtons`（与
+   * `uiScaleRaw` 交给 `parseUiScale` 同一条纪律：存取器只管存取的失败）。
+   */
+  get touchButtonsRaw(): string | null {
+    return this.rawOf(KEY_TOUCH_BUTTONS);
+  }
+
+  /** 记住触屏按钮集合（顺序即槽位）。 */
+  saveTouchButtons(skillIds: readonly string[]): void {
+    try {
+      this.storage?.setItem(KEY_TOUCH_BUTTONS, serializeTouchButtons(skillIds));
+    } catch {
+      /* 配额满 / 隐私模式：存不上就算了，不影响这一局 */
     }
   }
 

@@ -157,10 +157,12 @@ function panelBindings() {
     close: vi.fn<() => void>(),
     switchTab: vi.fn<(tab: SettingsTab) => void>(),
     resetKeys: vi.fn<() => void>(),
+    resetTouch: vi.fn<() => void>(),
     notice: vi.fn<(text: string) => void>(),
     swapSlots: vi.fn<(from: number, to: number) => void>(),
     focusSkill: vi.fn<(skillId: string) => void>(),
     startCapture: vi.fn<(skillId: string) => void>(),
+    toggleTouch: vi.fn<(skillId: string) => void>(),
     uiScale: vi.fn<(value: number) => void>(),
     redraw: vi.fn<() => void>(),
   } satisfies PanelActionBindings;
@@ -245,8 +247,10 @@ function keyBindings(over: Partial<KeyActionBindings> = {}) {
     close: vi.fn<() => void>(),
     switchTab: vi.fn<(tab: SettingsTab) => void>(),
     resetKeys: vi.fn<() => void>(),
+    resetTouch: vi.fn<() => void>(),
     notice: vi.fn<(text: string) => void>(),
     rebind: vi.fn<(skillId: string, key: string) => void>(),
+    toggleTouch: vi.fn<(skillId: string) => void>(),
     startCapture: vi.fn<(skillId: string, triggerKey?: string) => void>(),
     stopCapture: vi.fn<() => void>(),
     finishCapture: vi.fn<(key: string) => void>(),
@@ -266,6 +270,7 @@ describe('resolveKeyDispatch：按键决策', () => {
       capturingSkillId: undefined,
       focus: GRID,
       rowSkillIds: ROWS,
+      tab: 'keys',
     });
     expect(d.action).toEqual({ kind: 'ignore' });
     expect(d.trace).toBe('');
@@ -278,6 +283,7 @@ describe('resolveKeyDispatch：按键决策', () => {
       capturingSkillId: 'flash',
       focus: GRID,
       rowSkillIds: ROWS,
+      tab: 'keys',
     });
     expect(d.action).toEqual({ kind: 'capture', key: 'y' });
     expect(d.trace).toBe('handleKey(y) cap=flash -> capture');
@@ -290,6 +296,7 @@ describe('resolveKeyDispatch：按键决策', () => {
       capturingSkillId: 'flash',
       focus: GRID,
       rowSkillIds: ROWS,
+      tab: 'keys',
     });
     expect(d.action).toEqual({ kind: 'cancelCapture' });
   });
@@ -300,6 +307,7 @@ describe('resolveKeyDispatch：按键决策', () => {
       capturingSkillId: undefined,
       focus: GRID,
       rowSkillIds: ROWS,
+      tab: 'keys' as const,
     };
     expect(resolveKeyDispatch({ ...base, key: 'arrowleft' }).action).toEqual({
       kind: 'move',
@@ -318,6 +326,7 @@ describe('resolveKeyDispatch：按键决策', () => {
       capturingSkillId: undefined,
       focus: { zone: 'grid', index: 6 },
       rowSkillIds: ROWS,
+      tab: 'keys',
     });
     expect(d.action).toEqual({ kind: 'activate' });
     expect(d.activate).toEqual({ kind: 'startCapture', skillId: 'flash' });

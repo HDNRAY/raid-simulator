@@ -69,15 +69,19 @@ describe('触屏与键盘功能对等（AGENTS.md §3b）', () => {
   });
 });
 
-describe('改键不能把技能"弄丢"（触屏上等于少一个按钮）', () => {
+describe('改键不能把技能"弄丢"（技能栏上等于少一个格子）', () => {
   /**
    * 一个键只能绑一个技能 → 改键必然顶掉旧占用者（`applyRebind` 的策略）。
-   * 但**解绑在触屏上是致命的**：`touchButtonsFromBindings` 只取
-   * `key !== ''` 的技能，所以被顶掉的技能会**从按钮上消失**。
+   * 但**解绑的代价很大**：没键的技能不上技能栏（`slotsFromBindings`
+   * 只取 `key !== ''`），所以被顶掉的技能会**从画面消失**。
    *
    * 实测踩到的：「斩」改到「避」的键后，「避」失去绑定 —— 而「避」是
    * 倒地（`restrictToTags: ['dodge']`）时**唯一能按的技能**，丢掉它
    * 等于倒地没有出路。
+   *
+   * ⚠️ 这段理由原先写的是"触屏上等于少一个按钮"（旧的派生关系）。
+   * 2026-10-12 触屏按钮有了自己的集合（AGENTS.md §3b 的作废标注），
+   * 所以受益者变成技能栏 —— 结论不变。
    *
    * 所以调用方要走**两位互换**：X 拿走 k，原占用者拿到 X 的旧键。
    */
@@ -126,18 +130,20 @@ describe('改键不能把技能"弄丢"（触屏上等于少一个按钮）', ()
   });
 });
 
-describe('触屏换位：必须真的改变**按钮顺序**', () => {
+describe('「按键」页换位：必须真的改变**槽位顺序**', () => {
   /**
    * 需求（用户两次提出）："触屏依旧没有办法设置按键"、"选slot，再选技能
    * 就换slot"。
    *
    * ⚠️ 核心是换**位置**，不是换**键**。
    *
-   * 触屏按钮的顺序 = 绑定表里"有键的技能"的顺序
-   * （`touchButtonsFromBindings`：`filter(key !== '').map(index)`）。
-   * 而 `applyRebind` **只换键、不动数组顺序** —— 所以换完按钮顺序
+   * `applyRebind` **只换键、不动数组顺序** —— 所以换完之后槽位顺序
    * **一点变化都没有**，"选 slot 换 slot"是**假的**。
    * （我第一版就是这么接的，这条测试就是为它写的。）
+   *
+   * ⚠️ 顺序的消费者在 2026-10-12 换人了：原先写的是"触屏按钮顺序 =
+   * 绑定表里有键的技能的顺序"；用户推翻那条派生之后（AGENTS.md §3b 的
+   * 作废标注），跟着变的是**技能栏槽位**（`slotsFromBindings`）。
    */
   const base = [
     { key: 'q', skillId: 'attack' },
@@ -146,13 +152,13 @@ describe('触屏换位：必须真的改变**按钮顺序**', () => {
     { key: 'r', skillId: 'break' },
   ];
 
-  /** 按钮顺序 = 有键的技能，按绑定表顺序。 */
-  const buttonOrder = (b: readonly { readonly key: string; readonly skillId: string }[]) =>
+  /** 槽位顺序 = 有键的技能，按绑定表顺序（`slotsFromBindings` 同一条）。 */
+  const slotOrder = (b: readonly { readonly key: string; readonly skillId: string }[]) =>
     b.filter((x) => x.key !== '').map((x) => x.skillId);
 
-  it('换位后按钮顺序**确实变了**', () => {
-    const before = buttonOrder(base);
-    const after = buttonOrder(swapSlotSkills(base, 0, 1));
+  it('换位后槽位顺序**确实变了**', () => {
+    const before = slotOrder(base);
+    const after = slotOrder(swapSlotSkills(base, 0, 1));
     expect(before).toEqual(['attack', 'blast', 'break']);
     expect(after).toEqual(['blast', 'attack', 'break']);
     /** 断言"变了"而不是只看数组内容 —— 这正是那个假实现的失败点 */
@@ -170,7 +176,7 @@ describe('触屏换位：必须真的改变**按钮顺序**', () => {
     const after = swapSlotSkills(base, 0, 2);
     expect(after[2]).toEqual({ key: '', skillId: 'attack' });
     /** 「闪」是空键 → 不上场，但它仍在表里、仍在原位 */
-    expect(buttonOrder(after)).toEqual(['flash', 'blast', 'break']);
+    expect(slotOrder(after)).toEqual(['flash', 'blast', 'break']);
   });
 
   it('越界 / 同位置不改动（不产生脏数据）', () => {
@@ -179,16 +185,16 @@ describe('触屏换位：必须真的改变**按钮顺序**', () => {
     expect(swapSlotSkills(base, -1, 1)).toBe(base);
   });
 
-  it('【对照】`applyRebind` **不能**用来做换位（它还丢一个按钮）', () => {
+  it('【对照】`applyRebind` **不能**用来做换位（它还丢一个槽位）', () => {
     /**
      * ⚠️ 这条是**反向证据**。实测比预期更糟：把 `attack` 改到 `w` 之后，
-     * 位置 0 的 `q` **没人占**了 → 触屏按钮从 **3 个变成 2 个**
+     * 位置 0 的 `q` **没人占**了 → 技能栏从 **3 格变成 2 格**
      * （`blast` 因为 `q` 空掉而不上场）。所以拿 `applyRebind` 做换位
-     * 不只是"顺序不变"，还会**少一个按钮**。
+     * 不只是"顺序不变"，还会**少一个槽位**。
      */
     const rebound = applyRebind(base, 'attack', 'w').bindings;
-    expect(buttonOrder(rebound)).not.toEqual(buttonOrder(base));
-    expect(buttonOrder(rebound)).toHaveLength(2);
-    expect(buttonOrder(base)).toHaveLength(3);
+    expect(slotOrder(rebound)).not.toEqual(slotOrder(base));
+    expect(slotOrder(rebound)).toHaveLength(2);
+    expect(slotOrder(base)).toHaveLength(3);
   });
 });

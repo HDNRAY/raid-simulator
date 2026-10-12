@@ -19,6 +19,7 @@
 
 import type { Container } from 'pixi.js';
 import { LogPanel } from '../../ui/LogPanel';
+import type { LogReviewPanel } from '../../ui/LogReviewPanel';
 import type { PixiCtor } from '../../ui/primitives';
 import { UiLayout } from '../../ui/uiLayout';
 import type { FrameRegistry, TranslateFn } from '../sceneTypes';
@@ -41,6 +42,18 @@ export class LogArea {
 
   /** 战斗日志（屏幕右侧） */
   private readonly logPanel: LogPanel;
+
+  /**
+   * **复盘那一层**（一局结束后的全屏战报）—— 转发给上层。
+   *
+   * ⚠️ 上层（场景 → `game.ts` → `canvasInput` / `loopWiring`）要拿它判
+   * **输入归属**（复盘开着没有）。这条转发链是刻意的：复盘在节点树里
+   * 埋在 `LogPanel` 里（见上面那条"不能套一层容器"的约束），
+   * 但输入归属的判据需要**问到它本人**，不能另存一份布尔。
+   */
+  get review(): LogReviewPanel {
+    return this.logPanel.review;
+  }
 
   constructor(pixi: PixiCtor, translate: TranslateFn) {
     /* 战斗日志（右侧）—— 画在 HUD 下层，避免压住技能栏与资源面板 */

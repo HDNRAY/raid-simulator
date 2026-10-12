@@ -26,9 +26,12 @@ import { detectBrowserPlatform } from '../render/platform';
 import {
   SettingsStore,
   browserStorage,
+  loadTouchButtons,
   parseBindings,
   type InputMode,
 } from './settingsStore';
+import { touchButtonIdsFromBindings } from '../input/touchLayout';
+import { bindableSkillIdsOf } from './keyRows';
 import type { ContentRegistry } from '../core/content/registry';
 import type { KeyBinding } from '../input/keyboard';
 import type { ContentBundle } from '../core/content/validate';
@@ -58,6 +61,14 @@ export interface GameDeps {
   readonly settingsStore: SettingsStore;
   /** 初始键位表（已按注册表里的合法技能 id 过滤）。 */
   readonly bindings: readonly KeyBinding[];
+  /**
+   * 初始**触屏按钮集合**（技能 id，顺序即槽位）。
+   *
+   * ⚠️ 它与 `bindings` **互不派生**（用户："触屏和键盘当然是 2 套，
+   * 连 localStorage 都是分 2 个 key 存的，只是可选技能是一样的"）。
+   * 老存档没有这个键时，这里做**一次迁移**（见 `createGameDeps`）。
+   */
+  readonly touchButtons: readonly string[];
   /** 本机的输入方式（触屏 / 键鼠）—— 设置存储用它决定默认键位表。 */
   readonly inputMode: InputMode;
 }
@@ -138,5 +149,41 @@ export function createGameDeps(): GameDeps {
   const validSkillIds = new Set(registry.skills.keys());
   const bindings: readonly KeyBinding[] = parseBindings(settingsStore.bindings, validSkillIds);
 
-  return { registry, registryFor, settingsStore, bindings, inputMode };
+  /**
+   * ================================================================
+   * 触屏按钮集合：校验 + **老存档迁移一次**
+   * ================================================================
+   *
+   * 需求："老玩家（如果之前靠绑键盘键获得过触屏按钮）**第一次加载时从旧的
+   * 派生结果初始化一次**，否则他们的按钮会突然消失。"
+   *
+   * ⚠️ 迁移**只在这里发生一次**，而且立刻写回存储：下一次加载读到的是
+   * 普通存档，走的是 `parseTouchButtons` 的常规路径。**运行期任何地方
+   * 都不许再读派生结果**（那会把"没绑键就没按钮"的死结接回来）。
+   * 校验与迁移的判定在 `loadTouchButtons`（纯函数，有单测）。
+   *
+   * ⚠️ 池子是**设置页列出的那些技能**（`bindableSkillIdsOf`，与
+   * `buildKeyRows` 同一份判据），与键盘那套**同一张表** —— 用户要求
+   * "可选技能是一样的"。用注册表的并集当池会把 Boss 技 / 派生技也放进来
+   * （设置页根本给不出它们）。
+   *
+   * ⚠️ 存储可用而 `setItem` 失败（配额满）无所谓：这次会话里按钮仍然对，
+   * 只是下次加载会再迁移一次 —— 迁移是**幂等**的（同样的输入给同样的结果）。
+   */
+  const touchPool = bindableSkillIdsOf(registry);
+  const touchLoad = loadTouchButtons(
+    settingsStore.touchButtonsRaw,
+    touchPool,
+    touchButtonIdsFromBindings(bindings),
+  );
+  if (touchLoad.migrated) settingsStore.saveTouchButtons(touchLoad.skillIds);
+
+  return {
+    registry,
+    registryFor,
+    settingsStore,
+    bindings,
+    touchButtons: touchLoad.skillIds,
+    inputMode,
+  };
 }

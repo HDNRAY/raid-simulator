@@ -4,6 +4,15 @@
  * 刻意把调试探针声明成 `| undefined`，强制调用方判空 ——
  * 生产构建里这段可能不存在。
  */
+
+/**
+ * ⚠️ 调试入口的 tab 类型**复用** `SettingsTab`（唯一真相），不在这里
+ * 重抄一份字面量：面板现在有三个 tab（「通用 / 按键 / 触屏」），抄一份
+ * 会让"验证脚本打不开第三页"这类漂移没人发现。
+ * （本文件本来就是模块 —— 末尾有 `export {}` —— 所以 `import type` 安全。）
+ */
+import type { SettingsTab } from '../ui/settings/logic';
+
 declare global {
   interface Window {
     /** 战斗探针：验证"战斗真的在推进" */
@@ -43,7 +52,7 @@ declare global {
       stage: unknown;
       /** 设置界面（调试用：headless 下模拟点击不可靠） */
       settings: {
-        open(tab?: 'general' | 'keys'): void;
+        open(tab?: SettingsTab): void;
         close(): void;
         /** 用逻辑坐标点一下（验证命中测试与布局一致） */
         openIn(px: number, py: number): void;
@@ -155,6 +164,22 @@ declare global {
         bounds(): { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
         /** 箭头中心的逻辑坐标 —— 注入点击时用它，别手写数字。 */
         center(): { readonly x: number; readonly y: number };
+      };
+      /**
+       * **复盘（战报）那层** + 当前的**输入归属**（调试 / 验证用）。
+       *
+       * ⚠️ 存在的理由：这次的 bug 是"复盘开着时 `↑↓` 被设置按钮吃掉"——
+       * 只看截图分不清"键没生效"和"滚动到了尽头"。`layer()` 暴露
+       * `inputRouter.activeInputLayer` 的结果（纯函数，判据只有一处），
+       * 于是脚本能钉住"复盘开着 ⇒ 层是 `review` 而不是 `battle`"。
+       */
+      logReview: {
+        /** 现在哪一层在接收键盘 / 指针（`battle` / `review` / `settings` / …）。 */
+        layer(): string;
+        /** 复盘此刻是否开着（一局结束且没被 `Space` 藏起来）。 */
+        isOpen(): boolean;
+        /** 滚动位置比例（0 = 最旧那行，1 = 最新那行）。 */
+        pointerRatio(): number;
       };
     };
     /** 渲染侧探针：报告实际写到 Pixi 上的位置 */

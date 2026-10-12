@@ -24,7 +24,9 @@ import { keyLabel as formatKey } from './logic';
 import type { KeyRow } from './rows';
 import type { TranslateFn } from '../../i18n/translator';
 
-/** 每一格的状态（焦点 / 是否正在改键）。 */
+/**
+ * 每一格的状态（焦点 / 是否正在改键 / 在触屏页时有没有按钮）。
+ */
 export interface KeyGridState {
   /** 焦点落在第几个格子；`-1` = 焦点不在格子上 */
   readonly focusIndex: number;
@@ -37,10 +39,20 @@ export interface KeyGridState {
    * 功能按钮。"
    *
    * ⚠️ 触屏上「按键」页会因此变成"只有技能名的列表" —— 那是**预期**
-   * 的：触屏玩家没有键可改，页面还在是因为"技能全集"由它承载。
-   * 真正该做的是给触屏一个不同的设置页，那是后续任务。
+   * 的：触屏玩家没有键可改。真正给触屏用的那一页是「触屏」页
+   * （`touchSkillIds`），那里点一下就是放上 / 取下。
    */
   readonly showKeyHints?: boolean | undefined;
+  /**
+   * 「触屏」页：**当前的按钮集合**（顺序即双弧槽位）。
+   *
+   * ⚠️ `undefined` = 不是触屏页（按键页要保持原来的"技能字 + 按键"画法）。
+   * 传了数组就是触屏页：右上角画"有没有按钮"的勾，左上角画槽位序号。
+   *
+   * ⚠️ 传**整个集合**而不是"这一格在不在"：序号要看它在集合里的位置，
+   * 逐格算一份 `indexOf` 会在格子与集合之间造出第二个真相。
+   */
+  readonly touchSkillIds?: readonly string[] | undefined;
 }
 
 export class KeyGrid {
@@ -53,11 +65,9 @@ export class KeyGrid {
     /**
      * **触屏的按钮位序号**（1、2、3…）。
      *
-     * 需求："触屏依旧没有办法设置按键" —— 触屏按钮是由键位表**机械派生**
-     * 出来的（`touchButtonsFromBindings` = "有键的技能"，顺序即按钮顺序），
-     * 所以「按键」页**就是**按钮配置页；缺的只是**看出来**这是几号按钮位。
-     * 这个标签补上那点信息，配合已有的"点两格互换"就够了。
-     * 桌面不显示（那里有键名列）。
+     * 需求："触屏依旧没有办法设置按键" —— 现在「触屏」页就是按钮配置页，
+     * 序号告诉玩家"这个技能在双弧上是第几个"（顺序即位置）。
+     * 桌面（按键页）不显示序号（那里有键名列）。
      */
     slot: Label;
     rect: { x: number; y: number; w: number; h: number };
@@ -205,31 +215,62 @@ export class KeyGrid {
 
       const capturing = state.capturingSkillId === row.skillId;
       const focused = state.focusIndex === i;
-      cell.name.set(this.translate(row.nameKey));
-      // 按键名统一大写显示，与技能栏上的提示一致
-      cell.key.set(
-        state.showKeyHints === false
-          ? ''
-          : capturing
-            ? '…'
-            : formatKey(row.key, this.translate('settings.keyUnbound')),
-      );
-      cell.key.setColor(capturing || focused ? PALETTE.douqi.bright : PALETTE.text);
       /**
-       * 触屏：显示**按钮位序号**（1 起）。`i` 就是按钮顺序 ——
-       * `touchButtonsFromBindings` 是按绑定表顺序取"有键的技能"的。
-       * ⚠️ 只在触屏显示：桌面有键名列，再塞个序号会挤。
+       * 触屏页：`order` = 这个技能在按钮集合里的位置（`-1` = 没有按钮）。
+       * ⚠️ 用**集合里**的下标而不是行下标：双弧的顺序跟的是按钮集合的
+       * 顺序，两者在"有技能被取下"时就会错开。
        */
-      cell.slot.set(state.showKeyHints === false ? String(i + 1) : '');
+      const touchIds = state.touchSkillIds;
+      const order = touchIds === undefined ? -1 : touchIds.indexOf(row.skillId);
+      const hasButton = order >= 0;
+
+      cell.name.set(this.translate(row.nameKey));
+      if (touchIds !== undefined) {
+        /**
+         * ============================================================
+         * 「触屏」页的格子：右上角勾 = **有没有按钮**，左上角数字 = 槽位
+         * ============================================================
+         *
+         * 需求："要在同一处能看到『这个技能有没有触屏按钮』"。
+         * 所以"有 / 没有"必须是**看得见**的（而不是只能靠点一下试试）：
+         * 有 → 亮边框 + 勾 + 序号；没有 → 普通格子。
+         */
+        cell.key.set(hasButton ? '✓' : '');
+        cell.key.setColor(PALETTE.douqi.bright);
+        cell.slot.set(hasButton ? String(order + 1) : '');
+      } else {
+        // 按键名统一大写显示，与技能栏上的提示一致
+        cell.key.set(
+          state.showKeyHints === false
+            ? ''
+            : capturing
+              ? '…'
+              : formatKey(row.key, this.translate('settings.keyUnbound')),
+        );
+        cell.key.setColor(capturing || focused ? PALETTE.douqi.bright : PALETTE.text);
+        /**
+         * 触屏（按键页）：显示**行序号**，让玩家知道这页列出的是技能全集。
+         * ⚠️ 只在触屏显示：桌面有键名列，再塞个序号会挤。
+         */
+        cell.slot.set(state.showKeyHints === false ? String(i + 1) : '');
+      }
 
       if (focused) onFocused(row);
 
-      // 交替底色 + 捕获 / 键盘焦点的高亮
+      // 交替底色 + 捕获 / 键盘焦点 / "有触屏按钮"的高亮
       const box = (): typeof this.gfx =>
         this.gfx.rect(cell.rect.x, cell.rect.y, cell.rect.w, cell.rect.h);
       box().fill({
-        color: capturing || focused ? PALETTE.douqi.base : 0xffffff,
-        alpha: capturing ? 0.18 : focused ? 0.12 : i % 2 === 0 ? 0.03 : 0.06,
+        color: capturing || focused || hasButton ? PALETTE.douqi.base : 0xffffff,
+        alpha: capturing
+          ? 0.18
+          : focused
+            ? 0.12
+            : hasButton
+              ? 0.1
+              : i % 2 === 0
+                ? 0.03
+                : 0.06,
       });
       /**
        * **每个格子都有边框**（需求："没有边框啊，选中态这些"）。
@@ -242,11 +283,13 @@ export class KeyGrid {
        *   普通  淡描边
        *   焦点  亮描边 + 更粗
        *   捕获  亮描边 + 亮底
+       * ⚠️ 「触屏」页上"已经放上"的格子也走亮描边那一级 —— 它就是那一页的
+       * "选中态"（需求："同一处能看到有没有"）。
        */
       box().stroke({
-        color: capturing || focused ? PALETTE.douqi.bright : 0x3c3e50,
-        width: capturing || focused ? 2 : 1,
-        alpha: capturing || focused ? 1 : 0.9,
+        color: capturing || focused || hasButton ? PALETTE.douqi.bright : 0x3c3e50,
+        width: capturing || focused || hasButton ? 2 : 1,
+        alpha: capturing || focused || hasButton ? 1 : 0.9,
       });
     }
   }

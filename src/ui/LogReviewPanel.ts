@@ -38,14 +38,36 @@
  * 不是三套滚动逻辑 —— 否则边界（滚到尽头、一屏不满、空日志）会在
  * 其中一条路径上漏掉。
  *
- * ⚠️ 输入监听直接挂 `window`（`render/sizes.ts` 的 resize 也是这么做的）：
+ * ==================================================================
+ * ⚠️ 指针不再是"挂在 window 上的自己的监听"
+ * ==================================================================
+ *
+ * 原先本类自己 `window.addEventListener('pointerdown'…)` 并吃掉**整个
+ * 窗口**的手势。那是"输入归属没收口"的一个实例，而且实测有两个后果：
+ *
+ *   1. **触屏永远滚不动复盘** —— 那一下 pointerdown 会**先**被
+ *      `canvasInput` 的"结算中点屏幕 = 离开战斗"接走（它当时只看
+ *      `phase === 'battle'`），玩家一碰就重开，拖拽根本没开始
+ *   2. 它与结算面板的"点屏幕再来一次"是**两条独立判据**，谁先谁后靠
+ *      注册顺序，改一处就会漂
+ *
+ * 现在指针路由收口在 `app/inputRouter.ts`：
+ * `canvasInput` 算出逻辑坐标 → 问 `reviewConsumesPointer`（层是 `review`
+ * **且**点在面板矩形内）→ 命中才转发到这里的 `pointerDown/Move/Up`。
+ * 面板因此只知道"从这一行的位置开始拖、拖到了这一行"，**不再碰 DOM 坐标**。
+ *
+ * ⚠️ 键盘监听仍然直接挂 `window`（`render/sizes.ts` 的 resize 也是这么做的）：
  * 它不是 DOM UI，只是"画布之外还有谁在按键"的入口。所有 UI 仍然是 canvas。
+ * 但它同样只认**输入层是 `review`** 时的按键 —— 由 `loopWiring` 转发，
+ * 见那里的 `inputLayer()`。
  */
 
 import type { Container, Graphics } from 'pixi.js';
 import type { LogEntry } from '../app/logFormat';
+import type { LogicalRect } from '../app/inputRouter';
+import { reviewRowsAt } from '../app/inputRouter';
 import type { BattleSnapshotView } from '../render/viewModel';
-import { FONT, LOGICAL } from './layout';
+import { FONT } from './layout';
 import { Label, Panel, type PixiCtor } from './primitives';
 import { PALETTE } from '../render/theme';
 import {
@@ -56,6 +78,7 @@ import {
   REVIEW_PAD_X,
   REVIEW_RECT,
   REVIEW_ROWS,
+  REVIEW_ROWS_RECT,
   REVIEW_ROWS_Y,
   REVIEW_ROW_H,
   REVIEW_TEXT_X,
@@ -140,8 +163,14 @@ export class LogReviewPanel {
   /** 上一次画的内容指纹：**只在真的变了的时候重画**（每帧都会调进来）。 */
   private lastSignature = '';
 
-  /** 拖拽中：指针 id、上一次的 clientY、画布的 CSS 高（用来把 px 折成行）。 */
-  private drag: { readonly id: number; y: number; cssH: number | undefined } | null = null;
+  /**
+   * 拖拽中：指针 id 与上一次的**逻辑 Y 坐标**。
+   *
+   * ⚠️ 存逻辑坐标而不是 `clientY`：后者是 CSS 像素，会随 letterbox 缩放
+   * 漂移。换算（CSS → 逻辑）只在 `canvasInput` 做一次
+   * （见文件头"指针不再是自己的监听"）。
+   */
+  private drag: { readonly id: number; logicalY: number } | null = null;
   /** 拖拽累计的"不足一行"的零头 —— 慢速拖动不会因为取整而完全不动。 */
   private dragCarry = 0;
 
@@ -265,17 +294,17 @@ export class LogReviewPanel {
     /**
      * 输入监听**挂一次、活到页面结束**。
      *
+     * ⚠️ 只留**滚轮**：它没有"这一下归谁"的问题（页面本身在复盘时不该滚，
+     * 见 `onWheel`），而且浏览器不会把滚轮派给别的界面。
+     * 键盘与指针都由 `app/inputRouter.ts` 判完归属再转发进来
+     * （`handleKey` / `pointerDown`），见文件头"指针不再是自己的监听"。
+     *
      * ⚠️ 不随"进/出复盘"增删：`BattleScene` 一局只建一次、`LogPanel`
      * 也只建一次（重开一局是复用同一个场景），所以没有监听泄漏；
      * 而增删监听会引入"到底注册了没有"的状态 —— 那是重复计入/漏计的经典来源。
-     * 每个 handler 的第一件事都是 `if (!visible) return`。
+     * handler 的第一件事都是 `if (!this.isOpen()) return`。
      */
     window.addEventListener('wheel', this.onWheel, { passive: false });
-    window.addEventListener('keydown', this.onKeyDown);
-    window.addEventListener('pointerdown', this.onPointerDown);
-    window.addEventListener('pointermove', this.onPointerMove);
-    window.addEventListener('pointerup', this.onPointerUp);
-    window.addEventListener('pointercancel', this.onPointerUp);
   }
 
   /**
@@ -439,13 +468,54 @@ export class LogReviewPanel {
     };
     this.range.set(t('logReview.range', { from: win.from, to: win.to }));
   }
-
   /* ---------------------------------------------------------------- *
-   * 输入
+   * 输入（由 `app/inputRouter.ts` 判完归属再转发进来）
    * ---------------------------------------------------------------- */
 
-  /** 滚 `delta` 行（正数 = 往新的翻）。三条输入路径**都走这里**。 */
-  private scrollRows(delta: number): void {
+  /**
+   * 复盘此刻**是否在接收输入**（= 画着且玩家没按 `Space` 藏起来）。
+   *
+   * ⚠️ 这就是 `inputRouter.activeInputLayer` 判 `review` 层用的那个"开着"。
+   * 两个条件缺一不可：`finished`（一局结束）与 `shown`（玩家没有切回结算）。
+   */
+  isOpen(): boolean {
+    return this.finished && this.shown;
+  }
+
+  /**
+   * 复盘**此刻滚不滚得动** —— 条目多于一屏才算（与滚条的显示条件同源，
+   * 见 `redraw` 里 `total > REVIEW_ROWS` 那一段）。
+   *
+   * ⚠️ 调用方（`canvasInput`）用它决定"这一下点按归复盘还是归
+   * 点屏幕离开战斗"：滚不动时复盘吃下点击只会**吞掉**玩家的退出操作。
+   */
+  canScroll(): boolean {
+    return this.entries.length > REVIEW_ROWS;
+  }
+
+  /**
+   * 复盘**会吃掉指针**的矩形 —— 是**列表区**，不是整块面板。
+   *
+   * ⚠️ 表头 / 页脚**故意留在外面**：面板几乎占满屏幕（928×516 / 960×540），
+   * 若按整块算，"面板外"只剩十几像素的边 —— 手指点不到，触屏玩家就
+   * 出不去复盘（详见 `logReview.REVIEW_ROWS_RECT` 的说明）。
+   */
+  bounds(): LogicalRect {
+    return REVIEW_ROWS_RECT;
+  }
+
+  /**
+   * 滚动位置换算成**指针可用的比例**（0 = 第一行，1 = 最后一行）。
+   *
+   * 给验证脚本用：它把指针点在哪一行**从面板自己的几何反推**，
+   * 而不是抄一份坐标 —— 布局一调，抄的那份就会静默指到别处。
+   */
+  pointerRatio(): number {
+    return scrollFraction(this.offset, this.entries.length, REVIEW_ROWS);
+  }
+
+  /** 滚 `delta` 行（正数 = 往新的翻）。**四条**输入路径都走这里。 */
+  scrollRows(delta: number): void {
     const next = scrollOffset(this.offset, delta, this.entries.length, REVIEW_ROWS);
     if (next === this.offset) return;
     this.offset = next;
@@ -453,7 +523,7 @@ export class LogReviewPanel {
   }
 
   private readonly onWheel = (event: WheelEvent): void => {
-    if (!this.root.visible) return;
+    if (!this.isOpen()) return;
     // 复盘时页面本身不该跟着滚（画布是整屏的，滚动没有意义还会误触）
     event.preventDefault();
     // `deltaMode === 1` 时 `deltaY` 的单位是**行**，否则是像素
@@ -462,28 +532,25 @@ export class LogReviewPanel {
     if (step !== 0) this.scrollRows(step);
   };
 
-  private readonly onKeyDown = (event: KeyboardEvent): void => {
-    if (!this.finished) return;
-    /**
-     * ⚠️ **别人已经处理过的按键不要抢**。
-     *
-     * 设置面板的键盘监听挂在**捕获阶段**（`app/settingsKeys.ts`），
-     * 而且它也用 `Space` / `Enter` 当"确定"。战斗结束后开着设置面板时，
-     * 一次 `Space` 会同时是"确定这一项"和"切回结算" —— 后者是**看不见的
-     * 副作用**（设置面板盖在上面），关掉设置后玩家会莫名发现视图变了。
-     *
-     * 捕获阶段先跑，被消费掉的键会 `preventDefault()`，这里据此让路。
-     */
-    if (event.defaultPrevented) return;
+  /**
+   * 键盘：**只有输入层是 `review` 时才被调进来**（`loopWiring` 负责判归属）。
+   *
+   * ⚠️ 这里**不再自查 `event.defaultPrevented`**：归属已经由一个地方
+   * （`activeInputLayer`）决定了，再叠一层"谁先注册"的隐式判据就是这次
+   * bug 的成因（设置按钮先注册、先吃掉 `↑`）。让路应当发生在**路由**那一步，
+   * 而不是靠两个监听器的注册顺序。
+   *
+   * @returns 是否消费了这次按键（消费了调用方要 `preventDefault`）
+   */
+  handleKey(key: string): boolean {
+    if (!this.isOpen()) return false;
     /** `Space` 在"战报 / 结算"之间来回切（见文件头与 `LogPanel.syncLayer`）。 */
-    if (event.key === ' ') {
-      this.shown = !this.shown;
+    if (key === ' ') {
+      this.shown = false;
       this.force();
-      event.preventDefault();
-      return;
+      return true;
     }
-    if (!this.shown) return;
-    switch (event.key) {
+    switch (key) {
       case 'ArrowDown':
         this.scrollRows(1);
         break;
@@ -503,54 +570,53 @@ export class LogReviewPanel {
         this.scrollRows(this.entries.length);
         break;
       default:
-        return;
+        return false;
     }
-    event.preventDefault();
-  };
+    return true;
+  }
 
-  /** 按下：记住起点（以及画布的 CSS 高，用来把拖拽的像素折成行）。 */
-  private readonly onPointerDown = (event: PointerEvent): void => {
-    if (!this.root.visible) return;
-    this.drag = { id: event.pointerId, y: event.clientY, cssH: canvasCssHeight(event.target) };
+  /**
+   * 按下：记住起点（**行**）。
+   *
+   * ⚠️ 收的是**逻辑 Y 坐标**（画布 960×540），不是 `clientY`：后者是 CSS
+   * 像素，会随 letterbox 缩放漂移（见文件头"指针不再是自己的监听"）。
+   * 换算与命中判定都收口在 `canvasInput` + `inputRouter`。
+   *
+   * @param pointerId 指针 id（一个 `pointerId` 只占一个手势）
+   * @param logicalY 这一下落在画布逻辑 Y 的哪里
+   */
+  pointerDown(pointerId: number, logicalY: number): void {
+    if (!this.isOpen()) return;
+    this.drag = { id: pointerId, logicalY };
     this.dragCarry = 0;
-  };
+  }
 
   /**
    * 拖动：**向上拖 = 看更新的**（与"内容跟着手指走"的直觉一致）。
    *
-   * ⚠️ 像素要折成**逻辑行**才能和窗口计算对上：画布是自适应缩放的
-   * （960×540 逻辑 → 任意 CSS 尺寸），所以 `clientY` 的 1px ≠ 逻辑 1px。
-   * 换算基准只能从画布自己的 `getBoundingClientRect()` 拿。
+   * ⚠️ 零头要**留着**（`dragCarry`）：慢速拖动时每帧只挪不到一行，
+   * 取整会把它抹成 0，表现成"手指慢慢拖、内容纹丝不动"。
    */
-  private readonly onPointerMove = (event: PointerEvent): void => {
+  pointerMove(pointerId: number, logicalY: number): void {
     const drag = this.drag;
-    if (drag === null || event.pointerId !== drag.id) return;
-    const dy = drag.y - event.clientY;
-    drag.y = event.clientY;
-    const cssH = drag.cssH ?? canvasCssHeight(event.target);
-    if (cssH === undefined) return;
-    this.dragCarry += (dy * (LOGICAL.height / cssH)) / REVIEW_ROW_H;
+    if (drag === null || pointerId !== drag.id) return;
+    /**
+     * 向上拖（`logicalY` 变小）→ `dy` 为正 → 往上翻、看更新的。
+     * 零头留在 `dragCarry` 里，跨帧累计。
+     */
+    const dy = reviewRowsAt(drag.logicalY, 0, REVIEW_ROW_H)
+      - reviewRowsAt(logicalY, 0, REVIEW_ROW_H);
+    this.drag = { id: pointerId, logicalY };
+    /** `dy` 已是**行数**（含小数）；零头跨帧累计。 */
+    this.dragCarry += dy;
     const whole = Math.trunc(this.dragCarry);
     if (whole === 0) return;
     this.dragCarry -= whole;
     this.scrollRows(whole);
-  };
+  }
 
-  private readonly onPointerUp = (event: PointerEvent): void => {
-    if (this.drag !== null && event.pointerId === this.drag.id) this.drag = null;
-  };
-}
-
-/**
- * 画布的 CSS 高（`undefined` = 这一下不在画布上）。
- *
- * ⚠️ 不写死 `960×540` 也不读窗口尺寸：`clientY` 是 CSS 像素，而画布
- * 可能被 letterbox 缩放（见 `render/sizes.ts`）。唯一可靠的基准是
- * 事件目标自己的矩形 —— 指针事件的 `target` 就是画布元素。
- */
-function canvasCssHeight(target: EventTarget | null): number | undefined {
-  if (typeof HTMLCanvasElement === 'undefined') return undefined;
-  if (!(target instanceof HTMLCanvasElement)) return undefined;
-  const rect = target.getBoundingClientRect();
-  return rect.height > 0 ? rect.height : undefined;
+  /** 松开 / 取消：结束拖拽（`pointercancel` 与 `pointerup` 同义）。 */
+  pointerUp(pointerId: number): void {
+    if (this.drag !== null && pointerId === this.drag.id) this.drag = null;
+  }
 }

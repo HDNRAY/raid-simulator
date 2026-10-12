@@ -15,7 +15,7 @@ import { MS_PER_TICK } from '../core/loopConstants';
 import { createKeyboardInput, repeatHeld, type InputSource, type KeyBinding } from '../input/keyboard';
 import { ViewAdapter, DEFAULT_SLOTS, slotsFromBindings, type SlotBinding } from './viewAdapter';
 import { LogFormatter, type LogEntry } from './logFormat';
-import type { BattleSnapshotView } from '../render/viewModel';
+import type { BattleSnapshotView, SkillSlotView } from '../render/viewModel';
 import type { Action } from '../core/types';
 
 /** 单帧最多补多少 tick（防止标签页休眠后一次性补几千帧）。 */
@@ -173,6 +173,20 @@ export class BattleLoop {
 
   get engineState(): BattleEngine {
     return this.engine;
+  }
+
+  /**
+   * **单独造一个技能槽位视图**（这个技能不必上技能栏）。
+   *
+   * 用途：触屏按钮可以放"没绑键、因此没上技能栏"的技能 —— 那正是
+   * "没绑键的技能在触屏上根本没有按钮"那个死结的解法。按钮上的字 / 代价 /
+   * 冷却都来自槽位视图，所以这里按 `skillId` 现造一个。
+   *
+   * ⚠️ 走 `ViewAdapter.slotViewOf`：与技能栏**同一段构造**，不另写一份
+   * 静态近似（那会漂成"按钮亮着、按下去没反应"）。见那边的说明。
+   */
+  slotViewOf(skillId: string, index: number): SkillSlotView | undefined {
+    return this.adapter.slotViewOf(this.engine, skillId, index);
   }
 
   get isPaused(): boolean {

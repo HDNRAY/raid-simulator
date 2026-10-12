@@ -11,9 +11,9 @@
 
 import type { BattleEngine } from '../core/combat/battleState';
 import type { SkillDef, EventDef } from '../core/types';
-import { holdDrainPerSecond } from '../core/combat/holds';
 import { PALETTE } from '../render/theme';
 import { deriveSlots, type SlotBinding } from './derivedSlots';
+import { buildSlotView, slotViewOfSkill } from './slotViews';
 import { emptyCombatant, emptyView } from '../render/emptyView';
 import type { FeedbackState } from '../render/feedback';
 import { HitFeedbackTracker } from './hitFeedback';
@@ -42,7 +42,6 @@ import type {
   FloatingTextView,
   ResultView,
   SkillSlotView,
-  SlotCost,
 } from '../render/viewModel';
 
 /**
@@ -377,7 +376,15 @@ export class ViewAdapter {
     const { slots: derivedSlots } = deriveSlots(resolvedSlots, playerRaw.buffs, this.skills);
     const skills = derivedSlots
       .map((slot) =>
-        this.buildSlot(engine, slot, state.tick, playerStats.haste ?? 0, comboWindowOpen, derivedFrom),
+        buildSlotView(
+          this.skills,
+          engine,
+          slot,
+          state.tick,
+          playerStats.haste ?? 0,
+          comboWindowOpen,
+          derivedFrom,
+        ),
       )
       .filter((s): s is SkillSlotView => s !== undefined);
 
@@ -445,100 +452,16 @@ export class ViewAdapter {
     };
   }
 
-  private buildSlot(
-    engine: BattleEngine,
-    slot: SlotBinding,
-    tick: number,
-    haste: number,
-    comboWindowOpen: boolean,
-    /** 派生窗口的源技能（没有窗口时为 undefined）。 */
-    derivedFrom: string | undefined,
-  ): SkillSlotView | undefined {
-    const skill = this.skills.get(slot.skillId);
-    if (!skill) return undefined;
-    const state = engine.snapshot.combatants.find((c) => c.side === 'ally');
-    if (!state) return undefined;
-
-    // 冷却：引擎把"下次可用 tick"存在 cooldowns 里
-    const readyAt = state.cooldowns[slot.skillId] ?? 0;
-    const totalTicks = Math.max(1, Math.round((skill.cooldown * (1 - haste)) / (1000 / 60)));
-    const remainTicks = Math.max(0, readyAt - tick);
-    const cooldownRatio = skill.cooldown > 0 ? Math.min(1, remainTicks / totalTicks) : 0;
-
-    // 资源是否够（UI 需要提前变灰，而不是等玩家按了才拒绝）
-    let costOk = true;
-    for (const cost of skill.cost) {
-      const need = typeof cost.value === 'number' ? cost.value : 0;
-      const has = (state.resources as Record<string, number>)[cost.resource] ?? 0;
-      if (has < need) costOk = false;
-    }
-
-    // 前置条件（派生窗口）
-    let conditionOk = true;
-    for (const cond of skill.requires ?? []) {
-      if (cond.kind === 'hasBuff' && cond.buffId === 'combo-window' && !comboWindowOpen) {
-        conditionOk = false;
-      }
-    }
-
-    const casting = state.casts.length > 0;
-    const usable = costOk && conditionOk && cooldownRatio <= 0.001 && !casting;
-
-    // 不可用原因用**本地化 key**表达，UI 层负责取文案
-    let blockedKey: string | undefined;
-    if (!conditionOk) blockedKey = 'block.comboWindow';
-    else if (!costOk) blockedKey = 'block.cost';
-    else if (cooldownRatio > 0.001) blockedKey = 'block.cooldown';
-    else if (casting) blockedKey = 'block.casting';
-
-    /**
-     * 资源代价 —— 取**第一项**。
-     *
-     * 现在的技能都只有一项代价；如果以后出现"同时消耗炁和缠"，
-     * 这里要改成数组（格子右上角放不下两项，得换表达方式）。
-     * 按住技（「卸」）的代价在 `holdDrain` 里，不是 `cost`。
-     */
-    const firstCost = skill.cost[0];
-    const drain = skill.holdDrain;
-    /**
-     * 数据层（`core/types.ts`）把 `resource` 声明成了宽泛的 `string`，
-     * 而视图层要的是 `'hp' | 'energy' | 'douqi'`。用**类型守卫**收敛，
-     * 不用 `as` 断言（AGENTS.md §1）。守卫失败就当作"没有代价可显示"，
-     * 这比让一个未知字符串漏进渲染层更安全。
-     */
-    const cost: SlotCost | undefined =
-      firstCost !== undefined && typeof firstCost.value === 'number'
-        ? toSlotCost(firstCost.resource, firstCost.value)
-        : drain !== undefined
-          ? // 按住技：代价按**逻辑步**扣，技能栏写的是"每秒多少"。
-            // 换算与设置页共用 `holdDrainPerSecond()` —— 曾把 `perLogicTick`
-            // 直接当成每秒，显示成 3/s 而实际 30/s（10 倍偏差）。
-            toSlotCost(drain.resource, holdDrainPerSecond(drain), '/s')
-          : undefined;
-
-    return {
-      index: slot.index,
-      key: slot.key,
-      skillId: slot.skillId,
-      nameKey: skill.nameKey,
-      icon: skill.icon,
-      usable,
-      cooldownRatio,
-      ...(cost === undefined ? {} : { cost }),
-      cooldownSec: (remainTicks * (1000 / 60)) / 1000,
-      // 固有冷却（满值）—— 左下角显示的那个
-      skillCdSec: skill.cooldown / 1000,
-      comboReady: (skill.requires?.length ?? 0) > 0 && conditionOk,
-      /**
-       * 只有**派生技**才带 `derivedFrom` —— 判断依据是"它有 requires"。
-       * 渲染层据此把它画在源技能旁边，而不是占一个正常槽位。
-       */
-      ...((skill.requires?.length ?? 0) > 0 && comboWindowOpen && derivedFrom !== undefined
-        ? { derivedFrom }
-        : {}),
-      ...(blockedKey === undefined ? {} : { blockedKey }),
-    };
+  /**
+   * **单独造一个槽位视图**（这个技能**不需要**在技能栏里）。
+   *
+   * 实现搬到 `./slotViews`（"一个技能槽位怎么造"这一撮横向切出去的，
+   * 见那里的文件头）。这里只做**转交**：`skills` 是适配器持有的注册表。
+   */
+  slotViewOf(engine: BattleEngine, skillId: string, index: number): SkillSlotView | undefined {
+    return slotViewOfSkill(this.skills, engine, skillId, index);
   }
+
 
 }
 
@@ -646,11 +569,4 @@ function toCombatantView(
     feedback,
     ...(castView ? { cast: castView } : {}),
   } satisfies CombatantView & { _stats?: typeof stats };
-}
-
-function toSlotCost(resource: string, value: number, suffix?: string): SlotCost | undefined {
-  if (resource === 'hp' || resource === 'energy' || resource === 'douqi') {
-    return suffix === undefined ? { resource, value } : { resource, value, suffix };
-  }
-  return undefined;
 }

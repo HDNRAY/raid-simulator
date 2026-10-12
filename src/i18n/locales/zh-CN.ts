@@ -568,16 +568,18 @@ export const zhCN = {
      */
     tabGeneral: '通用',
     tabKeys: '按键',
+    /**
+     * 「触屏」页 —— **触屏按钮的配置入口**（2026-10-12 用户定案）。
+     *
+     * ⚠️ 原先这里没有这一页，也没有对应的文案：那时触屏按钮由键位表
+     * **机械派生**（AGENTS.md §3b 的旧说法），所以「按键」页就是它。
+     * 用户推翻了那条（"触屏和键盘当然是 2 套"）：没绑键的技能在触屏上
+     * 根本没有按钮，而触屏又按不出键、进不去改键 —— 死结。现在两套分开。
+     */
+    tabTouch: '触屏',
     /** 通用 tab 暂时没有可调项 */
     /** 通用页：UI 缩放 slider */
     uiScale: 'UI 缩放',
-    /**
-     * 触屏按钮的**只读预览**（需求："暂时就不给玩家自由编辑了"）。
-     *
-     * 既然不给编辑，这里只告诉玩家"现在是什么样" ——
-     * 按钮由键位表推导，所以它同时也解释了"为什么这些技能在场上"。
-     */
-    touchButtons: '触屏按钮',
     generalHint: '← → 调整，↑ ↓ 切换项',
     generalEmpty: '暂时还没有可调项',
     generalEmptyHint: '音量、画面与体验相关的选项之后加在这里',
@@ -650,6 +652,15 @@ export const zhCN = {
     keysReservedHint: 'Esc / Tab / Enter / F1–F12 / 单独的 Shift、Ctrl、Alt 不能绑定',
     keysReset: '恢复默认',
     keysResetDone: '已恢复默认键位',
+    /**
+     * 「触屏」页的操作提示 —— **只有前半句**。
+     *
+     * ⚠️ 动作键名（`Enter / Space`）**不许写进来**：键位是运行期可变的状态，
+     * 文案是静态资源，两者生命周期不同（AGENTS.md §3b）。渲染层从
+     * `TOUCH_TOGGLE_KEYS` 反查后拼上，触屏则不拼那半句。
+     */
+    touchHint: '点一下技能格放上 / 取下',
+    touchResetDone: '已恢复默认触屏按钮',
     /** 键位表的两列标题 */
     keyColumnAction: '技能',
     keyColumnKey: '按键',

@@ -84,8 +84,10 @@ export class LogPanel {
   private readonly panel: Panel;
   private readonly title: Label;
   private readonly lines: Label[] = [];
-  /** 复盘（一局结束后的全屏模式）。 */
-  private readonly review: LogReviewPanel;
+  /** 复盘（一局结束后的全屏模式）。
+   *
+   * ⚠️ 经 `get review()` 暴露出去 —— 输入归属要问它"开着没有"，见那个 getter。 */
+  private readonly reviewPanel: LogReviewPanel;
   /** 上一次画的内容指纹，用来跳过无变化的重排（每帧都会调进来）。 */
   private lastSignature = '';
 
@@ -156,8 +158,20 @@ export class LogPanel {
     }
 
     /** 复盘面板放在**最后**：它在 `root` 内部也要盖住上面那几条。 */
-    this.review = new LogReviewPanel({ pixi, translate: options.translate });
-    this.root.addChild(this.review.root);
+    this.reviewPanel = new LogReviewPanel({ pixi, translate: options.translate });
+    this.root.addChild(this.reviewPanel.root);
+  }
+
+  /**
+   * **复盘那一层**（一局结束后的全屏战报）。
+   *
+   * ⚠️ 暴露出去是为了**输入归属**：`app/inputRouter.ts` 要判"复盘开着没有"，
+   * 而"开着"这件事只有复盘自己知道（`finished && shown`）。
+   * 调用方拿它问状态，**不替它存一份布尔** —— 两份真相会漂，而漂移的样子
+   * 正是本次的 bug（设置按钮以为还在战斗、实际复盘盖在上面）。
+   */
+  get review(): LogReviewPanel {
+    return this.reviewPanel;
   }
 
   /**
@@ -173,8 +187,8 @@ export class LogPanel {
    * 小面板"）；全部条目交给复盘面板。
    */
   update(entries: readonly LogEntry[], view: BattleSnapshotView): void {
-    this.review.update(entries, view);
-    this.syncLayer(this.review.root.visible);
+    this.reviewPanel.update(entries, view);
+    this.syncLayer(this.reviewPanel.root.visible);
 
     const visible = majorEntries(entries).slice(-VISIBLE_LINES);
     // 内容没变就整段跳过（每帧调用的东西，能省则省）

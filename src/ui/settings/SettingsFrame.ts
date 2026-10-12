@@ -18,10 +18,30 @@ import type { TranslateFn } from '../../i18n/translator';
 import {
   CLOSE_BUTTON,
   SETTINGS_PANEL,
+  SETTINGS_TABS,
   mnemonicKeyOf,
   tabRect,
   type SettingsTab,
 } from './logic';
+
+/**
+ * 每个 tab 的**标签 key** 与**助记键目标**。
+ *
+ * ⚠️ 写成两张表而不是 `tab === 'general' ? ... : ...` 的三元链：加了第三个
+ * tab（「触屏」）之后，三元链的默认分支会**静默**把新页的标签画成按键页的，
+ * 而截图上看不出"这页叫错了"。
+ */
+const TAB_LABEL = {
+  general: 'settings.tabGeneral',
+  keys: 'settings.tabKeys',
+  touch: 'settings.tabTouch',
+} as const;
+
+const TAB_MNEMONIC = {
+  general: 'tabGeneral',
+  keys: 'tabKeys',
+  touch: 'tabTouch',
+} as const;
 
 interface TabButton {
   readonly tab: SettingsTab;
@@ -73,8 +93,11 @@ export class SettingsFrame {
     this.root.addChild(panel.root, this.title.root, this.closeHint.root);
 
     /* ---- tab 按钮 ---- */
-    const tabs: SettingsTab[] = ['general', 'keys'];
-    for (const [i, tab] of tabs.entries()) {
+    /**
+     * ⚠️ 顺序取自 `SETTINGS_TABS`（唯一真相）—— 命中测试用的是同一张表，
+     * 所以"点第二个位置进了第三页"这类错位结构上不可能发生。
+     */
+    for (const [i, tab] of SETTINGS_TABS.entries()) {
       const rect = tabRect(i);
       const gfx = new pixi.Graphics();
       const label = new Label(pixi, {
@@ -121,15 +144,13 @@ export class SettingsFrame {
     for (const [i, button] of this.tabButtons.entries()) {
       const active = button.tab === activeTab;
       const focused = focusZone === 'tabs' && focusIndex === i;
-      const base = this.translate(
-        button.tab === 'general' ? 'settings.tabGeneral' : 'settings.tabKeys',
-      );
+      const base = this.translate(TAB_LABEL[button.tab]);
       /**
        * ⚠️ 助记键从 `MNEMONIC_KEYS` **反查并拼上**，不写进 i18n ——
        * 否则改快捷键就得改文案（需求："改快捷键 害得改 i18n吗？"）。
        * 触屏不拼（"移动端就不用显示快捷键信息了"）。
        */
-      const mnemonic = mnemonicKeyOf(button.tab === 'general' ? 'tabGeneral' : 'tabKeys');
+      const mnemonic = mnemonicKeyOf(TAB_MNEMONIC[button.tab]);
       button.label.set(
         showKeyHints && mnemonic !== undefined ? `${base} (${mnemonic})` : base,
       );

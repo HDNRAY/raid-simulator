@@ -17,6 +17,7 @@ import type { SettingsPanel } from '../ui/settings/SettingsPanel';
 import type { SettingsButton } from '../ui/settings/SettingsButton';
 import type { SettingsToggle } from './settingsToggle';
 import type { TouchControls } from './touchControls';
+import { activeInputLayer, type InputLayer } from './inputRouter';
 
 /** 主循环要驱动的界面对象。 */
 export interface CanvasHost {
@@ -96,6 +97,19 @@ export interface WireOptions {
     refresh(): void;
     dispose(): void;
   };
+  /**
+   * **复盘那一层**（一局结束后的全屏战报）。
+   *
+   * ⚠️ 键盘分发要问它"开着没有"：复盘是 `battle` 相位里的**子模式**
+   * （一局结束仍停在 `battle`），所以只看 `state.phase` 会把复盘漏掉 ——
+   * 那正是用户报的"上下键无效、反而选中设置按钮"。
+   */
+  readonly review: {
+    /** 复盘此刻是否在接收输入。 */
+    isOpen(): boolean;
+    /** 把这次按键交给复盘（`true` = 消费了）。 */
+    handleKey(key: string): boolean;
+  };
 }
 
 /**
@@ -106,6 +120,20 @@ export interface WireOptions {
  */
 export function wireLoop(o: WireOptions): void {
   const { state, host } = o;
+
+  /**
+   * **谁在接收输入** —— 一个地方回答（`app/inputRouter.ts`）。
+   *
+   * ⚠️ 主循环的每帧分发**仍然按 `phase`**（那是"哪一屏要重画 / 显隐"的事，
+   * 由 `applyPhase` 收口）；只有**键盘归属**走这一层 —— 因为键盘要看
+   * "子模式"（复盘 / 设置），而重画不看。两件事的判据不同，不要合并。
+   */
+  const layerNow = (): InputLayer =>
+    activeInputLayer({
+      phase: state.phase,
+      settingsOpen: host.settingsToggle.isOpen(),
+      reviewOpen: o.review.isOpen(),
+    });
 
   /* ---------- 主循环 ---------- */
   o.app.ticker.add(() => {
@@ -162,6 +190,32 @@ export function wireLoop(o: WireOptions): void {
    * 自由 → 备战界面）。这里不判模式，避免三处各判一遍。 */
   window.addEventListener('keydown', (event) => {
     /**
+     * **这一次按键归谁** —— 一个地方回答（`app/inputRouter.ts`）。
+     *
+     * ⚠️ 原先每个分支各判一次 `state.phase`，而"复盘"是 `battle` 相位里的
+     * **子模式** —— 于是复盘开着时 `state.phase !== 'battle'` 为假，
+     * 整段键盘分发被跳过，上下键落到别处（设置按钮）。用户报的就是这条。
+     */
+    const layer = layerNow();
+
+    /**
+     * **复盘开着：这一次按键整块交给它**（`Space` 切换战报、`↑↓` /
+     * `PgUp·PgDn` / `Home·End` 滚动）。
+     *
+     * ⚠️ 放在**最前**且**整体 return**：
+     *   - 排在后面：`ArrowUp` 会先被别的分支看到（这正是设置按钮抢键的形态）
+     *   - 不 return：一次按键会同时滚日志又做别的事
+     *
+     * ⚠️ 它**不抢 `Esc`**：复盘没有"关闭"语义（`Space` 才是切换键），
+     * 而 `Esc` 在 `battle` 相位本来就不做事（见下面 `phaseFromEscape` 的表）。
+     * 所以把 `Esc` 放行给下面那条返回分支 —— 它自己判"该相位有没有返回目标"。
+     */
+    if (layer === 'review' && event.key !== 'Escape') {
+      if (o.review.handleKey(event.key)) event.preventDefault();
+      return;
+    }
+
+    /**
      * **返回（`Esc`）先判** —— 它在"哪个相位能用"这件事上与前缀无关。
      *
      * | 相位 | `Esc` |
@@ -180,12 +234,14 @@ export function wireLoop(o: WireOptions): void {
      *   - `settingsToggle.isOpen()`：面板开着时 `Esc` 是**它的**关闭键
      *   - `settingsButtonFocused()`：焦点在齿轮上时，`Esc` 不该顺手把界面
      *     也切走（与 `Enter` 那条同一个道理）
-     *   - `phase !== 'battle'`：见上表最后一行
+     *   - `layer !== 'battle'`：见上表最后一行（复盘开着时，`layer` 是
+     *     `review`，`phaseFromEscape` 对 `battle` 相位本来就没有目标，
+     *     所以这里不额外判 —— 判据仍然只有一处）
      */
     if (
       !host.settingsToggle.isOpen() &&
       !state.settingsButtonFocused() &&
-      state.phase !== 'battle' &&
+      layer !== 'battle' &&
       event.key === 'Escape'
     ) {
       /**
@@ -223,16 +279,19 @@ export function wireLoop(o: WireOptions): void {
      * 改键，方向键是移动焦点的。`settingsToggle.isOpen()` 与
      * `settingsButtonFocused()` 的优先级高于一切界面。
      *
-     * ⚠️ 三条分支**互斥**（`phase` 一次只有一个值），但每条都要
+     * ⚠️ 三条分支**互斥**（输入层一次只有一个值），但每条都要
      * `default: return`：不 return 的话未处理的键会掉到下面的战斗分支上，
      * 而那里判的是 `state.loop`（非战斗阶段是 `undefined`）。
+     *
+     * ⚠️ 判 `layer !== 'battle'` 仍然对：复盘开着时上面那段已经 return 了，
+     * 所以走到这里只可能是"三个整屏界面之一"或"设置面板"。
      */
     if (
       !host.settingsToggle.isOpen() &&
       !state.settingsButtonFocused() &&
-      state.phase !== 'battle'
+      layer !== 'battle'
     ) {
-      if (state.phase === 'home') {
+      if (layer === 'home') {
         switch (event.key) {
           case 'ArrowUp':
             host.home.moveFocus(-1);
@@ -252,7 +311,7 @@ export function wireLoop(o: WireOptions): void {
             return;
         }
       }
-      if (state.phase === 'characterSelect') {
+      if (layer === 'characterSelect') {
         switch (event.key) {
           case 'ArrowLeft':
             host.select.cycle(-1);
@@ -305,7 +364,7 @@ export function wireLoop(o: WireOptions): void {
       }
     }
     if (
-      state.phase === 'battle' &&
+      layer === 'battle' &&
       event.key === 'Enter' &&
       host.battle()?.engineState.snapshot.status !== 'running'
     ) {

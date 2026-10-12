@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   SettingsStore,
+  loadTouchButtons,
   parseBindings,
+  parseTouchButtons,
   parseUiScale,
   serializeBindings,
+  serializeTouchButtons,
   type StorageLike,
 } from '../../src/app/settingsStore';
 import { DEFAULT_BINDINGS } from '../../src/input/keyboard';
+import { touchButtonIdsFromBindings } from '../../src/input/touchLayout';
 
 const VALID = new Set(['attack', 'blast', 'focus', 'break', 'dodge', 'guard', 'flash', 'jie']);
 
@@ -106,6 +110,141 @@ describe('键位持久化：读的时候必须校验', () => {
     expect(parseBindings(reversed, VALID).map((b) => b.skillId)).toEqual(
       DEFAULT_BINDINGS.map((b) => b.skillId),
     );
+  });
+});
+
+/**
+ * ==================================================================
+ * 触屏按钮集合：**第三个存储键**，与键位表互不派生
+ * ==================================================================
+ *
+ * 需求（用户 2026-10-12）："触屏和键盘**当然是 2 套**，连 localStorage
+ * 都是分 2 个 key 存的，只是**可选技能是一样的**。"
+ *
+ * ⚠️ 与 `parseBindings` 同一条纪律：`localStorage` 的内容是**未经验证的
+ * 输入**，坏数据要能被丢掉而不是信任它。
+ */
+describe('触屏按钮集合：读的时候必须校验', () => {
+  const POOL = new Set(['attack', 'blast', 'focus', 'break', 'dodge', 'guard', 'flash']);
+
+  it('【关键】没存过 → `undefined`（= 该迁移），不是空集合', () => {
+    /**
+     * ⚠️ `undefined` 与 `[]` 是**两件事**，这条与下面那条一起钉住：
+     * 合并它们会让"玩家主动取下了全部按钮"被迁移悄悄加回来。
+     */
+    expect(parseTouchButtons(null, POOL)).toBeUndefined();
+    expect(parseTouchButtons('', POOL)).toBeUndefined();
+  });
+
+  it('【关键】存了空数组 → `[]`（玩家明确取下了全部按钮）', () => {
+    expect(parseTouchButtons('[]', POOL)).toEqual([]);
+  });
+
+  it('坏 JSON / 非数组 → `undefined`（当作没存过，交给迁移兜底）', () => {
+    expect(parseTouchButtons('{ not json', POOL)).toBeUndefined();
+    expect(parseTouchButtons('42', POOL)).toBeUndefined();
+    expect(parseTouchButtons('"x"', POOL)).toBeUndefined();
+    expect(parseTouchButtons('{"a":1}', POOL)).toBeUndefined();
+  });
+
+  it('正常存档原样读回，**顺序保留**（顺序即双弧槽位）', () => {
+    const raw = serializeTouchButtons(['guard', 'attack', 'blast']);
+    expect(parseTouchButtons(raw, POOL)).toEqual(['guard', 'attack', 'blast']);
+  });
+
+  it('【关键】单条坏数据逐条丢弃（不是整份丢弃）', () => {
+    const raw = JSON.stringify([
+      'attack',
+      42,
+      null,
+      '',
+      { skillId: 'blast' },
+      'guard',
+    ]);
+    expect(parseTouchButtons(raw, POOL)).toEqual(['attack', 'guard']);
+  });
+
+  it('【关键】不在**技能池**里的 id 丢弃 —— "可选技能是同一个池"', () => {
+    const raw = JSON.stringify(['attack', 'boss-lust-hum', 'deleted-skill', 'guard']);
+    expect(parseTouchButtons(raw, POOL)).toEqual(['attack', 'guard']);
+  });
+
+  it('重复 id 只保留先出现的（一个技能不能占两个按钮位）', () => {
+    const raw = JSON.stringify(['attack', 'guard', 'attack']);
+    expect(parseTouchButtons(raw, POOL)).toEqual(['attack', 'guard']);
+  });
+
+  it('serialize → parse 往返不变', () => {
+    const ids = ['attack', 'flash'];
+    expect(parseTouchButtons(serializeTouchButtons(ids), POOL)).toEqual(ids);
+  });
+});
+
+describe('触屏按钮集合：老存档迁移一次（用户要求）', () => {
+  const POOL = new Set(['attack', 'blast', 'focus', 'break', 'dodge', 'guard', 'flash']);
+  /** 老存档的迁移来源 = "绑了键的那些技能"（旧的派生结果）。 */
+  const legacy = touchButtonIdsFromBindings([
+    { key: 'q', skillId: 'attack' },
+    { key: 'a', skillId: 'dodge' },
+    { key: '', skillId: 'flash' },
+    { key: 's', skillId: 'guard' },
+  ]);
+
+  it('【关键】没存过 → 用旧派生结果初始化（老玩家的按钮不会突然消失）', () => {
+    const out = loadTouchButtons(null, POOL, legacy);
+    expect(out.migrated).toBe(true);
+    expect(out.skillIds).toEqual(['attack', 'dodge', 'guard']);
+  });
+
+  it('【关键】存过之后**不再回读**派生 —— 哪怕存的是空集合', () => {
+    /**
+     * 这条是"迁移只做一次"的判定：存档存在（含 `[]`）时，迁移来源必须
+     * **完全不起作用**。否则"玩家取下了全部按钮"下次加载就被加回来了。
+     */
+    const out = loadTouchButtons('[]', POOL, legacy);
+    expect(out.migrated).toBe(false);
+    expect(out.skillIds).toEqual([]);
+
+    const saved = loadTouchButtons(serializeTouchButtons(['flash']), POOL, legacy);
+    expect(saved.migrated).toBe(false);
+    expect(saved.skillIds).toEqual(['flash']);
+  });
+
+  it('迁移结果也要按池子过滤（老的绑定表可能含池外/失效 id）', () => {
+    const out = loadTouchButtons(null, POOL, ['attack', 'boss-lust-hum', 'ghost']);
+    expect(out.skillIds).toEqual(['attack']);
+  });
+
+  it('坏存档（读不出来）也走迁移 —— 比清空玩家的按钮温和', () => {
+    const out = loadTouchButtons('{ 半截', POOL, legacy);
+    expect(out.migrated).toBe(true);
+    expect(out.skillIds).toEqual(['attack', 'dodge', 'guard']);
+  });
+});
+
+describe('触屏按钮集合：存取器（第三个 key）', () => {
+  it('与键位表是**两个 key**，互不覆盖', () => {
+    const st = memStorage();
+    const store = new SettingsStore(st, 'keyboard');
+    store.saveBindings([{ key: 'z', skillId: 'attack' }]);
+    store.saveTouchButtons(['attack', 'guard']);
+
+    expect(st.data['raid.bindings.keyboard.v1']).toContain('"z"');
+    expect(st.data['raid.touchButtons.v1']).toBe('["attack","guard"]');
+    /** 触屏按钮**不按设备分份**：换一种形态读到的还是同一份。 */
+    expect(new SettingsStore(st, 'touch').touchButtonsRaw).toBe('["attack","guard"]');
+  });
+
+  it('存储不可用 / setItem 抛时不炸', () => {
+    expect(new SettingsStore(undefined, 'touch').touchButtonsRaw).toBeNull();
+    expect(() => new SettingsStore(undefined, 'touch').saveTouchButtons(['a'])).not.toThrow();
+    const throwing: StorageLike = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('QuotaExceeded');
+      },
+    };
+    expect(() => new SettingsStore(throwing, 'touch').saveTouchButtons(['a'])).not.toThrow();
   });
 });
 

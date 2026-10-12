@@ -70,6 +70,7 @@ import { createStartBattle } from './battleSetup';
 import { createRunSession } from './runSession';
 import { createGameState, settingsAnchorOf } from './flow';
 import { CONTROL_VISIBILITY, phaseFromEscape } from './phaseLogic';
+import { activeInputLayer } from './inputRouter';
 import { createSettingsSetup } from './settingsSetup';
 import { createTouchSetup } from './touchSetup';
 import { installDebugApi } from './debugApiSetup';
@@ -111,7 +112,7 @@ export interface CreateGameDeps {
 export function createGame(o: CreateGameDeps): GameHandle {
   const { app, stage } = o;
   const d = o.deps;
-  const state = createGameState(d.bindings);
+  const state = createGameState(d.bindings, d.touchButtons);
 
   /* ---------- 场景 ---------- */
   const scene = new BattleScene({
@@ -294,17 +295,19 @@ export function createGame(o: CreateGameDeps): GameHandle {
     state.loop = startBattle();
 
     /**
-     * ⚠️ **触屏按钮要按"这一局有哪些技能"重派生一次**（2026-10-12）。
+     * ⚠️ **触屏按钮要按"这一局有哪些技能"过滤一次**（2026-10-12）。
      *
-     * 触屏按钮由键位表机械派生（AGENTS.md §3b），而键位表是整场游戏的
-     * （Q 斩 / S 防 / A 避…）。两个角色的技能不一样 —— 不过滤的话凯丽的
-     * 双弧上会多出「防」「避」两个按不出东西的按钮。
+     * 按钮集合是**用户自己选的**（整场游戏的技能池），两个角色的技能不一样
+     * —— 不过滤的话凯丽的双弧上会多出「防」「避」两个按不出东西的按钮。
      *
      * ⚠️ 过滤的判据在触屏层里读**引擎的技能集**（`currentSkillIds`），
-     * 所以这里只需在**换局之后**通知它一次；换角色之后再开一局就会
-     * 重新派生。放在 `applyPhase` **之前**与显隐无关（那时按钮整层隐藏）。
+     * 所以这里只需在**换局之后**通知它一次；换角色之后再开一局就会重新
+     * 过滤。放在 `applyPhase` **之前**与显隐无关（那时按钮整层隐藏）。
+     *
+     * ⚠️ 传的是**按钮集合**（`state.touchButtons`）而不是键位表：那正是
+     * 这次切断的派生（"没绑键的技能在触屏上就没有按钮"）。
      */
-    state.touch?.setBindings(state.bindings);
+    state.touch?.setButtons(state.touchButtons);
 
     applyPhase('battle');
   };
@@ -485,19 +488,29 @@ export function createGame(o: CreateGameDeps): GameHandle {
     battle,
     scene,
     /**
-     * ⚠️ **改键的另外两处同步**（loop 由 `settingsSetup` 自己做）：
-     * 触屏按钮与画面技能格的键位提示。
+     * ⚠️ **改键的同步**（loop 由 `settingsSetup` 自己做）：画面技能格的
+     * 键位提示。
+     *
+     * ⚠️ **不含触屏按钮** —— 按钮集合与键位表互不派生（用户 2026-10-12），
+     * 改键不该动按钮。按钮那条走下面的 `onTouchButtonsChanged`。
      *
      * ⚠️ 走 `state.touch` 而不是闭包变量：这个回调在**用户改键时**才被调，
      * 那时触屏层早就在下面建好了；用闭包变量反而要先声明一个可能为空的
      * `let`，而那正是"两处真相"的开端。
      */
-    onBindingsChanged: (next) => {
-      state.touch?.setBindings(next);
+    onBindingsChanged: () => {
       if (state.touch !== undefined) scene.setShowKeyHints(state.touch.caps.showKeyHints);
     },
+    /**
+     * ⚠️ **触屏按钮集合的同步**（另一条改动线）：触屏层按新集合重画。
+     *
+     * 与 `onBindingsChanged` 同一个"走 `state.touch` 而不是闭包变量"的理由。
+     */
+    onTouchButtonsChanged: (next) => {
+      state.touch?.setButtons(next);
+    },
   });
-  const { settings, settingsButton, settingsToggle, touchPreviewSource } = settingsSetup;
+  const { settings, settingsButton, settingsToggle, touchCapsSource } = settingsSetup;
   /** 回填给 `applyPhase`（它的定义早于这一句，见 `flow.ts` 的说明）。 */
   state.settingsButton = settingsButton;
 
@@ -506,14 +519,13 @@ export function createGame(o: CreateGameDeps): GameHandle {
    * ⚠️ 触屏控件（能力探测 + 布局 + 输入源 + 双弧按钮层）。与键盘并存。
    *
    * ⚠️ 它**必须晚于设置面板**（面板要接收 `touch` 的能力值 —— 见
-   * `touchPreviewSource` 的转交说明），但**必须早于第一次真正驱动战斗**：
+   * `touchCapsSource` 的转交说明），但**必须早于第一次真正驱动战斗**：
    * `BattleLoop` 每帧通过 `() => state.touch?.input` 读它。`?prepare=skip`
    * 在上一段就建好了第一局 loop，但那只是建对象 —— `frame()` 要等主循环
    * 启动，那时触屏层已经就绪。
    */
   const touch = createTouchSetup({
     app: app,
-    registry: d.registry,
     battle,
     isSettingsOpen: () => settingsToggle.isOpen(),
     /**
@@ -522,10 +534,11 @@ export function createGame(o: CreateGameDeps): GameHandle {
      * AGENTS.md §3b"触屏时整条技能栏都隐藏"）。
      */
     isBattleActive: () => state.phase === 'battle',
-    bindings: () => state.bindings,
+    /** ⚠️ 按钮集合是**用户自己选的**，与键位表无关（见 `touchLayout`）。 */
+    touchSkillIds: () => state.touchButtons,
     scene,
     settingsButton,
-    previewSource: touchPreviewSource,
+    capsSource: touchCapsSource,
   });
   state.touch = touch;
 
@@ -540,6 +553,24 @@ export function createGame(o: CreateGameDeps): GameHandle {
   const onScreenChange = (screen: Phase): void =>
     settingsButton.setScreen(settingsAnchorOf(screen));
   state.onScreenChange = onScreenChange;
+
+  /**
+   * **现在哪一层在接收输入** —— 全应用唯一的那个取值。
+   *
+   * ⚠️ 三个消费者（指针路由 `canvasInput`、设置快捷键 `settingsKeys`、
+   * 调试入口 `__raidBattle.logReview`）都从这里读，而不是各自拼
+   * `phase === 'battle'`：复盘是 `battle` 相位里的**子模式**，
+   * 各自拼一份就会漏掉它 —— 那正是这次的 bug。
+   *
+   * ⚠️ 它是**取值函数**而不是快照：`phase` / 面板开关都会变，
+   * 快照一份就会永远停在装配那一刻。
+   */
+  const currentLayer = () =>
+    activeInputLayer({
+      phase: state.phase,
+      settingsOpen: settingsToggle.isOpen(),
+      reviewOpen: scene.logReview.isOpen(),
+    });
 
   /* ---------- 画布指针接线 ---------- */
   /**
@@ -557,6 +588,11 @@ export function createGame(o: CreateGameDeps): GameHandle {
     touch,
     phase: () => state.phase,
     settingsOpen: () => settingsToggle.isOpen(),
+    /**
+     * ⚠️ **复盘那一层**要递给指针路由 —— 它是 `battle` 相位里的子模式，
+     * 只看相位会让"触屏点复盘"被当成"点屏幕离开战斗"（详见 `inputRouter`）。
+     */
+    review: () => scene.logReview,
     openSettings: () => settingsToggle.open('keys'),
     battleEnded: () => state.loop?.engineState.snapshot.status !== 'running',
     backFromBattle,
@@ -567,15 +603,23 @@ export function createGame(o: CreateGameDeps): GameHandle {
    * ⚠️ 抽到了 `app/settingsKeys.ts` —— 那里写着"必须用捕获阶段"与
    * "弹窗打开时独占键盘"两条由来，不在这里重复。
    *
-   * ⚠️ `acceptsKeyboardFocus` 只在**战斗**为真：自由模式里 `↑↓` 换槽位、
-   * 首页里 `↑↓` 移动光标，都不能被设置按钮抢走（那些界面 `F1`
-   * 照样能开设置）。由来见 `settingsKeys.ts` 里那个方法的注释。
+   * ⚠️ **`acceptsKeyboardFocus` 不是 `phase === 'battle'`**（原先就是这么写的，
+   * 那正是用户报的那个 bug）：复盘是 `battle` 相位里的**子模式**，
+   * 一局结束仍然停在 `battle`，于是复盘开着时 `↑` 被设置按钮抢走、
+   * 复盘收不到上下键。判据收口到 `inputRouter.activeInputLayer`
+   * ——"只有输入层是 `battle` 时才允许"，复盘 / 设置面板开着都不允许。
    */
   const settingsKeys = wireSettingsKeys({
     settings,
     settingsButton,
     settingsOpen: () => settingsToggle.isOpen(),
-    acceptsKeyboardFocus: () => state.phase === 'battle',
+    /**
+     * ⚠️ **判据是"输入层是 `battle`"**（不是原先的 `state.phase === 'battle'`）：
+     * 复盘是 `battle` 相位里的子模式，只看相位就会在复盘开着时把 `↑`
+     * 判给设置按钮 —— 那正是用户报的那个 bug。判据收口在 `currentLayer`
+     * （`inputRouter.activeInputLayer`），不是在这里再写一份。
+     */
+    acceptsKeyboardFocus: () => currentLayer() === 'battle',
     openSettings: () => settingsToggle.open('keys'),
     setHandling: (value) => {
       state.handlingKeyDown = value;
@@ -617,6 +661,8 @@ export function createGame(o: CreateGameDeps): GameHandle {
         app,
         stage,
         observer,
+        /** 复盘那一层：键盘归属要问它（见 `WireOptions.review`）。 */
+        review: scene.logReview,
       });
 
       /**
@@ -636,6 +682,12 @@ export function createGame(o: CreateGameDeps): GameHandle {
         prepare,
         back,
         touch,
+        /**
+         * ⚠️ **输入归属**（调试 / 验证用）：一份纯函数的结果，脚本据此
+         * 断言"复盘开着时这一层是 `review` 而不是 `battle`" ——
+         * 那正是本次 bug 的判据，只看截图看不出"键被谁吃了"。
+         */
+        layer: currentLayer,
         restart: () => enterBattle(selection.playerId, selection.bossId),
       });
     },

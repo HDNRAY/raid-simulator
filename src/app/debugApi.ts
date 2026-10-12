@@ -16,6 +16,15 @@
  * 光标"这条需求，如果调试入口自己改状态，那验证的就是调试入口而不是界面。
  */
 
+/**
+ * ⚠️ tab 用 `SettingsTab` 而不是 `'general' | 'keys'` 字面量：面板现在有
+ * **三个** tab（加了「触屏」），写死两个字面量会让调试入口打不开第三页
+ * —— 而"验证脚本进不去"正是这次要修的那类问题。
+ *
+ * 类型从 `ui/settings/logic` 取（**类型**，编译期擦除，不构成运行期依赖）。
+ */
+import type { SettingsTab } from '../ui/settings/logic';
+
 /** 备战界面暴露给调试的最小面（`PrepareScreen` 满足它）。 */
 export interface PrepareDebugTarget {
   current: {
@@ -194,14 +203,14 @@ export interface SettingsButtonDebugTarget {
 export function settingsDebugApi(
   getSettings: () => SettingsDebugTarget,
   getToggle: () => {
-    readonly open: (tab: 'general' | 'keys') => void;
+    readonly open: (tab: SettingsTab) => void;
     readonly close: () => void;
     readonly isOpen: () => boolean;
   },
   getButton: () => SettingsButtonDebugTarget,
 ): {
   readonly settings: {
-    open(tab?: 'general' | 'keys'): void;
+    open(tab?: SettingsTab): void;
     close(): void;
     openIn(px: number, py: number): void;
     isOpen(): boolean;

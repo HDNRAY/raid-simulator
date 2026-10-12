@@ -386,7 +386,14 @@ describe('logReview：渲染层的接线（源码扫描）', () => {
     const panel = read('ui/LogPanel.ts');
     // 实时列：经过 majorEntries 过滤
     expect(panel).toMatch(/majorEntries\(entries\)/);
-    expect(panel).toMatch(/this\.review\.update\(entries, view\)/);
+    /**
+     * 复盘那一路收到的是**未过滤**的 `entries`。
+     *
+     * ⚠️ 断言的还是"这件事存在"（复盘拿到全部条目），只是字段名跟着
+     * 改名了：`review` 现在是**公开 getter**（输入归属要问它"开着没有"，
+     * 见 `app/inputRouter.ts`），私有的那一份叫 `reviewPanel`。
+     */
+    expect(panel).toMatch(/this\.reviewPanel\.update\(entries, view\)/);
   });
 
   it('复盘面板不判 `entry.key` 是什么（i18n 规范 I1：渲染层不做判断）', () => {
