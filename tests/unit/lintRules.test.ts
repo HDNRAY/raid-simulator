@@ -291,6 +291,22 @@ describe('AGENTS.md 硬规则：禁止类型断言逃生舱', () => {
      */
     const GRANDFATHERED: Record<string, number> = {};
 
+    /**
+     * ⚠️ **豁免：`src/i18n/locales/`**（用户决定）。
+     *
+     * 原话："locales 不限制行数"。
+     *
+     * 理由是**它是数据表，不是代码**：一个语言包就是"key → 文案"的
+     * 平铺映射，按命名空间切开会带来**纯粹的间接层**（要跨文件找一个
+     * 词、`flattenCatalog` 的遍历要跟、diff 会分散），而不会让任何人
+     * 更容易读懂 —— §3 拆分的目的是"让人一次读得完一个单元"，
+     * 而语言包的正确读法本来就是"搜 key"，不是"通读"。
+     *
+     * ⚠️ 豁免的**只有 locales**，其余照旧。判据放在这里而不是
+     * `GRANDFATHERED`（那张表是"暂时超限"，这张是"永不适用"）。
+     */
+    const EXEMPT = /^src\/i18n\/locales\//;
+
     const overLimit: string[] = [];
     const ratchetBreaks: string[] = [];
 
@@ -302,6 +318,7 @@ describe('AGENTS.md 硬规则：禁止类型断言逃生舱', () => {
         continue;
       }
       for (const file of files) {
+        if (EXEMPT.test(file)) continue;
         const lines = readFileSync(file, 'utf8').split('\n').length;
         const ceiling = GRANDFATHERED[file];
         if (ceiling === undefined) {
