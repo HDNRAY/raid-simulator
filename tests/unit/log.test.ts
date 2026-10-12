@@ -540,8 +540,19 @@ describe('UI 缩放：覆盖面与鼠标支持', () => {
     // 两处读条
     expect(b.castBar.h).toBeGreaterThan(a.castBar.h);
     expect(b.playerCastBar.h).toBeGreaterThan(a.playerCastBar.h);
-    // 日志面板：贴右，放大后右缘不动
-    expect(b.logPanel.x + b.logPanel.w).toBe(a.logPanel.x + a.logPanel.w);
+    /**
+     * 日志面板：**贴左**（`LAYOUT.log.x = 8`），放大后**左缘不动**、宽度变大。
+     *
+     * ⚠️ 这条原先断言的是"**贴右**，放大后右缘不动" ✗ —— 它把锚点写错的
+     * bug **固化成了标准**。而那个 bug 在默认缩放下完全看不出来：
+     * `'right'` 锚点在 scale=1 时算出来**恰好也是 x=8**
+     * （`960 - 8 - (960-8-8) = 8`），所以只有拖动滑块才会发现面板被裁 ✗
+     *
+     * 这与仓库里其它几处"测试固化了错误行为"是同一类问题
+     * （例如 `avoided` 的两个 reason 被写反）。**断言描述的是现象，
+     * 但那个现象当时是错的。**
+     */
+    expect(b.logPanel.x).toBe(a.logPanel.x);
     expect(b.logPanel.w).toBeGreaterThan(a.logPanel.w);
     // Boss buff 条的方块与间距
     expect(b.bossBuffs.size).toBeGreaterThan(a.bossBuffs.size);

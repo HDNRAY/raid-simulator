@@ -126,11 +126,17 @@ export class BossHeader {
     /* ---------- Boss 相关（需求："boss 相关面板 buff，读条"） ---------- */
     const bb = ui.bossBar;
     /**
-     * ⚠️ 构造时用的是 `FONT.title`(17)，这里用的是 `FONT.body`(15) ——
-     * 两者不一致。**本次重构原样保留**（纯搬运不改行为），只把它记下来：
-     * 于是"名字缩放到 1.5 倍"得到的是 23 而不是 25.5。
+     * ⚠️ **这里曾经用 `FONT.body`(15)，与构造时的 `FONT.title`(17) 不一致**
+     * （已修）。
+     *
+     * 后果很具体：**一拖动缩放滑块，名字就会"缩一下"** —— 因为
+     * `setUiScale` 用 15 作为基准去乘，而当前字号明明是 17 算出来的。
+     * 用户在滑块上第一个动作就能看见 ✗
+     *
+     * 这类"同一个属性的基准值写在两个地方"的问题，和仓库里其它
+     * "两份真相"是同一类；修法就是把基准收成一处：**都取 `FONT.title`**。
      */
-    this.bossName.setSize(ui.len(FONT.body));
+    this.bossName.setSize(ui.len(FONT.title));
     this.bossName.root.x = bb.x + ui.len(2);
     this.bossName.root.y = bb.y;
     this.bossPhase.setSize(ui.len(FONT.small));

@@ -134,6 +134,25 @@ export class UiLayout {
   }
 
   /**
+   * 玩家的 buff / 减益条（面板上方，**左对齐**）。
+   *
+   * ⚠️ 这两个 getter 是**补上的**：原先只有 Boss 的两条有，玩家的两条没有
+   * —— 于是 `playerStatus.setUiScale` 里根本没有可用的缩放矩形，
+   * 那两条就一直保持 20px 不动 ✗ 而同屏的 Boss 图标会跟着放大。
+   *
+   * 同一屏幕上两处同类元素行为不一致，没有任何设计理由。
+   * `LAYOUT.playerBuffs/playerDebuffs` 的 `align` 是 `'left'`，
+   * 所以**不传** `'right'`（传了会把它们翻到右缘去）。
+   */
+  get playerBuffs(): { readonly x: number; readonly y: number; readonly size: number; readonly gap: number } {
+    return this.stripRect(LAYOUT.playerBuffs);
+  }
+
+  get playerDebuffs(): { readonly x: number; readonly y: number; readonly size: number; readonly gap: number } {
+    return this.stripRect(LAYOUT.playerDebuffs);
+  }
+
+  /**
    * buff 条的缩放后矩形。
    *
    * ⚠️ 右对齐的条 `x` 是**右缘**，缩放时要**贴着安全区反向**算：
@@ -148,8 +167,23 @@ export class UiLayout {
     return { x, y: base.y, size: this.len(base.size), gap: this.len(base.gap) };
   }
 
+  /**
+   * 战斗日志的矩形。
+   *
+   * ⚠️ **锚点是 `'top-left'`，曾经错写成 `'right'`**（已修）。
+   *
+   * 日志面板在**左上角**（`LAYOUT.log.x = 8`），而 `'right'` 是"贴右缘
+   * 反向算 x"——scale=1 时两者**恰好都是 8**（`960-8-944=8`），所以这个
+   * 错误在默认缩放下**完全看不出来** ✗ 一旦放大就露馅：150% 时 x 变成
+   * 负数，面板探出画布左缘被裁掉。
+   *
+   * 教训：**锚点写错但默认值巧合正确**，是那种"只有用户去拖动滑块才会
+   * 发现"的 bug。`UI_ANCHORS` 那张表里当时**没有** `logPanel` 这一条，
+   * 所以没有任何东西能对账 —— 现在它仍然不进那张表（那张表的类型是
+   * `Record<string, UiAnchor>`，加不加都行），但这个注释就是它的说明。
+   */
   get logPanel(): Rect {
-    return this.rect(LAYOUT.log, 'right');
+    return this.rect(LAYOUT.log, 'top-left');
   }
 
   get castBar(): Rect {

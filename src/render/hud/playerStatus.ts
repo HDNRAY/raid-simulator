@@ -167,8 +167,13 @@ export class PlayerStatus {
    * ⚠️ 面板锚在**左下角**（`UI_ANCHORS.playerPanel = 'bottom-left'`）——
    * 直接乘系数会让它朝画布中心挤过去。
    *
-   * ⚠️ 两条图标条（`playerBuffs` / `playerDebuffs`）**原来就不跟着缩放**，
-   * 本次重构原样保留（纯搬运不改行为）。
+   * ⚠️ **两条图标条现在也跟着缩放了**（原先不跟，已修）。
+   *
+   * 原先它们不跟，而 **Boss 的两条跟** —— 同一个屏幕上两处同类元素的
+   * 行为不一致，150% 时 "Boss 的图标变大了、自己的还是 20px" ✗
+   * 那种不一致没有设计理由，纯粹是"当时漏了"。
+   *
+   * 缩放口径与 `bossHeader.ts` 完全一致（都走 `IconStrip.setUiScale`）。
    */
   setUiScale(scale: number): void {
     const ui = new UiLayout(scale);
@@ -207,5 +212,9 @@ export class PlayerStatus {
       entry.text.root.x = barX + barW - ui.len(4);
       entry.text.root.y = midY;
     }
+
+    /** 两条图标条 —— 与 `bossHeader.ts` 同一口径（见上面那段 ⚠️）。 */
+    this.playerBuffs.setUiScale(scale, ui.playerBuffs);
+    this.playerDebuffs.setUiScale(scale, ui.playerDebuffs);
   }
 }
