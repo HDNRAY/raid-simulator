@@ -8,7 +8,7 @@ import {
   computeScale,
 } from '../../src/render/scaling';
 import { FONT, GLYPH_NUDGE, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../../src/ui/layout';
-import { iconHintBoxSize, iconHintFontSize, iconHintPlacement } from '../../src/ui/iconHint';
+import { iconHintBoxSize, iconHintFontSize, iconHintPlacement, iconHintRise } from '../../src/ui/iconHint';
 
 /**
  * 技能栏的实现**已拆到 `skillBar.ts`**（原文件超长）。
@@ -340,19 +340,20 @@ describe('技能格：图标尺寸与冷却时的可读性', () => {
 
 });
 
-describe('键位提示的尺度：角标 + 随图标缩放', () => {
+describe('键位提示的尺度：角标 + 抬升 + 随图标缩放', () => {
   /**
    * ⚠️ 2026-10-13 用户把摆法说死了："**是角标在左上角啊？**"（参照物是昨天
-   * 的 `e64eb2d`）。`41ca468` 那次"恢复历史"挖的是**首个提交**的并排摆法，
-   * 挖错了对象 —— 这条断言就是"角标 + 缩放"两条规则叠在一起的样子。
+   * 的 `e64eb2d`），随后又给了一个微调："**f1 还要再往上挪几个 px**"。
+   * `41ca468` 那次"恢复历史"挖的是**首个提交**的并排摆法，挖错了对象 ——
+   * 这条断言就是"角标 + 抬升 + 缩放"三条规则叠在一起的样子。
    *
    * 这类"视觉尺度"的判据分两层：
-   *   - **算得对不对**（左上角对齐、随缩放 + 下限）→ 纯函数，这里钉
+   *   - **算得对不对**（左缘对齐、抬 `rise`、随缩放 + 下限）→ 纯函数，这里钉
    *   - **画出来是什么样**（9px、亮色 + 黑描边、压在角上看得清）→ **截图**
    *     （AGENTS.md §4）—— 所以这里不去正则扫源码里那句话，那是在锁实现
    *     而不是锁行为。
    */
-  it('提示的**左上角 = 图标的左上角**（角标），且不随缩放改规则', () => {
+  it('提示的**左缘 = 图标左缘**、**上缘 = 图标上缘 − `rise`**（角标），不随缩放改规则', () => {
     for (const scale of [0.5, 1, 1.5, 2]) {
       const size = Math.max(1, Math.round(20 * scale));
       const icon = { x: 100, y: 200, w: size, h: size };
@@ -362,10 +363,13 @@ describe('键位提示的尺度：角标 + 随图标缩放', () => {
         hint.w,
         hint.h,
       );
+      const rise = iconHintRise(size);
       const tag = `scale=${scale}`;
-      /** 角标：左缘与上缘都对齐图标的左上角（不是同一行、不是垂直居中）。 */
+      /** 角标：左缘对齐图标左缘、上缘比图标上缘再高 `rise`。 */
       expect(p.x, tag).toBe(icon.x);
-      expect(p.y, tag).toBe(icon.y);
+      expect(p.y, tag).toBe(icon.y - rise);
+      /** 抬升随缩放变大（不是常数 4）。 */
+      expect(rise, tag).toBe(Math.round(4 * (size / 20)));
       /** 提示只往**右下方**长（这正是"压在左上角"的形状）。 */
       expect(p.x + hint.w, tag).toBeGreaterThan(icon.x);
       expect(p.y + hint.h, tag).toBeGreaterThan(icon.y);
