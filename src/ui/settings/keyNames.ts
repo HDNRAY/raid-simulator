@@ -44,8 +44,12 @@ export function keyLabel(key: string, unboundText: string): string {
 export const MNEMONIC_KEYS: Readonly<Record<string, KeyAction>> = {
   g: { kind: 'mnemonic', target: 'tabGeneral' },
   k: { kind: 'mnemonic', target: 'tabKeys' },
-  // 「触屏」页（`T` 取自"触屏/Touch"）—— 与 `K` 同一套直达语义
-  t: { kind: 'mnemonic', target: 'tabTouch' },
+  /**
+   * ⚠️ **`T`（触屏页）已删**（用户 2026-10-12："首页点开的设置，可以不要
+   * 按键tab …… 刚说的触屏的按键设置方法，最好集成到 按键tab 里面"）。
+   * 触屏键位现在是「按键」页右下角的一块，方向键按下就到（`focus.slots`），
+   * 不再需要一个只切 tab 的助记键。
+   */
   r: { kind: 'mnemonic', target: 'resetKeys' },
   // UI 缩放：需求要求它也能用键盘直达，而不只是 Tab 遍历
   s: { kind: 'mnemonic', target: 'slider' },
@@ -59,7 +63,7 @@ export const MNEMONIC_KEYS: Readonly<Record<string, KeyAction>> = {
  * 需求："改快捷键 害得改 i18n吗？" —— 所以键名**不进 i18n**。
  */
 export function mnemonicKeyOf(
-  target: 'tabGeneral' | 'tabKeys' | 'tabTouch' | 'resetKeys' | 'slider',
+  target: 'tabGeneral' | 'tabKeys' | 'resetKeys' | 'slider',
 ): string | undefined {
   for (const [key, action] of Object.entries(MNEMONIC_KEYS)) {
     if (action.kind === 'mnemonic' && action.target === target) return key.toUpperCase();
@@ -68,27 +72,23 @@ export function mnemonicKeyOf(
 }
 
 /**
- * 「触屏」页上**放上 / 取下**一个按钮的动作键。
+ * **触屏键位（右下角模拟键位）用到的键**。
  *
  * ⚠️ 它是一张**键位表**（和 `MNEMONIC_KEYS` 同类），不是文案：
- * `settings.touchHint` 只写"点一下技能格放上 / 取下"这半句，键名由渲染层
+ * `settings.slotHint` 只写"点键位 → 点技能 = 绑定"这半句，键名由渲染层
  * 从这里**反查后拼**上去（AGENTS.md §3b："键位提示不能放进 i18n"）。
- * 改键时只动这里，不必碰语言包。
+ * 改键时只动这里，不必碰语言包；触屏设备上这段提示整个不拼。
  *
- * `label` 与 `key` 分开：`' '` 的键名显然是"空格"，直接显示一个空格
- * 没人看得懂。
- *
- * ⚠️ 这两个键必须真的被 `resolveKeyAction` 当成 `activate`
- * （`logic.ts` 里 `enter` / `' '` 那条），否则提示在骗人 ——
- * 单测里有这条断言。
+ * `label` 与 `key` 分开：方向键要写成 `←→↑↓`（写 `arrowleft` 没人看得懂），
+ * 而 `key` 必须是真的能被 `resolveKeyAction` 处理的键名 ——
+ * `tests/unit/settingsTouch.test.ts` 里有这条断言，否则提示在骗人。
  */
-export const TOUCH_TOGGLE_KEYS: readonly { readonly key: string; readonly label: string }[] = [
+export const SLOT_NAV_KEYS: readonly { readonly key: string; readonly label: string }[] = [
+  { key: 'arrowleft', label: '←→↑↓' },
   { key: 'enter', label: 'Enter' },
-  { key: ' ', label: 'Space' },
 ];
 
-/** 动作键提示（`'Enter / Space'`）—— 由渲染层拼，不进 i18n。 */
-export function touchToggleKeyHint(): string {
-  return TOUCH_TOGGLE_KEYS.map((k) => k.label).join(' / ');
+/** 动作键提示（`'←→↑↓ / Enter'`）—— 由渲染层拼，不进 i18n。 */
+export function slotNavKeyHint(): string {
+  return SLOT_NAV_KEYS.map((k) => k.label).join(' / ');
 }
-

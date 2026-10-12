@@ -8,9 +8,9 @@
 
 import type { Container, Graphics } from 'pixi.js';
 import { FONT, LAYOUT, skillSlotLabels, skillSlotRect } from '../ui/layout';
-import { Label, type PixiCtor } from '../ui/primitives';
+import { HALF_PIXEL, Label, type PixiCtor } from '../ui/primitives';
 import { PALETTE } from './theme';
-import type { ResourceKeyName, SkillSlotView } from './viewModel';
+import { BLOCK_KEYS, type ResourceKeyName, type SkillSlotView } from './viewModel';
 import type { FrameContext, FramePart, TranslateFn } from './sceneTypes';
 
 /**
@@ -27,6 +27,95 @@ export const RESOURCE_COLORS: Readonly<Record<ResourceKeyName, number>> = {
 
 /** 冷却矮条的最大高度（取自布局表，避免两处写魔数）。 */
 const SLOT_COOLDOWN_BAR_H = LAYOUT.skillBar.cooldownBarHeight;
+
+/**
+ * 一格的**视觉状态** —— 四档，各有自己的底色（见 `SLOT_LOOKS`）。
+ *
+ * 需求（用户原话）："键盘的时候技能按钮还是加一个背景色，要不然
+ * **资源不够用不了的技能看着太不清楚了**。"
+ *
+ * ⚠️ 这一档**不是**渲染层自己推出来的：判据全部来自 `app/slotViews.ts`
+ * 算好的 `usable` / `blockedKey` / `cooldownRatio`。渲染层若自己再算一遍
+ * "炁够不够"，就会出现两份会漂的真相（那是本仓库反复踩过的那类 bug）。
+ */
+type SlotState =
+  /** 可用 */
+  | 'ready'
+  /** 冷却中 */
+  | 'cooldown'
+  /** 条件型不可用：读条中 / 派生窗口未开 */
+  | 'waiting'
+  /** **资源不足**（"买不起"）—— 用户点名要一眼看得出来的那一档 */
+  | 'blocked';
+
+/** 一档状态怎么画：底色 / 描边 / 技能字 / 键名 / 代价数字。 */
+interface SlotLook {
+  readonly fill: number;
+  readonly line: number;
+  readonly glyph: number;
+  readonly key: number;
+  /** 代价数字要不要压灰（只有"买不起"要 —— 见 `PALETTE.slot.blockedCost`） */
+  readonly costDimmed: boolean;
+}
+
+/**
+ * 四档状态的配色表。
+ *
+ * 色号全部来自 `PALETTE.slot`（唯一配色真相源）—— 那里写着为什么这四档
+ * **共用一个色相**、而不是"买得起绿、买不起红"。
+ *
+ * ⚠️ `ready` 与 `cooldown` **底色相同**：冷却由白色遮罩 + 中间的大数字
+ * 表达，底色再变一次就是同一个状态两套表达 —— 两套表达必然在某个
+ * 边界上互相矛盾（"看着亮、其实在冷却"）。
+ */
+const SLOT_LOOKS: Readonly<Record<SlotState, SlotLook>> = {
+  ready: {
+    fill: PALETTE.slot.ready,
+    line: PALETTE.slot.readyLine,
+    glyph: 0xffffff,
+    key: 0xd8d8e4,
+    costDimmed: false,
+  },
+  cooldown: {
+    fill: PALETTE.slot.ready,
+    line: PALETTE.slot.readyLine,
+    glyph: 0xb0b0be,
+    key: 0x8a8a98,
+    costDimmed: false,
+  },
+  waiting: {
+    fill: PALETTE.slot.waiting,
+    line: PALETTE.slot.waitingLine,
+    glyph: 0xa8aabc,
+    key: 0x8a8a98,
+    costDimmed: false,
+  },
+  blocked: {
+    fill: PALETTE.slot.blocked,
+    line: PALETTE.slot.blockedLine,
+    glyph: PALETTE.slot.blockedGlyph,
+    key: 0x6a6c7c,
+    costDimmed: true,
+  },
+};
+
+/**
+ * 这一格该按哪一档画。
+ *
+ * ⚠️ 「买不起」的判据就是 `slotViews.ts` 写进 `blockedKey` 的那个 key
+ * （`BLOCK_KEYS.cost`）—— 不在渲染层重新推"资源够不够"，也不重新排序：
+ * 那一格的 `blockedKey` 是谁，这里就照着画。**一份判据。**
+ *
+ * ⚠️ 冷却必须排在 `cost` **之后**判断，与 `slotViews.ts` 里算
+ * `blockedKey` 的先后一致（那里也是先资源、后冷却）：否则"又买不起、
+ * 又在冷却"的格子会被画成"只是冷却"。
+ */
+function slotStateOf(view: SkillSlotView): SlotState {
+  if (view.usable) return 'ready';
+  if (view.blockedKey === BLOCK_KEYS.cost) return 'blocked';
+  if (view.cooldownRatio > 0.001) return 'cooldown';
+  return 'waiting';
+}
 
 export class SkillBarView implements FramePart {
   readonly name = 'skillBar';
@@ -103,6 +192,28 @@ export class SkillBarView implements FramePart {
     }
     this.slots.length = 0;
     this.slotCount = 0;
+  }
+
+  /**
+   * 技能格底色的**圆角半径**（跟着 UI 缩放走）。
+   *
+   * 取 3 与 `PANEL_STYLE.radius` 同一个值 —— 技能格不是面板，但它们
+   * 出现在同一块画面里，"所有方块圆角一致"是这套 UI 看起来是一个东西的
+   * 来源之一。下限 2 是给"缩到 100% 以下"留的：半径再小就和直角没区别，
+   * 那还不如不画。
+   */
+  private cornerRadius(): number {
+    return Math.max(2, Math.round(3 * this.uiScale));
+  }
+
+  /**
+   * 描边宽度（跟着 UI 缩放走）。
+   *
+   * 不写死 1px 的理由：`uiScale` 是**在逻辑画布内**把技能栏放大的，
+   * 100% 时 1px 的描边在 200% 的格子上会细得像没画。
+   */
+  private lineWidth(): number {
+    return Math.max(1, Math.round(this.uiScale));
   }
 
   /**
@@ -283,18 +394,37 @@ export class SkillBarView implements FramePart {
         : derivedRect(s.rect, view.key, skills);
       const { x, y, w, h } = rect;
       const g = s.gfx;
+      const look = SLOT_LOOKS[slotStateOf(view)];
+      const radius = this.cornerRadius();
+      const lineW = this.lineWidth();
+      /**
+       * 描边**内移半个线宽**：奇数宽度要落在半像素上（见 `HALF_PIXEL`
+       * 的说明 —— 1px 的线画在整数坐标上会被反锯齿稀释成两行半像素，
+       * 实测几乎看不见），偶数宽度正好压在像素边界上。
+       */
+      const inset = lineW % 2 === 1 ? HALF_PIXEL : lineW / 2;
       g.clear();
 
       /**
-       * 按钮外观：**没有边框、没有底色**。
+       * 底色 = 技能格的"按钮"本体，四档状态各一色（`PALETTE.slot`）。
        *
-       * 需求明确"暂时不要按钮的大招边框、不同的背景色"。
-       * 所以只用两种手段表达状态：
-       *   - 可用：字正常亮
-       *   - 冷却中：弧形遮罩 + 秒数
-       *   - 不可用（资源不足）：字变暗
-       * 这样画面上只有"字 + 一个弧形"，是这套 UI 最干净的状态。
+       * ------------------------------------------------------------------
+       * 演进：这里曾经**没有底色**（需求原话："暂时不要按钮的大招边框、
+       * 不同的背景色"）。那一版只用"字的明暗"表达状态，结果就是用户这次
+       * 报的问题：**资源不够的技能几乎看不见** —— 深灰的字压在深色的
+       * 战斗背景上，玩家连"这里有一格、它是哪个技能"都认不出来。
+       *
+       * 所以现在每一格都有底色，而且底色**跟着状态走**：
+       *   可用 / 冷却中 → 亮石板（冷却另加白色遮罩 + 秒数）
+       *   读条中等条件型 → 中间一档
+       *   买不起         → 最暗的一档（"断电"）
+       * 四档同色系、只差明暗，所以技能栏不会变成一盏红绿灯。
+       *
+       * ⚠️ 圆角与描边宽度**都按 `uiScale` 走**（`cornerRadius` / `lineWidth`）：
+       * 缩放后格子会变大，写死的 1px / 3px 会显得"糊在格子里"。
        */
+      g.roundRect(x, y, w, h, radius).fill(look.fill);
+
       if (view.cooldownRatio > 0.001) {
         /**
          * 冷却遮罩：**白色半透明，铺满整格**（底边对齐，向满高生长）。
@@ -314,22 +444,34 @@ export class SkillBarView implements FramePart {
          *
          * 数字（`s.cd`）在这个遮罩**之后** addChild，所以盖在最上面 ——
          * 这正是需求要的"数字盖在 icon 上"。
+         *
+         * ⚠️ 遮罩压在**底色**上（在描边之前）：于是"还剩多少"是在那块
+         * 底板上长出来的，而不是浮在战斗背景上。
          */
         const barH = Math.max(1, Math.round(SLOT_COOLDOWN_BAR_H * view.cooldownRatio));
-        g.rect(x, y + h - barH, w, barH).fill({ color: 0xffffff, alpha: 0.55 });
+        g.roundRect(x, y + h - barH, w, barH, radius).fill({ color: 0xffffff, alpha: 0.55 });
       }
       /**
-       * 不可用（资源不足 / 条件不满足）**不画任何方框**。
+       * 描边**最后画**（盖在冷却遮罩之上）：否则冷却时格子的下半边
+       * 会被白色遮罩吃掉边界，四格连成一片。
        *
-       * 早期这里填一个半透明圆角方块 —— 那就是需求里要去掉的
-       * "按钮方框"。现在只用**字的明暗**表达：
-       * 可用纯白、冷却中偏灰、不可用更暗。画面上只剩字与弧。
+       * 四档都有描边（只是颜色不同）—— 它的职责是"画出这一格的**存在**"，
+       * 不再承担状态语义；状态由底色的明暗说。
        */
+      g.roundRect(x + inset, y + inset, w - lineW, h - lineW, radius).stroke({
+        color: look.line,
+        width: lineW,
+      });
 
       s.glyph.set(this.translate(view.nameKey));
-      s.glyph.setColor(
-        view.usable ? 0xffffff : view.cooldownRatio > 0.001 ? 0xb0b0be : 0x5a5a68,
-      );
+      /**
+       * 技能字的颜色跟着**同一档底色**走（`SLOT_LOOKS`）。
+       *
+       * ⚠️ 换底色时最容易被压坏的就是这个字 —— 玩家在"买不起"时**仍然
+       * 要认出这是哪个技能**，所以 `blocked` 那一档的字不是"更暗"，
+       * 而是换成一个压在暗底上仍读得出的中灰（见 `PALETTE.slot.blockedGlyph`）。
+       */
+      s.glyph.setColor(look.glyph);
       /**
        * 图标**不再因冷却而压暗**。
        *
@@ -355,14 +497,12 @@ export class SkillBarView implements FramePart {
        * 之后从没更新 —— 于是技能进冷却时**按键那一侧完全没有反馈**
        * （需求："现在技能 cd 时，按键那边没有反馈了"）。
        *
-       * 现在它跟技能字用同一套明暗：
+       * 现在它跟技能字用同一套明暗（`SLOT_LOOKS` 的 `key` 一列）：
        *   可用   → 亮（玩家一眼知道这个键现在能按）
        *   冷却中 → 偏灰
        *   不可用 → 更暗
        */
-      s.key.setColor(
-        view.usable ? 0xd8d8e4 : view.cooldownRatio > 0.001 ? 0x8a8a98 : 0x55555f,
-      );
+      s.key.setColor(look.key);
       // 剩余秒数：0.1 秒精度（逻辑步长就是 0.1 秒，再细没意义）
       /**
        * 冷却剩秒**取整**。
@@ -393,11 +533,18 @@ export class SkillBarView implements FramePart {
        * 需求："用相应的颜色代表那种资源"。颜色取自 `PALETTE` 里
        * 资源条用的**同一个 base 色**，于是格子右上角的"30"和
        * 左下面板的炁条是同一个绿 —— 玩家不需要学第二套映射。
+       *
+       * ⚠️ 例外：**买不起**的时候压成灰（`PALETTE.slot.blockedCost`）。
+       * 改之前这里无论买不买得起都画成亮的资源色 —— 于是"买不起"的
+       * 格子上顶着一个最醒目的金色 `50`，"底色说断电、数字说没问题"，
+       * 同一个状态两套打架的表达。
        */
       if (view.cost) {
         // 按住技带 `/s` 后缀（"3/s" = 每秒 3 点，不是一共 3 点）
         s.cost.set(`${Math.round(view.cost.value)}${view.cost.suffix ?? ''}`);
-        s.cost.setColor(RESOURCE_COLORS[view.cost.resource]);
+        s.cost.setColor(
+          look.costDimmed ? PALETTE.slot.blockedCost : RESOURCE_COLORS[view.cost.resource],
+        );
       } else {
         s.cost.set('');
       }

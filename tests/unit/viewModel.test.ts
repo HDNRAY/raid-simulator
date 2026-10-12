@@ -272,14 +272,71 @@ describe('技能格：冷却遮罩（白）与数字的层叠', () => {
 
   it('遮罩是**白色**半透明，而不是黑色', async () => {
     const src = await readSkillBar();
-    // 冷却遮罩那次 fill 必须是白色
-    const m = /SLOT_COOLDOWN_BAR_H \* view\.cooldownRatio\)\);\s*\n\s*g\.rect\([^)]*\)\.fill\(\{ color: (0x[0-9a-f]+), alpha: ([\d.]+) \}\)/.exec(src);
+    /**
+     * 冷却遮罩那次 fill 必须是白色。
+     *
+     * ⚠️ 现在是 `roundRect`（不再是 `rect`）：技能格有了底色之后，
+     * 遮罩要跟底色**同一个圆角** —— 否则白色的矮条会从格子底部的
+     * 圆角处探出去（半径 3px，放大到 200% 时是 6px，看得出来）。
+     * 断言的东西没变：**白色 + 半透明**。
+     */
+    const m = /SLOT_COOLDOWN_BAR_H \* view\.cooldownRatio\)\);\s*\n\s*g\.roundRect\([^)]*\)\.fill\(\{ color: (0x[0-9a-f]+), alpha: ([\d.]+) \}\)/.exec(src);
     expect(m, '未找到冷却遮罩的 fill 调用').not.toBeNull();
     expect(m![1]).toBe('0xffffff');
     // 半透明：既压住技能字，又不糊成死白
     const alpha = Number(m![2]);
     expect(alpha).toBeGreaterThan(0.3);
     expect(alpha).toBeLessThan(1);
+  });
+
+  /**
+   * 技能格底色（`PALETTE.slot`）的四条**设计约束**。
+   *
+   * 需求（用户原话）："键盘的时候技能按钮还是加一个背景色，要不然
+   * **资源不够用不了的技能看着太不清楚了**。"
+   *
+   * 为什么用断言锁住颜色而不是只靠截图：截图能证明"这一版好看"，
+   * 证明不了"下一版还成立"。而这几条一旦被改坏，画面**仍然能看** ——
+   * 只是"买不起"不再是最不显眼的那一档（那正是这次要修的问题）。
+   */
+  it('【关键】四档底色：同色系、买不起最暗、字在最暗那档仍可辨', async () => {
+    const { PALETTE } = await import('../../src/render/theme');
+    /** WCAG 相对亮度（sRGB → 线性）。 */
+    const lum = (c: number): number => {
+      const channel = (v: number): number => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+      };
+      return (
+        0.2126 * channel((c >> 16) & 0xff)
+        + 0.7152 * channel((c >> 8) & 0xff)
+        + 0.0722 * channel(c & 0xff)
+      );
+    };
+    const contrast = (a: number, b: number): number => {
+      const [hi, lo] = lum(a) > lum(b) ? [lum(a), lum(b)] : [lum(b), lum(a)];
+      return (hi + 0.05) / (lo + 0.05);
+    };
+
+    // 1. 亮度**单调**：可用 > 条件型不可用 > 买不起。
+    //    "买不起"必须是整条技能栏里最暗的一档 —— 这是"一眼可辨"的来源。
+    expect(lum(PALETTE.slot.ready)).toBeGreaterThan(lum(PALETTE.slot.waiting));
+    expect(lum(PALETTE.slot.waiting)).toBeGreaterThan(lum(PALETTE.slot.blocked));
+
+    // 2. **同色系**（冷石板蓝）：三档的蓝通道都高于红通道。
+    //    红/绿的点色（"红绿灯"）过不了这一条 —— 而本作的纯红/纯绿
+    //    已经分别属于"物理预警"与"炁"，不能再用一次。
+    for (const c of [PALETTE.slot.ready, PALETTE.slot.waiting, PALETTE.slot.blocked]) {
+      expect((c & 0xff) > ((c >> 16) & 0xff), `0x${c.toString(16)} 不是冷色调`).toBe(true);
+    }
+
+    // 3. 技能字压在**最暗**那档上仍读得出（≥ 3:1，大字号可读的门槛）：
+    //    "买不起"时玩家还是得认出这是哪个技能。
+    expect(contrast(PALETTE.slot.blockedGlyph, PALETTE.slot.blocked)).toBeGreaterThan(3);
+
+    // 4. 「买不起」的代价数字**不再是亮的资源色** —— 否则那一格上
+    //    "底色说断电、金色 50 说没问题"，同一个状态两套打架的表达。
+    expect(lum(PALETTE.slot.blockedCost)).toBeLessThan(lum(PALETTE.energy.base));
   });
 
   it('遮罩最大高度 = 整格（不是一条矮条）', () => {

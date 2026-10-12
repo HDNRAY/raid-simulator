@@ -20,9 +20,9 @@ import {
   tabRect,
   closeButtonRect,
   cycleZone,
-  moveFocus,
-  type SettingsFocus,
+  type FocusContext,
 } from '../../src/ui/settings/logic';
+import { visibleTabs } from '../../src/ui/settings/tabs';
 import { UiLayout } from '../../src/ui/uiLayout';
 import { FONT, LAYOUT } from '../../src/ui/layout';
 
@@ -34,21 +34,73 @@ import { FONT, LAYOUT } from '../../src/ui/layout';
  * 与 `DebugPanel` / `formatDebugValue` 同一分工。
  */
 
+/**
+ * `hitTest` / 焦点模型要的**可见 tab 表**。
+ *
+ * ⚠️ 它是**参数**（首页只有「通用」），所以测试也按"游戏内"那一套显式传，
+ * 而不是让被测函数自己去猜 —— 猜的那一天就会出现"从首页打开的设置里
+ * 也能点到按键页"。
+ */
+const TABS = visibleTabs('gameplay');
+
+/** 焦点模型的上下文（默认 = 「按键」页：有格子、有键位区、有两个按钮）。 */
+function ctx(over: Partial<FocusContext> = {}): FocusContext {
+  return {
+    tabCount: TABS.length,
+    cellCount: 6,
+    hasGrid: true,
+    hasSlider: false,
+    hasSlots: true,
+    hasTouchReset: true,
+    slotIndex: 0,
+    ...over,
+  };
+}
+
 describe('几何：点击命中不能错位', () => {
   it('弹窗居中', () => {
     expect(SETTINGS_PANEL.x + SETTINGS_PANEL.w / 2).toBeCloseTo(480, 0);
     expect(SETTINGS_PANEL.y + SETTINGS_PANEL.h / 2).toBeCloseTo(270, 0);
   });
 
-  it('三个 tab 不重叠、且都在弹窗内', () => {
+  it('两个 tab 不重叠、且都在弹窗内', () => {
+    /**
+     * ⚠️ 第三页（「触屏」）已删（用户 2026-10-12：触屏键位并进「按键」页）。
+     * 但 `tabRect(2)` 仍然**算得出来**（只是没有页住在那里）——
+     * 所以这里只断言真正存在的两页。
+     */
     const a = tabRect(0);
     const b = tabRect(1);
-    const c = tabRect(2);
     expect(a.x + a.w).toBeLessThanOrEqual(b.x);
-    expect(b.x + b.w).toBeLessThanOrEqual(c.x);
     expect(insidePanel(a.x + 1, a.y + 1)).toBe(true);
     expect(insidePanel(b.x + 1, b.y + 1)).toBe(true);
-    expect(insidePanel(c.x + 1, c.y + 1)).toBe(true);
+  });
+
+  it('首页只显示「通用」——「按键」页在那个来源下不可见', () => {
+    /**
+     * 用户原话："首页点开的设置，可以不要 按键tab"。
+     * 判据只有一处（`visibleTabs`），这里钉住它的两个取值。
+     */
+    expect(visibleTabs('home')).toEqual(['general']);
+    expect(visibleTabs('gameplay')).toEqual(['general', 'keys']);
+    /** 首页的「通用」仍然可点（它有一个 tab 的位置）。 */
+    const homeTab = tabRect(0);
+    expect(
+      hitTest(homeTab.x + 2, homeTab.y + 2, {
+        tabs: visibleTabs('home'),
+        tab: 'general',
+        rowSkillIds: [],
+      }),
+    ).toEqual({ kind: 'tab', tab: 'general' });
+    /** ⚠️ 而第二个位置在首页**没有任何东西**（不能点到隐藏的「按键」页）。 */
+    const hidden = tabRect(1);
+    expect(
+      hitTest(hidden.x + 2, hidden.y + 2, {
+        tabs: visibleTabs('home'),
+        tab: 'general',
+        rowSkillIds: [],
+      }).kind,
+    ).toBe('none');
   });
 
   it('技能格按 grid 排布，两两不重叠', () => {
@@ -105,9 +157,10 @@ describe('hitTest：点到哪里', () => {
   const rows = ['attack', 'blast', 'focus', 'break', 'dodge', 'guard'];
 
   it('点在弹窗外 → outside（用于"点外部关闭"）', () => {
-    expect(hitTest(2, 2, { tab: 'keys', rowSkillIds: rows }).kind).toBe('outside');
+    expect(hitTest(2, 2, { tabs: TABS, tab: 'keys', rowSkillIds: rows }).kind).toBe('outside');
     expect(
       hitTest(SETTINGS_PANEL.x + SETTINGS_PANEL.w + 5, SETTINGS_PANEL.y + 5, {
+        tabs: TABS,
         tab: 'keys',
         rowSkillIds: rows,
       }).kind,
@@ -118,9 +171,9 @@ describe('hitTest：点到哪里', () => {
     const general = tabRect(0);
     const keys = tabRect(1);
     expect(
-      hitTest(general.x + 2, general.y + 2, { tab: 'keys', rowSkillIds: rows }),
+      hitTest(general.x + 2, general.y + 2, { tabs: TABS, tab: 'keys', rowSkillIds: rows }),
     ).toEqual({ kind: 'tab', tab: 'general' });
-    expect(hitTest(keys.x + 2, keys.y + 2, { tab: 'keys', rowSkillIds: rows })).toEqual({
+    expect(hitTest(keys.x + 2, keys.y + 2, { tabs: TABS, tab: 'keys', rowSkillIds: rows })).toEqual({
       kind: 'tab',
       tab: 'keys',
     });
@@ -129,7 +182,7 @@ describe('hitTest：点到哪里', () => {
   it('点键位行命中对应的技能', () => {
     for (const [i, skillId] of rows.entries()) {
       const r = keyCellRect(i);
-      expect(hitTest(r.x + 4, r.y + 4, { tab: 'keys', rowSkillIds: rows })).toEqual({
+      expect(hitTest(r.x + 4, r.y + 4, { tabs: TABS, tab: 'keys', rowSkillIds: rows })).toEqual({
         kind: 'keyRow',
         skillId,
       });
@@ -138,23 +191,23 @@ describe('hitTest：点到哪里', () => {
 
   it('点恢复默认按钮命中 resetKeys', () => {
     const r = resetButtonRect();
-    expect(hitTest(r.x + 4, r.y + 4, { tab: 'keys', rowSkillIds: rows }).kind).toBe('resetKeys');
+    expect(hitTest(r.x + 4, r.y + 4, { tabs: TABS, tab: 'keys', rowSkillIds: rows }).kind).toBe('resetKeys');
   });
 
   it('【关键】通用 tab 下不会命中键位行 —— 那一块在通用 tab 里不存在', () => {
     const r = keyCellRect(0);
-    expect(hitTest(r.x + 4, r.y + 4, { tab: 'general', rowSkillIds: rows }).kind).toBe('none');
+    expect(hitTest(r.x + 4, r.y + 4, { tabs: TABS, tab: 'general', rowSkillIds: rows }).kind).toBe('none');
   });
 
   it('【关键】通用 tab 下也不会命中"恢复默认"——它属于按键 tab', () => {
     const r = resetButtonRect();
-    expect(hitTest(r.x + 4, r.y + 4, { tab: 'general', rowSkillIds: rows }).kind).toBe('none');
+    expect(hitTest(r.x + 4, r.y + 4, { tabs: TABS, tab: 'general', rowSkillIds: rows }).kind).toBe('none');
   });
 
   it('最后一行**可见**的键位仍然可点', () => {
     const many = Array.from({ length: KEY_GRID_CAPACITY + 4 }, (_, i) => `s${i}`);
     const last = keyCellRect(KEY_GRID_CAPACITY - 1);
-    expect(hitTest(last.x + 4, last.y + 4, { tab: 'keys', rowSkillIds: many })).toEqual({
+    expect(hitTest(last.x + 4, last.y + 4, { tabs: TABS, tab: 'keys', rowSkillIds: many })).toEqual({
       kind: 'keyRow',
       skillId: `s${KEY_GRID_CAPACITY - 1}`,
     });
@@ -168,7 +221,7 @@ describe('hitTest：点到哪里', () => {
      */
     const many = Array.from({ length: KEY_GRID_CAPACITY + 4 }, (_, i) => `s${i}`);
     const beyond = keyCellRect(KEY_GRID_CAPACITY + 1);
-    const target = hitTest(beyond.x + 4, beyond.y + 4, { tab: 'keys', rowSkillIds: many });
+    const target = hitTest(beyond.x + 4, beyond.y + 4, { tabs: TABS, tab: 'keys', rowSkillIds: many });
     expect(target.kind).not.toBe('keyRow');
   });
 
@@ -176,6 +229,7 @@ describe('hitTest：点到哪里', () => {
     // 弹窗左下角、键位行与按钮之外的区域
     expect(
       hitTest(SETTINGS_PANEL.x + 10, SETTINGS_PANEL.y + SETTINGS_PANEL.h - 70, {
+        tabs: TABS,
         tab: 'keys',
         rowSkillIds: rows,
       }).kind,
@@ -360,99 +414,6 @@ describe('系统保留键不能绑技能', () => {
   });
 });
 
-describe('弹窗内的键盘导航：没有只能用鼠标的死角', () => {
-  const cells = 6;
-
-  it('方向键在技能网格里移动，与 grid 的列数一致', () => {
-    const first: SettingsFocus = { zone: 'grid', index: 0 };
-    expect(moveFocus(first, 'right', cells)).toEqual({ zone: 'grid', index: 1 });
-    expect(moveFocus(first, 'down', cells)).toEqual({ zone: 'grid', index: KEY_GRID.cols });
-    // 第一列往左不动（不绕到上一行末尾，避免"斜着跳"）
-    expect(moveFocus(first, 'left', cells)).toEqual(first);
-  });
-
-  it('网格第一行往上 → 到 tab 行；最后一行往下 → 到"恢复默认"', () => {
-    expect(moveFocus({ zone: 'grid', index: 0 }, 'up', cells)).toEqual({ zone: 'tabs', index: 0 });
-    const lastRow: SettingsFocus = { zone: 'grid', index: KEY_GRID.cols * 2 };
-    expect(moveFocus(lastRow, 'down', cells)).toEqual({ zone: 'reset' });
-  });
-
-  it('焦点不会落到看不见的格子上', () => {
-    /**
-     * 容量是算出来的（`KEY_GRID_CAPACITY`），如果某一行只填了一半，
-     * 向下移动不能把焦点放到那个空位上 —— 否则玩家按 Enter
-     * 会"对空气改键"。
-     */
-    const odd = 4; // 4 个格子、3 列 → 第二行只有 1 个
-    const secondRowStart: SettingsFocus = { zone: 'grid', index: 2 };
-    expect(moveFocus(secondRowStart, 'down', odd)).toEqual({ zone: 'reset' });
-  });
-
-  it('"恢复默认"往上/往左回到网格', () => {
-    expect(moveFocus({ zone: 'reset' }, 'up', cells)).toEqual({ zone: 'grid', index: cells - 1 });
-    expect(moveFocus({ zone: 'reset' }, 'left', cells)).toEqual({ zone: 'grid', index: cells - 1 });
-  });
-
-  it('Tab 循环所有可用区域（含关闭按钮），Shift+Tab 反向', () => {
-    const a = cycleZone({ zone: 'tabs', index: 0 }, cells);
-    expect(a.zone).toBe('grid');
-    const b = cycleZone(a, cells);
-    expect(b.zone).toBe('reset');
-    // reset → close → tabs（关闭按钮也在循环里，否则它只能用鼠标）
-    const c = cycleZone(b, cells);
-    expect(c.zone).toBe('close');
-    expect(cycleZone(c, cells).zone).toBe('tabs');
-    // 反向：tabs ← close（顺序是 tabs → grid → reset → close → tabs）
-    expect(cycleZone({ zone: 'tabs', index: 0 }, cells, true).zone).toBe('close');
-  });
-
-  it('没有技能格时 Tab 只在 tab 行与按钮之间走（不产生空焦点）', () => {
-    const a = cycleZone({ zone: 'tabs', index: 0 }, 0);
-    expect(a.zone).toBe('reset');
-    const a2 = cycleZone(a, 0);
-    expect(a2.zone).toBe('close');
-    expect(cycleZone(a2, 0).zone).toBe('tabs');
-  });
-
-  it('Enter 激活：tab 行切换 tab、格子上开始改键、按钮上恢复默认', () => {
-    expect(resolveActivate({ zone: 'tabs', index: 0 }, [], 'keys')).toEqual({
-      kind: 'switchTab',
-      tab: 'general',
-    });
-    expect(resolveActivate({ zone: 'tabs', index: 1 }, [], 'keys')).toEqual({
-      kind: 'switchTab',
-      tab: 'keys',
-    });
-    expect(resolveActivate({ zone: 'reset' }, [], 'keys')).toEqual({ kind: 'resetKeys' });
-    expect(resolveActivate({ zone: 'grid', index: 1 }, ['a', 'b'], 'keys')).toEqual({
-      kind: 'startCapture',
-      skillId: 'b',
-    });
-  });
-
-  it('方向键与 Enter 在弹窗内被当作导航，不会穿透成技能', () => {
-    // 这是"几乎全键盘可操作"的前提：弹窗开着时方向键不该去打怪
-    expect(resolveKeyAction('arrowup', false)).toEqual({ kind: 'move', direction: 'up' });
-    expect(resolveKeyAction('arrowdown', false)).toEqual({ kind: 'move', direction: 'down' });
-    expect(resolveKeyAction('arrowleft', false)).toEqual({ kind: 'move', direction: 'left' });
-    expect(resolveKeyAction('arrowright', false)).toEqual({ kind: 'move', direction: 'right' });
-    expect(resolveKeyAction('enter', false)).toEqual({ kind: 'activate' });
-    expect(resolveKeyAction('tab', false)).toEqual({ kind: 'cycle', back: false });
-  });
-
-  it('捕获中优先一切 —— 连方向键都是"想绑这个键"', () => {
-    // 否则玩家想把技能绑成方向键就永远绑不上
-    expect(resolveKeyAction('arrowup', true)).toEqual({ kind: 'capture', key: 'arrowup' });
-    expect(resolveKeyAction('enter', true)).toEqual({ kind: 'capture', key: 'enter' });
-    // Esc 是唯一退路
-    expect(resolveKeyAction('escape', true)).toEqual({ kind: 'cancelCapture' });
-  });
-
-  it('无关按键不产生动作（但也不穿透）', () => {
-    expect(resolveKeyAction('x', false)).toEqual({ kind: 'ignore' });
-  });
-});
-
 describe('保留键在弹窗内的处理路径', () => {
   /**
    * 需求："一部分系统 reserved 的按键不支持绑技能，记得加提示"。
@@ -493,11 +454,11 @@ describe('关闭按钮与 Boss 面板边距', () => {
    */
   it('【关键】点「关闭」命中 close，且关掉弹窗', () => {
     const r = closeButtonRect();
-    const hit = hitTest(r.x + r.w / 2, r.y + r.h / 2, { tab: 'general', rowSkillIds: [] });
+    const hit = hitTest(r.x + r.w / 2, r.y + r.h / 2, { tabs: TABS, tab: 'general', rowSkillIds: [] });
     expect(hit.kind).toBe('close');
     // 每一页上都该能点（它是弹窗级的，不属于某一页）
-    expect(hitTest(r.x + 2, r.y + 2, { tab: 'keys', rowSkillIds: ['attack'] }).kind).toBe('close');
-    expect(hitTest(r.x + 2, r.y + 2, { tab: 'touch', rowSkillIds: ['attack'] }).kind).toBe('close');
+    expect(hitTest(r.x + 2, r.y + 2, { tabs: TABS, tab: 'keys', rowSkillIds: ['attack'] }).kind).toBe('close');
+    expect(hitTest(r.x + 2, r.y + 2, { tabs: TABS, tab: 'general', rowSkillIds: ['attack'] }).kind).toBe('close');
   });
 
   it('关闭按钮在弹窗内、右上角，且不与 tab 行重叠', () => {
@@ -509,10 +470,18 @@ describe('关闭按钮与 Boss 面板边距', () => {
   });
 
   it('键盘也能到「关闭」（Enter 可触发）', () => {
-    expect(resolveActivate({ zone: 'close' }, [], 'keys').kind).toBe('close');
+    expect(
+      resolveActivate({
+        focus: { zone: 'close' },
+        tabs: TABS,
+        rowSkillIds: [],
+        slotSkillIds: [],
+        selectedSlot: undefined,
+      }).kind,
+    ).toBe('close');
     // 循环里必须包含它，否则它只能用鼠标
-    const fromReset = cycleZone({ zone: 'reset' }, 0);
-    expect(fromReset.zone).toBe('close');
+    const fromTouchReset = cycleZone({ zone: 'touchReset' }, ctx());
+    expect(fromTouchReset.zone).toBe('close');
   });
 
   /**
@@ -652,6 +621,7 @@ describe('⚠️ 命中测试必须与**当前模式**的渲染度量一致', ()
       for (let dy = 2; dy < rect.h - 2; dy += 2) {
         total += 1;
         const target = hitTest(rect.x + dx, rect.y + dy, {
+          tabs: TABS,
           tab: 'keys',
           rowSkillIds: rows,
           showKeyHints,

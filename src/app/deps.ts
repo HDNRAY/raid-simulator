@@ -32,6 +32,7 @@ import {
 } from './settingsStore';
 import { touchButtonIdsFromBindings } from '../input/touchLayout';
 import { bindableSkillIdsOf } from './keyRows';
+import { TOUCH_BUTTON_CAPACITY } from '../render/touchGeometry';
 import type { ContentRegistry } from '../core/content/registry';
 import type { KeyBinding } from '../input/keyboard';
 import type { ContentBundle } from '../core/content/validate';
@@ -175,6 +176,11 @@ export function createGameDeps(): GameDeps {
     settingsStore.touchButtonsRaw,
     touchPool,
     touchButtonIdsFromBindings(bindings),
+    /**
+     * ⚠️ **容量要从渲染层的几何取**（`TOUCH_BUTTON_CAPACITY` = 7）：
+     * 双弧只放得下 7 个键位，超出部分没有任何位置可画。
+     */
+    TOUCH_BUTTON_CAPACITY,
   );
   if (touchLoad.migrated) settingsStore.saveTouchButtons(touchLoad.skillIds);
 

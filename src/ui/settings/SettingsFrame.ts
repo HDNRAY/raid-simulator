@@ -15,33 +15,29 @@ import { FONT } from '../layout';
 import { Label, Panel, type PixiCtor } from '../primitives';
 import { PALETTE } from '../../render/theme';
 import type { TranslateFn } from '../../i18n/translator';
-import {
-  CLOSE_BUTTON,
-  SETTINGS_PANEL,
-  SETTINGS_TABS,
-  mnemonicKeyOf,
-  tabRect,
-  type SettingsTab,
-} from './logic';
+import { ALL_SETTINGS_TABS, CLOSE_BUTTON, SETTINGS_PANEL, mnemonicKeyOf, tabRect } from './logic';
+/**
+ * ⚠️ **可见的 tab 是参数**（首页只有「通用」）：外框不能自己去算，
+ * 那会造出第二份判据（`ui/settings/tabs.ts` 的 `visibleTabs` 才是真相）。
+ */
+import type { SettingsTab } from './tabs';
 
 /**
  * 每个 tab 的**标签 key** 与**助记键目标**。
  *
- * ⚠️ 写成两张表而不是 `tab === 'general' ? ... : ...` 的三元链：加了第三个
- * tab（「触屏」）之后，三元链的默认分支会**静默**把新页的标签画成按键页的，
- * 而截图上看不出"这页叫错了"。
+ * ⚠️ 写成两张表而不是 `tab === 'general' ? ... : ...` 的三元链：三元链的
+ * 默认分支会**静默**把新页的标签画成旧页的，而截图上看不出"这页叫错了"。
+ * 加页 / 删页时这两张表会因为**类型**而必须一起改（键是 `SettingsTab`）。
  */
-const TAB_LABEL = {
+const TAB_LABEL: Readonly<Record<SettingsTab, string>> = {
   general: 'settings.tabGeneral',
   keys: 'settings.tabKeys',
-  touch: 'settings.tabTouch',
-} as const;
+};
 
-const TAB_MNEMONIC = {
+const TAB_MNEMONIC: Readonly<Record<SettingsTab, 'tabGeneral' | 'tabKeys'>> = {
   general: 'tabGeneral',
   keys: 'tabKeys',
-  touch: 'tabTouch',
-} as const;
+};
 
 interface TabButton {
   readonly tab: SettingsTab;
@@ -56,6 +52,10 @@ export class SettingsFrame {
   readonly closeHint: Label;
 
   private readonly title: Label;
+  /**
+   * tab 按钮按**容量**建好，显隐由 `update` 决定 —— 于是"首页少一个 tab"
+   * 不需要销毁/重建 Pixi 对象（那正是"切来源后画面错位"的来源）。
+   */
   private readonly tabButtons: TabButton[] = [];
 
   constructor(
@@ -94,10 +94,12 @@ export class SettingsFrame {
 
     /* ---- tab 按钮 ---- */
     /**
-     * ⚠️ 顺序取自 `SETTINGS_TABS`（唯一真相）—— 命中测试用的是同一张表，
-     * 所以"点第二个位置进了第三页"这类错位结构上不可能发生。
+     * ⚠️ 按钮**按位置**建（最多 `ALL_SETTINGS_TABS.length` 个），
+     * 每次 `update` 按**当前可见的 tab 表**决定画哪几个。
+     * 顺序取自 `tabRect(i)` —— 命中测试用的是同一个函数，所以
+     * "点第二个位置进了第三页"这类错位结构上不可能发生。
      */
-    for (const [i, tab] of SETTINGS_TABS.entries()) {
+    for (const [i, tab] of ALL_SETTINGS_TABS.entries()) {
       const rect = tabRect(i);
       const gfx = new pixi.Graphics();
       const label = new Label(pixi, {
@@ -125,6 +127,8 @@ export class SettingsFrame {
    * 两者可能同时在同一个 tab 上，也可能分开（焦点移走了但 tab 没切）。
    */
   update(
+    /** **可见的 tab 表**（首页只有「通用」）—— 由调用方从 `visibleTabs` 取。 */
+    tabs: readonly SettingsTab[],
     activeTab: SettingsTab,
     focusZone: string,
     /**
@@ -142,6 +146,15 @@ export class SettingsFrame {
     showKeyHints = true,
   ): void {
     for (const [i, button] of this.tabButtons.entries()) {
+      /** ⚠️ 不可见的 tab **整个不画**（也不可点 —— 命中测试同样按可见表来）。 */
+      const visible = tabs.includes(button.tab);
+      button.gfx.visible = visible;
+      button.label.root.visible = visible;
+      if (!visible) {
+        button.gfx.clear();
+        button.label.set('');
+        continue;
+      }
       const active = button.tab === activeTab;
       const focused = focusZone === 'tabs' && focusIndex === i;
       const base = this.translate(TAB_LABEL[button.tab]);

@@ -24,8 +24,20 @@
  * 共享几何常量（**叶子模块**，见那里的说明 —— 留在这会造循环依赖）。
  * 转发出去，外部 import 路径不变。
  */
-import { SETTINGS_PANEL, KEY_GRID, RESET_BUTTON, SKILL_DETAIL } from './settingsGeometry';
+import {
+  SETTINGS_PANEL,
+  RESET_BUTTON,
+  SKILL_DETAIL,
+  touchResetButtonRect,
+} from './settingsGeometry';
 import { MNEMONIC_KEYS } from './keyNames';
+/**
+ * ⚠️ `tab` 的**可见集合**是"按从哪打开取值"的（用户 2026-10-12：
+ * "首页点开的设置，可以不要 按键tab"），真相在 `./tabs`。这里只转发类型，
+ * 外部 import 路径不变；**判据只有那一份**。
+ */
+import type { SettingsTab } from './tabs';
+import { previewSlotAt } from './touchPreview';
 /**
  * 键名显示与助记键反查搬到了 `./keyNames`（那一撮自成一体的）。
  * 这里**转发**，外部 import 路径不变。
@@ -33,10 +45,10 @@ import { MNEMONIC_KEYS } from './keyNames';
 export {
   EMPTY_KEY,
   MNEMONIC_KEYS,
-  TOUCH_TOGGLE_KEYS,
+  SLOT_NAV_KEYS,
   keyLabel,
   mnemonicKeyOf,
-  touchToggleKeyHint,
+  slotNavKeyHint,
 } from './keyNames';
 /**
  * 改键语义（`RebindResult` / `applyRebind` / `swapSlotSkills` /
@@ -51,9 +63,20 @@ export {
   RESET_BUTTON,
   SKILL_DETAIL,
   HINT_LINE,
+  TOUCH_PREVIEW,
   hintLineY,
   bottomAreaTop,
 } from './settingsGeometry';
+/**
+ * ⚠️ **焦点模型搬到了 `./focus`**（这一轮加了"触屏键位"这个新的焦点区，
+ * 几何/命中与焦点模型本来就不是一件事，按 AGENTS.md §3 的顺序先横向切割）。
+ * 这里**转发**，外部 import 路径不变 —— 与 `keyNames` / `rebind` 同一做法。
+ */
+export type { ActivateAction, ActivateInput, Direction, FocusContext, SettingsFocus } from './focus';
+export { INITIAL_FOCUS, cycleZone, moveFocus, resolveActivate } from './focus';
+export { visibleTabs, preferredTab, tabAt, tabIsVisible, ALL_SETTINGS_TABS } from './tabs';
+export type { SettingsOrigin, SettingsTab } from './tabs';
+export { touchResetButtonRect } from './settingsGeometry';
 /**
  * ⚠️ 既 import 又 export：本文件内部要用它们（`keyGridStateOf`
  * 之类），而外部 import 路径不变。`export ... from` 不产生本地绑定。
@@ -197,25 +220,20 @@ export function insidePanel(px: number, py: number): boolean {
  * 点击命中
  * ------------------------------------------------------------------ */
 
-export type SettingsTab = 'general' | 'keys' | 'touch';
-
-/**
- * tab 的顺序 —— **唯一真相**。
- *
- * ⚠️ 抽出来是因为有三处消费者（命中测试 / 外框渲染 / 助记键映射），
- * 而"第三个 tab 加到哪儿"这种漂移只会表现为"点第二个位置进了第三页"，
- * 截图上看不出来。
- *
- * ⚠️ 顺序**不许整理**：`index` 是助记键与既有测试锚定的（0 通用、
- * 1 按键、2 触屏）。
- */
-export const SETTINGS_TABS: readonly SettingsTab[] = ['general', 'keys', 'touch'];
-
 export type ClickTarget =
   | { readonly kind: 'outside' }
   | { readonly kind: 'tab'; readonly tab: SettingsTab }
   | { readonly kind: 'resetKeys' }
+  /** 「触屏默认」按钮（恢复触屏键位表）。 */
+  | { readonly kind: 'resetTouch' }
   | { readonly kind: 'keyRow'; readonly skillId: string }
+  /**
+   * 右下角**模拟键位**上的一个槽位（两步交互的第一步）。
+   *
+   * ⚠️ 它与 `keyRow` 是**两个区**：`keyRow` 是技能表，`slot` 是键位表。
+   * 先点 `slot` 再点 `keyRow` = 绑定（判定在 `slotActions.resolveSlotBind`）。
+   */
+  | { readonly kind: 'slot'; readonly index: number }
   /** 通用页的 UI 缩放滑块（支持鼠标点击/拖动） */
   | { readonly kind: 'scaleSlider' }
   /** 右上角的关闭 */
@@ -234,6 +252,13 @@ export function hitTest(
   py: number,
   options: {
     readonly tab: SettingsTab;
+    /**
+     * **这个来源下可见的 tab**（首页只有「通用」）。
+     *
+     * ⚠️ 必须由调用方给：命中测试不能自己去算"哪几页可见"，
+     * 那会造出第二份判据（`./tabs.visibleTabs` 才是唯一真相）。
+     */
+    readonly tabs: readonly SettingsTab[];
     readonly rowSkillIds: readonly string[];
     /**
      * 是否显示键名 —— 它**决定网格度量**（桌面 3 列 44 高 / 触屏 3 列 64 高）。
@@ -252,7 +277,7 @@ export function hitTest(
   // 关闭按钮优先级最高（它在右上角，与别的区域不重叠，但语义上该先判）
   if (contains(closeButtonRect(), px, py)) return { kind: 'close' };
 
-  for (const [i, tab] of SETTINGS_TABS.entries()) {
+  for (const [i, tab] of options.tabs.entries()) {
     if (contains(tabRect(i), px, py)) return { kind: 'tab', tab };
   }
 
@@ -266,6 +291,13 @@ export function hitTest(
 
   if (options.tab !== 'general') {
     if (contains(resetButtonRect(), px, py)) return { kind: 'resetKeys' };
+    if (contains(touchResetButtonRect(), px, py)) return { kind: 'resetTouch' };
+    /**
+     * ⚠️ **模拟键位**先于技能格判定：它在格阵之外（右下角），但判定顺序
+     * 放在这里能保证"以后有人把它挪到格子上"时**不会**变成"点键位改键"。
+     */
+    const slot = previewSlotAt(px, py);
+    if (slot !== undefined) return { kind: 'slot', index: slot };
     /**
      * ⚠️ 用**当前模式**的度量与容量 —— 渲染那边（`KeyGrid`）就是这么算的，
      * 两处必须同源。用桌面常量 `KEY_GRID_CAPACITY` 会让触屏的第 3 行
@@ -286,139 +318,12 @@ export function hitTest(
 }
 
 /* ------------------------------------------------------------------ *
- * 键盘导航
- * ------------------------------------------------------------------ */
-
-/**
- * 键盘焦点位置。
- *
- * 用一个**线性游标**而不是"tab 索引 + 列 + 行"三件套：箭头键的处理
- * 只需要"往哪个方向找下一个"，而线性游标把这个逻辑收敛成一次
- * 索引运算，顺便让"Tab 也能切换"变得免费。
+ * 键盘：这一次按键意味着什么
+ * ------------------------------------------------------------------ *
+ * ⚠️ 焦点模型（含「触屏键位」那个新的焦点区）搬到了 `./focus` ——
+ * 见那里的说明。这里只剩**单键解析**：这个键是移动、激活、还是忽略。
+ * 焦点是"现在在谁身上"，与"这个键是什么"是两件事。
  */
-export type SettingsFocus =
-  | { readonly zone: 'tabs'; readonly index: number }
-  | { readonly zone: 'grid'; readonly index: number }
-  | { readonly zone: 'slider' }
-  | { readonly zone: 'reset' }
-  /** 右上角的「关闭」 */
-  | { readonly zone: 'close' };
-
-/** 初始焦点：按键 tab 的第一个技能格（最常改的东西）。 */
-export const INITIAL_FOCUS: SettingsFocus = { zone: 'grid', index: 0 };
-
-export const TAB_COUNT = SETTINGS_TABS.length;
-
-/**
- * 方向键移动后的新焦点。
- *
- * `cellCount` 是**当前可见**的技能格数量 —— 焦点不会跑到看不见的格子上。
- */
-export function moveFocus(
-  focus: SettingsFocus,
-  direction: 'up' | 'down' | 'left' | 'right',
-  cellCount: number,
-  /**
-   * 当前页有没有 UI 缩放 slider（只有「通用」页有）。
-   *
-   * 不把它写死是因为**焦点模型不该知道 tab 的语义** ——
-   * 调用方说"这页有什么"，模型只负责在它们之间走。
-   */
-  hasSlider = false,
-  /** 当前页有没有技能格（只有「按键」页有）。 */
-  hasGrid = true,
-): SettingsFocus {
-  /** 通用页的纵向顺序：tabs → slider → reset */
-  const downFromTabs: SettingsFocus = hasGrid
-    ? { zone: 'grid', index: 0 }
-    : hasSlider
-      ? { zone: 'slider' }
-      : { zone: 'reset' };
-
-  if (focus.zone === 'tabs') {
-    // tab 行是横向的一排
-    if (direction === 'left') {
-      return { zone: 'tabs', index: (focus.index + TAB_COUNT - 1) % TAB_COUNT };
-    }
-    if (direction === 'right') {
-      return { zone: 'tabs', index: (focus.index + 1) % TAB_COUNT };
-    }
-    return downFromTabs;
-  }
-
-  if (focus.zone === 'slider') {
-    // slider **不吃上下**：上下是"离开这一行"，左右留给调用方当调节键
-    if (direction === 'down') return { zone: 'reset' };
-    if (direction === 'up' || direction === 'left' || direction === 'right') {
-      return { zone: 'tabs', index: 0 };
-    }
-    return focus;
-  }
-
-  if (focus.zone === 'reset') {
-    if (direction === 'up' || direction === 'left') {
-      if (hasGrid) {
-        return cellCount > 0 ? { zone: 'grid', index: cellCount - 1 } : { zone: 'tabs', index: 0 };
-      }
-      return hasSlider ? { zone: 'slider' } : { zone: 'tabs', index: 0 };
-    }
-    return focus;
-  }
-
-  // 网格：左右在同一行内移动，上下按列移动；越界则换区
-  // ⚠️ 必须先收窄到 grid —— 焦点也可能停在 tabs / slider / reset / close 上
-  if (focus.zone !== 'grid') return focus;
-  const index = focus.index;
-  const col = index % KEY_GRID.cols;
-  const row = Math.floor(index / KEY_GRID.cols);
-  const rows = Math.max(1, Math.ceil(cellCount / KEY_GRID.cols));
-
-  const clampToCell = (i: number): SettingsFocus =>
-    i >= 0 && i < cellCount ? { zone: 'grid', index: i } : focus;
-
-  switch (direction) {
-    case 'left':
-      return col > 0 ? clampToCell(index - 1) : focus;
-    case 'right':
-      return col < KEY_GRID.cols - 1 ? clampToCell(index + 1) : focus;
-    case 'up':
-      if (row > 0) return clampToCell(index - KEY_GRID.cols);
-      return { zone: 'tabs', index: 0 };
-    case 'down': {
-      if (row < rows - 1) {
-        const next = index + KEY_GRID.cols;
-        // 最后一行的空位不落焦点
-        if (next < cellCount) return { zone: 'grid', index: next };
-      }
-      return { zone: 'reset' };
-    }
-  }
-}
-
-/** Tab / Shift+Tab 在较大区域之间切换（无障碍习惯用 Tab，所以也支持）。 */
-export function cycleZone(
-  focus: SettingsFocus,
-  cellCount: number,
-  back = false,
-  hasSlider = false,
-): SettingsFocus {
-  /** Tab 顺序跟着"这一页实际有什么"走 —— 见 `moveFocus` 的同名参数说明 */
-  const usable: SettingsFocus['zone'][] = ['tabs'];
-  if (cellCount > 0) usable.push('grid');
-  if (hasSlider) usable.push('slider');
-  usable.push('reset', 'close');
-  const current = usable.indexOf(focus.zone);
-  const step = back ? -1 : 1;
-  const next = usable[(current + step + usable.length) % usable.length]!;
-  if (next === 'grid') {
-    const index = focus.zone === 'grid' ? focus.index : 0;
-    return { zone: 'grid', index: Math.min(index, Math.max(0, cellCount - 1)) };
-  }
-  if (next === 'slider') return { zone: 'slider' };
-  if (next === 'tabs') return { zone: 'tabs', index: 0 };
-  if (next === 'close') return { zone: 'close' };
-  return { zone: 'reset' };
-}
 
 /**
  * 弹窗打开时，某个按键该怎么处理。
@@ -450,7 +355,15 @@ export type KeyAction =
    *   mnemonic  一键直达 —— 熟练之后不必按六次
    * 两者并存，互不替代。
    */
-  | { readonly kind: 'mnemonic'; readonly target: 'tabGeneral' | 'tabKeys' | 'tabTouch' | 'resetKeys' | 'slider' }
+  | {
+      readonly kind: 'mnemonic';
+      /**
+       * ⚠️ **不含触屏**（`T` 已删）：触屏键位不再是一个独立的 tab，
+       * 而是「按键」页右下角的一块 —— 它有自己的焦点区（`focus.slots`），
+       * 从网格按下方向键就到，不需要助记键。
+       */
+      readonly target: 'tabGeneral' | 'tabKeys' | 'resetKeys' | 'slider';
+    }
   | { readonly kind: 'move'; readonly direction: 'up' | 'down' | 'left' | 'right' }
   | { readonly kind: 'cycle'; readonly back: boolean }
   | { readonly kind: 'activate' }
@@ -493,50 +406,6 @@ export function resolveKeyAction(key: string, capturing: boolean): KeyAction {
   if (key === 'enter' || key === ' ') return { kind: 'activate' };
   if (key === 'escape') return { kind: 'closePanel' };
   return { kind: 'ignore' };
-}
-
-/** 激活当前焦点时的动作。 */
-export type ActivateAction =
-  | { readonly kind: 'switchTab'; readonly tab: SettingsTab }
-  | { readonly kind: 'startCapture'; readonly skillId: string }
-  /**
-   * **放上 / 取下触屏按钮**（「触屏」页上 Enter / 空格 = 点一下格子）。
-   *
-   * ⚠️ 它与 `startCapture` 按**当前 tab** 分流：同一句"激活这一格"，
-   * 在「按键」页是"改键"，在「触屏」页是"增删按钮"。两个动作都保留，
-   * 所以键鼠与触屏在**各自那一页**上都能走完（AGENTS.md §3b 功能对等）。
-   */
-  | { readonly kind: 'toggleTouch'; readonly skillId: string }
-  | { readonly kind: 'resetKeys' }
-  | { readonly kind: 'resetTouch' }
-  | { readonly kind: 'close' }
-  | { readonly kind: 'none' };
-
-/**
- * @param tab 当前页 —— 它决定"激活一个技能格"是**改键**还是**增删触屏按钮**
- *   （见 `ActivateAction.toggleTouch`）。
- */
-export function resolveActivate(
-  focus: SettingsFocus,
-  rowSkillIds: readonly string[],
-  tab: SettingsTab,
-): ActivateAction {
-  if (focus.zone === 'tabs') {
-    return { kind: 'switchTab', tab: SETTINGS_TABS[focus.index] ?? 'keys' };
-  }
-  if (focus.zone === 'reset') {
-    /** 「恢复默认」两页含义不同：按键页恢复键位，触屏页恢复按钮集合。 */
-    return tab === 'touch' ? { kind: 'resetTouch' } : { kind: 'resetKeys' };
-  }
-  if (focus.zone === 'close') return { kind: 'close' };
-  // slider 没有"激活"动作 —— 它的变化由左右方向键直接完成
-  // （见 SettingsPanel 里 `move` 分支对 slider 的专门处理）
-  if (focus.zone === 'slider') return { kind: 'none' };
-  const skillId = rowSkillIds[focus.index];
-  if (skillId === undefined) return { kind: 'none' };
-  return tab === 'touch'
-    ? { kind: 'toggleTouch', skillId }
-    : { kind: 'startCapture', skillId };
 }
 
 /**

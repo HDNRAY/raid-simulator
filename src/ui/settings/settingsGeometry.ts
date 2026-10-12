@@ -90,24 +90,86 @@ export const HINT_LINE = {
 } as const;
 
 /**
- * 按键页底部：**选中技能的详情**（四行：名字 / 标签 / 说明 / 代价·冷却）。
+ * 按键页底部：**选中技能的详情**（名字 / 说明 / 代价·冷却）。
  *
  * 位置在格阵之下、提示行之上。⚠️ 网格容量必须**在它之前**停下 ——
  * 见 `keyGridLayout.rowsCapacity` 里踩过的坑。
+ *
+ * ⚠️ 宽度 608 → **400**（2026-10-12）：右下角要放**模拟键位预览**
+ * （`TOUCH_PREVIEW`，从 `x = 428` 起）。不缩的话两者会叠在一起 ——
+ * 而叠在一起的样子是"技能说明压在按钮上"，很难看出是哪一边错了。
  */
 export const SKILL_DETAIL = {
   x: 16,
   /** 距弹窗顶部的距离 */
   top: 344,
-  w: 608,
+  w: 400,
   /**
-   * 四行，行距 **22px**。
+   * 三行，行距 **22px**。
    *
    * 22 是**量出来的**：13px 的 `Label` 实测占高 22px（Pixi 的行高远大于
    * 字号）。试过 14 / 15 / 18，三次都叠字。
    */
   h: 80,
 } as const;
+
+/**
+ * **触屏键位的模拟预览**（设置页右下角，面板坐标系）。
+ *
+ * ==================================================================
+ * 它是"和真实按钮同一套布局"的，不是另画一份
+ * ==================================================================
+ *
+ * 需求："在设置页面的右下角，模拟一个 7 个键位"，且**预览必须与实际
+ * 一致**。所以这里只给"装进哪块区域"，里面每个键位的位置由
+ * `ui/settings/touchPreview.ts` 从 `render/touchGeometry` 的**同一份
+ * 双弧几何**按比例算出来 —— ⚠️ **不许手摆坐标**。
+ *
+ * 位置：格阵之下（格阵最下沿 296）、详情区之右（详情区右沿 416）。
+ * 右下角留 16px 边距，与其它元素一致。
+ */
+export const TOUCH_PREVIEW = {
+  x: 428,
+  top: 302,
+  w: 196,
+  h: 190,
+  /**
+   * 顶部留给**说明文字**（"已选键位 3"）的高度。
+   *
+   * 双弧按剩下的高度等比缩放 —— 所以这个数字也是几何的一部分，
+   * 不要在下游再写死一次。
+   */
+  captionH: 16,
+} as const;
+
+/**
+ * 「触屏默认」按钮（与「恢复默认」并排）。
+ *
+ * ⚠️ 它与 `RESET_BUTTON` 是**两个含义不同的东西**（键位 vs 触屏键位），
+ * 所以是两个常量、两个命中区域 —— 合成一个就会变成"点哪都恢复键位"。
+ */
+export const TOUCH_RESET_BUTTON = {
+  x: 120,
+  w: 88,
+  h: 26,
+  /** 与 `RESET_BUTTON.bottom` 对齐（同一行）。 */
+  bottom: 16,
+} as const;
+
+/** 「触屏默认」按钮在画布坐标系里的矩形。 */
+export function touchResetButtonRect(): {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+} {
+  return {
+    x: SETTINGS_PANEL.x + TOUCH_RESET_BUTTON.x,
+    y: SETTINGS_PANEL.y + SETTINGS_PANEL.h - TOUCH_RESET_BUTTON.bottom - TOUCH_RESET_BUTTON.h,
+    w: TOUCH_RESET_BUTTON.w,
+    h: TOUCH_RESET_BUTTON.h,
+  };
+}
 
 /** 提示文字行的 y（相对弹窗顶部）。 */
 export function hintLineY(): number {

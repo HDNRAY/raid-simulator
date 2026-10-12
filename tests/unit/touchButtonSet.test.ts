@@ -1,5 +1,5 @@
 /**
- * **触屏按钮集合**：可选技能与键盘**同一个池** + 设置页「触屏」页的派发。
+ * **触屏键位**：可选技能与键盘**同一个池** + 「按键」页右下角那块的两步交互。
  *
  * ==================================================================
  * 这个文件防的是什么
@@ -33,15 +33,22 @@ import {
   type PanelDispatchInput,
 } from '../../src/ui/settings/panelDispatch';
 import {
+  SETTINGS_PANEL,
   hitTest,
   keyCellRect,
   keyGridMetrics,
   resetButtonRect,
   resolveActivate,
   resolveKeyAction,
-  tabRect,
+  touchResetButtonRect,
 } from '../../src/ui/settings/logic';
-import { TOUCH_TOGGLE_KEYS, touchToggleKeyHint } from '../../src/ui/settings/keyNames';
+import { visibleTabs } from '../../src/ui/settings/tabs';
+import { MNEMONIC_KEYS, SLOT_NAV_KEYS, slotNavKeyHint } from '../../src/ui/settings/keyNames';
+import {
+  TOUCH_BUTTON_CAPACITY,
+  touchButtonCenter,
+} from '../../src/render/touchGeometry';
+import { previewSlotCenter, previewSlotRadius } from '../../src/ui/settings/touchPreview';
 
 /** 与 `app/deps.ts` 同一条构造方式（同一份内容）。 */
 function testRegistry() {
@@ -108,14 +115,22 @@ describe('触屏按钮集合与键位表：两套，互不派生', () => {
 });
 
 /* ------------------------------------------------------------------ *
- * 「触屏」页的派发
+ * 右下角「模拟键位」的派发（两步交互）
  * ------------------------------------------------------------------ */
 
-function panelInput(over: Partial<PanelDispatchInput> & { px: number; py: number }): PanelDispatchInput {
+const TABS = visibleTabs('gameplay');
+const ROWS = ['attack', 'blast', 'focus'];
+
+function panelInput(
+  over: Partial<PanelDispatchInput> & { px: number; py: number },
+): PanelDispatchInput {
   return {
     visible: true,
-    tab: 'touch',
-    rowSkillIds: ['attack', 'blast', 'focus'],
+    tab: 'keys',
+    tabs: TABS,
+    rowSkillIds: ROWS,
+    slotSkillIds: [],
+    selectedSlot: undefined,
     focus: { zone: 'grid', index: 0 },
     capturingSkillId: undefined,
     showKeyHints: true,
@@ -129,74 +144,99 @@ function cellCenter(index: number): { px: number; py: number } {
   return { px: r.x + r.w / 2, py: r.y + r.h / 2 };
 }
 
-describe('「触屏」页的派发：点一下格子 = 放上 / 取下', () => {
-  it('【关键】第三个 tab（触屏）可点 —— 它是这一整套功能唯一的入口', () => {
+describe('两步交互：点键位 → 点技能 → 绑定（用户 2026-10-12 定案）', () => {
+  it('【关键】预览画的就是战斗里那 7 个键位（复用同一份几何）', () => {
     /**
-     * ⚠️ 触屏玩家要给自己加一个技能按钮，只能从这一页进（见 AGENTS.md §3b
-     * 的作废标注）。tab 顺序由 `SETTINGS_TABS` 定，所以这里断言的是
-     * "第三个位置 = 触屏页"，而不是某个绝对坐标。
+     * ⚠️ 这条是"预览与实战不许是两份真相"的机器判据：预览的圆心由
+     * `touchGeometry` 的双弧**等比变换**而来，所以
+     *   "两个键位的相对方位" 在预览与战斗里必须一致
+     * （等比 ⇒ 夹角与距离比不变）。
+     * 手摆坐标的话这条会挂。
      */
-    const touch = tabRect(2);
-    expect(hitTest(touch.x + 2, touch.y + 2, { tab: 'keys', rowSkillIds: [] })).toEqual({
-      kind: 'tab',
-      tab: 'touch',
-    });
-    /** 三个 tab 不重叠（第三个挤到别处就会点错页）。 */
-    for (const i of [0, 1]) {
-      const prev = tabRect(i);
-      expect(prev.x + prev.w).toBeLessThanOrEqual(touch.x);
+    const centers = Array.from({ length: TOUCH_BUTTON_CAPACITY }, (_, i) =>
+      previewSlotCenter(i),
+    );
+    expect(centers.every((c) => c !== undefined)).toBe(true);
+    /** 键位之间的相对位置与真实几何同构（同一把尺子量：距离比恒定）。 */
+    const previewDist = (a: number, b: number): number => {
+      const pa = centers[a]!;
+      const pb = centers[b]!;
+      return Math.hypot(pa.x - pb.x, pa.y - pb.y);
+    };
+    const worldDist = (a: number, b: number): number => {
+      const wa = touchButtonCenter(a)!;
+      const wb = touchButtonCenter(b)!;
+      return Math.hypot(wa.x - wb.x, wa.y - wb.y);
+    };
+    const ratio = previewDist(0, 1) / worldDist(0, 1);
+    for (const [a, b] of [
+      [0, 2],
+      [3, 6],
+      [0, 4],
+      [2, 5],
+    ] as const) {
+      expect(previewDist(a, b) / worldDist(a, b)).toBeCloseTo(ratio, 6);
+    }
+    /** 而且**整组都在预览区里**（不越出面板）。 */
+    for (const c of centers) {
+      expect(c!.x).toBeGreaterThan(SETTINGS_PANEL.x);
+      expect(c!.x).toBeLessThan(SETTINGS_PANEL.x + SETTINGS_PANEL.w);
+      expect(c!.y).toBeGreaterThan(SETTINGS_PANEL.y);
+      expect(c!.y).toBeLessThan(SETTINGS_PANEL.y + SETTINGS_PANEL.h);
     }
   });
 
-  it('触屏页与按键页**共用同一套格子几何**（点得到、也点得到恢复按钮）', () => {
-    const cell = keyCellRect(0, keyGridMetrics(true));
+  it('键位是可点的 —— 它是"配触屏按钮"唯一的入口（触屏玩家也点得到）', () => {
+    for (let i = 0; i < TOUCH_BUTTON_CAPACITY; i += 1) {
+      const c = previewSlotCenter(i)!;
+      expect(hitTest(c.x, c.y, { tabs: TABS, tab: 'keys', rowSkillIds: ROWS })).toEqual({
+        kind: 'slot',
+        index: i,
+      });
+    }
+    /** 键位圆的直径要够手指点（>= 44px 的可点下限）。 */
+    expect(previewSlotRadius() * 2).toBeGreaterThanOrEqual(44);
+  });
+
+  it('点键位 → selectSlot；再点它 → deselectSlot（不清空内容）', () => {
+    const c = previewSlotCenter(3)!;
+    expect(resolvePanelDispatch(panelInput({ px: c.x, py: c.y }))).toEqual({
+      kind: 'selectSlot',
+      index: 3,
+    });
     expect(
-      hitTest(cell.x + 4, cell.y + 4, { tab: 'touch', rowSkillIds: ['attack'] }),
-    ).toEqual({ kind: 'keyRow', skillId: 'attack' });
-    const reset = resetButtonRect();
-    expect(hitTest(reset.x + 4, reset.y + 4, { tab: 'touch', rowSkillIds: ['attack'] }).kind).toBe(
-      'resetKeys',
-    );
+      resolvePanelDispatch(panelInput({ px: c.x, py: c.y, selectedSlot: 3 })),
+    ).toEqual({ kind: 'deselectSlot' });
   });
 
-  it('触屏页点格子 → toggleTouch（不是 captureSkill / focusSkill）', () => {
-    const at = cellCenter(2);
-    expect(resolvePanelDispatch(panelInput({ ...at, tab: 'touch' }))).toEqual({
-      kind: 'toggleTouch',
-      skillId: 'focus',
-    });
-    /** ⚠️ 同一格在「按键」页仍然是"先选中"（键盘那套没被动）。 */
-    expect(resolvePanelDispatch(panelInput({ ...at, tab: 'keys' }))).toEqual({
+  it('【关键】选中键位后点技能 = 绑上去（同一格不选中时仍是"只选中技能"）', () => {
+    /** ⚠️ 用**没有焦点**的那一格：点已聚焦的格子本来是"进改键"。 */
+    const at = cellCenter(1);
+    expect(
+      resolvePanelDispatch(panelInput({ ...at, selectedSlot: 2, slotSkillIds: ['', ''] })),
+    ).toEqual({ kind: 'assignTouchSlot', slot: 2, skillId: 'blast' });
+    expect(resolvePanelDispatch(panelInput(at))).toEqual({
       kind: 'focusSkill',
-      skillId: 'focus',
+      skillId: 'blast',
     });
   });
 
-  it('【关键】触屏页**再点一次已选中的格子**仍然只是增删 —— 不进改键', () => {
-    /**
-     * 需求："不要做成『请按一个键』—— 那对触屏无意义。"
-     *
-     * 「按键」页上"点已选中的格子"会进改键（那条路对键盘是必须的），
-     * 所以这里用**同一个坐标、同一个焦点**分别跑两页，钉住分叉。
-     */
+  it('【关键】点回该键位上已有的技能 = 取下（清空键位的唯一入口）', () => {
     const at = cellCenter(0);
-    const sameCell = { ...at, focus: { zone: 'grid', index: 0 } as const };
-    expect(resolvePanelDispatch(panelInput({ ...sameCell, tab: 'touch' })).kind).toBe(
-      'toggleTouch',
-    );
-    expect(resolvePanelDispatch(panelInput({ ...sameCell, tab: 'keys' })).kind).toBe(
-      'captureSkill',
-    );
+    expect(
+      resolvePanelDispatch(panelInput({ ...at, selectedSlot: 0, slotSkillIds: ['attack'] })),
+    ).toEqual({ kind: 'clearTouchSlot', slot: 0 });
   });
 
-  it('触屏页的「恢复默认」→ resetTouch（与按键页的 resetKeys 分开）', () => {
-    const r = resetButtonRect();
-    const at = { px: r.x + 4, py: r.y + 4 };
-    expect(resolvePanelDispatch(panelInput({ ...at, tab: 'touch' }))).toEqual({
+  it('「触屏默认」是**另一个按钮**（不恢复键位）', () => {
+    const r = touchResetButtonRect();
+    expect(resolvePanelDispatch(panelInput({ px: r.x + 4, py: r.y + 4 }))).toEqual({
       kind: 'resetTouch',
       notice: 'touchResetDone',
     });
-    expect(resolvePanelDispatch(panelInput({ ...at, tab: 'keys' }))).toEqual({
+    /** ⚠️ 「恢复默认」仍旧只恢复**键位**（两者靠位置分开，不靠当前页）。 */
+    const kr = resetButtonRect();
+    expect(resolvePanelDispatch(panelInput({ px: kr.x + 4, py: kr.y + 4 }))).toEqual({
       kind: 'resetKeys',
       notice: 'keysResetDone',
     });
@@ -204,53 +244,96 @@ describe('「触屏」页的派发：点一下格子 = 放上 / 取下', () => {
 
   /**
    * ==================================================================
-   * 键盘那条路：Enter / 空格在触屏页 = **放上 / 取下**（不是改键）
+   * 键盘那条路：与鼠标**同一份判定**（AGENTS.md §3b 功能对等）
    * ==================================================================
    *
-   * 需求："触屏原生：点一下技能格 = 放上 / 取下。⚠️ 不要做成『请按一个键』
-   * —— 那对触屏无意义" + "键盘也要能用（触屏笔记本）"。
-   *
-   * ⚠️ 断言"**同一句激活**在两个 tab 上给出两种动作"：只测触屏页会漏掉
-   * "按键页被顺手改成 toggleTouch"这种回归（那会让键盘用户再也改不了键）。
-   * 判定走 `resolveActivate`（`resolveKeyDispatch` 就是拿它解析 Enter 的）。
+   * ⚠️ 断言"同一句激活在不同状态下给出两种动作"：只测鼠标会漏掉
+   * "键盘被顺手做成只能改键"或反之，而那种不一致截图上看不出来。
    */
-  it('【关键】同一个格子：按键页 = 改键，触屏页 = 放上 / 取下', () => {
-    expect(resolveActivate({ zone: 'grid', index: 0 }, ['a'], 'keys')).toEqual({
-      kind: 'startCapture',
-      skillId: 'a',
+  it('【关键】同一个 `Enter`：没选键位 = 改键，选了键位 = 绑到它', () => {
+    const base = { tabs: TABS, rowSkillIds: ['a'], slotSkillIds: ['', ''] } as const;
+    expect(
+      resolveActivate({
+        ...base,
+        focus: { zone: 'grid', index: 0 },
+        selectedSlot: undefined,
+      }),
+    ).toEqual({ kind: 'startCapture', skillId: 'a' });
+    expect(
+      resolveActivate({ ...base, focus: { zone: 'grid', index: 0 }, selectedSlot: 1 }),
+    ).toEqual({ kind: 'assignTouchSlot', slot: 1, skillId: 'a' });
+    /** 那个键位上已经有它 → 取下。 */
+    expect(
+      resolveActivate({ ...base, focus: { zone: 'grid', index: 0 }, selectedSlot: 0 }),
+    ).toEqual({ kind: 'assignTouchSlot', slot: 0, skillId: 'a' });
+    expect(
+      resolveActivate({
+        tabs: TABS,
+        rowSkillIds: ['a'],
+        slotSkillIds: ['a'],
+        focus: { zone: 'grid', index: 0 },
+        selectedSlot: 0,
+      }),
+    ).toEqual({ kind: 'clearTouchSlot', slot: 0 });
+  });
+
+  it('键位区按 Enter 选中它，再按一次取消选中', () => {
+    const base = { tabs: TABS, rowSkillIds: ROWS, slotSkillIds: [] } as const;
+    expect(
+      resolveActivate({ ...base, focus: { zone: 'slots', index: 4 }, selectedSlot: undefined }),
+    ).toEqual({ kind: 'selectSlot', index: 4 });
+    expect(
+      resolveActivate({ ...base, focus: { zone: 'slots', index: 4 }, selectedSlot: 4 }),
+    ).toEqual({ kind: 'deselectSlot' });
+  });
+
+  it('「触屏默认」的 Enter = resetTouch；「恢复默认」的 = resetKeys', () => {
+    const base = { tabs: TABS, rowSkillIds: [], slotSkillIds: [], selectedSlot: undefined } as const;
+    expect(resolveActivate({ ...base, focus: { zone: 'reset' } })).toEqual({ kind: 'resetKeys' });
+    expect(resolveActivate({ ...base, focus: { zone: 'touchReset' } })).toEqual({
+      kind: 'resetTouch',
     });
-    expect(resolveActivate({ zone: 'grid', index: 0 }, ['a'], 'touch')).toEqual({
-      kind: 'toggleTouch',
-      skillId: 'a',
-    });
-    /** 触屏页的「恢复默认」恢复的是**按钮集合**，与按键页含义不同。 */
-    expect(resolveActivate({ zone: 'reset' }, [], 'touch')).toEqual({ kind: 'resetTouch' });
-    /** 第三个 tab 的助记键（`T`）也要真的切到触屏页。 */
-    expect(resolveActivate({ zone: 'tabs', index: 2 }, [], 'keys')).toEqual({
-      kind: 'switchTab',
-      tab: 'touch',
-    });
+  });
+
+  it('两个 tab 的助记键都还能用（`T` 已删 —— 触屏不再是独立页）', () => {
+    expect(resolveActivate({
+      tabs: TABS,
+      rowSkillIds: [],
+      slotSkillIds: [],
+      selectedSlot: undefined,
+      focus: { zone: 'tabs', index: 0 },
+    })).toEqual({ kind: 'switchTab', tab: 'general' });
+    expect(resolveActivate({
+      tabs: TABS,
+      rowSkillIds: [],
+      slotSkillIds: [],
+      selectedSlot: undefined,
+      focus: { zone: 'tabs', index: 1 },
+    })).toEqual({ kind: 'switchTab', tab: 'keys' });
+    /** ⚠️ `t` 不再是助记键（它曾经切「触屏」页）。 */
+    expect(MNEMONIC_KEYS['t']).toBeUndefined();
   });
 });
 
 /**
- * 动作键提示与实际行为一致。
+ * 动作提示与实际行为一致。
  *
- * ⚠️ 键名（`Enter / Space`）来自 `TOUCH_TOGGLE_KEYS` 而不是 i18n
- * （AGENTS.md §3b），而且**必须真的被面板当成 activate** ——
+ * ⚠️ 键名（`←→↑↓ / Enter`）来自 `SLOT_NAV_KEYS` 而不是 i18n
+ * （AGENTS.md §3b），而且**必须真的能被面板处理** ——
  * 否则提示在骗人（而这类"提示与行为不一致"只有人会看出来）。
  */
-describe('动作键提示与实际行为一致', () => {
-  it('【关键】提示里写的那几个键，`resolveKeyAction` 真的当成 activate', () => {
-    expect(TOUCH_TOGGLE_KEYS.length).toBeGreaterThan(0);
-    for (const { key } of TOUCH_TOGGLE_KEYS) {
-      // 非捕获状态下 = 用户想激活这一格（触屏页上就是增删按钮）
-      expect(resolveKeyAction(key, false)).toEqual({ kind: 'activate' });
+describe('键位提示与实际行为一致', () => {
+  it('【关键】提示里写的那几个键，`resolveKeyAction` 真的当它是一回事', () => {
+    expect(SLOT_NAV_KEYS.length).toBeGreaterThan(0);
+    for (const { key } of SLOT_NAV_KEYS) {
+      const action = resolveKeyAction(key, false);
+      // 方向键 → move；Enter → activate。都不是 ignore
+      expect(action.kind === 'move' || action.kind === 'activate').toBe(true);
     }
-    expect(touchToggleKeyHint()).toContain('Enter');
+    expect(slotNavKeyHint()).toContain('Enter');
   });
 
   it('提示里**不含**中文（键名不进 i18n，也不自己写死一句话）', () => {
-    expect(touchToggleKeyHint()).not.toMatch(/[\u4e00-\u9fff]/);
+    expect(slotNavKeyHint()).not.toMatch(/[\u4e00-\u9fff]/);
   });
 });

@@ -15,8 +15,17 @@ import { skillDetailRect } from './logic';
 import type { KeyRow } from './rows';
 import type { TranslateFn } from '../../i18n/translator';
 
-/** 说明的最大字符数（超出截断加省略号）。 */
-const DETAIL_DESC_MAX_CHARS = 46;
+/**
+ * 说明的最大字符数 —— **按详情区宽度算出来**，不写死。
+ *
+ * ⚠️ 原先写死 46（那时详情区 608 宽）。现在它让位给右下角的模拟键位、
+ * 缩到 400 宽，写死的 46 会**画到预览按钮上**（中文一字约 1em，
+ * 46 字 ≈ 506px > 400）。所以改成从宽度推导：
+ * `(宽 - 留白) / 字号`，两个数字都是既有的常量。
+ */
+function descMaxChars(): number {
+  return Math.max(8, Math.floor((skillDetailRect().w - 12) / FONT.tiny));
+}
 
 /** 四行之间的行距（见 `render` 里的实测说明）。 */
 const LINE_H = 22;
@@ -95,7 +104,7 @@ export class SkillDetail {
     const desc =
       row.descKey === undefined
         ? ''
-        : truncate(t(row.descKey).replaceAll('**', ''), DETAIL_DESC_MAX_CHARS);
+        : truncate(t(row.descKey).replaceAll('**', ''), descMaxChars());
     /**
      * **结构化行**：消耗 · 冷却 · 施放。
      *

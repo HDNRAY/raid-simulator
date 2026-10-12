@@ -15,8 +15,8 @@
  */
 
 import type { BattleEngine } from '../core/combat/battleState';
-/** ⚠️ tab 用 `SettingsTab`（面板有三个 tab）—— 见 `debugApi.ts` 的同名说明。 */
-import type { SettingsTab } from '../ui/settings/logic';
+/** ⚠️ tab 用 `SettingsTab`（可见的页依来源而变）—— 见 `debugApi.ts` 的同名说明。 */
+import type { SettingsTab } from '../ui/settings/tabs';
 
 /** 探针输出。字段名即端到端脚本读的名字。 */
 export interface ProbeSnapshot {

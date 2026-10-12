@@ -59,6 +59,16 @@ declare global {
         isOpen(): boolean;
         capturing(): string | undefined;
         focus(): { readonly zone: string; readonly index?: number };
+        /**
+         * 第 `index` 个**技能格**的圆心（逻辑坐标）。
+         *
+         * ⚠️ 验证脚本要注入**真实触摸**就必须知道坐标，而脚本**不许自己
+         * 复制一份 `keyCellRect`**（布局一调就静默失效 —— "点空了"和
+         * "功能坏了"看起来一模一样）。与 `touchButtonCenter` 同一个理由。
+         */
+        cellCenter(index: number): { readonly x: number; readonly y: number };
+        /** 右下角第 `index` 个**键位**的圆心（越界为 `null`）。 */
+        slotCenter(index: number): { readonly x: number; readonly y: number } | null;
         trace(): readonly string[];
         /**
          * 打开/关掉**齿轮按钮**的键盘焦点并立刻重绘（截图用）。

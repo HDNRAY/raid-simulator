@@ -160,22 +160,25 @@ export function serializeBindings(bindings: readonly KeyBinding[]): string {
 }
 
 /**
- * 校验触屏按钮集合。
+ * 校验触屏键位表。
  *
  * @param raw `localStorage` 里的原始字符串（可能是 `null` / 坏 JSON）
  * @param validSkillIds **可选技能池** —— 与设置页列出的技能**同一个池**
  *   （用户要求："只是可选技能是一样的"）。不在池里的 id 一律丢弃。
- * @returns 校验后的技能 id（顺序即槽位）；**`undefined` = 没有可用的存档**，
- *   调用方据此走一次**迁移**（老玩家从旧的"有键的技能"初始化）。
+ * @returns 校验后的槽位表（**下标 = 槽位号**，`''` = 空槽位，末尾空槽已裁）；
+ *   **`undefined` = 没有可用的存档**，调用方据此走一次**迁移**。
  *
  * ⚠️ `undefined` 与 `[]` 是**两件事**，不能合并：
  *   `undefined` = 没存过 / 读不出来 → 该迁移
  *   `[]`        = 玩家**明确**把所有按钮都取下了 → 迁移会把它们全加回来 ✗
  *
- * ⚠️ 坏数据分两级（与 `parseBindings` 同一条纪律）：
- *   - **单条**坏（不是字符串 / 空串 / 不在池里 / 重复）→ 丢掉那一条
- *   - **整份**读不出来（坏 JSON / 不是数组）→ 当作"没存过"，交给迁移
- *     （比"清空玩家的按钮"温和，而且迁移结果正是那个坏存档想表达的东西）
+ * ⚠️ **位置信息必须保住**（2026-10-12 起）：槽位就是位置，所以一条坏数据
+ * 只能变成**那个槽位空着**（`''`），**不许把后面的整体前移** ——
+ * 前移会让玩家摆好的位置整体错一格，而界面上看起来只是"少了一个按钮"。
+ * 所以下面所有"丢掉这一条"的分支都写成 `out.push('')`。
+ *
+ * ⚠️ **整份**读不出来（坏 JSON / 不是数组）仍然当作"没存过"，交给迁移
+ *   （比"清空玩家的按钮"温和，而且迁移结果正是那个坏存档想表达的东西）。
  */
 export function parseTouchButtons(
   raw: string | null,
@@ -194,20 +197,41 @@ export function parseTouchButtons(
   const seen = new Set<string>();
   const out: string[] = [];
   for (const item of parsed) {
-    if (typeof item !== 'string') continue;
-    if (item === '') continue;
-    if (!validSkillIds.has(item)) continue;
-    /** 同一个技能不能占两个按钮位（手改存储很容易造出来）。 */
-    if (seen.has(item)) continue;
+    if (typeof item !== 'string' || item === '') {
+      out.push('');
+      continue;
+    }
+    if (!validSkillIds.has(item)) {
+      out.push('');
+      continue;
+    }
+    /** 同一个技能不能占两个键位（手改存储很容易造出来）—— 后者留空。 */
+    if (seen.has(item)) {
+      out.push('');
+      continue;
+    }
     seen.add(item);
     out.push(item);
   }
-  return out;
+  return trimTrailing(out);
 }
 
-/** 序列化触屏按钮集合（就是一个 id 数组 —— 顺序是内容的一部分）。 */
-export function serializeTouchButtons(skillIds: readonly string[]): string {
-  return JSON.stringify(skillIds);
+/** 末尾的空槽位不存（与 `input/touchLayout.trimTrailingSlots` 同一条规则）。 */
+function trimTrailing(slots: readonly string[]): readonly string[] {
+  let end = slots.length;
+  while (end > 0 && slots[end - 1] === '') end -= 1;
+  return end === slots.length ? slots : slots.slice(0, end);
+}
+
+/**
+ * 序列化触屏键位表。
+ *
+ * ⚠️ 与旧格式（技能 id 数组）**同一个形状**：旧存档里没有空串，读出来就是
+ * "0..n-1 号槽位各一个技能"，所以**不需要迁移**（用户明确要求尽量不动存储）。
+ * 新写的存档可能带空洞：`["attack","","guard"]` = 1 号键位空着。
+ */
+export function serializeTouchButtons(slots: readonly string[]): string {
+  return JSON.stringify(trimTrailing(slots));
 }
 
 /**
@@ -247,11 +271,21 @@ export function loadTouchButtons(
   raw: string | null,
   validSkillIds: ReadonlySet<string>,
   legacySkillIds: readonly string[],
+  /**
+   * 槽位容量（= 双弧放得下的个数，`TOUCH_BUTTON_CAPACITY`）。
+   *
+   * ⚠️ **必须在这里截断**：超出的槽位没有任何位置可画
+   * （`touchButtonCenter` 返回 `undefined`），留着就成了"存得下、
+   * 用不上"的幽灵数据 —— 而玩家在设置页也看不到它们（预览只画 7 个）。
+   */
+  capacity: number,
 ): TouchButtonsLoad {
   const saved = parseTouchButtons(raw, validSkillIds);
-  if (saved !== undefined) return { skillIds: saved, migrated: false };
+  if (saved !== undefined) {
+    return { skillIds: trimTrailing(saved.slice(0, capacity)), migrated: false };
+  }
   return {
-    skillIds: legacySkillIds.filter((id) => validSkillIds.has(id)),
+    skillIds: legacySkillIds.filter((id) => validSkillIds.has(id)).slice(0, capacity),
     migrated: true,
   };
 }

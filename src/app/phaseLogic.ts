@@ -63,6 +63,12 @@
 export type Phase = 'home' | 'characterSelect' | 'prepare' | 'battle';
 
 /**
+ * ⚠️ **类型**导入（编译期擦除，不构成循环依赖）：`ui/settings/tabs.ts`
+ * 是"哪几页可见"的真相，这里只借它的 `SettingsOrigin` 命名。
+ */
+import type { SettingsOrigin } from '../ui/settings/tabs';
+
+/**
  * **返回能去哪**（目前只有首页）。
  *
  * ⚠️ 单独给出这个类型是为了让"返回目标"是 `Phase` 的**真子集**：
@@ -136,3 +142,29 @@ export const CONTROL_VISIBILITY = {
   /** 左上角的返回按钮。 */
   back: backVisibleIn,
 } as const;
+
+/**
+ * 设置面板是**从哪打开的** —— 决定它能显示哪几页。
+ *
+ * ==================================================================
+ * 为什么这个判定住在 `phaseLogic.ts`
+ * ==================================================================
+ *
+ * 它就是"**这个相位下，某个界面意味着什么**"那类问题，与
+ * `backVisibleIn` / `phaseFromEscape` 同一张表（用户 2026-10-12：
+ * "首页点开的设置，可以不要 按键tab"）。
+ *
+ * ⚠️ **只有首页**算"没有上下文"：首页没有战斗、没有技能栏，
+ * 所以"给技能配键 / 配触屏键位"没有对象。选角色屏与自由模式都已经是
+ * "这一局"的一部分（技能表就在那儿），所以它们照旧显示「按键」页。
+ *
+ * ⚠️ 判据落在这里而不是 `settingsToggle` / `game.ts`：那两个地方
+ * 各自写一遍 `phase === 'home'` 就会漂，而漂的样子是"从首页打开的设置
+ * 里出现了按键页"（截图上看不出对错）。
+ *
+ * `ui/settings/tabs.ts` 的 `visibleTabs(origin)` 才是"哪几页可见"的
+ * 唯一真相；这里只负责 `Phase → SettingsOrigin` 这一步翻译。
+ */
+export function settingsOriginOf(phase: Phase): SettingsOrigin {
+  return phase === 'home' ? 'home' : 'gameplay';
+}

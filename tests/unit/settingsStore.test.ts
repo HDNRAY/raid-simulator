@@ -152,7 +152,14 @@ describe('触屏按钮集合：读的时候必须校验', () => {
     expect(parseTouchButtons(raw, POOL)).toEqual(['guard', 'attack', 'blast']);
   });
 
-  it('【关键】单条坏数据逐条丢弃（不是整份丢弃）', () => {
+  it('【关键】单条坏数据逐条丢弃 —— 但**位置留空**（不是前移）', () => {
+    /**
+     * ⚠️ 这一版的核心：`下标 = 键位号`，所以一条坏数据只能让**那个键位空着**。
+     *
+     * 旧实现是 `continue`（丢掉、后面的整体前移）—— 那在"数组 = 一份清单"
+     * 时没问题，但换成槽位之后，前移会让玩家摆好的**每个键位都错一格**，
+     * 而界面上看起来只是"少了一个按钮"（很难查）。
+     */
     const raw = JSON.stringify([
       'attack',
       42,
@@ -161,17 +168,23 @@ describe('触屏按钮集合：读的时候必须校验', () => {
       { skillId: 'blast' },
       'guard',
     ]);
-    expect(parseTouchButtons(raw, POOL)).toEqual(['attack', 'guard']);
+    expect(parseTouchButtons(raw, POOL)).toEqual(['attack', '', '', '', '', 'guard']);
   });
 
-  it('【关键】不在**技能池**里的 id 丢弃 —— "可选技能是同一个池"', () => {
+  it('【关键】不在**技能池**里的 id 丢弃（那个键位留空）—— "可选技能是同一个池"', () => {
     const raw = JSON.stringify(['attack', 'boss-lust-hum', 'deleted-skill', 'guard']);
+    expect(parseTouchButtons(raw, POOL)).toEqual(['attack', '', '', 'guard']);
+  });
+
+  it('重复 id 只保留先出现的（后者那个键位留空，前面那个不动）', () => {
+    const raw = JSON.stringify(['attack', 'guard', 'attack']);
+    /** 末尾那个空槽会被裁掉（末尾空槽不存），所以只剩两个。 */
     expect(parseTouchButtons(raw, POOL)).toEqual(['attack', 'guard']);
   });
 
-  it('重复 id 只保留先出现的（一个技能不能占两个按钮位）', () => {
-    const raw = JSON.stringify(['attack', 'guard', 'attack']);
-    expect(parseTouchButtons(raw, POOL)).toEqual(['attack', 'guard']);
+  it('空洞（空串）是**合法内容**：它表示"这个键位空着"', () => {
+    const raw = JSON.stringify(['attack', '', 'guard']);
+    expect(parseTouchButtons(raw, POOL)).toEqual(['attack', '', 'guard']);
   });
 
   it('serialize → parse 往返不变', () => {
@@ -182,6 +195,12 @@ describe('触屏按钮集合：读的时候必须校验', () => {
 
 describe('触屏按钮集合：老存档迁移一次（用户要求）', () => {
   const POOL = new Set(['attack', 'blast', 'focus', 'break', 'dodge', 'guard', 'flash']);
+  /**
+   * 容量。⚠️ 这里**故意用一个大的值**（= 池子的大小）：这一组测的是
+   * "迁移 / 不再回读派生"的判定，截断本身由 `settingsSlotBind.test.ts`
+   * 专门钉（拿真实的 `TOUCH_BUTTON_CAPACITY` = 7）。
+   */
+  const CAP = POOL.size;
   /** 老存档的迁移来源 = "绑了键的那些技能"（旧的派生结果）。 */
   const legacy = touchButtonIdsFromBindings([
     { key: 'q', skillId: 'attack' },
@@ -191,7 +210,7 @@ describe('触屏按钮集合：老存档迁移一次（用户要求）', () => {
   ]);
 
   it('【关键】没存过 → 用旧派生结果初始化（老玩家的按钮不会突然消失）', () => {
-    const out = loadTouchButtons(null, POOL, legacy);
+    const out = loadTouchButtons(null, POOL, legacy, CAP);
     expect(out.migrated).toBe(true);
     expect(out.skillIds).toEqual(['attack', 'dodge', 'guard']);
   });
@@ -201,22 +220,22 @@ describe('触屏按钮集合：老存档迁移一次（用户要求）', () => {
      * 这条是"迁移只做一次"的判定：存档存在（含 `[]`）时，迁移来源必须
      * **完全不起作用**。否则"玩家取下了全部按钮"下次加载就被加回来了。
      */
-    const out = loadTouchButtons('[]', POOL, legacy);
+    const out = loadTouchButtons('[]', POOL, legacy, CAP);
     expect(out.migrated).toBe(false);
     expect(out.skillIds).toEqual([]);
 
-    const saved = loadTouchButtons(serializeTouchButtons(['flash']), POOL, legacy);
+    const saved = loadTouchButtons(serializeTouchButtons(['flash']), POOL, legacy, CAP);
     expect(saved.migrated).toBe(false);
     expect(saved.skillIds).toEqual(['flash']);
   });
 
   it('迁移结果也要按池子过滤（老的绑定表可能含池外/失效 id）', () => {
-    const out = loadTouchButtons(null, POOL, ['attack', 'boss-lust-hum', 'ghost']);
+    const out = loadTouchButtons(null, POOL, ['attack', 'boss-lust-hum', 'ghost'], CAP);
     expect(out.skillIds).toEqual(['attack']);
   });
 
   it('坏存档（读不出来）也走迁移 —— 比清空玩家的按钮温和', () => {
-    const out = loadTouchButtons('{ 半截', POOL, legacy);
+    const out = loadTouchButtons('{ 半截', POOL, legacy, CAP);
     expect(out.migrated).toBe(true);
     expect(out.skillIds).toEqual(['attack', 'dodge', 'guard']);
   });

@@ -327,32 +327,58 @@ describe('UI 缩放（设置 · 通用页的 slider）', () => {
     expect(rect.y + rect.h).toBeLessThanOrEqual(SETTINGS_PANEL.y + SETTINGS_PANEL.h);
   });
 
+  /**
+   * 焦点模型的上下文（见 `ui/settings/focus.FocusContext`）。
+   *
+   * ⚠️ "这一页有什么"是**参数**：通用页没有技能格 / 键位区 / 触屏按钮，
+   * 而「按键」页三样都有。
+   */
+  const generalCtx = {
+    tabCount: 1,
+    cellCount: 0,
+    hasGrid: false,
+    hasSlider: true,
+    hasSlots: false,
+    hasTouchReset: false,
+    slotIndex: 0,
+  } as const;
+  const keysCtx = {
+    tabCount: 2,
+    cellCount: 6,
+    hasGrid: true,
+    hasSlider: false,
+    hasSlots: true,
+    hasTouchReset: true,
+    slotIndex: 0,
+  } as const;
+
   it('通用页的焦点顺序是 tabs → slider → reset（Tab 能走完）', () => {
     // 通用页：没有技能格、有 slider
-    let focus = cycleZone({ zone: 'tabs', index: 0 }, 0, false, true);
+    let focus = cycleZone({ zone: 'tabs', index: 0 }, generalCtx);
     expect(focus.zone).toBe('slider');
-    focus = cycleZone(focus, 0, false, true);
+    focus = cycleZone(focus, generalCtx);
     expect(focus.zone).toBe('reset');
     // reset → close（右上角的关闭）
-    const close = cycleZone(focus, 0, false, true);
+    const close = cycleZone(focus, generalCtx);
     expect(close.zone).toBe('close');
     // 再 Tab 回到 tabs
-    expect(cycleZone(close, 0, false, true).zone).toBe('tabs');
-    // 按键页没有 slider，Tab 顺序里不应出现它
-    let keysFocus = cycleZone({ zone: 'tabs', index: 0 }, 6, false, false);
+    expect(cycleZone(close, generalCtx).zone).toBe('tabs');
+    // 按键页没有 slider，Tab 顺序里不应出现它，但有**键位区**
+    let keysFocus = cycleZone({ zone: 'tabs', index: 0 }, keysCtx);
     expect(keysFocus.zone).toBe('grid');
-    keysFocus = cycleZone(keysFocus, 6, false, false);
-    expect(keysFocus.zone).toBe('reset');
+    keysFocus = cycleZone(keysFocus, keysCtx);
+    expect(keysFocus.zone).toBe('slots');
+    expect(cycleZone(keysFocus, keysCtx).zone).toBe('reset');
   });
 
   it('通用页里从上往下走是 tabs → slider → reset', () => {
-    const toSlider = moveFocus({ zone: 'tabs', index: 0 }, 'down', 0, true, false);
+    const toSlider = moveFocus({ zone: 'tabs', index: 0 }, 'down', generalCtx);
     expect(toSlider.zone).toBe('slider');
-    const toReset = moveFocus(toSlider, 'down', 0, true, false);
+    const toReset = moveFocus(toSlider, 'down', generalCtx);
     expect(toReset.zone).toBe('reset');
     // slider 的左右**不移动焦点**（调用方拿它们当调值键）——
     // 模型这一层把左右都当作"回到 tabs"
-    expect(moveFocus(toSlider, 'up', 0, true, false).zone).toBe('tabs');
+    expect(moveFocus(toSlider, 'up', generalCtx).zone).toBe('tabs');
   });
 });
 
@@ -577,18 +603,30 @@ describe('UI 缩放：覆盖面与鼠标支持', () => {
     expect(mid).toBeLessThan(1.4);
     // 点在面板内但不在滑块上 → 不该返回滑块目标
     expect(
-      hitTest(rect.x + rect.w + 40, rect.y + 4, { tab: 'general', rowSkillIds: [] }).kind,
+      hitTest(rect.x + rect.w + 40, rect.y + 4, {
+        tabs: ['general'],
+        tab: 'general',
+        rowSkillIds: [],
+      }).kind,
     ).not.toBe('scaleSlider');
   });
 
   it('滑块只属于通用页 —— 按键页点它不该命中', () => {
     const rect = uiScaleSliderRect();
-    expect(hitTest(rect.x + 4, rect.y + 4, { tab: 'general', rowSkillIds: [] }).kind).toBe(
-      'scaleSlider',
-    );
-    expect(hitTest(rect.x + 4, rect.y + 4, { tab: 'keys', rowSkillIds: ['attack'] }).kind).not.toBe(
-      'scaleSlider',
-    );
+    expect(
+      hitTest(rect.x + 4, rect.y + 4, {
+        tabs: ['general'],
+        tab: 'general',
+        rowSkillIds: [],
+      }).kind,
+    ).toBe('scaleSlider');
+    expect(
+      hitTest(rect.x + 4, rect.y + 4, {
+        tabs: ['general', 'keys'],
+        tab: 'keys',
+        rowSkillIds: ['attack'],
+      }).kind,
+    ).not.toBe('scaleSlider');
   });
 });
 

@@ -20,14 +20,22 @@
  * 还按着暂停，界面却继续跑了。
  */
 
-import type { SettingsTab } from '../ui/settings/logic';
+import type { SettingsOrigin, SettingsTab } from '../ui/settings/tabs';
 
 export interface SettingsToggleTargets {
   /** 面板本体。 */
   readonly settings: {
-    open(tab: SettingsTab): void;
+    /** ⚠️ `origin` = **从哪打开的**（决定哪几页可见，见 `ui/settings/tabs.ts`）。 */
+    open(tab: SettingsTab, origin: SettingsOrigin): void;
     close(): void;
   };
+  /**
+   * 打开设置时的**来源**（`home` / `gameplay`）。
+   *
+   * ⚠️ 是**取值函数**而不是构造期快照：同一个面板会先在首页打开、
+   * 再在战斗里打开，来源当然不同。
+   */
+  readonly origin: () => SettingsOrigin;
   /** 齿轮按钮（面板打开时要藏起来）。 */
   readonly settingsButton: {
     setVisible(visible: boolean): void;
@@ -66,7 +74,7 @@ export function createSettingsToggle(t: SettingsToggleTargets): SettingsToggle {
     t.setPaused(true);
     /** 面板打开时隐藏齿轮 —— 否则它会从面板左下角露出来（看着还能点）。 */
     t.settingsButton.setVisible(false);
-    t.settings.open(tab);
+    t.settings.open(tab, t.origin());
   };
 
   const close = (): void => {

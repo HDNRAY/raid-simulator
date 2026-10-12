@@ -14,14 +14,15 @@
  * ⚠️ **两条改动线，互不派生**（用户 2026-10-12："触屏和键盘当然是 2 套"）：
  *
  *   键位表（`apply`）      改键 / 换位 / 恢复默认 → `loop` + `settingsStore`
- *   按钮集合（`applyTouch`）触屏页增删 / 恢复默认 → 触屏层 + `settingsStore`
+ *   键位表（`applyTouch`）键位指派 / 恢复默认 → 触屏层 + `settingsStore`
  *
  * ⚠️ 键位表那条**不再**同步触屏按钮：那是被推翻的派生
  * （"没绑键的技能在触屏上就没有按钮"，而触屏又进不去改键）。
  */
 
 import { DEFAULT_BINDINGS, type KeyBinding } from '../input/keyboard';
-import { defaultTouchButtonIds, toggleTouchButtonId } from '../input/touchLayout';
+import { assignSkillToSlot, clearSlot, defaultTouchButtonIds } from '../input/touchLayout';
+import { TOUCH_BUTTON_CAPACITY } from '../render/touchGeometry';
 import type { SettingsPanelOptions } from './../ui/settings/SettingsPanel';
 import { rebindWithSwap, swapSlots } from './bindingActions';
 import { buildKeyRows } from './keyRows';
@@ -55,11 +56,11 @@ export interface SettingsOptionsDeps {
   /** 是否正由主监听器处理这次按键（是则跳过捕获，避免重复投递）。 */
   readonly isHandlingKeyDown: () => boolean;
   /**
-   * **触屏按钮集合**（技能 id，顺序即槽位）—— 读的是 `GameState`，
-   * 与键盘绑定表**互不派生**（用户 2026-10-12 定案）。
+   * **触屏键位表**（**下标 = 键位号**，`''` = 空键位）—— 读的是
+   * `GameState`，与键盘绑定表**互不派生**（用户 2026-10-12 定案）。
    */
   readonly getTouchSkillIds: () => readonly string[];
-  /** 写入触屏按钮集合（同时同步到触屏层与存储 —— 见文件头）。 */
+  /** 写入触屏键位表（同时同步到触屏层与存储 —— 见文件头）。 */
   readonly setTouchSkillIds: (next: readonly string[]) => void;
 }
 
@@ -68,9 +69,9 @@ export function buildSettingsOptions(d: SettingsOptionsDeps): SettingsPanelOptio
   const t = d.translate;
   return {
     pixi: d.pixi,
-    /** 触屏页要读的两样：能力值（是否拼键名）与按钮集合本身。 */
+    /** 「按键」页要读的两样：能力值（是否拼键名）与触屏键位表本身。 */
     getShowKeyHints: () => d.getShowKeyHints(),
-    getTouchSkillIds: () => d.getTouchSkillIds(),
+    getTouchSlots: () => d.getTouchSkillIds(),
     /**
      * ⚠️ **透传 `params`** —— 只写 `(key) => t(key)` 会把占位符参数吃掉，
      * 界面上的 `{seconds}` 就会原样显示出来（踩过，见 `main.ts` 的 `translateSafe`）。
@@ -91,17 +92,22 @@ export function buildSettingsOptions(d: SettingsOptionsDeps): SettingsPanelOptio
       apply(d, swapSlots(d.getBindings(), from, to));
     },
     /**
-     * 「触屏」页：**点一下格子 = 放上 / 取下**。
+     * **两步交互的落点**：把技能绑到某个键位（用户 2026-10-12：
+     * "点键位 =》 点技能 =》 绑定这个技能到这个键位"）。
      *
-     * ⚠️ 改的是**按钮集合**（`GameState.touchButtons`），与键位表无关 ——
-     * 这正是这次要切断的那条派生（"有键的技能才有按钮"）。
+     * ⚠️ 改的是**触屏键位表**（`GameState.touchButtons`），与键位表无关 ——
+     * 这正是那条被切断的派生（"有键的技能才有触屏按钮"）。
      */
-    onToggleTouchButton: (skillId) => {
-      applyTouch(d, toggleTouchButtonId(d.getTouchSkillIds(), skillId));
+    onAssignTouchSlot: (slot, skillId) => {
+      applyTouch(d, assignSkillToSlot(d.getTouchSkillIds(), slot, skillId));
     },
-    /** 「触屏」页的「恢复默认」：回到"默认键位表里那些有键的技能"。 */
+    /** 取下某个键位上的技能（判定在 `ui/settings/slotActions`）。 */
+    onClearTouchSlot: (slot) => {
+      applyTouch(d, clearSlot(d.getTouchSkillIds(), slot));
+    },
+    /** 「触屏默认」：回到"默认键位表里那些有键的技能"（截到容量）。 */
     onResetTouchButtons: () => {
-      applyTouch(d, defaultTouchButtonIds());
+      applyTouch(d, defaultTouchButtonIds(TOUCH_BUTTON_CAPACITY));
     },
     onResetKeys: () => {
       /** 恢复默认**也覆盖存储**，否则刷新之后又变回玩家改过的键位。 */

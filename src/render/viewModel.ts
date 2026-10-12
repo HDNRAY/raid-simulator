@@ -168,9 +168,37 @@ export interface SkillSlotView {
    * 渲染层不做单位换算（那会又多一份"一步多长"的真相）。
    */
   readonly cost?: SlotCost;
-  /** 不可用的原因（**本地化 key**，不是文案） */
+  /**
+   * 不可用的原因（**本地化 key**，不是文案）。取值只可能是 `BLOCK_KEYS`
+   * 里的那四个 —— 技能格用它区分「买不起 / 冷却中 / 读条中」三种底色，
+   * 状态提示区用它取文案。
+   */
   readonly blockedKey?: string;
 }
+
+/**
+ * 「这一格为什么用不了」的**本地化 key**（`SkillSlotView.blockedKey` 的取值）。
+ *
+ * ------------------------------------------------------------------
+ * 为什么要收成一张表
+ * ------------------------------------------------------------------
+ * 这个字段有两个消费方，而且**关注点不同**：
+ *   - `app/slotViews.ts` 判断"够不够 / 是不是在冷却"，选出该用哪个 key
+ *   - `render/skillBar.ts` 靠 `cost` 这一项决定"这一格要不要画成断电的样子"
+ *
+ * 两边各写一遍字面量 `'block.cost'` 的话，改 key 只会**静默**让
+ * 底色回退成"普通的不可用" —— 那种 bug 在截图里看起来像"设计如此"，
+ * 没人会去查。收在一处，改名就只需要改这一行。
+ *
+ * ⚠️ 它是**渲染层的契约**（这个文件零依赖、纯类型 + 纯函数），
+ * 与 `ResourceKeyName` 出于同样的理由自持一份声明。
+ */
+export const BLOCK_KEYS = {
+  comboWindow: 'block.comboWindow',
+  cost: 'block.cost',
+  cooldown: 'block.cooldown',
+  casting: 'block.casting',
+} as const;
 
 export interface FloatingTextView {
   readonly id: number;

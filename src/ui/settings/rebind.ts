@@ -157,9 +157,9 @@ export function swapSlotSkills<T extends { readonly key: string; readonly skillI
  * 现在**两边合用同一条规则**：点已选中的格子就进改键。
  * 先点一下选中、再点一下进改键，与键盘的"方向键选中 → Enter"完全对齐。
  *
- * ⚠️ **「触屏」页不走这里**（2026-10-12）：那一页点格子 = 放上 / 取下触屏
- * 按钮，判定在 `panelDispatch.resolvePanelDispatch` 里**先于**本函数分流
- * （触屏玩家按不出键，"进改键"对他们没有意义）。
+ * ⚠️ **"已经选中了一个触屏键位"时也不走这里**（2026-10-12）：那一刻点格子
+ * = **绑到那个键位**，判定在 `panelDispatch.resolvePanelDispatch` 里
+ * **先于**本函数分流（见 `slotActions.resolveSlotBind`）。
  */
 export function resolveRowTap(input: {
   readonly focusedSkillId: string | undefined;

@@ -23,7 +23,7 @@
  *
  * 类型从 `ui/settings/logic` 取（**类型**，编译期擦除，不构成运行期依赖）。
  */
-import type { SettingsTab } from '../ui/settings/logic';
+import type { SettingsTab } from '../ui/settings/tabs';
 
 /** 备战界面暴露给调试的最小面（`PrepareScreen` 满足它）。 */
 export interface PrepareDebugTarget {
@@ -176,6 +176,21 @@ export interface SettingsDebugTarget {
   readonly focusState: { readonly zone: string; readonly index?: number };
   readonly settingsTrace: readonly string[];
   hitTest(px: number, py: number): boolean;
+  /**
+   * 第 `index` 个**技能格**的圆心（逻辑坐标）—— 验证脚本注入真实点击用。
+   *
+   * ⚠️ 脚本**不许自己复制一份 `keyCellRect`**：布局一调，脚本会静默失效
+   * （"点空了"看起来和"功能坏了"一模一样）。与 `touchButtonCenter`
+   * 同一个理由。
+   */
+  cellCenter(index: number): { readonly x: number; readonly y: number };
+  /**
+   * 右下角第 `index` 个**键位**的圆心（逻辑坐标，`undefined` = 越界）。
+   *
+   * ⚠️ 同上：它来自预览自己的几何（也就是 `touchGeometry` 的双弧等比变换），
+   * 脚本复制一份必然与实际漂开。
+   */
+  slotCenter(index: number): { readonly x: number; readonly y: number } | undefined;
 }
 
 /** 设置**按钮**暴露给调试的最小面（`SettingsButton` 满足它）。 */
@@ -216,6 +231,10 @@ export function settingsDebugApi(
     isOpen(): boolean;
     capturing(): string | undefined;
     focus(): { readonly zone: string; readonly index?: number };
+    /** 第 `index` 个技能格的圆心（验证脚本注入真实点击用）。 */
+    cellCenter(index: number): { readonly x: number; readonly y: number };
+    /** 右下角第 `index` 个键位的圆心（越界为 `null`）。 */
+    slotCenter(index: number): { readonly x: number; readonly y: number } | null;
     trace(): readonly string[];
     /**
      * 把**齿轮按钮**的键盘焦点打开/关掉，并立刻重绘一次。
@@ -241,6 +260,10 @@ export function settingsDebugApi(
       capturing: () => getSettings().capturingSkillId,
       /** 当前键盘焦点（调试用）。 */
       focus: () => ({ ...getSettings().focusState }),
+      /** 第 `index` 个技能格的圆心（真实点击的注入坐标）。 */
+      cellCenter: (index) => ({ ...getSettings().cellCenter(index) }),
+      /** 第 `index` 个键位的圆心（没有则 null）。 */
+      slotCenter: (index) => getSettings().slotCenter(index) ?? null,
       trace: () => [...getSettings().settingsTrace],
       setButtonFocused: (focused) => {
         const button = getButton();

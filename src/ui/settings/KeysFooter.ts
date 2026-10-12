@@ -1,13 +1,20 @@
 /**
- * 设置页的**底部**：一行提示 + 「恢复默认」按钮。
+ * 设置页的**底部**：一行提示 + 两个按钮（「恢复默认」/「触屏默认」）。
  *
  * `SettingsPanel.ts` 超过 700 行（AGENTS.md §3），这一块是纯外观 +
- * 一个"焦点在谁身上"的表现，抽出来之后面板只剩内容与交互。
+ * "焦点在谁身上"的表现，抽出来之后面板只剩内容与交互。
  *
- * ⚠️ 两个 tab（「按键」/「触屏」）共用这一个 footer：按钮只画一次，
- * 但**含义由当前页决定**（按键页恢复键位、触屏页恢复按钮集合），
- * 提示文案也不同。所以有 `updateKeys` / `updateTouch` 两个入口，
- * 而不是一个带布尔开关的函数 —— 那会让"这页到底是什么"变得不可见。
+ * ==================================================================
+ * 为什么是**两个**按钮（2026-10-12）
+ * ==================================================================
+ *
+ * 原先「恢复默认」的含义由**当前页**决定（「按键」页恢复键位、
+ * 「触屏」页恢复触屏按钮）—— 那时有两页。用户把触屏键位并进「按键」页
+ * 之后，"同一句激活按页分流"这条判据就没了，两者必须靠**位置**分开。
+ *
+ * 所以是两个常量（`RESET_BUTTON` / `TOUCH_RESET_BUTTON`）、两个命中区域、
+ * 两个焦点区（`reset` / `touchReset`）—— 合成一个就会变成
+ * "点哪都恢复键位"，而那种 bug 在截图上看不出来。
  */
 
 import type { Container, Graphics } from 'pixi.js';
@@ -19,9 +26,22 @@ import {
   mnemonicKeyOf,
   resetButtonRect,
   SETTINGS_PANEL,
-  touchToggleKeyHint,
+  slotNavKeyHint,
+  touchResetButtonRect,
 } from './logic';
 import type { TranslateFn } from '../../i18n/translator';
+
+/** 底部一帧的状态（键位页的提示行按它选文案）。 */
+export interface KeysFooterState {
+  /** 正在等按键（改键中）。 */
+  readonly capturing: boolean;
+  readonly resetFocused: boolean;
+  readonly touchResetFocused: boolean;
+  /** 是否显示键位提示（触屏不显示）。 */
+  readonly showKeyHints: boolean;
+  /** 当前选中的**触屏键位**（没有则 `undefined`）—— 提示行按它换文案。 */
+  readonly selectedSlot: number | undefined;
+}
 
 export class KeysFooter {
   readonly root: Container;
@@ -30,6 +50,9 @@ export class KeysFooter {
   private readonly resetGfx: Graphics;
   private readonly resetLabel: Label;
   private readonly resetRect: { x: number; y: number; w: number; h: number };
+  private readonly touchGfx: Graphics;
+  private readonly touchLabel: Label;
+  private readonly touchRect: { x: number; y: number; w: number; h: number };
 
   constructor(
     pixi: PixiCtor,
@@ -56,7 +79,23 @@ export class KeysFooter {
       color: PALETTE.text,
       anchorX: 0.5,
     });
-    this.root.addChild(this.hint.root, this.resetGfx, this.resetLabel.root);
+
+    this.touchRect = touchResetButtonRect();
+    this.touchGfx = new pixi.Graphics();
+    this.touchLabel = new Label(pixi, {
+      x: this.touchRect.x + this.touchRect.w / 2,
+      y: this.touchRect.y + 4,
+      size: FONT.small,
+      color: PALETTE.text,
+      anchorX: 0.5,
+    });
+    this.root.addChild(
+      this.hint.root,
+      this.resetGfx,
+      this.resetLabel.root,
+      this.touchGfx,
+      this.touchLabel.root,
+    );
   }
 
   /**
@@ -72,98 +111,86 @@ export class KeysFooter {
     this.hint.setColor(notice !== '' ? 0xff9080 : PALETTE.textDim);
   }
 
-  /** 清空整个底部（通用页用：那一页没有"恢复默认"）。 */
-  private clear(): void {
-    this.hint.set('');
-    this.resetLabel.set('');
-    this.resetGfx.clear();
-  }
-
   /**
-   * 画「恢复默认」按钮。
-   *
-   * ⚠️ 抽出来是因为**两页共用**（按键页 / 触屏页），而重复一遍画法
-   * 就会出现"一页的焦点态变了、另一页没变"。
+   * 画一个底部按钮（两处共用画法 —— 重复一遍就会出现
+   * "一个的焦点态变了、另一个没变"）。
    */
-  private drawReset(label: string, focused: boolean): void {
-    this.resetLabel.set(label);
-    this.resetLabel.setColor(focused ? PALETTE.douqi.bright : PALETTE.text);
-    const g = this.resetGfx;
-    const r = this.resetRect;
-    g.clear();
-    g.roundRect(r.x, r.y, r.w, r.h, 3).fill({
+  private drawButton(
+    gfx: Graphics,
+    label: Label,
+    rect: { x: number; y: number; w: number; h: number },
+    text: string,
+    focused: boolean,
+  ): void {
+    label.set(text);
+    label.setColor(focused ? PALETTE.douqi.bright : PALETTE.text);
+    gfx.clear();
+    gfx.roundRect(rect.x, rect.y, rect.w, rect.h, 3).fill({
       color: focused ? PALETTE.douqi.base : 0xffffff,
       alpha: focused ? 0.16 : 0.08,
     });
-    g.roundRect(r.x, r.y, r.w, r.h, 3).stroke({
+    gfx.roundRect(rect.x, rect.y, rect.w, rect.h, 3).stroke({
       color: focused ? PALETTE.douqi.bright : 0x6a6c80,
       width: focused ? 1.5 : 1,
     });
   }
 
-  /**
-   * 通用页：提示 + 隐藏恢复按钮。
-   *
-   * ⚠️ 提示是**键盘操作说明**（"← → 调整，↑ ↓ 切换项"），所以触屏要换成
-   * 触屏版文案，不能直接沿用 —— 需求："移动端就不用显示快捷键信息了"。
-   */
+  /** 通用页：提示是"怎么用滑块"，两个恢复按钮都藏起来。 */
   showGeneralHint(showKeyHints = true): void {
     if (!showKeyHints) {
-      this.clear();
-      return;
+      this.hint.set('');
+      this.hint.setColor(PALETTE.textDim);
+    } else {
+      this.hint.set(this.translate('settings.generalHint'));
+      this.hint.setColor(PALETTE.textDim);
     }
-    this.hint.set(this.translate('settings.generalHint'));
-    this.hint.setColor(PALETTE.textDim);
-    this.resetLabel.set('');
+    /**
+     * ⚠️ **整个按钮清掉**（不是"画一个空标签的按钮"）——「通用」页没有
+     * "恢复默认"这种东西，画两个空框会让人以为它们坏了。
+     */
     this.resetGfx.clear();
+    this.resetLabel.set('');
+    this.touchGfx.clear();
+    this.touchLabel.set('');
   }
 
   /**
-   * 按键页：提示按优先级选一条（通知 > 改键中 > 常规），
-   * 并画出「恢复默认」（含焦点表现）。
+   * 「按键」页：提示（通知 > 改键中 > 选键位中 > 常规）+ 两个恢复按钮。
+   *
+   * ⚠️ 键位提示（`←→↑↓ / Enter`）由渲染层从 `SLOT_NAV_KEYS` **反查后拼**
+   * 上去，**不写进 i18n**（AGENTS.md §3b："键位提示不能放进 i18n"）——
+   * 改键时只动那张表，不必碰语言包；触屏上整段不拼。
    */
-  updateKeys(capturing: boolean, resetFocused: boolean, showKeyHints = true): void {
-    this.setHint(
-      /**
-       * ⚠️ 触屏上**不显示键盘操作说明**（需求："移动端就不用显示快捷键
-       * 信息了，无论是技能按钮还是其他的功能按钮"），换成"点技能看详情"。
-       *
-       * 触屏改不了键（没有键），所以这一页对触屏玩家只是"技能全集 + 详情"；
-       * 真正能配的那一页是「触屏」页。
-       */
-      !showKeyHints
-        ? this.translate('settings.keysHintTap')
-        : capturing
-          ? this.translate('settings.keysCapturingHint')
-          : this.translate('settings.keysHint'),
-    );
+  updateKeys(state: KeysFooterState): void {
+    const show = state.showKeyHints;
+    const hintKeys = show ? ` (${slotNavKeyHint()})` : '';
+    const body = state.capturing
+      ? this.translate('settings.keysCapturingHint')
+      : state.selectedSlot !== undefined
+        ? this.translate('settings.slotHintArmed', { index: state.selectedSlot + 1 })
+        : this.translate('settings.slotHint');
+    this.setHint(`${body}${state.capturing ? '' : hintKeys}`);
 
-    /** ⚠️ 助记键反查后拼上，不写进 i18n（改键不该动文案）。 */
+    /**
+     * ⚠️ 「恢复默认」的助记键（`R`）**只有它有**：那是全局助记键表里的一行，
+     * 而「触屏默认」没有自己的字母键（键位表要短，见 `MNEMONIC_KEYS`）。
+     * 键鼠仍然可以 `Tab` 到它、按 `Enter`。
+     */
     const resetText = this.translate('settings.keysReset');
     const resetKey = mnemonicKeyOf('resetKeys');
-    this.drawReset(
-      showKeyHints && resetKey !== undefined ? `${resetText} (${resetKey})` : resetText,
-      resetFocused,
+    this.drawButton(
+      this.resetGfx,
+      this.resetLabel,
+      this.resetRect,
+      show && resetKey !== undefined ? `${resetText} (${resetKey})` : resetText,
+      state.resetFocused,
     );
-  }
-
-  /**
-   * 「触屏」页：提示 = **点一下格子放上 / 取下**，键鼠再拼上动作键；
-   * 「恢复默认」= 恢复默认**按钮集合**（与按键页的"恢复默认键位"不同）。
-   */
-  updateTouch(resetFocused: boolean, showKeyHints = true): void {
-    const hint = this.translate('settings.touchHint');
-    /**
-     * ⚠️ **键名从 `TOUCH_TOGGLE_KEYS` 反查后拼**，不写进 i18n ——
-     * 需求："改快捷键 害得改 i18n吗？"，且触屏要能只显示前半句
-     * （AGENTS.md §3b："键位提示不能放进 i18n"）。
-     */
-    this.setHint(showKeyHints ? `${hint} (${touchToggleKeyHint()})` : hint);
-    /**
-     * ⚠️ 触屏页的恢复按钮**不拼助记键**：`R` 的语义（先切到按键页、
-     * 再恢复键位）是全局的，这里再标一个 `(R)` 会指向另一件事。
-     * 键鼠仍然可以 Tab 到它、按 Enter。
-     */
-    this.drawReset(this.translate('settings.keysReset'), resetFocused);
+    this.drawButton(
+      this.touchGfx,
+      this.touchLabel,
+      this.touchRect,
+      this.translate('settings.touchReset'),
+      state.touchResetFocused,
+    );
   }
 }

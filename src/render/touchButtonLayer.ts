@@ -2,59 +2,26 @@
  * 触屏按钮层：**双弧圆形按钮**。
  *
  * ==================================================================
- * 为什么是双弧（不是 4×2 格子）
+ * 几何不在这里
  * ==================================================================
  *
- * 用户定案："移动端的技能按钮，应该是圆形，而且应该不是 4*2，
- * 参考其他同类游戏，是类似扇形排列的。"
- *
- * 理由是手的运动方式：拇指绕**拇指根**划弧，弧上的点**等距可达**；
- * 格子里的四个角要伸直手指去够。
+ * 半径 / 角度 / 槽位圆心全在 `./touchGeometry`（**唯一真相**）——
+ * 设置页右下角的模拟键位预览也消费同一份。这里只负责"按几何画按钮、
+ * 按快照更新文字"。（原先几何在本文件里，加预览时会出现第二份真相。）
  *
  * ==================================================================
- * ⚠️ 几何是算出来的，不是猜的
+ * ⚠️ `index` 是**槽位**，不是数组下标
  * ==================================================================
  *
- * **单弧放不下**：半径 r 的弧上，相邻按钮需要弦长 ≥ `D+gap`，
- * 所以角间隔 = `2·asin((D+gap)/2r)`。实测 r=130 时角间隔约 32°，
- * 可用弧段（约 110°）只放得下 3–4 个。
+ * 2026-10-12 用户定的交互是"点键位 → 点技能 → 绑到这个键位"，
+ * 所以槽位是**固定的 7 个格子**，中间可以是空的：
  *
- * 当前几何（**穷举搜索**后的可行解，`D=72, gap=10`）：
+ *   `setButtons(['attack', '', 'guard'])`
+ *   → 第 0、2 个槽位上有按钮，第 1 个槽位**什么都不画**
  *
- *   圆心 `(950, 535)` —— **游戏区域的右下角**
- *   内弧 r=150，80° → 15°，**3 个**
- *   外弧 r=235，80° → 10°，**4 个**
- *
- * 已验证：4 / 5 / 6 / 7 个都不重叠（7 个时最小间距 84 > 82）、
- * 不越界、不压左列与 Boss 区。
- *
- * ==================================================================
- * ⚠️ 圆心为什么是 (950,535) 而不是正角落 (960,540)
- * ==================================================================
- *
- * 需求："应该以游戏区域右下角为圆心"。
- *
- * 但圆心**正好**在 `(960,540)` 时，可用角度区只有约 70° ——
- * 因为按钮自身有半径：角度接近 `0°` 会从**右边**出去，接近 `90°`
- * 会从**下边**出去。实测（D=72）：
- *
- *   任意半径的单弧最多放 **3–4 个**，**7 个放不下**（穷举 0 组可行）
- *
- * 把圆心往里挪 10px（`(950,535)`，视觉上仍然是右下角）之后，
- * 可用角度区变宽，同一套约束下有 **24 组可行解**。
- *
- * ⚠️ 另一个约束是**两弧必须在径向上分开 ≥ D+gap**：它们的角度带
- * 若重叠，半径差小于 82px 就会让相邻两弧的按钮撞上（实测 85px
- * 半径差时只有 45px 间距）。
- *
- * ⚠️ 每个弧**按自己的容量均分**角度（而不是按实际数量）——
- * 否则"只放 2 个"时会把它们铺满整条弧，两弧在视觉上交错。
- *
- * ⚠️ **容量上限是 7**（3+4）。第 8 个开始放不下 —— 要么缩小按钮
- * （64px 能到 5+4），要么改角度范围。目前默认 6–7 个，够用；
- * 真的加技能到 8 个时，`touchButtonCenter()` 返回 `undefined`，
- * 调用方**跳过**而不是画一个重叠的按钮。
- * 这个上限在 `docs/plans/2026-10-10-m8-mobile.md` §9.1 里记着。
+ * 于是在这里 `slots[i]` 的下标就是槽位号，`touchButtonCenter(i)` 直接
+ * 可用。⚠️ 不要退回"按下标压缩"（那会让"第 3 个键位"变成"第 2 个"，
+ * 玩家在设置页摆好的位置就白摆了）。
  *
  * ==================================================================
  * 只负责画与命中；输入由 `TouchInputSource` 负责
@@ -71,101 +38,28 @@ import { FONT } from '../ui/layout';
 import { PALETTE } from './theme';
 import { RESOURCE_COLORS } from './skillBar';
 import type { TranslateFn } from '../i18n/translator';
-
-/* ------------------------------------------------------------------ *
- * 几何
- * ------------------------------------------------------------------ */
-
-/** 按钮直径。72px ≈ 44px 可点下限的 1.6 倍，拇指按得准。 */
-export const TOUCH_BUTTON_DIAMETER = 72;
-/** 相邻按钮的最小间隔。 */
-export const TOUCH_BUTTON_GAP = 10;
-
-/** 双弧的圆心 —— 拇指根的大致位置（右下角偏内）。 */
-export const TOUCH_ARC_CENTER = { x: 950, y: 535 } as const;
-
-interface ArcSpec {
-  readonly radius: number;
-  /** 起始角（度）。0° = 正右，逆时针为正。 */
-  readonly fromDeg: number;
-  readonly toDeg: number;
-  readonly capacity: number;
-}
+import {
+  BADGE_OFFSET_RATIO,
+  BADGE_RADIUS_RATIO,
+  TOUCH_BUTTON_DIAMETER,
+  touchButtonCenter,
+} from './touchGeometry';
 
 /**
- * 内弧先排（离拇指近），排满再上外弧。
- *
- * ⚠️ 顺序不能反：玩家最先看到的按钮应该在最舒服的位置。
+ * 几何的**转发**：外部（与测试）一直从本模块 import 它们，路径不变。
+ * 定义在 `./touchGeometry` —— 见那里的文件头。
  */
-const ARCS: readonly ArcSpec[] = [
-  { radius: 150, fromDeg: 80, toDeg: 15, capacity: 3 },
-  { radius: 235, fromDeg: 80, toDeg: 10, capacity: 4 },
-];
-
-/** 双弧的总容量。 */
-export const TOUCH_BUTTON_CAPACITY = ARCS.reduce((n, a) => n + a.capacity, 0);
-
-/**
- * 第 `index` 个按钮的圆心位置。
- *
- * 返回 `undefined` 表示**超出容量**（调用方应跳过，而不是画重叠）。
- */
-export function touchButtonCenter(index: number): { x: number; y: number } | undefined {
-  let remaining = index;
-  for (const arc of ARCS) {
-    if (remaining < arc.capacity) {
-      const span = arc.fromDeg - arc.toDeg;
-      /**
-       * 单个按钮时放在**弧中**（而不是起始角）—— 否则它会贴在弧的
-       * 一端，看起来像布局坏了。
-       */
-      const t = arc.capacity === 1 ? 0.5 : remaining / (arc.capacity - 1);
-      const deg = arc.fromDeg - span * t;
-      const rad = (deg * Math.PI) / 180;
-      return {
-        x: TOUCH_ARC_CENTER.x - arc.radius * Math.cos(rad),
-        y: TOUCH_ARC_CENTER.y - arc.radius * Math.sin(rad),
-      };
-    }
-    remaining -= arc.capacity;
-  }
-  return undefined;
-}
-
-/**
- * 角标环的**圆心偏移**（相对按钮圆心）与半径系数。
- *
- * ⚠️ 导出是因为**命中测试要用同一组数字** —— 画在这里、点在别处
- * 就会出现"看着能点、点不中"。
- */
-export const BADGE_OFFSET_RATIO = 0.6;
-/**
- * 环的半径系数。
- *
- * ⚠️ 与偏移一起决定"环在按钮内还是压在边上"。原先偏移 0.72 时，
- * 环心到按钮圆心 `0.72·√2·r ≈ 1.02r` —— **刚好在按钮外**，于是
- * 环大部分露在按钮外面，点它还会先命中按钮边缘。实测发现后
- * 收到 0.6（`0.6·√2 ≈ 0.85r`，落在按钮内，视觉上像"贴一个角标"）。
- *
- * ⚠️ 需求："现在触屏的派生 好像有点小" —— 0.42 → **0.55**
- * （直径 30px → 40px）。
- *
- * 依据是**命中区**而不是好看：命中半径 = `BADGE_RADIUS_RATIO × r × 1.4`，
- * 于是直径从 **42px → 55px**，越过触屏可点下限（44px）。
- * 0.42 时是 42px —— **差 2px 不达标**。
- *
- * 环**本来就该露出按钮**（它是"贴右上角的角标"，压在边缘才读得出是角标）。
- * 真正的约束是**环心必须在按钮圆内**（`0.6·√2·r ≈ 0.85r < r`），
- * 否则点它会先命中按钮边缘；这条有 `tests/unit/touchInput.test.ts` 钉着。
- */
-export const BADGE_RADIUS_RATIO = 0.55;
-
-/** 某个按钮角标环的圆心（给命中测试用）。 */
-export function badgeCenter(button: { x: number; y: number }): { x: number; y: number } {
-  const r = TOUCH_BUTTON_DIAMETER / 2;
-  const d = Math.round(r * BADGE_OFFSET_RATIO);
-  return { x: button.x + d, y: button.y - d };
-}
+export {
+  BADGE_OFFSET_RATIO,
+  BADGE_RADIUS_RATIO,
+  TOUCH_ARC_CENTER,
+  TOUCH_BUTTON_CAPACITY,
+  TOUCH_BUTTON_DIAMETER,
+  TOUCH_BUTTON_GAP,
+  badgeCenter,
+  touchButtonCenter,
+  touchLayoutBounds,
+} from './touchGeometry';
 
 /* ------------------------------------------------------------------ *
  * 组件
@@ -215,8 +109,10 @@ export class TouchButtonLayer {
 
   private readonly pixi: PixiCtor;
   private readonly translate: TranslateFn;
-  private readonly buttons: ButtonView[] = [];
-  private skillIds: readonly string[] = [];
+  /** 槽位号 → 按钮。空槽位**没有**条目（不是画一个空圆）。 */
+  private readonly buttons = new Map<number, ButtonView>();
+  /** 当前槽位表（下标 = 槽位，`''` = 空）。 */
+  private slots: readonly string[] = [];
 
   constructor(options: TouchButtonLayerOptions) {
     this.pixi = options.pixi;
@@ -226,144 +122,146 @@ export class TouchButtonLayer {
   }
 
   /**
-   * 设置按钮表。技能列表不变时**不重建对象**（只更新文本）。
+   * 设置槽位表（下标 = 槽位，`''` = 空）。
    *
-   * ⚠️ 重建 Pixi 对象是贵的；每帧重建会让帧率塌掉。
+   * ⚠️ 内容不变时**不重建**（重建 Pixi 对象是贵的；每帧重建会让帧率塌掉）。
    */
-  setButtons(skillIds: readonly string[]): void {
+  setButtons(slots: readonly string[]): void {
     const same =
-      skillIds.length === this.skillIds.length &&
-      skillIds.every((s, i) => s === this.skillIds[i]);
+      slots.length === this.slots.length && slots.every((s, i) => s === this.slots[i]);
     if (same) return;
-    this.skillIds = [...skillIds];
+    this.slots = [...slots];
 
-    // 多余的按钮先销毁
-    while (this.buttons.length > this.skillIds.length) {
-      const view = this.buttons.pop();
-      if (view === undefined) break;
-      this.root.removeChild(view.root);
-      view.root.destroy({ children: true });
+    /** 1) 空槽位上的按钮销毁；有技能的按钮只更新 `skillId`。 */
+    for (const [index, view] of [...this.buttons]) {
+      const skillId = this.slots[index] ?? '';
+      if (skillId === '') {
+        this.buttons.delete(index);
+        this.root.removeChild(view.root);
+        view.root.destroy({ children: true });
+      } else {
+        view.skillId = skillId;
+      }
     }
-
-    // 不足的补建
-    while (this.buttons.length < this.skillIds.length) {
-      const index = this.buttons.length;
-      const center = touchButtonCenter(index);
-      if (center === undefined) break; // 超出容量：不画
-      const radius = TOUCH_BUTTON_DIAMETER / 2;
-      const gfx = new this.pixi.Graphics();
-      const glyph = new Label(this.pixi, {
-        x: 0,
-        y: -4,
-        size: FONT.big,
-        color: PALETTE.text,
-        anchorX: 0.5,
-        anchorY: 0.5,
-      });
-      const cd = new Label(this.pixi, {
-        x: 0,
-        y: 18,
-        size: FONT.small,
-        color: 0xffd080,
-        anchorX: 0.5,
-        anchorY: 0.5,
-      });
-      /**
-       * **固有 CD**（左下）与**代价**（右下）分居两角 —— 与桌面技能格
-       * 同一套位置语言（那里 `skillCd` 在左下、`cost` 在右下）。
-       *
-       * ⚠️ 原先触屏只有 `cost`、且居中在字形下方，所以：
-       *   1. 代价**没有按资源上色**（需求："代价没有按颜色显示"）
-       *   2. **看不到这一招的 CD 是多少**（需求："也没显示招式的 cd
-       *      是多少（不是实时那个）"）
-       * 两者都在这一版补上。
-       */
-      const skillCd = new Label(this.pixi, {
-        x: -Math.round(radius * 0.46),
-        y: Math.round(radius * 0.56),
-        size: FONT.tiny,
-        color: PALETTE.textDim,
-        anchorX: 0.5,
-        anchorY: 0.5,
-      });
-      const cost = new Label(this.pixi, {
-        x: Math.round(radius * 0.46),
-        y: Math.round(radius * 0.56),
-        size: FONT.tiny,
-        color: PALETTE.text,
-        anchorX: 0.5,
-        anchorY: 0.5,
-      });
-      const root = new this.pixi.Container();
-      root.x = center.x;
-      root.y = center.y;
-
-      /**
-       * 圆底 + 描边。
-       *
-       * ⚠️ 触屏没有"悬停"也没有"按下"之外的反馈渠道，所以按钮
-       * **必须有可见的圆底** —— 桌面技能栏那套"只有字、没有方框"
-       * 的语言在这里不适用（手指需要看到可点的目标）。
-       */
-      gfx.circle(0, 0, radius).fill({ color: 0x14151f, alpha: 0.82 });
-      gfx.circle(0, 0, radius).stroke({ color: 0x3c3e50, width: 2 });
-
-      /**
-       * 角标环：贴在按钮**右上**、半径 40%，表示"从这里派生出一个技能"。
-       * 平时不可见，只在派生窗口开着时出现。
-       */
-      const ringR = Math.round(radius * BADGE_RADIUS_RATIO);
-      const ring = new this.pixi.Graphics();
-      ring.circle(0, 0, ringR).fill({ color: 0x1a1b26, alpha: 0.95 });
-      ring.circle(0, 0, ringR).stroke({ color: 0xffd870, width: 2 });
-      const ringGlyph = new Label(this.pixi, {
-        x: 0,
-        y: 0,
-        size: FONT.small,
-        color: 0xffd870,
-        anchorX: 0.5,
-        anchorY: 0.5,
-      });
-      /** 环挂在按钮容器的右上角。 */
-      const ringRoot = new this.pixi.Container();
-      ringRoot.x = Math.round(radius * BADGE_OFFSET_RATIO);
-      ringRoot.y = -Math.round(radius * BADGE_OFFSET_RATIO);
-      ringRoot.addChild(ring, ringGlyph.root);
-      ringRoot.visible = false;
-
-      root.addChild(gfx, glyph.root, cd.root, skillCd.root, cost.root, ringRoot);
-      this.root.addChild(root);
-      this.buttons.push({
-        root,
-        gfx,
-        glyph,
-        cd,
-        skillCd,
-        cost,
-        ring,
-        ringGlyph,
-        ringRoot,
-        skillId: this.skillIds[index] ?? '',
-        derivedSkillId: '',
-      });
+    /** 2) 新槽位补建（超出容量的跳过，不画重叠）。 */
+    for (const [index, skillId] of this.slots.entries()) {
+      if (skillId === '' || this.buttons.has(index)) continue;
+      const view = this.buildButton(index, skillId);
+      if (view !== undefined) this.buttons.set(index, view);
     }
+  }
 
-    // 更新技能 id
-    for (let i = 0; i < this.buttons.length; i += 1) {
-      const view = this.buttons[i];
-      if (view !== undefined) view.skillId = this.skillIds[i] ?? '';
-    }
+  /** 画一个槽位的按钮（**位置只来自 `touchButtonCenter`**）。 */
+  private buildButton(index: number, skillId: string): ButtonView | undefined {
+    const center = touchButtonCenter(index);
+    if (center === undefined) return undefined; // 超出容量：不画
+    const radius = TOUCH_BUTTON_DIAMETER / 2;
+    const gfx = new this.pixi.Graphics();
+    const glyph = new Label(this.pixi, {
+      x: 0,
+      y: -4,
+      size: FONT.big,
+      color: PALETTE.text,
+      anchorX: 0.5,
+      anchorY: 0.5,
+    });
+    const cd = new Label(this.pixi, {
+      x: 0,
+      y: 18,
+      size: FONT.small,
+      color: 0xffd080,
+      anchorX: 0.5,
+      anchorY: 0.5,
+    });
+    /**
+     * **固有 CD**（左下）与**代价**（右下）分居两角 —— 与桌面技能格
+     * 同一套位置语言（那里 `skillCd` 在左下、`cost` 在右下）。
+     *
+     * ⚠️ 原先触屏只有 `cost`、且居中在字形下方，所以：
+     *   1. 代价**没有按资源上色**（需求："代价没有按颜色显示"）
+     *   2. **看不到这一招的 CD 是多少**（需求："也没显示招式的 cd
+     *      是多少（不是实时那个）"）
+     * 两者都在这一版补上。
+     */
+    const skillCd = new Label(this.pixi, {
+      x: -Math.round(radius * 0.46),
+      y: Math.round(radius * 0.56),
+      size: FONT.tiny,
+      color: PALETTE.textDim,
+      anchorX: 0.5,
+      anchorY: 0.5,
+    });
+    const cost = new Label(this.pixi, {
+      x: Math.round(radius * 0.46),
+      y: Math.round(radius * 0.56),
+      size: FONT.tiny,
+      color: PALETTE.text,
+      anchorX: 0.5,
+      anchorY: 0.5,
+    });
+    const root = new this.pixi.Container();
+    root.x = center.x;
+    root.y = center.y;
+
+    /**
+     * 圆底 + 描边。
+     *
+     * ⚠️ 触屏没有"悬停"也没有"按下"之外的反馈渠道，所以按钮
+     * **必须有可见的圆底** —— 桌面技能栏那套"只有字、没有方框"
+     * 的语言在这里不适用（手指需要看到可点的目标）。
+     */
+    gfx.circle(0, 0, radius).fill({ color: 0x14151f, alpha: 0.82 });
+    gfx.circle(0, 0, radius).stroke({ color: 0x3c3e50, width: 2 });
+
+    /**
+     * 角标环：贴在按钮**右上**、半径 40%，表示"从这里派生出一个技能"。
+     * 平时不可见，只在派生窗口开着时出现。
+     */
+    const ringR = Math.round(radius * BADGE_RADIUS_RATIO);
+    const ring = new this.pixi.Graphics();
+    ring.circle(0, 0, ringR).fill({ color: 0x1a1b26, alpha: 0.95 });
+    ring.circle(0, 0, ringR).stroke({ color: 0xffd870, width: 2 });
+    const ringGlyph = new Label(this.pixi, {
+      x: 0,
+      y: 0,
+      size: FONT.small,
+      color: 0xffd870,
+      anchorX: 0.5,
+      anchorY: 0.5,
+    });
+    /** 环挂在按钮容器的右上角。 */
+    const ringRoot = new this.pixi.Container();
+    ringRoot.x = Math.round(radius * BADGE_OFFSET_RATIO);
+    ringRoot.y = -Math.round(radius * BADGE_OFFSET_RATIO);
+    ringRoot.addChild(ring, ringGlyph.root);
+    ringRoot.visible = false;
+
+    root.addChild(gfx, glyph.root, cd.root, skillCd.root, cost.root, ringRoot);
+    this.root.addChild(root);
+    return {
+      root,
+      gfx,
+      glyph,
+      cd,
+      skillCd,
+      cost,
+      ring,
+      ringGlyph,
+      ringRoot,
+      skillId,
+      derivedSkillId: '',
+    };
   }
 
   /** 每帧按快照更新文本。 */
   update(view: BattleSnapshotView): void {
-    this.root.visible = this.buttons.length > 0;
+    this.root.visible = this.buttons.size > 0;
     /**
      * **派生技不进扇形**：它作为"环"挂在**源按钮**上（见 `ButtonView.ring`）。
      * 所以这里先从快照里挑出派生技，再把它配给源按钮。
      */
     const derived = view.skills.find((s) => s.derivedFrom !== undefined);
-    for (const button of this.buttons) {
+    for (const button of this.buttons.values()) {
       const slot = view.skills.find((s) => s.skillId === button.skillId);
       this.applySlot(button, slot);
       const attached =
@@ -434,11 +332,11 @@ export class TouchButtonLayer {
   }
 
   dispose(): void {
-    for (const view of this.buttons) {
+    for (const view of this.buttons.values()) {
       this.root.removeChild(view.root);
       view.root.destroy({ children: true });
     }
-    this.buttons.length = 0;
+    this.buttons.clear();
     this.root.destroy({ children: true });
   }
 }

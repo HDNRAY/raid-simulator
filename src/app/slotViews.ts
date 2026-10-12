@@ -23,7 +23,7 @@ import { holdDrainPerSecond } from '../core/combat/holds';
 import type { BattleEngine } from '../core/combat/battleState';
 import type { SkillDef } from '../core/types';
 import type { SlotBinding } from './derivedSlots';
-import type { SkillSlotView, SlotCost } from '../render/viewModel';
+import { BLOCK_KEYS, type SkillSlotView, type SlotCost } from '../render/viewModel';
 
 /**
  * **单独造一个槽位视图**（这个技能**不需要**在技能栏里）。
@@ -116,12 +116,14 @@ export function buildSlotView(
   const casting = state.casts.length > 0;
   const usable = costOk && conditionOk && cooldownRatio <= 0.001 && !casting;
 
-  // 不可用原因用**本地化 key**表达，UI 层负责取文案
+  // 不可用原因用**本地化 key**表达，UI 层负责取文案。
+  // ⚠️ key 的字面量住在 `render/viewModel.ts` 的 `BLOCK_KEYS`（那边有说明：
+  // 技能栏的底色也认这两个 key，两边各写一份会静默漂）。
   let blockedKey: string | undefined;
-  if (!conditionOk) blockedKey = 'block.comboWindow';
-  else if (!costOk) blockedKey = 'block.cost';
-  else if (cooldownRatio > 0.001) blockedKey = 'block.cooldown';
-  else if (casting) blockedKey = 'block.casting';
+  if (!conditionOk) blockedKey = BLOCK_KEYS.comboWindow;
+  else if (!costOk) blockedKey = BLOCK_KEYS.cost;
+  else if (cooldownRatio > 0.001) blockedKey = BLOCK_KEYS.cooldown;
+  else if (casting) blockedKey = BLOCK_KEYS.casting;
 
   /**
    * 资源代价 —— 取**第一项**。

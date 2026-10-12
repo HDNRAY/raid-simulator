@@ -19,6 +19,7 @@ import { SettingsButton } from '../ui/settings/SettingsButton';
 import { SettingsPanel } from '../ui/settings/SettingsPanel';
 import { buildSettingsOptions } from './settingsPanelOptions';
 import { createSettingsToggle, type SettingsToggle } from './settingsToggle';
+import { settingsOriginOf } from './phaseLogic';
 import { clampUiScale } from '../render/scaling';
 import { translateSafe } from './translate';
 import type { SettingsStore } from './settingsStore';
@@ -62,13 +63,22 @@ export interface SettingsSetupDeps {
   /**
    * 与触屏输入源无关的那部分可变状态。
    *
-   * ⚠️ `bindings` / `touchButtons` / `uiScale` / `settingsButtonFocused` /
-   * `handlingKeyDown` 都住在这里 —— 它们各自有**多个写入点**（改键、触屏页
-   * 增删、缩放滑块、键盘焦点），拆成 `let` 就会在多模块间各持一份真相。
+   * ⚠️ `phase` / `bindings` / `touchButtons` / `uiScale` /
+   * `settingsButtonFocused` / `handlingKeyDown` 都住在这里 —— 它们各自有
+   * **多个写入点**（相位转移、改键、触屏键位、缩放滑块、键盘焦点），
+   * 拆成 `let` 就会在多模块间各持一份真相。
+   *
+   * ⚠️ `phase` 是这一轮进来的：设置面板要按"从哪打开"决定显示哪几页
+   * （`settingsOriginOf`），而相位是那个判据的输入。
    */
   readonly state: Pick<
     GameState,
-    'bindings' | 'touchButtons' | 'uiScale' | 'settingsButtonFocused' | 'handlingKeyDown'
+    | 'phase'
+    | 'bindings'
+    | 'touchButtons'
+    | 'uiScale'
+    | 'settingsButtonFocused'
+    | 'handlingKeyDown'
   >;
 }
 
@@ -158,6 +168,11 @@ export function createSettingsSetup(d: SettingsSetupDeps): SettingsSetup {
   const settingsToggle = createSettingsToggle({
     settings,
     settingsButton,
+    /**
+     * ⚠️ **从哪打开**取自相位（`settingsOriginOf`，纯函数、有单测）——
+     * 首页打开的面板没有「按键」页（那里没有技能可配）。
+     */
+    origin: () => settingsOriginOf(d.state.phase),
     isPaused: () => d.battle()?.isPaused ?? false,
     setPaused: (value) => d.battle()?.setPaused(value),
   });

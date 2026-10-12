@@ -34,7 +34,12 @@
 import type { PixiCtor } from './../ui/primitives';
 import type { InputSource } from '../input/keyboard';
 import { createTouchInput, type TouchHitArea, type TouchInputSource } from '../input/touchInput';
-import { createTouchLayout, type TouchButton, type TouchLayout } from '../input/touchLayout';
+import {
+  createTouchLayout,
+  slotsFromButtons,
+  type TouchButton,
+  type TouchLayout,
+} from '../input/touchLayout';
 import {
   TouchButtonLayer,
   TOUCH_BUTTON_DIAMETER,
@@ -63,12 +68,13 @@ export interface TouchControlsOptions {
   readonly pixi: PixiCtor;
   readonly translate: TranslateFn;
   /**
-   * **用户选的触屏按钮技能 id**（顺序即槽位）。
+   * **用户选的触屏键位表**（**下标 = 槽位号**，`''` = 空槽位）。
    *
    * ⚠️ 与**键盘绑定表无关**（用户 2026-10-12 推翻了原来的派生）：
-   * 它来自设置页「触屏」页的增删，存 `raid.touchButtons.v1`。
-   * 这里再按 `currentSkillIds`（这一局真的有的技能）过滤一次 ——
-   * 那是"别画出按不出东西的按钮"这条既有纪律，见下面 `buttonsOf`。
+   * 它来自设置页「按键」页右下角的模拟键位（点键位 → 点技能 → 绑定），
+   * 存 `raid.touchButtons.v1`。这里再按 `currentSkillIds`（这一局真的有的
+   * 技能）过滤一次 —— 那是"别画出按不出东西的按钮"这条既有纪律，
+   * 见下面 `buttonsOf`。
    */
   readonly touchSkillIds: () => readonly string[];
   readonly currentTick: () => number;
@@ -154,7 +160,7 @@ export interface TouchControls {
    */
   readonly frame: (view?: BattleSnapshotView) => void;
   /**
-   * **按钮集合变了** → 布局跟着变（设置页「触屏」页增删的就是它）。
+   * **触屏键位表变了** → 布局跟着变（设置页右下角那组模拟键位改的就是它）。
    *
    * ⚠️ 参数是**用户选的技能 id**（不是键位表）：这是那条被推翻的派生
    * 关系的接口面 —— 只要它还收"绑定表"，就一定有人再把它当真相源。
@@ -184,10 +190,25 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
    * ⚠️ 抽成一处并在**构造**与 `setButtons` **两处都用**：两处各写一遍
    * 过滤，必然会出现"建局时对了、改完按钮后又漏回来"（见 `currentSkillIds`）。
    */
-  const buttonsOf = (skillIds: readonly string[]): readonly TouchButton[] => {
+  /**
+   * 槽位表 → 布局的按钮表（**槽位号原样保留**）。
+   *
+   * ⚠️ 抽成一处并在**构造**与 `setButtons` **两处都用**：两处各写一遍
+   * 过滤，必然会出现"建局时对了、改完按钮后又漏回来"（见 `currentSkillIds`）。
+   *
+   * ⚠️ 过滤掉"这一局没有的技能"时**不能重排槽位**：`index` 用的是
+   * 槽位下标（`slots.entries()` 给的），不是压缩后的序号 ——
+   * 否则凯丽（少两个技能）的按钮会整体往内弧挤，与设置页预览对不上。
+   */
+  const buttonsOf = (slots: readonly string[]): readonly TouchButton[] => {
     const owned = options.currentSkillIds();
-    const usable = owned === undefined ? skillIds : skillIds.filter((id) => owned.has(id));
-    return usable.map((skillId, index) => ({ index, skillId }));
+    const out: TouchButton[] = [];
+    for (const [index, skillId] of slots.entries()) {
+      if (skillId === '') continue;
+      if (owned !== undefined && !owned.has(skillId)) continue;
+      out.push({ index, skillId });
+    }
+    return out;
   };
   const layout = createTouchLayout(buttonsOf(options.touchSkillIds()));
   const layer = new TouchButtonLayer({
@@ -197,8 +218,11 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
   /**
    * 先按初始布局建一次按钮 —— 否则第一帧是空的，
    * 玩家会看到"按钮晚了一帧才出现"。
+   *
+   * ⚠️ 传的是**槽位表**（`slotsFromButtons`），不是 `map(b => b.skillId)`：
+   * 后者会把空洞压掉，第 3 个键位上的技能就跑到第 2 个位置去了。
    */
-  layer.setButtons(layout.current().map((b) => b.skillId));
+  layer.setButtons(slotsFromButtons(layout.current()));
   layer.root.visible = caps.touch;
 
   /**
@@ -245,7 +269,7 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
 
   /** 布局变化 → 按钮层跟着重画（"监听变化"的另一个落点）。 */
   const offLayout = layout.subscribe((buttons) => {
-    layer.setButtons(buttons.map((b) => b.skillId));
+    layer.setButtons(slotsFromButtons(buttons));
   });
 
   return {
@@ -255,8 +279,9 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
     input,
 
     centerOfSkill(skillId) {
-      const idx = layout.current().findIndex((b) => b.skillId === skillId);
-      return idx < 0 ? null : (touchButtonCenter(idx) ?? null);
+      /** ⚠️ 用 `b.index`（槽位号），不是数组下标 —— 槽位可以空着。 */
+      const button = layout.current().find((b) => b.skillId === skillId);
+      return button === undefined ? null : (touchButtonCenter(button.index) ?? null);
     },
     onPointerDown(pointerId, px, py) {
       /**
