@@ -58,6 +58,7 @@ import {
   moveFocus,
   pickOption,
   prepareHitAreas,
+  prepareLabelY,
   type PrepareSelection,
 } from './prepareLogic';
 import {
@@ -171,16 +172,25 @@ export class PrepareScreen {
       anchorY: 0.5,
       kai: true,
     });
+    /**
+     * 栏目标题（「选择人物」/「选择对手」）。
+     *
+     * ⚠️ 字号与位置**都来自布局表**（`labelSize` / `prepareLabelY`）——
+     * 2026-10-13 用户："选项卡的字体 可以大一点，特别是移动端"。
+     * 原来这里写死 `- 22` 与 `FONT.small`，那让"标题画在哪"和"卡片行在哪"
+     * 变成两处真相（行一移、标题不跟）。
+     */
+    const labelY = prepareLabelY();
     this.playerLabel = new Label(pixi, {
       x: PREPARE_LAYOUT.pad,
-      y: PREPARE_LAYOUT.playerRowY - 22,
-      size: FONT.small,
+      y: labelY.player,
+      size: PREPARE_LAYOUT.labelSize,
       color: PALETTE.textDim,
     });
     this.bossLabel = new Label(pixi, {
       x: PREPARE_LAYOUT.pad,
-      y: PREPARE_LAYOUT.bossRowY - 22,
-      size: FONT.small,
+      y: labelY.boss,
+      size: PREPARE_LAYOUT.labelSize,
       color: PALETTE.textDim,
     });
 

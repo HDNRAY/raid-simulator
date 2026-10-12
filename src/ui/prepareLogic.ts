@@ -93,6 +93,15 @@ export interface PrepareLayout {
   readonly startW: number;
   readonly startH: number;
   readonly startY: number;
+  /**
+   * **栏目标题**（「选择人物」/「选择对手」）的字号。
+   *
+   * 2026-10-13 用户："选项卡的字体 可以大一点，**特别是移动端**" ——
+   * "选项卡"指的是这两**栏的标题**（不是设置页的页签）。
+   */
+  readonly labelSize: number;
+  /** 标题**底线**到它那一行卡片顶边的间距（标题画在它上面）。 */
+  readonly labelGap: number;
 }
 
 /** 默认布局（逻辑坐标系，960×540）。 */
@@ -108,7 +117,53 @@ export const PREPARE_LAYOUT: PrepareLayout = {
   startW: 200,
   startH: 44,
   startY: 430,
+  /**
+   * 栏目标题字号：`FONT.small`(13) → **18**。
+   *
+   * ================================================================
+   * ⚠️ 2026-10-13：用户"选项卡的字体 可以大一点，特别是移动端"
+   * ================================================================
+   *
+   * 现状（改前）：这一屏**只有一套几何**（固定 960×540 逻辑画布），
+   * 栏目标题桌面与触屏**同值**（都是 `FONT.small` = 13）—— 没有"触屏
+   * 另有一套尺寸"这回事。所以"特别是移动端"**不可能**靠"给触屏再单开
+   * 一档"来满足：那会造出第二套只按操作方式分叉的布局，而这一屏的
+   * 画布、卡片、按钮全是共用的。
+   *
+   * 于是按 **(b) 两端一起加** 处理：13 → 18（比卡片名字 17 还大一号，
+   * 因为它是**栏目标题**，不是卡片内容；但远小于主标题 32，不抢它）。
+   * 移动端因此也一起变大 —— 用户要的"特别是移动端"在**结果上**满足
+   * （触屏那一屏同样读到 18）。
+   *
+   * ⚠️ 纵向有硬约束（见 `labelGap` 与布局测试）：标题画在
+   * `playerRowY - labelGap` 处，卡片顶边在 `playerRowY` —— 字号再大，
+   * 只要**行框**不超过 `labelGap` 就不会压到卡片。
+   */
+  labelSize: 18,
+  /**
+   * 标题**底线**到卡片顶边的间距。
+   *
+   * ⚠️ 原来这个 `22` 是**写死在 `PrepareScreen` 里的**（`y - 22`）。
+   * 既然这一轮要动标题字号，就把它挪进布局表并给出可断言的余量：
+   * 18px 楷体的行框约 **25px**，而这里给 **30** —— 标题下缘离卡片顶边
+   * 还有 5px。布局测试（`tests/unit/prepareLayout.test.ts`）会盯着
+   * "行框 ≤ labelGap"这条，字号一调大就会先失败。
+   */
+  labelGap: 30,
 };
+
+/**
+ * 栏目标题**底边**的 y（`PrepareScreen` 用它把标题画在卡片上方）。
+ *
+ * ⚠️ 抽出来的理由：原来这是 `PrepareScreen` 里的一个 `- 22` 字面量，
+ * 与"卡片行在哪"是两处真相 —— 行一移，标题不跟。
+ */
+export function prepareLabelY(L: PrepareLayout = PREPARE_LAYOUT): {
+  readonly player: number;
+  readonly boss: number;
+} {
+  return { player: L.playerRowY - L.labelGap, boss: L.bossRowY - L.labelGap };
+}
 
 function cardRect(
   index: number,
