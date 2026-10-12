@@ -92,3 +92,50 @@ export const SLOT_NAV_KEYS: readonly { readonly key: string; readonly label: str
 export function slotNavKeyHint(): string {
   return SLOT_NAV_KEYS.map((k) => k.label).join(' / ');
 }
+
+/**
+ * 「按键」页**第二行提示**用到的那套键（改键 / 退出捕获）。
+ *
+ * ⚠️ 与 `SLOT_NAV_KEYS` 分开两张表，因为语义不同：
+ *   - `SLOT_NAV_KEYS` 是**触屏键位**那两步交互用的（选择 / 绑定）
+ *   - 这一张是**键盘改键**用的（选技能 / 进改键 / 退出）
+ * 用户明确要求两者都可能被看到（"不能删，宁可弹窗更大"），所以它们各自
+ * 有一行 —— 合成一张表就没法分别拼两句提示了。
+ *
+ * ⚠️ 同样是**键位表**，不是文案：改键时只动这里，语言包不用碰
+ * （AGENTS.md §3b）。`key` 必须是真的能被 `resolveKeyAction` 处理的键名
+ * —— `tests/unit/settingsTouch.test.ts` 有这条断言。
+ */
+export const KEY_EDIT_KEYS = {
+  /** 在技能格之间走（`resolveKeyAction` 的 `move`）。 */
+  move: { key: 'arrowup', label: '←→↑↓' },
+  /** 进改键（`resolveKeyAction` 的 `activate`）。 */
+  edit: { key: 'enter', label: 'Enter' },
+  /** 退出捕获（`resolveKeyAction` 的 `cancelCapture`）。 */
+  cancel: { key: 'escape', label: 'Esc' },
+} as const;
+
+/**
+ * **第二行提示**的完整键名串：`'←→↑↓ / Enter / Esc'`。
+ *
+ * ⚠️ 顺序 = `move → edit → cancel`，与玩家实际的按键顺序一致
+ * （先选、再改、不行就退）。
+ */
+export function keyEditKeyHint(): string {
+  return [KEY_EDIT_KEYS.move.label, KEY_EDIT_KEYS.edit.label, KEY_EDIT_KEYS.cancel.label].join(' / ');
+}
+
+/**
+ * 第二行提示的**完整句子**：标签（i18n） + 键名（本表）。
+ *
+ * ⚠️ 拼在一起的规则**只有这一处**：面板与截图脚本问的都是这个函数。
+ * 原先那句 `keysHint`（"方向键选择，Enter 改键，Esc 返回"）整句写在 i18n
+ * 里、**含 `Enter` / `Esc`** —— 改键就得改语言包，用户否掉过
+ * （"改快捷键 害得改 i18n 吗？"）。
+ *
+ * ⚠️ `label` 由调用方从 i18n 取（渲染层不许硬编码可显示文案，规范 I1）。
+ * 触屏不调它（那时不显示这一行）。
+ */
+export function keyEditHint(label: string): string {
+  return `${label} ${keyEditKeyHint()}`;
+}

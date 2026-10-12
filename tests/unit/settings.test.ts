@@ -23,6 +23,7 @@ import {
   type FocusContext,
 } from '../../src/ui/settings/logic';
 import { visibleTabs } from '../../src/ui/settings/tabs';
+import { TOUCH_PREVIEW } from '../../src/ui/settings/settingsGeometry';
 import { UiLayout } from '../../src/ui/uiLayout';
 import { FONT, LAYOUT } from '../../src/ui/layout';
 
@@ -51,7 +52,6 @@ function ctx(over: Partial<FocusContext> = {}): FocusContext {
     hasGrid: true,
     hasSlider: false,
     hasSlots: true,
-    hasTouchReset: true,
     slotIndex: 0,
     ...over,
   };
@@ -123,13 +123,19 @@ describe('几何：点击命中不能错位', () => {
     expect(fourth.y).toBeGreaterThan(first.y);
   });
 
-  it('grid 比单列省高度：容量至少 12 个技能', () => {
+  it('grid 比单列省高度：容量至少 6 个技能（2 行 × 3 列）', () => {
     /**
      * 这是改成 grid 的**理由**，值得写成断言。
-     * 单列时 12 个技能要 12×30 = 360px，弹窗根本放不下。
+     * 单列时 8 个技能要 8×30 = 240px，弹窗根本放不下。
+     *
+     * ⚠️ 上限从 12（4 行）降到 **6**（2 行，2026-10-12）：详情区改成
+     * "换行 + 可滚"之后，那 2 行格子让给了它 —— 见
+     * `settingsGeometry.KEY_GRID_MAX_ROWS` 的说明。当前技能 8 个，
+     * 所以**第 7、8 个技能在键盘页看不全**（这是有意的取舍，写在这里
+     * 免得下一个人以为容量算错了）。
      */
     expect(KEY_GRID.cols).toBeGreaterThanOrEqual(3);
-    expect(KEY_GRID_CAPACITY).toBeGreaterThanOrEqual(12);
+    expect(KEY_GRID_CAPACITY).toBeGreaterThanOrEqual(6);
   });
 
   it('【关键】恢复默认按钮不与最后一个技能格重叠 —— 容量是从剩余空间推出来的', () => {
@@ -480,8 +486,7 @@ describe('关闭按钮与 Boss 面板边距', () => {
       }).kind,
     ).toBe('close');
     // 循环里必须包含它，否则它只能用鼠标
-    const fromTouchReset = cycleZone({ zone: 'touchReset' }, ctx());
-    expect(fromTouchReset.zone).toBe('close');
+    expect(cycleZone({ zone: 'reset' }, ctx()).zone).toBe('close');
   });
 
   /**
@@ -547,7 +552,8 @@ describe('标签只出现在详情区，不占技能格', () => {
     // （实现已抽到 `SkillDetail.ts`，所以整层拼接后再匹配）
     const detail = readFileSync(new URL('../../src/ui/settings/SkillDetail.ts', import.meta.url), 'utf8');
     const all = src + detail;
-    expect(all).toMatch(/this\.tags = line\(1, FONT\.tiny/);
+    /** ⚠️ 标签与**名字同一行**（`line(0,…)`）—— 需求"tags 放右边"。 */
+    expect(all).toMatch(/this\.tags = line\(0, FONT\.tiny/);
     expect(all).toMatch(/this\.tags\.set\(tags\)/);
     /**
      * ⚠️ 文案 key 现在是**完整 i18n key**（不再拼 `settings.hintTags.`
@@ -632,8 +638,15 @@ describe('⚠️ 命中测试必须与**当前模式**的渲染度量一致', ()
     return hit / total;
   }
 
+  /**
+   * 只对**放得下**的格子断言（容量是算出来的：桌面 2 行 = 6 格、触屏 2 行
+   * = 6 格）。超出的格子由下一条断言管"不可点"。
+   */
+  const capacity = (hints: boolean): number =>
+    Math.min(rows.length, rowsCapacity(keyGridMetrics(hints)));
+
   it('桌面度量：每一格都 100% 命中自己', () => {
-    for (let i = 0; i < rows.length; i += 1) {
+    for (let i = 0; i < capacity(true); i += 1) {
       expect(selfHitRatio(i, true)).toBe(1);
     }
   });
@@ -643,18 +656,44 @@ describe('⚠️ 命中测试必须与**当前模式**的渲染度量一致', ()
      * 这条就是那个 bug 的回归测试。修之前这一条在 i3..i6 全挂
      * （i6「闪」只有 6.3%）。
      */
-    for (let i = 0; i < rows.length; i += 1) {
+    for (let i = 0; i < capacity(false); i += 1) {
       expect(selfHitRatio(i, false)).toBe(1);
     }
   });
 
-  it('触屏第 4 行的格子不可点（那里是详情区，容量只有 9）', () => {
+  /**
+   * ⚠️ 这一轮的回归：键位预览一度压进格阵矩形，`hitTest` 的判定顺序
+   * （`slot` 先于 `keyRow`）于是让"第 3 格"只有 91.6% 命中。
+   */
+  it('【回归】格阵与键位预览**不重叠**', () => {
+    const previewTop = SETTINGS_PANEL.y + TOUCH_PREVIEW.top;
+    const previewLeft = SETTINGS_PANEL.x + TOUCH_PREVIEW.x;
+    for (const hints of [true, false]) {
+      const metrics = keyGridMetrics(hints);
+      for (let i = 0; i < rowsCapacity(metrics); i += 1) {
+        const cell = keyCellRect(i, metrics);
+        const overlaps =
+          cell.x < previewLeft + TOUCH_PREVIEW.w &&
+          cell.x + cell.w > previewLeft &&
+          cell.y < previewTop + TOUCH_PREVIEW.h &&
+          cell.y + cell.h > previewTop;
+        expect(overlaps, `第 ${i} 格与预览重叠`).toBe(false);
+      }
+    }
+  });
+
+  it('超出容量的格子**不可点**（那里是详情区）', () => {
     /**
-     * ⚠️ 桌面容量 12、触屏容量 9。第 10 个技能在触屏下**不该有可点区**
-     * —— 用桌面常量 `KEY_GRID_CAPACITY`(12) 会让它"能点但看不见"。
+     * ⚠️ 两种度量各有自己的容量（触屏格子更高，行数更少）。
+     * 超出容量的格子**不该有可点区** —— 用桌面常量去判会让它
+     * "能点但看不见"（用户报过的原 bug）。
+     *
+     * ⚠️ 2026-10-12 容量变小是**有意的取舍**：详情区要换行 + 可滚，
+     * 它从格阵那里拿走了 1 行（见 `KEY_GRID_MAX_ROWS`）。
      */
     const metrics = keyGridMetrics(false);
-    expect(rowsCapacity(metrics)).toBe(9);
-    expect(rowsCapacity(keyGridMetrics(true))).toBe(12);
+    /** 两边都是 2 行 = 6 格（让位给详情区 + 键位预览，见 `KEY_GRID_MAX_ROWS`）。 */
+    expect(rowsCapacity(metrics)).toBe(6);
+    expect(rowsCapacity(keyGridMetrics(true))).toBe(6);
   });
 });

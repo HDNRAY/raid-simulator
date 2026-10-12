@@ -11,13 +11,17 @@
 import type { Container, Graphics } from 'pixi.js';
 import { LOGICAL } from '../layout';
 import { RebindSession } from './rebindSession';
-import {
-  resolveCycleFocus,
-  resolveKeyDispatch,
-  resolveMoveFocus,
-  resolvePanelDispatch,
-} from './panelDispatch';
+import { resolveKeyDispatch, resolvePanelDispatch } from './panelDispatch';
 import { runPanelClick, runPanelKey, type PanelActions } from './panelWiring';
+import { drawBody } from './settingsBody';
+import { buildPanelActions } from './panelActions';
+import {
+  dragScaleSlider,
+  isOnDetail,
+  isOnScaleSlider,
+  wheelDetail,
+  type PointerTargets,
+} from './panelInput';
 import { HoverTracker } from './hoverTracker';
 import { PanelNotice } from './panelNotice';
 import { KeyGrid } from './KeyGrid';
@@ -33,9 +37,6 @@ import {
   INITIAL_FOCUS,
   keyCellRect,
   keyGridMetrics,
-  uiScaleFromPointer,
-  uiScaleSliderRect,
-  contains,
   preferredTab,
   visibleTabs,
   type FocusContext,
@@ -85,6 +86,17 @@ export interface SettingsPanelOptions {
    */
   readonly getShowKeyHints?: (() => boolean) | undefined;
   /**
+   * 这台设备**是不是触屏**（`render/platform` 的能力探测，**不看 UA**）。
+   *
+   * ⚠️ 与 `getShowKeyHints` **分开**：两者今天反相关，但语义不同 ——
+   * 这个字段只回答"底部那个唯一的「恢复默认」恢复谁"
+   * （用户 2026-10-12："同一时间显示一个按钮……根据当前是否是触屏"）。
+   *
+   * ⚠️ 同样是**函数**：能力值由 `touchCapsSource` 在触屏层构造后回填，
+   * 固定值会永远读到占位。
+   */
+  readonly getTouchCapable?: (() => boolean) | undefined;
+  /**
    * **触屏键位表**（**下标 = 键位号**，`''` = 空键位）。**从 `GameState` 读**，
    * 不在面板里留副本 —— 与键位表同一条纪律。
    */
@@ -120,12 +132,12 @@ export class SettingsPanel {
   private readonly scaleSlider: ScaleSlider;
 
   /**
-   * 按键页底部的**选中技能详情**（四行）。
+   * 按键页底部的**选中技能详情**（名字 / 标签 / 说明 / 代价·冷却）。
    *
    * 需求："除了显示标签，还显示一下技能说明和代价，cd 等信息"。
    * 只为**当前焦点**那一项显示 —— 十几个格子各塞一段中文会挤成一团。
+   * 实现在 `SkillDetail`（含这一轮加的**换行 + 滚动**）。
    */
-  /** 选中技能的详情（独立组件，见 `SkillDetail`） */
   private readonly detail: SkillDetail;
 
   /** 外框：底板 + 标题 + 「关闭」 + tab 按钮（独立组件） */
@@ -247,12 +259,12 @@ export class SettingsPanel {
   }
 
   /** 当前 tab 有没有 UI 缩放 slider（只有通用页有）。 */
-  private hasSlider(): boolean {
+  private get hasSlider(): boolean {
     return this.tab === 'general';
   }
 
   /** 当前 tab 有没有技能格（只有「按键」页有）。 */
-  private hasGrid(): boolean {
+  private get hasGrid(): boolean {
     return this.tab !== 'general';
   }
 
@@ -282,10 +294,9 @@ export class SettingsPanel {
     return {
       tabCount: this.tabs.length,
       cellCount: this.options.getRows().length,
-      hasGrid: this.hasGrid(),
-      hasSlider: this.hasSlider(),
-      hasSlots: this.hasGrid(),
-      hasTouchReset: this.hasGrid(),
+      hasGrid: this.hasGrid,
+      hasSlider: this.hasSlider,
+      hasSlots: this.hasGrid,
       slotIndex: this.preview.selected ?? 0,
     };
   }
@@ -317,6 +328,22 @@ export class SettingsPanel {
   /** 当前键盘焦点（调试探针用）。 */
   get focusState(): SettingsFocus {
     return this.focus;
+  }
+
+  /**
+   * 技能详情区的滚动状态（调试探针用）。
+   *
+   * ⚠️ 存在的理由与 `settingsTrace` 一样：**"滚了没有"看不出来** ——
+   * 滚动前后各拍一张图只能证明"内容位置不同"，证明不了"是谁动的、
+   * 还能不能继续滚"。验证脚本读它做前后对比。
+   */
+  detailScroll(): {
+    readonly offset: number;
+    readonly total: number;
+    readonly rows: number;
+    readonly lines: readonly number[];
+  } {
+    return this.detail.scrollState();
   }
 
   /**
@@ -374,8 +401,8 @@ export class SettingsPanel {
      * "第一个技能格" —— 不挪走的话，在首页按 `Enter` 会对一个**看不见的**
      * 技能开始改键（界面像死了）。
      */
-    if (!this.hasGrid() && (this.focus.zone === 'grid' || this.focus.zone === 'slots')) {
-      this.focus = this.hasSlider() ? { zone: 'slider' } : { zone: 'tabs', index: 0 };
+    if (!this.hasGrid && (this.focus.zone === 'grid' || this.focus.zone === 'slots')) {
+      this.focus = this.hasSlider ? { zone: 'slider' } : { zone: 'tabs', index: 0 };
     }
     this.redraw();
   }
@@ -409,50 +436,39 @@ export class SettingsPanel {
       focus: this.focus,
       capturingSkillId: this.rebind.skillId,
       showKeyHints: this.showKeyHintsNow,
+      touch: this.touchCapable(),
     });
 
     return runPanelClick(action, this.panelActions());
   }
 
-  /**
-   * 面板对外的**动作面**（点击与按键共用，见 `./panelWiring`）。
-   *
-   * ⚠️ 一处实现、两处接线：原先 `hitTest` 与 `handleKey` 各写一份绑定，
-   * 字段名还对不上（`toggleTouch` vs `rebind`）—— 那种"两份接线"
-   * 漏一个字段的表现是**某个入口静默失效**。
-   *
-   * ⚠️ 每次调用新建一个对象：它只是把"面板现在能做什么"交给纯决策层，
-   * 不持有状态（真的状态在 `focus` / `preview` / `rebind` 里）。
-   */
+  /** 面板对外的**动作面**（点击与按键共用）—— 实现见 `./panelActions`。 */
   private panelActions(): PanelActions {
-    return {
+    return buildPanelActions({
       close: () => this.options.onClose(),
       switchTab: (tab) => this.setTab(tab),
       resetKeys: () => this.options.onResetKeys(),
-      /** ⚠️ 「触屏默认」是**另一个按钮**（见 `resolvePanelDispatch`）。 */
       resetTouch: () => this.options.onResetTouchButtons?.(),
+      touch: () => this.touchCapable(),
       notice: (text) => this.notice.set(this.options.translate(text)),
       rebind: (skillId, key) => this.options.onRebind(skillId, key),
-      swapSlots: (from, to) => {
-        this.rebind.stop();
-        this.options.onSwapSlots(from, to);
-      },
+      swapSlots: (from, to) => this.options.onSwapSlots(from, to),
+      stopCapture: () => this.rebind.stop(),
       focusSkill: (skillId) => this.setFocusToSkill(skillId),
       startCapture: (skillId, triggerKey) => this.rebind.begin(skillId, triggerKey),
-      stopCapture: () => this.rebind.stop(),
       finishCapture: (key) => this.rebind.handleKey(key),
       selectSlot: (index) => this.selectSlot(index),
       deselectSlot: () => this.preview.deselect(),
       assignTouchSlot: (slot, skillId) => this.options.onAssignTouchSlot?.(slot, skillId),
       clearTouchSlot: (slot) => this.options.onClearTouchSlot?.(slot),
-      moveFocus: (direction) =>
-        resolveMoveFocus({ focus: this.focus, direction, ctx: this.focusContext() }),
-      cycleFocus: (back) =>
-        resolveCycleFocus({ focus: this.focus, ctx: this.focusContext(), back }),
       nudgeSlider: (direction) => this.scaleSlider.nudge(direction),
       uiScale: (value) => this.options.onUiScale(value),
       redraw: () => this.redraw(),
-    };
+      focus: () => this.focus,
+      rows: () => this.options.getRows(),
+      focusContext: () => this.focusContext(),
+      selectedSlot: () => this.preview.selected,
+    });
   }
 
   /**
@@ -512,16 +528,45 @@ export class SettingsPanel {
     this.redraw();
   }
 
-  /** 某个逻辑坐标是否落在通用页的滑块上（拖动拖拽用）。 */
-  isOnScaleSlider(px: number, py: number): boolean {
-    return this.visible && this.tab === 'general' && contains(uiScaleSliderRect(), px, py);
+  /** 指针输入要读/改的那点状态（转发给 `./panelInput`，见那里的说明）。 */
+  private pointerTargets(): PointerTargets {
+    return {
+      visible: this.visible,
+      tab: this.tab,
+      setUiScale: (value) => this.options.onUiScale(value),
+      redraw: () => this.redraw(),
+      wheelDetail: (deltaY, deltaMode) => this.detail.wheel(deltaY, deltaMode),
+    };
   }
 
-  /** 拖拽滑块到某个横坐标（由主循环在 pointermove 时调用）。 */
+  /** 逻辑坐标是否落在通用页的滑块上（`canvasInput` 用它决定开始拖拽）。 */
+  isOnScaleSlider(px: number, py: number): boolean {
+    return isOnScaleSlider(this.pointerTargets(), px, py);
+  }
+
+  /** 逻辑坐标是否落在**技能详情区**上（`canvasInput` 用它决定拖拽滚动）。 */
+  isOnDetail(px: number, py: number): boolean {
+    return isOnDetail(this.pointerTargets(), px, py);
+  }
+
+  /** 详情区滚轮；**滚得动才算消费**（调用方据此 `preventDefault`）。 */
+  wheelDetail(px: number, py: number, deltaY: number, deltaMode: number): boolean {
+    return wheelDetail(this.pointerTargets(), px, py, deltaY, deltaMode);
+  }
+
+  /**
+   * 详情区**拖拽滚动**的三个阶段（一个入口：它们是同一次手势；分开写会
+   * 让"漏接一个阶段"表现成"拖到一半就断"，很难查）。坐标**只认逻辑 Y**。
+   */
+  detailPointer(phase: 'down' | 'move' | 'up', pointerId: number, py = 0): void {
+    if (phase === 'down') this.detail.pointerDown(pointerId, py);
+    else if (phase === 'move') this.detail.pointerMove(pointerId, py);
+    else this.detail.pointerUp(pointerId);
+  }
+
+  /** 拖拽滑块到某个横坐标（由 `canvasInput` 在 `pointermove` 时调用）。 */
   dragScaleSlider(px: number): void {
-    if (this.tab !== 'general') return;
-    this.options.onUiScale(uiScaleFromPointer(px));
-    this.redraw();
+    dragScaleSlider(this.pointerTargets(), px);
   }
 
   /**
@@ -549,6 +594,7 @@ export class SettingsPanel {
        * 没选中时才是改键 —— 判定在 `focus.resolveActivate`（与鼠标同一份）。
        */
       selectedSlot: this.preview.selected,
+      touch: this.touchCapable(),
     });
     this.pushTrace(dispatch.trace);
 
@@ -586,6 +632,23 @@ export class SettingsPanel {
     this.preview.deselect();
   }
 
+  /**
+   * 这台设备**是不是触屏**（决定底部那个唯一的「恢复默认」恢复谁）。
+   *
+   * ⚠️ 唯一真相是 `SettingsPanelOptions.getTouchCapable`（来自
+   * `render/platform` 的能力探测，**不看 UA**）。
+   *
+   * ⚠️ 它**不是** `!showKeyHints` 的别名：两个字段今天恰好反相关
+   * （见 `render/platform.detectPlatform` 的说明），但"显示不显示键名"
+   * 与"恢复哪套键位"是两件事 —— 所以 `getTouchCapable` 缺失时才退回这个
+   * 近似（而不是反过来让 `showKeyHints` 承担语义）。
+   */
+  private touchCapable(): boolean {
+    const explicit = this.options.getTouchCapable?.();
+    if (explicit !== undefined) return explicit;
+    return this.options.getShowKeyHints !== undefined && !this.showKeyHintsNow;
+  }
+
   /** 每帧调用：提示的倒计时（到点自己消失，见 `PanelNotice`）。 */
   update(): void {
     if (this.notice.tick()) this.redraw();
@@ -596,98 +659,33 @@ export class SettingsPanel {
     this.drawBody();
   }
 
-  /**
-   * 画选中技能的详情：名字 / 标签 / 说明 / 代价·冷却。
-   *
-   * ⚠️ 只在焦点落在技能格上时调用（见调用处的说明）。
-   */
-  /** 画选中技能的详情（实现见 `SkillDetail`）。 */
-  private drawDetail(row: KeyRow): void {
-    this.detail.render(row);
-  }
-
-  /** 画外框（实现见 `SettingsFrame`）。 */
   private drawFrame(): void {
     const tabFocus = this.focus.zone === 'tabs' ? this.focus.index : -1;
     /** ⚠️ 可见的 tab 表一路传进渲染层 —— 首页时「按键」页整个不画。 */
     this.frame.update(this.tabs, this.tab, this.focus.zone, tabFocus, this.showKeyHintsNow);
   }
 
+  /** 画外框 / 内容区（实现在 `SettingsFrame` 与 `./settingsBody`）。 */
   private drawBody(): void {
-    this.keyGrid.setVisible(this.tab !== 'general');
-    /** 通用页的滑块 / 详情 / 键位预览都在此隐藏 —— 这里只写隐藏，
-     * 通用页分支只写显示。 */
-    this.scaleSlider.setVisible(false);
-    this.preview.setVisible(false);
-    this.detail.clear();
-
-    if (this.tab === 'general') {
-      // 通用 tab 目前是空的 —— 明确写出来，而不是给一片空白
-      // 通用页没有"恢复默认键位"，那一栏留空（它属于按键页）
-      this.footer.showGeneralHint(this.showKeyHintsNow);
-      /**
-       * 通用页的控件：**显示** + 重画。
-       *
-       * ⚠️ 这里只负责"现在是通用页"；**隐藏由下面那行统一处理** ——
-       * 两处都写 hide 就会漏（第一版就是这样漏到按键页的）。
-       */
-      this.scaleSlider.setVisible(true);
-      this.scaleSlider.setFocused(this.focus.zone === 'slider');
-      this.scaleSlider.redraw();
-      return;
-    }
-
-    /* ---- 「按键」页：键盘键位 + 右下角的触屏键位 ---- */
-    const rows = this.options.getRows();
-    const slots = this.touchSlots();
-
-    /**
-     * 格子交给组件画。
-     *
-     * ⚠️ 详情区由**格子驱动**（`onFocused` 回调）：焦点在哪一格就显示
-     * 哪个技能。这样"画格子"与"显示谁"只有一个真相来源，
-     * 不会再出现"点完格子、详情还停在上一个技能"。
-     *
-     * ⚠️ 还要喂一份**触屏键位表**：格子上那个小号（"第几个键位"）
-     * 与右下角的预览是同一份数据的两个视图。
-     */
-    this.keyGrid.update(
-      rows,
+    this.footer.setTouch(this.touchCapable());
+    drawBody(
       {
-        focusIndex: this.focus.zone === 'grid' ? this.focus.index : -1,
+        grid: this.keyGrid,
+        slider: this.scaleSlider,
+        preview: this.preview,
+        detail: this.detail,
+        footer: this.footer,
+        rows: this.options.getRows(),
+        slots: this.touchSlots(),
+      },
+      {
+        tab: this.tab,
+        focus: this.focus,
         capturingSkillId: this.rebind.skillId,
         showKeyHints: this.showKeyHintsNow,
-        slotSkillIds: slots,
+        translate: (key, params) => this.options.translate(key, params),
       },
-      (row) => this.drawDetail(row),
     );
-
-    /**
-     * 右下角的**模拟键位**：显示 + 刷新。
-     *
-     * 技能名从**行数据**里取（那一份已经是 i18n 之后的 nameKey），
-     * 与技能格显示的是同一个来源 —— 不会出现"格子里是「斩」、
-     * 键位上写成别的字"。
-     */
-    const nameOf = (skillId: string): string => {
-      const row = rows.find((r) => r.skillId === skillId);
-      return row === undefined ? '' : this.options.translate(row.nameKey);
-    };
-    this.preview.setVisible(true);
-    this.preview.update(
-      slots,
-      nameOf,
-      this.focus.zone === 'slots' ? this.focus.index : undefined,
-    );
-
-    this.footer.updateKeys({
-      capturing: this.rebind.skillId !== undefined,
-      resetFocused: this.focus.zone === 'reset',
-      touchResetFocused: this.focus.zone === 'touchReset',
-      showKeyHints: this.showKeyHintsNow,
-      selectedSlot: this.preview.selected,
-    });
   }
 
-  /** 空 tab 的占位：一行主文案 + 一行提示，避免一片空白让人以为坏了。 */
 }

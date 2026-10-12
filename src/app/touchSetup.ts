@@ -34,6 +34,14 @@ import type { BattleLoop } from './battleLoop';
 export interface TouchCapsSource {
   /** 是否显示键位提示（触屏为 `false`）。 */
   showKeyHints: boolean;
+  /**
+   * 主输入设备是不是手指（`render/platform` 的能力探测）。
+   *
+   * ⚠️ 与 `showKeyHints` 一起回填，但**不是**它的反义词：设置页拿它决定
+   * 底部那个唯一的「恢复默认」恢复键盘还是触屏键位
+   * （用户 2026-10-12："同一时间显示一个按钮……根据当前是否是触屏"）。
+   */
+  touch: boolean;
 }
 
 /** 触屏装配需要的外部依赖。 */
@@ -106,8 +114,9 @@ export function createTouchSetup(d: TouchSetupDeps): TouchControls {
     staticSlot: (skillId, index) => d.battle()?.slotViewOf(skillId, index),
   });
 
-  /** 回填能力值（见 `TouchCapsSource` 的说明）。 */
+  /** 回填能力值（见 `TouchCapsSource` 的说明）。两个字段一起填。 */
   d.capsSource.showKeyHints = touch.caps.showKeyHints;
+  d.capsSource.touch = touch.caps.touch;
 
   touch.setButtons(d.touchSkillIds());
   d.scene.setShowKeyHints(touch.caps.showKeyHints);

@@ -92,7 +92,7 @@ export interface CanvasInputTargets {
  */
 export function wireCanvasPointer(t: CanvasInputTargets): () => void {
   /** CSS 尺寸 → 逻辑坐标（canvas 内部分辨率固定，靠 CSS 缩放）。 */
-  const at = (event: PointerEvent): { px: number; py: number } => {
+  const at = (event: { readonly clientX: number; readonly clientY: number }): { px: number; py: number } => {
     const rect = t.canvas.getBoundingClientRect();
     return {
       px: ((event.clientX - rect.left) / rect.width) * LOGICAL_W,
@@ -108,6 +108,16 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
    * "这次手势从滑块开始" —— 否则鼠标划过面板时也会一直改数值。
    */
   let draggingSlider = false;
+
+  /**
+   * **详情区拖拽**占住了这次手势的指针 id（触屏没有滚轮，靠拖）。
+   *
+   * ⚠️ 与 `draggingSlider` 分开记账：两者是**同一页上的两个可拖区域**
+   * （滑块在「通用」页、详情在「按键」页，页不同但手势语义不同 ——
+   * 一个改数值、一个滚动内容）。合成一个标志，切换页时就会有一个
+   * 拖拽被引到另一个区域上。
+   */
+  let detailDragId: number | null = null;
 
   /**
    * 复盘拖拽**占住了这次手势**的指针 id。
@@ -233,7 +243,21 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
       if (t.settingsButton.hitTest(px, py)) t.openSettings();
       return;
     }
-    draggingSlider = t.settings.hitTest(px, py) && t.settings.isOnScaleSlider(px, py);
+    /**
+     * ⚠️ 命中测试**先跑**（它负责把这次点击路由到设置页的各个区域），
+     * 然后**同一次点击**再问两件事：
+     *   1. 它是不是落在滑块上（`draggingSlider`）
+     *   2. 它是不是落在详情区上（`detailDragId`，开始拖拽滚动）
+     *
+     * 详情区的拖拽**不能**等 `hitTest` 返回什么 —— 那里只管"点了哪个
+     * 控件"，而滚动是一次手势（按下 → 移动 → 松开），要自己记 id。
+     */
+    const consumed = t.settings.hitTest(px, py);
+    draggingSlider = consumed && t.settings.isOnScaleSlider(px, py);
+    if (consumed && t.settings.isOnDetail(px, py)) {
+      detailDragId = event.pointerId;
+      t.settings.detailPointer('down', event.pointerId, py);
+    }
   };
 
   const onMove = (event: PointerEvent): void => {
@@ -252,6 +276,14 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
       return;
     }
     /**
+     * 详情区拖拽（触屏滚动技能说明 —— AGENTS.md §3b 的功能对等：
+     * 不许把"能滚"做成只有滚轮能用）。
+     */
+    if (detailDragId === event.pointerId) {
+      t.settings.detailPointer('move', event.pointerId, py);
+      return;
+    }
+    /**
      * 鼠标悬停到技能格 = **选中它**（需求："方向键选中和鼠标选中，
      * 应该合并"）。与方向键走同一条路径，所以高亮与详情完全一致。
      */
@@ -264,14 +296,22 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
     t.review().pointerUp(event.pointerId);
   };
 
-  const endDrag = (): void => {
+  /** 结束详情区拖拽（`pointerup` / `pointercancel` / `pointerleave` 共用）。 */
+  const endDetailDrag = (event: PointerEvent): void => {
+    if (detailDragId !== event.pointerId) return;
+    detailDragId = null;
+    t.settings.detailPointer('up', event.pointerId);
+  };
+
+  const endDrag = (event: PointerEvent): void => {
     draggingSlider = false;
+    endDetailDrag(event);
   };
 
   const onUp = (event: PointerEvent): void => {
     endReviewDrag(event);
     t.touch.onPointerUp(event.pointerId);
-    endDrag();
+    endDrag(event);
   };
 
   /**
@@ -281,7 +321,24 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
   const onCancel = (event: PointerEvent): void => {
     endReviewDrag(event);
     t.touch.onPointerCancel(event.pointerId);
-    endDrag();
+    endDrag(event);
+  };
+
+  /**
+   * **滚轮**（桌面）：只服务「按键」页的**技能详情区**（它可能装不下）。
+   *
+   * ⚠️ 挂在这里而不是面板自己挂 `window`：输入归属只有一个入口
+   * （本文件），面板只暴露 `isOnDetail` / `wheelDetail` —— 与滑块的
+   * `isOnScaleSlider` / `dragScaleSlider` 同一分工。
+   *
+   * ⚠️ 用 `{ passive: false }` 是因为**可能**要 `preventDefault`：
+   * 详情区滚得动时页面不该跟着滚。滚不动时**不拦**（那一下不属于面板）。
+   */
+  const onWheel = (event: WheelEvent): void => {
+    if (!t.settingsOpen()) return;
+    const { px, py } = at(event);
+    if (!t.settings.wheelDetail(px, py, event.deltaY, event.deltaMode)) return;
+    event.preventDefault();
   };
 
   t.canvas.addEventListener('pointerdown', onDown);
@@ -290,6 +347,7 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
   t.canvas.addEventListener('pointercancel', onCancel);
   /** `pointerleave` 与 cancel 同义：离开画布就该松开。 */
   t.canvas.addEventListener('pointerleave', onCancel);
+  t.canvas.addEventListener('wheel', onWheel, { passive: false });
 
   return () => {
     t.canvas.removeEventListener('pointerdown', onDown);
@@ -297,5 +355,6 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
     t.canvas.removeEventListener('pointerup', onUp);
     t.canvas.removeEventListener('pointercancel', onCancel);
     t.canvas.removeEventListener('pointerleave', onCancel);
+    t.canvas.removeEventListener('wheel', onWheel);
   };
 }

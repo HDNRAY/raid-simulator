@@ -37,6 +37,7 @@ import { Label } from '../ui/primitives';
 import { FONT } from '../ui/layout';
 import { PALETTE } from './theme';
 import { RESOURCE_COLORS } from './skillBar';
+import { slotLookOf } from './slotLook';
 import type { TranslateFn } from '../i18n/translator';
 import {
   BADGE_OFFSET_RATIO,
@@ -206,12 +207,15 @@ export class TouchButtonLayer {
     /**
      * 圆底 + 描边。
      *
-     * ⚠️ 触屏没有"悬停"也没有"按下"之外的反馈渠道，所以按钮
-     * **必须有可见的圆底** —— 桌面技能栏那套"只有字、没有方框"
-     * 的语言在这里不适用（手指需要看到可点的目标）。
+     * ⚠️ 触屏没有"悬停"，所以按钮**必须有可见的圆底** —— 桌面技能栏那套
+     * "只有字、没有方框"的语言在这里不适用（手指需要看到可点的目标）。
+     *
+     * ⚠️ **底色不在这里定**：它跟着状态走（可用最亮 / 买不起最暗），
+     * 色号来自 `./slotLook` 的 `SLOT_LOOKS`（与技能栏**同一张表**）——
+     * 见 `applySlot`。这里只画一个"还没拿到状态"时的中性底（首帧）。
      */
-    gfx.circle(0, 0, radius).fill({ color: 0x14151f, alpha: 0.82 });
-    gfx.circle(0, 0, radius).stroke({ color: 0x3c3e50, width: 2 });
+    gfx.circle(0, 0, radius).fill({ color: PALETTE.slot.blocked, alpha: 0.82 });
+    gfx.circle(0, 0, radius).stroke({ color: PALETTE.slot.blockedLine, width: 2 });
 
     /**
      * 角标环：贴在按钮**右上**、半径 40%，表示"从这里派生出一个技能"。
@@ -273,19 +277,46 @@ export class TouchButtonLayer {
   }
 
   private applySlot(button: ButtonView, slot: SkillSlotView | undefined): void {
+    /**
+     * ================================================================
+     * 圆钮的底色 = **与技能栏同一套**状态配色（用户 2026-10-12："统一"）
+     * ================================================================
+     *
+     * ⚠️ 映射**不是在这里推的**：`slotLookOf` 读的是 `slotViews.ts` 算好的
+     * `usable` / `blockedKey` / `cooldownRatio`，色号来自 `theme.PALETTE.slot`
+     * —— 触屏层**一个色值都不抄**（抄一份就会在某个状态下与技能栏分叉）。
+     *
+     * ⚠️ 形状不同（圆 vs 圆矩形）是**有意的**，但"什么状态配什么色"一致：
+     * 可用最亮、读条中一档、买不起最暗。
+     */
+    const look = slotLookOf(slot);
+    const radius = TOUCH_BUTTON_DIAMETER / 2;
+    button.gfx.clear();
+    button.gfx.circle(0, 0, radius).fill({ color: look.fill, alpha: 0.92 });
+    button.gfx.circle(0, 0, radius).stroke({ color: look.line, width: 2 });
+
     if (slot === undefined) {
       /**
        * 快照里没有这个技能（布局刚变、快照还没跟上）→ 画成不可用，
        * 而不是显示上一次的文本（那会误导玩家）。
+       *
+       * ⚠️ 底色已经按 `slotLookOf(undefined)`（最暗那档）画过了 ——
+       * 那正是"这一格现在什么都做不了"该有的样子。
        */
       button.glyph.set('');
+      button.glyph.setColor(look.glyph);
       button.cd.set('');
       button.skillCd.set('');
       button.cost.set('');
       return;
     }
     button.glyph.set(this.translate(slot.nameKey));
-    button.glyph.setColor(slot.usable ? 0xffffff : 0x8a8a98);
+    /**
+     * ⚠️ 技能字的颜色跟着**同一档底色**走：玩家在"买不起"时仍然要认出
+     * 这是哪个技能，所以那一档的字不是更暗，而是换成压在暗底上仍读得出的
+     * 中灰（`PALETTE.slot.blockedGlyph`）—— 与技能栏**同一做法**。
+     */
+    button.glyph.setColor(look.glyph);
     /**
      * 冷却数字与代价**共用同一个位置**（不会同时出现）：
      * 冷却中显示剩余秒数，否则显示代价。
@@ -298,9 +329,18 @@ export class TouchButtonLayer {
     } else {
       button.cd.set('');
       button.cost.set(this.costText(slot));
-      /** ⚠️ **按资源上色**（与桌面技能格同一个色表）。 */
+      /**
+       * ⚠️ **按资源上色**（与桌面技能格同一个色表）。
+       *
+       * ⚠️ 例外与技能栏一致：**买不起**时压灰（`look.costDimmed` →
+       * `PALETTE.slot.blockedCost`）。不压的话"买不起"的圆钮上会顶着一个
+       * 最醒目的资源色数字，"底色说用不了、数字说没问题"——同一个状态
+       * 两套打架的表达（技能栏那一轮修过同一个问题）。
+       */
       const resource = slot.cost?.resource;
-      if (resource !== undefined && resource in RESOURCE_COLORS) {
+      if (look.costDimmed) {
+        button.cost.setColor(PALETTE.slot.blockedCost);
+      } else if (resource !== undefined && resource in RESOURCE_COLORS) {
         button.cost.setColor(RESOURCE_COLORS[resource as ResourceKeyName]);
       } else {
         button.cost.setColor(PALETTE.text);
@@ -312,11 +352,15 @@ export class TouchButtonLayer {
      * 无冷却（CD = 0）则留空。
      */
     button.skillCd.set(slot.skillCdSec > 0 ? String(Math.round(slot.skillCdSec)) : '');
-    const dim = !slot.usable;
-    button.glyph.root.alpha = dim ? 0.62 : 1;
+    /**
+     * ⚠️ **不再靠 alpha 表达"用不了"**：底色（`look.fill`）已经说得很清楚，
+     * 而压暗 alpha 会连"这是哪个技能"一起压掉 —— 与技能栏那一档的做法
+     * 对齐（那里也不给图标压 alpha，见 `skillBar` 的说明）。
+     */
+    button.glyph.root.alpha = 1;
     button.cd.root.alpha = 1;
-    button.cost.root.alpha = dim ? 0.62 : 1;
-    button.skillCd.root.alpha = dim ? 0.62 : 1;
+    button.cost.root.alpha = 1;
+    button.skillCd.root.alpha = 1;
   }
 
   /**

@@ -35,9 +35,15 @@ export type SettingsFocus =
   | { readonly zone: 'grid'; readonly index: number }
   | { readonly zone: 'slots'; readonly index: number }
   | { readonly zone: 'slider' }
+  /**
+   * 底部**唯一**那个「恢复默认」按钮。
+   *
+   * ⚠️ 原先还有 `touchReset`（并排的第二个按钮）。用户 2026-10-12：
+   * "恢复默认和触屏默认 **同一时间显示一个按钮**就可以了，根据当前是否是
+   * 触屏" —— 所以那个焦点区整块删掉了；"恢复什么"由设备能力决定
+   * （`./resetButton.resetTargetFor`），焦点模型不认识这件事。
+   */
   | { readonly zone: 'reset' }
-  /** 「触屏默认」按钮（与「恢复默认」并排，见 `KeysFooter`）。 */
-  | { readonly zone: 'touchReset' }
   /** 右上角的「关闭」 */
   | { readonly zone: 'close' };
 
@@ -63,8 +69,6 @@ export interface FocusContext {
   readonly hasSlider: boolean;
   /** 有没有触屏键位区（右下角预览）。 */
   readonly hasSlots: boolean;
-  /** 有没有「触屏默认」按钮。 */
-  readonly hasTouchReset: boolean;
   /**
    * 进入 `slots` 区时落在哪个槽位 —— 调用方传**已选中的那个**
    * （没有选中就给 0），于是方向键回到键位区时不会跳回第 1 个。
@@ -126,16 +130,11 @@ export function moveFocus(
   }
 
   if (focus.zone === 'reset') {
+    /**
+     * ⚠️ 右边**没有**第二个按钮了（用户 2026-10-12 定案）——所以"右"在
+     * 这里就是停在原地，而不是"跳到触屏默认"。
+     */
     if (direction === 'left' || direction === 'up') return aboveBottom(ctx);
-    if (direction === 'right') {
-      return ctx.hasTouchReset ? { zone: 'touchReset' } : focus;
-    }
-    return focus;
-  }
-
-  if (focus.zone === 'touchReset') {
-    if (direction === 'left') return { zone: 'reset' };
-    if (direction === 'up') return aboveBottom(ctx);
     return focus;
   }
 
@@ -180,7 +179,6 @@ export function cycleZone(focus: SettingsFocus, ctx: FocusContext, back = false)
   if (ctx.hasSlots) usable.push('slots');
   if (ctx.hasSlider) usable.push('slider');
   usable.push('reset');
-  if (ctx.hasTouchReset) usable.push('touchReset');
   usable.push('close');
   const current = usable.indexOf(focus.zone);
   const step = back ? -1 : 1;
@@ -193,7 +191,6 @@ export function cycleZone(focus: SettingsFocus, ctx: FocusContext, back = false)
   if (next === 'slider') return { zone: 'slider' };
   if (next === 'tabs') return { zone: 'tabs', index: 0 };
   if (next === 'close') return { zone: 'close' };
-  if (next === 'touchReset') return { zone: 'touchReset' };
   return { zone: 'reset' };
 }
 
@@ -215,8 +212,12 @@ export type ActivateAction =
   | { readonly kind: 'deselectSlot' }
   | { readonly kind: 'assignTouchSlot'; readonly slot: number; readonly skillId: string }
   | { readonly kind: 'clearTouchSlot'; readonly slot: number }
+  /**
+   * 底部那个唯一按钮。⚠️ "恢复键盘还是触屏"**不在这里**判断 ——
+   * 执行层按设备能力分流（`./resetButton.resetTargetFor`），
+   * 焦点模型只回答"玩家按了那个按钮"。
+   */
   | { readonly kind: 'resetKeys' }
-  | { readonly kind: 'resetTouch' }
   | { readonly kind: 'close' }
   | { readonly kind: 'none' };
 
@@ -237,7 +238,6 @@ export function resolveActivate(input: ActivateInput): ActivateAction {
     return { kind: 'switchTab', tab: input.tabs[focus.index] ?? input.tabs[0] ?? 'general' };
   }
   if (focus.zone === 'reset') return { kind: 'resetKeys' };
-  if (focus.zone === 'touchReset') return { kind: 'resetTouch' };
   if (focus.zone === 'close') return { kind: 'close' };
   // slider 没有"激活"动作 —— 它的变化由左右方向键直接完成
   if (focus.zone === 'slider') return { kind: 'none' };

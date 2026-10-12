@@ -111,6 +111,13 @@ export function createSettingsSetup(d: SettingsSetupDeps): SettingsSetup {
    */
   const touchCapsSource: TouchCapsSource = {
     showKeyHints: true,
+    /**
+     * ⚠️ 触屏层建好之前先当**非触屏**（保守）：那一刻玩家还没看到面板，
+     * 而"把触屏设备当桌面"最坏的后果是底部那个按钮的**文案**在首帧是
+     * 键盘那套 —— 反正马上会被 `touchSetup` 回填。反过来（先当触屏）
+     * 会让桌面用户在第一帧看到触屏文案，更容易被误认成 bug。
+     */
+    touch: false,
   };
 
   const settings = new SettingsPanel(
@@ -144,6 +151,11 @@ export function createSettingsSetup(d: SettingsSetupDeps): SettingsSetup {
       snapshot: () => d.battle()?.snapshot,
       translate: translateSafe,
       getShowKeyHints: () => touchCapsSource.showKeyHints,
+      /**
+       * ⚠️ 与 `getShowKeyHints` 一样是**函数**（能力值在触屏层构造后才
+       * 回填）—— 而它只服务一件事：底部那个唯一的「恢复默认」恢复谁。
+       */
+      getTouchCapable: () => touchCapsSource.touch,
       pixi: { Container, Graphics, Sprite, Text },
       close: () => settingsToggle.close(),
       capture: (handler) => d.battle()?.inputSource?.capture(handler),

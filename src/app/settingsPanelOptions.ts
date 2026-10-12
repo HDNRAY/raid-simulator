@@ -48,6 +48,8 @@ export interface SettingsOptionsDeps {
   /** ⚠️ 用共享的 `TranslateFn`（带 `params`）—— 收窄成只收 `key` 会让占位符漏到界面上。 */
   readonly translate: TranslateFn;
   readonly getShowKeyHints: () => boolean;
+  /** 是不是触屏设备（决定那个唯一的「恢复默认」恢复谁 —— 见 `resetButton`）。 */
+  readonly getTouchCapable: () => boolean;
   readonly pixi: SettingsPanelOptions['pixi'];
   /** 关闭面板（由 `settingsToggle` 处理"恢复暂停"）。 */
   readonly close: () => void;
@@ -71,6 +73,7 @@ export function buildSettingsOptions(d: SettingsOptionsDeps): SettingsPanelOptio
     pixi: d.pixi,
     /** 「按键」页要读的两样：能力值（是否拼键名）与触屏键位表本身。 */
     getShowKeyHints: () => d.getShowKeyHints(),
+    getTouchCapable: () => d.getTouchCapable(),
     getTouchSlots: () => d.getTouchSkillIds(),
     /**
      * ⚠️ **透传 `params`** —— 只写 `(key) => t(key)` 会把占位符参数吃掉，

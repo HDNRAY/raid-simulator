@@ -229,98 +229,29 @@ export function rowStyle(entry: LogEntry): RowStyle {
  * 窗口计算（该显示哪几条）
  * ================================================================== */
 
-/** 一屏放几行（非有限值/0 → 至少 1，免得后面整除出 NaN）。 */
-function safeRows(rows: number): number {
-  if (!Number.isFinite(rows)) return 1;
-  return Math.max(1, Math.floor(rows));
-}
-
 /**
- * 最大偏移：等于"把头滚出屏幕"。
+ * 滚动的数学搬到了 `./scrollWindow`（**叶子模块**）。
  *
- * `0` 表示总共不到一屏（没有可滚的）；否则是 `条数 - 一屏行数`。
- */
-export function maxOffset(count: number, rows: number): number {
-  const safeCount = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
-  return Math.max(0, safeCount - safeRows(rows));
-}
-
-/** 把偏移钳进 `[0, maxOffset]`（非有限值当"滚到底"）。 */
-export function clampOffset(offset: number, count: number, rows: number): number {
-  const max = maxOffset(count, rows);
-  if (!Number.isFinite(offset)) return max;
-  return Math.min(max, Math.max(0, Math.floor(offset)));
-}
-
-/**
- * 可见的那几条（**时间顺序**，旧的在前）。
+ * ⚠️ 理由是 AGENTS.md 的"不要另发明一套滚动"：这一轮设置页的技能详情区
+ * 也要滚动，于是同一套窗口数学有了**第二个**消费者。留在本文件里的话，
+ * 详情区只能（a）反向 import 复盘模块，或（b）抄一份 —— 前者是耦合，
+ * 后者正是"两份会漂的真相"。所以下沉成叶子，两边都向下依赖它。
  *
- * `offset` 是"第一条可见条目在数组里的下标"，不是"距末尾多少条" ——
- * 前者才能直接 `slice`，也不会在追加新条目时让画面跳。
+ * 这里**转发**，外部 import 路径不变（与 `settings/logic` 转发
+ * `keyNames` / `rebind` 同一做法）。
  */
-export function visibleWindow(
-  entries: readonly LogEntry[],
-  offset: number,
-  rows: number,
-): readonly LogEntry[] {
-  const start = clampOffset(offset, entries.length, rows);
-  return entries.slice(start, start + safeRows(rows));
-}
-
-/** 滚到最新（一局刚结束时用：先看"最后到底发生了什么"）。 */
-export function tailOffset(count: number, rows: number): number {
-  return maxOffset(count, rows);
-}
-
-/** 翻页：`delta` 行，**正数 = 往新的翻**（与滚轮向下/PageDown 一致）。 */
-export function scrollOffset(
-  offset: number,
-  delta: number,
-  count: number,
-  rows: number,
-): number {
-  const step = Number.isFinite(delta) ? Math.round(delta) : 0;
-  return clampOffset(offset + step, count, rows);
-}
-
-/**
- * 翻页一次的步长：**留一行重叠**。
- *
- * 一页正好翻 `rows` 行的话，上一页的最后一行正好落在下一页的视野之外 ——
- * 玩家会觉得"跳了一行"。留一行重叠是分页的通用做法。
- */
-export function pageStep(rows: number): number {
-  return Math.max(1, safeRows(rows) - 1);
-}
-
-/** 当前窗口的条数区间（1 基、闭区间；空数组给 `0-0`）。 */
-export interface WindowRange {
-  readonly from: number;
-  readonly to: number;
-  readonly count: number;
-}
-
-export function windowRange(count: number, rows: number, offset: number): WindowRange {
-  const safeCount = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
-  if (safeCount === 0) return { from: 0, to: 0, count: 0 };
-  const start = clampOffset(offset, safeCount, rows);
-  const len = Math.min(safeRows(rows), safeCount - start);
-  return { from: start + 1, to: start + len, count: safeCount };
-}
-
-/** 滑块位置比例 0..1（`0` = 顶部/最旧，`1` = 底部/最新）。 */
-export function scrollFraction(offset: number, count: number, rows: number): number {
-  const max = maxOffset(count, rows);
-  if (max === 0) return 0;
-  return clampOffset(offset, count, rows) / max;
-}
-
-/** 滑块长度比例 0..1（内容不足一屏时 = 1，即滑块占满轨道）。 */
-export function scrollThumbRatio(count: number, rows: number): number {
-  const safeCount = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
-  if (safeCount <= safeRows(rows)) return 1;
-  return safeRows(rows) / safeCount;
-}
+export {
+  clampOffset,
+  maxOffset,
+  pageStep,
+  scrollFraction,
+  scrollOffset,
+  scrollThumbRatio,
+  tailOffset,
+  visibleWindow,
+  windowRange,
+  type WindowRange,
+} from './scrollWindow';
 
 /**
  * 战斗中那条实时面板的输入：只要 `major`。

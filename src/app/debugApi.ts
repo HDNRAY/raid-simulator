@@ -191,6 +191,17 @@ export interface SettingsDebugTarget {
    * 脚本复制一份必然与实际漂开。
    */
   slotCenter(index: number): { readonly x: number; readonly y: number } | undefined;
+  /**
+   * 技能详情区的滚动状态（`offset` = 第一条可见行）。
+   *
+   * ⚠️ 给验证脚本"滚动前后对比"用 —— 截图证明不了内容位移了多少。
+   */
+  detailScroll(): {
+    readonly offset: number;
+    readonly total: number;
+    readonly rows: number;
+    readonly lines: readonly number[];
+  };
 }
 
 /** 设置**按钮**暴露给调试的最小面（`SettingsButton` 满足它）。 */
@@ -235,6 +246,18 @@ export function settingsDebugApi(
     cellCenter(index: number): { readonly x: number; readonly y: number };
     /** 右下角第 `index` 个键位的圆心（越界为 `null`）。 */
     slotCenter(index: number): { readonly x: number; readonly y: number } | null;
+    /**
+     * 技能详情区的滚动状态（`offset` 变了 = 真的滚了）。
+     *
+     * `lines` = 名字 / 说明折了几行 / 代价 —— 用来验证"说明**换行**了"
+     * （而不是截断），见 `SkillDetail.scrollState`。
+     */
+    detailScroll(): {
+      readonly offset: number;
+      readonly total: number;
+      readonly rows: number;
+      readonly lines: readonly number[];
+    };
     trace(): readonly string[];
     /**
      * 把**齿轮按钮**的键盘焦点打开/关掉，并立刻重绘一次。
@@ -264,6 +287,7 @@ export function settingsDebugApi(
       cellCenter: (index) => ({ ...getSettings().cellCenter(index) }),
       /** 第 `index` 个键位的圆心（没有则 null）。 */
       slotCenter: (index) => getSettings().slotCenter(index) ?? null,
+      detailScroll: () => ({ ...getSettings().detailScroll() }),
       trace: () => [...getSettings().settingsTrace],
       setButtonFocused: (focused) => {
         const button = getButton();

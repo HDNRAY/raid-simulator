@@ -15,11 +15,11 @@ import {
   keyGridMetrics,
   resetButtonRect,
   tabRect,
-  touchResetButtonRect,
   type FocusContext,
   type SettingsFocus,
   type SettingsTab,
 } from '../../src/ui/settings/logic';
+import { DETAIL_TOP, KEY_GRID_BOTTOM, SETTINGS_PANEL } from '../../src/ui/settings/settingsGeometry';
 import { visibleTabs } from '../../src/ui/settings/tabs';
 import { TOUCH_BUTTON_CAPACITY } from '../../src/render/touchGeometry';
 import { previewSlotCenter } from '../../src/ui/settings/touchPreview';
@@ -45,7 +45,6 @@ function ctx(over: Partial<FocusContext> = {}): FocusContext {
     hasGrid: true,
     hasSlider: false,
     hasSlots: true,
-    hasTouchReset: true,
     slotIndex: 0,
     ...over,
   };
@@ -64,6 +63,8 @@ function panelInput(over: Partial<PanelDispatchInput> = {}): PanelDispatchInput 
     focus: GRID,
     capturingSkillId: undefined,
     showKeyHints: true,
+    /** 默认当**桌面**（非触屏）—— 触屏那条分支由专门的用例显式传 `true`。 */
+    touch: false,
     ...over,
   };
 }
@@ -118,10 +119,16 @@ describe('resolvePanelDispatch：点一下该做什么', () => {
 
   it('点在弹窗内空白处 → none（消费掉）', () => {
     /**
-     * ⚠️ 空白处要避开**新的**键位预览（右下角 x 588..784 × y 322..492）：
-     * 取 tab 行下面、格阵左边那一条空隙。
+     * ⚠️ 空白处要避开格阵、详情区、提示两行、按钮与**右下角的键位预览**
+     * —— 坐标直接**从几何常量推**（别再手写一个"以前是空的"的点：
+     * 这一轮布局一改，原来那个点就落进技能格里了）。
+     *
+     * 取格阵下沿与详情区顶边之间那条缝（`KEY_GRID_BOTTOM .. DETAIL_TOP`）。
      */
-    expect(resolvePanelDispatch(panelInput({ px: 700, py: 100 }))).toEqual({ kind: 'none' });
+    const y = (SETTINGS_PANEL.y + KEY_GRID_BOTTOM + DETAIL_TOP) / 2;
+    expect(resolvePanelDispatch(panelInput({ px: SETTINGS_PANEL.x + 8, py: y }))).toEqual({
+      kind: 'none',
+    });
   });
 
   describe('右下角的模拟键位（两步交互的第一步）', () => {
@@ -168,9 +175,24 @@ describe('resolvePanelDispatch：点一下该做什么', () => {
       ).toEqual({ kind: 'assignTouchSlot', slot: 2, skillId: 'attack' });
     });
 
-    it('点「触屏默认」→ resetTouch（与「恢复默认」是两个按钮）', () => {
-      const r = touchResetButtonRect();
-      expect(resolvePanelDispatch(panelInput(centerOf(r)))).toEqual({
+    /**
+     * ⚠️ 用户 2026-10-12："恢复默认和触屏默认 **同一时间显示一个按钮**
+     * 就可以了，根据当前是否是触屏。"
+     *
+     * 所以"点那个按钮"只有**一个**命中区（`resetButtonRect`），而它到底
+     * 恢复什么由 `touch` 决定 —— 判定在 `./resetButton.resetTargetFor`。
+     */
+    it('非触屏点「恢复默认」→ resetKeys', () => {
+      const r = resetButtonRect();
+      expect(resolvePanelDispatch(panelInput({ ...centerOf(r), touch: false }))).toEqual({
+        kind: 'resetKeys',
+        notice: 'keysResetDone',
+      });
+    });
+
+    it('触屏点**同一个**「恢复默认」→ resetTouch（位置相同、结果不同）', () => {
+      const r = resetButtonRect();
+      expect(resolvePanelDispatch(panelInput({ ...centerOf(r), touch: true }))).toEqual({
         kind: 'resetTouch',
         notice: 'touchResetDone',
       });
@@ -249,6 +271,8 @@ function panelBindings() {
     switchTab: vi.fn<(tab: SettingsTab) => void>(),
     resetKeys: vi.fn<() => void>(),
     resetTouch: vi.fn<() => void>(),
+    /** 默认桌面 —— 那个唯一的按钮恢复键盘键位（触屏那条另有专门用例）。 */
+    touch: () => false,
     notice: vi.fn<(text: string) => void>(),
     swapSlots: vi.fn<(from: number, to: number) => void>(),
     focusSkill: vi.fn<(skillId: string) => void>(),
@@ -342,6 +366,7 @@ function keyBindings(over: Partial<KeyActionBindings> = {}) {
     switchTab: vi.fn<(tab: SettingsTab) => void>(),
     resetKeys: vi.fn<() => void>(),
     resetTouch: vi.fn<() => void>(),
+    touch: () => false,
     notice: vi.fn<(text: string) => void>(),
     rebind: vi.fn<(skillId: string, key: string) => void>(),
     selectSlot: vi.fn<(index: number) => void>(),
@@ -370,6 +395,7 @@ describe('resolveKeyDispatch：按键决策', () => {
       tabs: TABS,
       slotSkillIds: [],
       selectedSlot: undefined,
+      touch: false,
     });
     expect(d.action).toEqual({ kind: 'ignore' });
     expect(d.trace).toBe('');
@@ -385,6 +411,7 @@ describe('resolveKeyDispatch：按键决策', () => {
       tabs: TABS,
       slotSkillIds: [],
       selectedSlot: undefined,
+      touch: false,
     });
     expect(d.action).toEqual({ kind: 'capture', key: 'y' });
     expect(d.trace).toBe('handleKey(y) cap=flash -> capture');
@@ -400,6 +427,7 @@ describe('resolveKeyDispatch：按键决策', () => {
       tabs: TABS,
       slotSkillIds: [],
       selectedSlot: undefined,
+      touch: false,
     });
     expect(d.action).toEqual({ kind: 'cancelCapture' });
   });
@@ -413,6 +441,7 @@ describe('resolveKeyDispatch：按键决策', () => {
       tabs: TABS,
       slotSkillIds: [],
       selectedSlot: undefined,
+      touch: false,
     };
     expect(resolveKeyDispatch({ ...base, key: 'arrowleft' }).action).toEqual({
       kind: 'move',
@@ -434,6 +463,7 @@ describe('resolveKeyDispatch：按键决策', () => {
       tabs: TABS,
       slotSkillIds: [],
       selectedSlot: undefined,
+      touch: false,
     });
     expect(d.action).toEqual({ kind: 'activate' });
     expect(d.activate).toEqual({ kind: 'startCapture', skillId: 'flash' });
@@ -446,7 +476,7 @@ describe('resolveMoveFocus / executeKeyPanelAction', () => {
     const next = resolveMoveFocus({
       focus: { zone: 'slider' },
       direction: 'left',
-      ctx: ctx({ hasGrid: false, hasSlider: true, hasSlots: false, hasTouchReset: false }),
+      ctx: ctx({ hasGrid: false, hasSlider: true, hasSlots: false }),
     });
     expect(next).toBeUndefined();
   });

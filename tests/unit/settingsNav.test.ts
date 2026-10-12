@@ -39,7 +39,6 @@ function ctx(over: Partial<FocusContext> = {}): FocusContext {
     hasGrid: true,
     hasSlider: false,
     hasSlots: true,
-    hasTouchReset: true,
     slotIndex: 0,
     ...over,
   };
@@ -89,10 +88,15 @@ describe('弹窗内的键盘导航：没有只能用鼠标的死角', () => {
     });
   });
 
-  it('「触屏默认」在「恢复默认」右边：左右互达', () => {
-    expect(moveFocus({ zone: 'reset' }, 'right', ctx())).toEqual({ zone: 'touchReset' });
-    expect(moveFocus({ zone: 'touchReset' }, 'left', ctx())).toEqual({ zone: 'reset' });
-    expect(moveFocus({ zone: 'touchReset' }, 'right', ctx())).toEqual({ zone: 'touchReset' });
+  /**
+   * ⚠️ 用户 2026-10-12："恢复默认和触屏默认 **同一时间显示一个按钮**
+   * 就可以了，根据当前是否是触屏。" —— 所以 `reset` 右边**没有**第二个
+   * 按钮了，"右"在这里就是**停在原地**（不是绕回、也不是跳走）。
+   */
+  it('「恢复默认」右边没有第二个按钮：右 = 停在原地', () => {
+    expect(moveFocus({ zone: 'reset' }, 'right', ctx())).toEqual({ zone: 'reset' });
+    expect(moveFocus({ zone: 'reset' }, 'left', ctx())).toEqual({ zone: 'slots', index: 0 });
+    expect(moveFocus({ zone: 'reset' }, 'up', ctx())).toEqual({ zone: 'slots', index: 0 });
   });
 
   it('键位区内左右在 0..容量-1 之间走（两端不绕回）', () => {
@@ -116,17 +120,15 @@ describe('弹窗内的键盘导航：没有只能用鼠标的死角', () => {
     expect(b.zone).toBe('slots');
     const c = cycleZone(b, ctx());
     expect(c.zone).toBe('reset');
-    const d = cycleZone(c, ctx());
-    expect(d.zone).toBe('touchReset');
-    // 最后 → close → tabs（关闭按钮也在循环里，否则它只能用鼠标）
-    expect(cycleZone(d, ctx()).zone).toBe('close');
+    /** ⚠️ `reset` 之后**直接**是 `close`（那个第二个按钮已删，见上一条）。 */
+    expect(cycleZone(c, ctx()).zone).toBe('close');
     expect(cycleZone({ zone: 'close' }, ctx()).zone).toBe('tabs');
-    // 反向：tabs ← close（顺序是 tabs → grid → slots → reset → touchReset → close → tabs）
+    // 反向：tabs ← close（顺序是 tabs → grid → slots → reset → close → tabs）
     expect(cycleZone({ zone: 'tabs', index: 0 }, ctx(), true).zone).toBe('close');
   });
 
   it('没有技能格时 Tab 只在 tab 行与按钮之间走（不产生空焦点）', () => {
-    const bare = ctx({ cellCount: 0, hasGrid: false, hasSlots: false, hasTouchReset: false });
+    const bare = ctx({ cellCount: 0, hasGrid: false, hasSlots: false });
     const a = cycleZone({ zone: 'tabs', index: 0 }, bare);
     expect(a.zone).toBe('reset');
     const a2 = cycleZone(a, bare);

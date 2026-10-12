@@ -40,7 +40,6 @@ import {
   resetButtonRect,
   resolveActivate,
   resolveKeyAction,
-  touchResetButtonRect,
 } from '../../src/ui/settings/logic';
 import { visibleTabs } from '../../src/ui/settings/tabs';
 import { MNEMONIC_KEYS, SLOT_NAV_KEYS, slotNavKeyHint } from '../../src/ui/settings/keyNames';
@@ -133,6 +132,8 @@ function panelInput(
     selectedSlot: undefined,
     focus: { zone: 'grid', index: 0 },
     capturingSkillId: undefined,
+    /** 默认桌面；触屏那条分支由专门的用例显式传 `true`。 */
+    touch: false,
     showKeyHints: true,
     ...over,
   };
@@ -228,17 +229,21 @@ describe('两步交互：点键位 → 点技能 → 绑定（用户 2026-10-12 
     ).toEqual({ kind: 'clearTouchSlot', slot: 0 });
   });
 
-  it('「触屏默认」是**另一个按钮**（不恢复键位）', () => {
-    const r = touchResetButtonRect();
-    expect(resolvePanelDispatch(panelInput({ px: r.x + 4, py: r.y + 4 }))).toEqual({
-      kind: 'resetTouch',
-      notice: 'touchResetDone',
-    });
-    /** ⚠️ 「恢复默认」仍旧只恢复**键位**（两者靠位置分开，不靠当前页）。 */
-    const kr = resetButtonRect();
-    expect(resolvePanelDispatch(panelInput({ px: kr.x + 4, py: kr.y + 4 }))).toEqual({
+  /**
+   * ⚠️ 用户 2026-10-12："恢复默认和触屏默认 **同一时间显示一个按钮**
+   * 就可以了，根据当前是否是触屏。" —— 所以**位置只有一个**
+   * （`resetButtonRect`），恢复什么由 `touch` 决定。
+   */
+  it('同一个按钮：桌面恢复键位、触屏恢复触屏键位（位置相同）', () => {
+    const r = resetButtonRect();
+    const at = { px: r.x + 4, py: r.y + 4 };
+    expect(resolvePanelDispatch(panelInput({ ...at, touch: false }))).toEqual({
       kind: 'resetKeys',
       notice: 'keysResetDone',
+    });
+    expect(resolvePanelDispatch(panelInput({ ...at, touch: true }))).toEqual({
+      kind: 'resetTouch',
+      notice: 'touchResetDone',
     });
   });
 
@@ -287,12 +292,14 @@ describe('两步交互：点键位 → 点技能 → 绑定（用户 2026-10-12 
     ).toEqual({ kind: 'deselectSlot' });
   });
 
-  it('「触屏默认」的 Enter = resetTouch；「恢复默认」的 = resetKeys', () => {
+  /**
+   * ⚠️ 那个唯一的按钮在**焦点模型**里只有一种激活：`resetKeys`。
+   * "恢复键盘还是触屏"由执行层按设备分流（`./resetButton.resetTargetFor`）
+   * —— 焦点模型不认识设备，那是它不该知道的事。
+   */
+  it('「恢复默认」的 Enter = resetKeys（设备分流在执行层）', () => {
     const base = { tabs: TABS, rowSkillIds: [], slotSkillIds: [], selectedSlot: undefined } as const;
     expect(resolveActivate({ ...base, focus: { zone: 'reset' } })).toEqual({ kind: 'resetKeys' });
-    expect(resolveActivate({ ...base, focus: { zone: 'touchReset' } })).toEqual({
-      kind: 'resetTouch',
-    });
   });
 
   it('两个 tab 的助记键都还能用（`T` 已删 —— 触屏不再是独立页）', () => {

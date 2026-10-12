@@ -17,7 +17,28 @@
  * 的表还没建好时就去读了）。
  *
  * 所以把这些常量**下沉成叶子**：两边都向下依赖它，谁也不再依赖谁。
- * （同一个坑在 `src/data/scale.ts` 上踩过一次，那里也是这个解法。）
+ *
+ * ==================================================================
+ * ⚠️ 竖排只分成四段，数字全是**显式常量**（2026-10-12 重排）
+ * ==================================================================
+ *
+ *   ```
+ *   面板顶  0     ┌ tab 行 ────────────── 40..70
+ *                 │ 格阵（最多 2 行）      88..184
+ *                 │ 详情区（换行 + 可滚）  194..416   ← 左下
+ *                 │ 提示两行               430 / 450  ← 左下
+ *   面板底 520    └ 按钮                   478..504
+ *
+ *   右下角：模拟键位预览  x 428..624, y 264..454（画布）
+ *   ```
+ *
+ * ⚠️ 这一版**故意不写"一层套一层的推导式"**：实测踩过两次 ——
+ * 模块级推导式一旦引用还没求值的兄弟常量，轻则
+ * `Cannot access 'X' before initialization`（TDZ），重则**静默算错**
+ * （容量从 3 行变 5 行、详情区高 26px）。显式数字 + `settings.test.ts`
+ * 里的自洽性断言（详情区不重叠 / 格阵不越界 / 预览不压格子）更好查。
+ *
+ * ⚠️ 改任何一个数字，都要让 `pnpm run test:run` 里那几条几何断言过。
  */
 
 import { LOGICAL } from '../layout';
@@ -25,15 +46,20 @@ import { LOGICAL } from '../layout';
 export const SETTINGS_PANEL = {
   w: 640,
   /**
-   * 高度按"能放下当前全部技能"定。
+   * 高度：**520**（2026-10-12 由 500 扩到 520）。
    *
-   * 演进 400 → 440 → **500**：
+   * 演进 400 → 440 → 500 → **520**：
    *   440：按键页底部要加一块**选中技能的详情**（说明、代价、CD）
    *   500：详情区那段中文说明在 440 里放不下
+   *   520：底部提示从**一行变两行**（用户："`keysHint` 不能删，宁可弹窗
+   *        更大"），而那 40px 不能从详情区里抢 —— 详情区这一轮才刚改成
+   *        "换行 + 可滚"，再压就没得滚了。所以照用户那句话把面板做大。
    *
-   * 500 在画布（540）内仍然放得下（居中后 y 20..520）。
+   * 520 在画布（540）内仍然放得下（居中后 y 10..530）。
+   * ⚠️ 代价：面板外的边只剩 **10px** —— "点面板外关闭"仍然点得到，
+   * 但比原来的 20px 窄。这是拿"详情区多 20px"换的。
    */
-  h: 500,
+  h: 520,
   /** 居中 */
   get x(): number {
     return Math.round((LOGICAL.width - this.w) / 2);
@@ -54,8 +80,7 @@ export const KEY_GRID = {
    * "在技能名下放一行提示标签"，而那行标签后来被需求删掉了。于是下半截
    * 变成空白 —— 表现就是"行虚高、尺寸不对"。
    *
-   * ⚠️ 但触屏**不能**跟着用 44（手指点不准）—— 见 `keyGridLayout` 里
-   * `TOUCH_CELL_H` 的说明。
+   * ⚠️ 但触屏**不能**跟着用 44（手指点不准）—— 见下面 `TOUCH_CELL_H`。
    */
   cellH: 44,
   gapX: 10,
@@ -63,54 +88,196 @@ export const KEY_GRID = {
   inset: 16,
 } as const;
 
+/** 触屏格子的高度（手指可点下限约 44px，格子还要放 20px 的技能字）。 */
+export const TOUCH_CELL_H = 64;
+
 /**
- * 底部两个元素的位置：**提示文字在上、按钮在下**。
+ * 格阵**最多占几行**。
  *
- * 踩过的坑：`RESET_BUTTON.bottom` 曾在容量推导与绘制里各写了一次，
- * 算重了 —— 结果"恢复默认"按钮压在提示文字上。现在只在**这一处**定义。
+ * ⚠️ **2 行**（桌面 6 格、触屏 6 格）是这一轮挤压的结果，也是这一版
+ * **要让用户看见的取舍**：详情区被挤窄（608 → 400）之后，说明在 400px 里
+ * 折 2~4 行是常态，而底部又多了一行提示。三个东西抢同一块高度。
+ *
+ * 判据（用户的话）："`keysHint` 不能删，**宁可弹窗更大**" —— 面板已经扩到
+ * 520（画布 540 里只剩 10px 边）。再往下只能从**格阵**上让：键盘页一屏
+ * 能点到的技能从 12 个降到 **6 个**（当前技能 8 个）。
+ *
+ * ⚠️ 触屏那套格子更高（64 vs 44），所以**同样是 2 行** —— 但触屏键位另有
+ * 右下角的预览（7 个槽位）可配，不受这个影响。
+ *
+ * ⚠️ 这是**容量**（显示上限），不是"必须填满"：技能少时格子照常少。
  */
-export const RESET_BUTTON = {
-  x: 16,
-  w: 96,
-  h: 26,
-  /**
-   * 距弹窗底部。
-   *
-   * ⚠️ `bottom` 与 `KEY_GRID_CAPACITY` 联动：容量推导会从下往上留出
-   * 按钮与提示文字的空间。改这里必须让容量跟着重算（它是推导出来的，
-   * 不是写死的行数）。
-   */
-  bottom: 16,
-} as const;
+export const KEY_GRID_MAX_ROWS = 2;
+
+/**
+ * **格阵下沿**（面板相对）：最后一行的下边缘。
+ *
+ * = `88 + 2×44 + 1×8` = **184**（画布 194）。
+ *
+ * ⚠️ 它是 `gridRows` 的上沿，也是"详情区从哪儿开始"的依据。
+ */
+export const KEY_GRID_BOTTOM =
+  KEY_GRID.top + KEY_GRID_MAX_ROWS * KEY_GRID.cellH + (KEY_GRID_MAX_ROWS - 1) * KEY_GRID.gapY;
+
+/**
+ * 触屏格阵的**行数上限**。
+ *
+ * ⚠️ 与桌面**同为 2 行**（6 格）。曾经想给触屏 3 行（9 格，能放下全部
+ * 技能），但触屏格子高 64 → 第 3 行会伸到画布 y 296，而右下角键位预览的
+ * 圆最上沿在 y 280 一带 —— 实测**圆会压进第 3 行的格子矩形**，
+ * `hitTest` 的判定顺序（`slot` 先于 `keyRow`）于是让那几格点不中
+ * （`settings.test.ts` 的"格阵与预览不重叠"断言当场挂）。
+ *
+ * 所以两边一样多：**6 格**。触屏玩家要配第 7 个键位，用右下角那 7 个槽位
+ * （它们才是触屏的真正入口）。
+ */
+export const TOUCH_GRID_MAX_ROWS = 2;
+
+/**
+ * **触屏那套的格阵下沿**（面板相对）：`88 + 2×64 + 1×8` = **224**
+ * → 画布 **234**。
+ *
+ * ⚠️ 它比桌面那条（184）低 40px —— 同样行数、格子更高。详情区的触屏那份
+ * 跟着往下让（`DETAIL_TOP_TOUCH`，画布 244）。
+ */
+export const KEY_GRID_BOTTOM_TOUCH =
+  KEY_GRID.top + TOUCH_GRID_MAX_ROWS * TOUCH_CELL_H + (TOUCH_GRID_MAX_ROWS - 1) * KEY_GRID.gapY;
+
+
+
+/** 详情区与格阵之间的留白（画布坐标里 `DETAIL_TOP - gridBottom`）。 */
+export const DETAIL_TOP_GAP = 10;
+
+/**
+ * **详情区的顶边**（画布坐标）—— 桌面（键盘）那套。
+ *
+ * = `SETTINGS_PANEL.y + KEY_GRID_BOTTOM + DETAIL_TOP_GAP` = `10 + 184 + 10`
+ * = **194**。
+ *
+ * ⚠️ 详情区的**底边**由 `DETAIL_BOTTOM` 给，中间那一段就是它的高度
+ * （**约 220px** ≈ 名字 + 4~5 行说明 + 代价行）。写死高度会在"提示行数
+ * 变了"时留在原地（这一轮正是这么撞上的）。
+ */
+export const DETAIL_TOP = SETTINGS_PANEL.y + KEY_GRID_BOTTOM + DETAIL_TOP_GAP;
+
+/**
+ * **详情区的顶边**（画布坐标）—— 触屏那套。
+ *
+ * = `SETTINGS_PANEL.y + KEY_GRID_BOTTOM_TOUCH + DETAIL_TOP_GAP`
+ * = `10 + 224 + 10` = **244**。
+ *
+ * ==================================================================
+ * ⚠️ 为什么触屏要在**更下面**开始
+ * ==================================================================
+ *
+ * 触屏格子 64 高（手指可点下限的要求，见 `TOUCH_CELL_H`），所以同样 2 行在
+ * 触屏上更高。两者共用一条上沿的话：按触屏算会浪费桌面的高度，按桌面算
+ * 会让触屏那两行**越过上沿、被判不可点**。
+ *
+ * 所以 `keyGridLayout.gridRows` 按传入的 `metrics` 选上沿（桌面
+ * `KEY_GRID_BOTTOM` / 触屏 `KEY_GRID_BOTTOM_TOUCH`）。
+ */
+export const DETAIL_TOP_TOUCH =
+  SETTINGS_PANEL.y + KEY_GRID_BOTTOM_TOUCH + DETAIL_TOP_GAP;
+
+/**
+ * 底部提示文字的**行数** —— 2 行，两行都在左列。
+ *
+ * ==================================================================
+ * 为什么是 2 行（用户 2026-10-12）
+ * ==================================================================
+ *
+ * 需求①："原来的 `keysHint`（方向键选择，Enter 改键，Esc 返回）被删了
+ * → **不能删，宁可弹窗更大**"。
+ * 需求②：两句提示（"怎么绑定键位" / "怎么改键"）**都必须在某个状态下
+ * 看得到**，而且**不许**靠"只显示一行"省空间。
+ *
+ * 两句横着放是放不下的（实测：`slotHint` 一句 + 键名提示就约 340px，
+ * 两句接起来 ≈ 520px > 详情区可用宽 400px）—— 所以改成**两行**。
+ */
+export const HINT_LINES = 2;
 
 export const HINT_LINE = {
   height: 20,
-  /** 与按钮之间的间隙 */
+  /** 提示区与按钮之间的间隙 */
   gap: 8,
 } as const;
 
+/** 提示文字**整块**（两行）占的高度。 */
+export const HINT_BLOCK_H = HINT_LINES * HINT_LINE.height;
+
 /**
- * 按键页底部：**选中技能的详情**（名字 / 说明 / 代价·冷却）。
+ * 底部按钮的位置（面板相对）。
  *
- * 位置在格阵之下、提示行之上。⚠️ 网格容量必须**在它之前**停下 ——
- * 见 `keyGridLayout.rowsCapacity` 里踩过的坑。
+ * ⚠️ 定义在提示区**之前**：提示区的 y 是从按钮往上推出来的。
+ *
+ * ⚠️ `bottom: 16` 不是自由参数：右下角的模拟键位底缘在画布 y **454**，
+ * 而按钮那一行在画布 **488..514** —— 整行落在预览之下，"点按钮"不可能先
+ * 落进 `previewSlotAt` 的圆里（命中顺序见 `logic.hitTest`）。
+ */
+export const RESET_BUTTON_BOTTOM = 16;
+export const RESET_BUTTON_H = 26;
+
+/**
+ * **提示区第一行的 y**（面板相对）。
+ *
+ * = 面板高 - 按钮 - 间隙 - 两行提示 = `520 - 16 - 26 - 8 - 40` = **430**。
+ *
+ * ⚠️ 从**按钮**往上推（而不是从面板底部往下推）：按钮位置是设计给定的，
+ * 提示跟着它走。
+ *
+ * ⚠️ 它是**常驻**的（两行都算进去），不随"这一帧显示几行"变 —— 否则
+ * 详情区与按钮的位置会随选中状态上下跳，而 `hitTest` 也要跟着算两遍
+ * （那是"命中区与画出来的位置对不上"的经典来源）。空着的那一行只是
+ * 不写字。
+ */
+export const HINT_BLOCK_TOP =
+  SETTINGS_PANEL.h - RESET_BUTTON_BOTTOM - RESET_BUTTON_H - HINT_LINE.gap - HINT_BLOCK_H;
+
+/** **详情区的底边**（面板相对）—— 再往下就压到提示文字了。 */
+export const DETAIL_BOTTOM = HINT_BLOCK_TOP - 16;
+
+/**
+ * 详情区（可滚的那块）的**宽度与横坐标**。
  *
  * ⚠️ 宽度 608 → **400**（2026-10-12）：右下角要放**模拟键位预览**
  * （`TOUCH_PREVIEW`，从 `x = 428` 起）。不缩的话两者会叠在一起 ——
  * 而叠在一起的样子是"技能说明压在按钮上"，很难看出是哪一边错了。
+ *
+ * 宽 400 也是"说明必须换行 + 可能还要滚"的**直接原因**（用户要的就是
+ * 那个效果）。
+ *
+ * ⚠️ 高度**不在这里**（= `DETAIL_TOP .. DETAIL_BOTTOM`，由
+ * `keyGridLayout.skillDetailViewport()` 拼出来）。
  */
 export const SKILL_DETAIL = {
   x: 16,
-  /** 距弹窗顶部的距离 */
-  top: 344,
   w: 400,
-  /**
-   * 三行，行距 **22px**。
-   *
-   * 22 是**量出来的**：13px 的 `Label` 实测占高 22px（Pixi 的行高远大于
-   * 字号）。试过 14 / 15 / 18，三次都叠字。
-   */
-  h: 80,
+} as const;
+
+/**
+ * 「恢复默认」按钮 —— **现在只有一个**。
+ *
+ * ==================================================================
+ * 为什么从两个变回一个（用户 2026-10-12）
+ * ==================================================================
+ *
+ * 原话："**恢复默认和触屏默认 同一时间显示一个按钮就可以了，
+ * 根据当前是否是触屏**。"
+ *
+ * 所以"恢复什么"由**设备能力**决定（`./resetButton.resetTargetFor`），
+ * 不再由"点在哪个按钮上"决定 —— 于是并排的第二个位置整块删掉了。
+ * ⚠️ 但**两个功能都还在**：触屏设备上这一个按钮恢复触屏键位，非触屏上
+ * 恢复键盘键位。i18n 里两条 key（`keysReset` / `touchReset`）也都留着，
+ * 由渲染层按设备选。
+ *
+ * ⚠️ 它仍在**左列**（`x 16`），与提示文字同一条竖线。
+ */
+export const RESET_BUTTON = {
+  x: 16,
+  w: 96,
+  h: RESET_BUTTON_H,
+  bottom: RESET_BUTTON_BOTTOM,
 } as const;
 
 /**
@@ -125,12 +292,19 @@ export const SKILL_DETAIL = {
  * `ui/settings/touchPreview.ts` 从 `render/touchGeometry` 的**同一份
  * 双弧几何**按比例算出来 —— ⚠️ **不许手摆坐标**。
  *
- * 位置：格阵之下（格阵最下沿 296）、详情区之右（详情区右沿 416）。
- * 右下角留 16px 边距，与其它元素一致。
+ * ⚠️ **上沿必须落在格阵下沿之下**（`KEY_GRID_BOTTOM`，画布 194）：预览的
+ * 圆一旦压进格子的矩形，`hitTest` 的判定顺序（`slot` 先于 `keyRow`）就会
+ * 让**那一格点不中**（实测：第 3 格 91.6%、第 6 格 62% 命中，
+ * `settings.test.ts` 的 100% 断言当场挂）。`+ 50` 就是这条的余量。
+ *
+ * ⚠️ **高度 190 是"按钮够大"的下限**：双弧按等比装进 `h - captionH`，
+ * 缩得太小之后圆钮直径会低于 44px 的手指可点下限
+ * （`touchButtonSet.test.ts` 有这条断言：190 → 直径约 47px）。
  */
 export const TOUCH_PREVIEW = {
   x: 428,
-  top: 302,
+  /** 面板相对 y（画布 = `SETTINGS_PANEL.y + 这个值` = 264）。 */
+  top: KEY_GRID_BOTTOM + 50,
   w: 196,
   h: 190,
   /**
@@ -142,43 +316,32 @@ export const TOUCH_PREVIEW = {
   captionH: 16,
 } as const;
 
+/** 提示文字**每行**的 y（面板相对）。`index` 从 0 起。 */
+export function hintLineY(index = 0): number {
+  return HINT_BLOCK_TOP + index * HINT_LINE.height;
+}
+
 /**
- * 「触屏默认」按钮（与「恢复默认」并排）。
+ * 底部区域的上沿（面板相对）= 详情区的**底边**。
  *
- * ⚠️ 它与 `RESET_BUTTON` 是**两个含义不同的东西**（键位 vs 触屏键位），
- * 所以是两个常量、两个命中区域 —— 合成一个就会变成"点哪都恢复键位"。
+ * ⚠️ 是"详情区的底边"而不是"提示区顶边"：格阵与提示区之间隔着**整个
+ * 详情区**，拿提示区的顶边当上沿会让格子直接压在技能说明上
+ * （`keyGridLayout` 文件头记着那个坑：实测"攻"字盖住了「闪」那一格）。
  */
-export const TOUCH_RESET_BUTTON = {
-  x: 120,
-  w: 88,
-  h: 26,
-  /** 与 `RESET_BUTTON.bottom` 对齐（同一行）。 */
-  bottom: 16,
-} as const;
-
-/** 「触屏默认」按钮在画布坐标系里的矩形。 */
-export function touchResetButtonRect(): {
-  readonly x: number;
-  readonly y: number;
-  readonly w: number;
-  readonly h: number;
-} {
-  return {
-    x: SETTINGS_PANEL.x + TOUCH_RESET_BUTTON.x,
-    y: SETTINGS_PANEL.y + SETTINGS_PANEL.h - TOUCH_RESET_BUTTON.bottom - TOUCH_RESET_BUTTON.h,
-    w: TOUCH_RESET_BUTTON.w,
-    h: TOUCH_RESET_BUTTON.h,
-  };
-}
-
-/** 提示文字行的 y（相对弹窗顶部）。 */
-export function hintLineY(): number {
-  return (
-    SETTINGS_PANEL.h - RESET_BUTTON.bottom - RESET_BUTTON.h - HINT_LINE.gap - HINT_LINE.height
-  );
-}
-
-/** 底部区域上沿：格子不能越过这条线。 */
 export function bottomAreaTop(): number {
-  return hintLineY();
+  return DETAIL_BOTTOM;
 }
+
+/**
+ * 「触屏默认」按钮**不再是一个独立的按钮**（2026-10-12 用户定案：
+ * "恢复默认和触屏默认 同一时间显示一个按钮就可以了，根据当前是否是触屏"）。
+ *
+ * 所以 `TOUCH_RESET_BUTTON` 与 `touchResetButtonRect()` 都被删掉了 ——
+ * 不是"藏起来"，是这个**位置**不再存在。恢复触屏键位仍然可达：就是那
+ * **唯一一个**按钮（见 `./resetButton.resetTargetFor` 按设备分流）。
+ *
+ * ⚠️ **详情区的矩形不在这里** —— 移到了 `./keyGridLayout` 的
+ * `skillDetailViewport()`（它的顶边要按**网格度量**算）。本文件必须是
+ * **叶子**（见文件头），所以推导留在那边；调用方从 `./logic` 拿（那里
+ * 转发）。
+ */

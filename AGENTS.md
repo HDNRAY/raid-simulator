@@ -429,3 +429,43 @@ ui截图 验证"
 - 把图存到 `/tmp` 再 `read_image` 看。⚠️ 画布有 letterbox：
   `clientY = rect.top + 逻辑Y × (rect.width / 960)`
 
+### ⚠️ 每个起 Chrome 的脚本都必须保证**杀掉它**
+
+**这不是"顺手清理"，是硬约束。** 用户报告过一次实测泄漏：CPU 被跑满 ——
+清点时 **99 个 Chrome 进程**，其中多个 headless 已经跑了**近 3 小时**，
+GPU 进程各占 4.6~7.8% CPU，整机 **load average 24**。
+
+**根因**：截图脚本在**收尾阶段会挂住**，而 kill 写在**正常路径的最末尾**
+（`child.kill('SIGKILL')`）—— 那一行到不了，Chrome 就一直活着。
+
+⚠️ **脚本"挂住"不是"慢"，是"泄漏"。** 所以判据不是"跑得完吗"，而是
+"**跑不完的时候谁来收尾**"。
+
+**每一个 spawn Chrome 的脚本（`tools/shot.mjs`、`tools/bench.mjs`，以及
+以后任何一个）都必须同时具备这四条** —— 少一条就可能漏：
+
+| 防线 | 作用 |
+|---|---|
+| **`finally` 里 kill** | 正常路径 / 抛错 / 提前返回都收得到。⚠️ **不是**函数末尾 |
+| **硬超时看门狗** | ⚠️ **最关键的一条**。流程挂住时 `finally` **永远不执行**，只有看门狗能兜住：到点**无条件** kill + 退出（`RAID_SHOT_TIMEOUT_MS` / `RAID_BENCH_TIMEOUT_MS` 可覆盖） |
+| `exit` / `SIGINT` / `SIGTERM` / `unhandledRejection` 钩子 | Ctrl-C、报错、超时 —— 任何一条路都不能漏 |
+| kill 之后**确认它真的死了** | 不是 fire-and-forget。`SIGTERM` 对 Chrome 不一定够 → 到点 `SIGKILL`，并**轮询确认**进程组消失 |
+
+实现收在 **`tools/headlessChrome.mjs` 一处**（`startHeadlessChrome()` +
+`armGuards()` + `close()`），两个脚本共用 —— 清理逻辑写两份必然漂移：
+一份修好了、另一份继续漏。
+
+⚠️ **只许杀自己起的那个 child**（按 `child.pid` 的进程组 `kill(-pid)`，
+`detached: true` 让 Chrome 当组长，才能把 GPU / renderer 那些 helper
+一起带走）。**绝不许**写成"全机扫 `--headless` 再 kill" —— 那会**误杀
+用户自己的浏览器**（危险；那两行命令只是事后人工清理用的，不是脚本的手段）。
+
+**怎么验证（只跑一次不够）**：
+
+1. 正常路径跑一遍 → 跑完数一遍 `--headless` 进程（应为 **0**）
+2. ⚠️ **模拟它挂住**（在自己的 `/tmp` 副本里加 `await new Promise(() => {})`，
+   **不许提交**）→ 验证看门狗真的到点 kill + 退出 → 再数一遍（必须 **0**）
+
+第 2 条才是核心验收：第 1 条只证明"顺利的时候没问题"，而泄漏恰恰发生在
+不顺利的时候。
+

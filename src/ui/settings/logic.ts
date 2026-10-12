@@ -24,12 +24,7 @@
  * 共享几何常量（**叶子模块**，见那里的说明 —— 留在这会造循环依赖）。
  * 转发出去，外部 import 路径不变。
  */
-import {
-  SETTINGS_PANEL,
-  RESET_BUTTON,
-  SKILL_DETAIL,
-  touchResetButtonRect,
-} from './settingsGeometry';
+import { SETTINGS_PANEL, RESET_BUTTON } from './settingsGeometry';
 import { MNEMONIC_KEYS } from './keyNames';
 /**
  * ⚠️ `tab` 的**可见集合**是"按从哪打开取值"的（用户 2026-10-12：
@@ -63,6 +58,9 @@ export {
   RESET_BUTTON,
   SKILL_DETAIL,
   HINT_LINE,
+  HINT_LINES,
+  HINT_BLOCK_TOP,
+  DETAIL_BOTTOM,
   TOUCH_PREVIEW,
   hintLineY,
   bottomAreaTop,
@@ -76,7 +74,6 @@ export type { ActivateAction, ActivateInput, Direction, FocusContext, SettingsFo
 export { INITIAL_FOCUS, cycleZone, moveFocus, resolveActivate } from './focus';
 export { visibleTabs, preferredTab, tabAt, tabIsVisible, ALL_SETTINGS_TABS } from './tabs';
 export type { SettingsOrigin, SettingsTab } from './tabs';
-export { touchResetButtonRect } from './settingsGeometry';
 /**
  * ⚠️ 既 import 又 export：本文件内部要用它们（`keyGridStateOf`
  * 之类），而外部 import 路径不变。`export ... from` 不产生本地绑定。
@@ -223,9 +220,11 @@ export function insidePanel(px: number, py: number): boolean {
 export type ClickTarget =
   | { readonly kind: 'outside' }
   | { readonly kind: 'tab'; readonly tab: SettingsTab }
+  /**
+   * 唯一那个「恢复默认」按钮。⚠️ 恢复的是**键盘键位还是触屏键位**，由
+   * 设备能力决定（`./resetButton.resetTargetFor`）—— 命中测试不判这件事。
+   */
   | { readonly kind: 'resetKeys' }
-  /** 「触屏默认」按钮（恢复触屏键位表）。 */
-  | { readonly kind: 'resetTouch' }
   | { readonly kind: 'keyRow'; readonly skillId: string }
   /**
    * 右下角**模拟键位**上的一个槽位（两步交互的第一步）。
@@ -290,8 +289,13 @@ export function hitTest(
   }
 
   if (options.tab !== 'general') {
+    /**
+     * ⚠️ **只有一个**「恢复默认」按钮（用户 2026-10-12："恢复默认和触屏
+     * 默认 同一时间显示一个按钮就可以了，根据当前是否是触屏"）。
+     * "恢复什么"由设备能力决定 —— 判定在 `./resetButton.resetTargetFor`，
+     * 不在命中测试里（它只管"点到了按钮"）。
+     */
     if (contains(resetButtonRect(), px, py)) return { kind: 'resetKeys' };
-    if (contains(touchResetButtonRect(), px, py)) return { kind: 'resetTouch' };
     /**
      * ⚠️ **模拟键位**先于技能格判定：它在格阵之外（右下角），但判定顺序
      * 放在这里能保证"以后有人把它挪到格子上"时**不会**变成"点键位改键"。
@@ -429,20 +433,14 @@ export function closeButtonRect(): Rect {
 }
 
 
-/** 详情区在弹窗坐标系里的矩形。 */
-export function skillDetailRect(): {
-  readonly x: number;
-  readonly y: number;
-  readonly w: number;
-  readonly h: number;
-} {
-  return {
-    x: SETTINGS_PANEL.x + SKILL_DETAIL.x,
-    y: SETTINGS_PANEL.y + SKILL_DETAIL.top,
-    w: SKILL_DETAIL.w,
-    h: SKILL_DETAIL.h,
-  };
-}
+/**
+ * 详情区（可滚的那块）在**画布坐标**里的矩形。
+ *
+ * ⚠️ 实现在 `./keyGridLayout.skillDetailViewport()` —— 它的顶边是"格阵
+ * 下沿"，要知道网格度量；而 `logic.ts` 已经向下依赖 `keyGridLayout`
+ * （网格几何那一摊），所以这里**转发**，外部 import 路径不变。
+ */
+export { skillDetailViewport as skillDetailRect } from './keyGridLayout';
 
 /**
  * 鼠标点击滑块时，由**横坐标**反算出倍数。

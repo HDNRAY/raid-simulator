@@ -10,7 +10,12 @@ import type { Container, Graphics } from 'pixi.js';
 import { FONT, LAYOUT, skillSlotLabels, skillSlotRect } from '../ui/layout';
 import { HALF_PIXEL, Label, type PixiCtor } from '../ui/primitives';
 import { PALETTE } from './theme';
-import { BLOCK_KEYS, type ResourceKeyName, type SkillSlotView } from './viewModel';
+import type { ResourceKeyName, SkillSlotView } from './viewModel';
+/**
+ * 状态 → 配色抽到了 `./slotLook`（**技能栏与触屏圆钮共用**，需求：
+ * "触屏圆钮跟技能栏统一"）。这里只转发 `slotStateOf`，调用点不变。
+ */
+import { SLOT_LOOKS, slotStateOf } from './slotLook';
 import type { FrameContext, FramePart, TranslateFn } from './sceneTypes';
 
 /**
@@ -27,95 +32,6 @@ export const RESOURCE_COLORS: Readonly<Record<ResourceKeyName, number>> = {
 
 /** 冷却矮条的最大高度（取自布局表，避免两处写魔数）。 */
 const SLOT_COOLDOWN_BAR_H = LAYOUT.skillBar.cooldownBarHeight;
-
-/**
- * 一格的**视觉状态** —— 四档，各有自己的底色（见 `SLOT_LOOKS`）。
- *
- * 需求（用户原话）："键盘的时候技能按钮还是加一个背景色，要不然
- * **资源不够用不了的技能看着太不清楚了**。"
- *
- * ⚠️ 这一档**不是**渲染层自己推出来的：判据全部来自 `app/slotViews.ts`
- * 算好的 `usable` / `blockedKey` / `cooldownRatio`。渲染层若自己再算一遍
- * "炁够不够"，就会出现两份会漂的真相（那是本仓库反复踩过的那类 bug）。
- */
-type SlotState =
-  /** 可用 */
-  | 'ready'
-  /** 冷却中 */
-  | 'cooldown'
-  /** 条件型不可用：读条中 / 派生窗口未开 */
-  | 'waiting'
-  /** **资源不足**（"买不起"）—— 用户点名要一眼看得出来的那一档 */
-  | 'blocked';
-
-/** 一档状态怎么画：底色 / 描边 / 技能字 / 键名 / 代价数字。 */
-interface SlotLook {
-  readonly fill: number;
-  readonly line: number;
-  readonly glyph: number;
-  readonly key: number;
-  /** 代价数字要不要压灰（只有"买不起"要 —— 见 `PALETTE.slot.blockedCost`） */
-  readonly costDimmed: boolean;
-}
-
-/**
- * 四档状态的配色表。
- *
- * 色号全部来自 `PALETTE.slot`（唯一配色真相源）—— 那里写着为什么这四档
- * **共用一个色相**、而不是"买得起绿、买不起红"。
- *
- * ⚠️ `ready` 与 `cooldown` **底色相同**：冷却由白色遮罩 + 中间的大数字
- * 表达，底色再变一次就是同一个状态两套表达 —— 两套表达必然在某个
- * 边界上互相矛盾（"看着亮、其实在冷却"）。
- */
-const SLOT_LOOKS: Readonly<Record<SlotState, SlotLook>> = {
-  ready: {
-    fill: PALETTE.slot.ready,
-    line: PALETTE.slot.readyLine,
-    glyph: 0xffffff,
-    key: 0xd8d8e4,
-    costDimmed: false,
-  },
-  cooldown: {
-    fill: PALETTE.slot.ready,
-    line: PALETTE.slot.readyLine,
-    glyph: 0xb0b0be,
-    key: 0x8a8a98,
-    costDimmed: false,
-  },
-  waiting: {
-    fill: PALETTE.slot.waiting,
-    line: PALETTE.slot.waitingLine,
-    glyph: 0xa8aabc,
-    key: 0x8a8a98,
-    costDimmed: false,
-  },
-  blocked: {
-    fill: PALETTE.slot.blocked,
-    line: PALETTE.slot.blockedLine,
-    glyph: PALETTE.slot.blockedGlyph,
-    key: 0x6a6c7c,
-    costDimmed: true,
-  },
-};
-
-/**
- * 这一格该按哪一档画。
- *
- * ⚠️ 「买不起」的判据就是 `slotViews.ts` 写进 `blockedKey` 的那个 key
- * （`BLOCK_KEYS.cost`）—— 不在渲染层重新推"资源够不够"，也不重新排序：
- * 那一格的 `blockedKey` 是谁，这里就照着画。**一份判据。**
- *
- * ⚠️ 冷却必须排在 `cost` **之后**判断，与 `slotViews.ts` 里算
- * `blockedKey` 的先后一致（那里也是先资源、后冷却）：否则"又买不起、
- * 又在冷却"的格子会被画成"只是冷却"。
- */
-function slotStateOf(view: SkillSlotView): SlotState {
-  if (view.usable) return 'ready';
-  if (view.blockedKey === BLOCK_KEYS.cost) return 'blocked';
-  if (view.cooldownRatio > 0.001) return 'cooldown';
-  return 'waiting';
-}
 
 export class SkillBarView implements FramePart {
   readonly name = 'skillBar';

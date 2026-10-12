@@ -35,6 +35,7 @@ import {
 } from './logic';
 import type { SettingsTab } from './tabs';
 import { resolveSlotBind, resolveSlotTap } from './slotActions';
+import { resetDoneKey, resetTargetFor } from './resetButton';
 
 /** 焦点此刻落在哪个技能格上（不在格子上、或下标越界时为 undefined）。 */
 export function focusedSkillIdOf(
@@ -86,7 +87,13 @@ export type PanelDispatch =
   | { readonly kind: 'deselectSlot' }
   | { readonly kind: 'assignTouchSlot'; readonly slot: number; readonly skillId: string }
   | { readonly kind: 'clearTouchSlot'; readonly slot: number }
-  /** 「触屏默认」按钮：回到"默认键位表里那些有键的技能"（截到容量）。 */
+  /**
+   * 触屏设备上的「恢复默认」—— 同一个按钮，恢复的是**触屏键位**。
+   *
+   * ⚠️ 与 `resetKeys` 是**同一个按钮的两个结果**（用户 2026-10-12：
+   * "同一时间显示一个按钮……根据当前是否是触屏"）。哪一个是它，
+   * 由 `resetTargetFor(touch)` 决定 —— 纯函数，有单测。
+   */
   | { readonly kind: 'resetTouch'; readonly notice: 'touchResetDone' }
   /** 拖 / 点 UI 缩放滑块：由横坐标反算倍数。 */
   | { readonly kind: 'setScaleFromPointer'; readonly px: number };
@@ -108,6 +115,14 @@ export interface PanelDispatchInput {
   readonly capturingSkillId: string | undefined;
   /** 是否显示键名 —— 它决定网格度量，必须与渲染同源（见 `logic.ts` 的 `hitTest`）。 */
   readonly showKeyHints: boolean;
+  /**
+   * 是不是触屏设备（`render/platform` 的能力探测）。
+   *
+   * ⚠️ 只用来回答一件事："底部那个「恢复默认」按钮恢复谁"
+   * （`./resetButton.resetTargetFor`）。**不要**在这里顺手加别的
+   * `if (touch)` —— 那会让这个字段变成第二个 `showKeyHints`。
+   */
+  readonly touch: boolean;
 }
 
 /**
@@ -130,15 +145,20 @@ export function resolvePanelDispatch(input: PanelDispatchInput): PanelDispatch {
       return { kind: 'close' };
     case 'tab':
       return { kind: 'switchTab', tab: target.tab };
-    case 'resetKeys':
-      return { kind: 'resetKeys', notice: 'keysResetDone' };
-    case 'resetTouch':
+    case 'resetKeys': {
       /**
-       * ⚠️ 「触屏默认」是**另一个按钮**（与「恢复默认」并排），不是
-       * "当前页不同、含义不同" —— 两者现在同处「按键」页，语义必须靠
-       * **位置**分开（`touchResetButtonRect`）。见 `KeysFooter`。
+       * ⚠️ 命中测试只知道"点到了那个按钮"；**恢复什么**要按设备分流 ——
+       * 用户 2026-10-12："恢复默认和触屏默认 同一时间显示一个按钮就可以
+       * 了，根据当前是否是触屏。"
+       *
+       * 判定在 `./resetButton.resetTargetFor`（纯函数、可单测），
+       * 这里只做接线。
        */
-      return { kind: 'resetTouch', notice: 'touchResetDone' };
+      const target = resetTargetFor(input.touch);
+      return target === 'touch'
+        ? { kind: 'resetTouch', notice: 'touchResetDone' }
+        : { kind: 'resetKeys', notice: 'keysResetDone' };
+    }
     case 'slot':
       /** ① 点键位：选中 / 取消选中（判定在 `slotActions`）。 */
       return resolveSlotTap(input.selectedSlot, target.index);
@@ -215,6 +235,11 @@ export interface KeyDispatchInput {
   readonly slotSkillIds: readonly string[];
   /** 当前选中的键位（`Enter` 在技能格上时决定"改键"还是"绑键位"）。 */
   readonly selectedSlot: number | undefined;
+  /**
+   * 是不是触屏设备 —— `Enter` 落在那个唯一的「恢复默认」上时，决定
+   * 恢复键盘键位还是触屏键位（见 `./resetButton`）。
+   */
+  readonly touch: boolean;
 }
 
 /** `handleKey` 的决策结果：面板拿 `action` / `activate` 去执行，`trace` 记轨迹。 */
@@ -304,9 +329,12 @@ export function resolveCycleFocus(input: {
 export interface PanelActionBindings {
   readonly close: () => void;
   readonly switchTab: (tab: SettingsTab) => void;
+  /** 恢复**键盘**键位（那个按钮在非触屏设备上的行为）。 */
   readonly resetKeys: () => void;
-  /** 「触屏默认」按钮：恢复默认键位表。 */
+  /** 恢复**触屏**键位（同一个按钮在触屏设备上的行为）。 */
   readonly resetTouch: () => void;
+  /** 是不是触屏设备 —— 那个按钮恢复谁（见 `./resetButton`）。 */
+  readonly touch: () => boolean;
   /** 提示文案（来自 i18n），执行层只负责把它交给 `notice`。 */
   readonly notice: (text: string) => void;
   readonly swapSlots: (from: number, to: number) => void;
@@ -422,9 +450,17 @@ export function executePanelDispatch(
 export interface KeyActionBindings {
   readonly close: () => void;
   readonly switchTab: (tab: SettingsTab) => void;
+  /** 恢复**键盘**键位（底部那个按钮在非触屏设备上的行为）。 */
   readonly resetKeys: () => void;
-  /** 「触屏默认」按钮：恢复默认键位表。 */
+  /** 恢复**触屏**键位（同一个按钮在触屏设备上的行为）。 */
   readonly resetTouch: () => void;
+  /**
+   * 是不是触屏设备 —— 唯一用途是"那个按钮恢复谁"。
+   *
+   * ⚠️ 用**函数**而不是值：面板可能在构造之后才拿到能力值
+   * （`touchCapsSource` 的回填，见 `app/settingsSetup.ts`）。
+   */
+  readonly touch: () => boolean;
   /** 提示文案（来自 i18n）。 */
   readonly notice: (text: string) => void;
   /** 把某个技能改绑到某个键（收尾由 `finishCapture` 做）。 */
@@ -604,14 +640,21 @@ export function executeKeyPanelAction(
         case 'clearTouchSlot':
           do_.clearTouchSlot(activate.slot);
           return { consumed: true };
-        case 'resetKeys':
-          do_.resetKeys();
-          do_.notice('settings.keysResetDone');
+        /**
+         * 底部那个**唯一**的「恢复默认」。
+         *
+         * ⚠️ 焦点模型只回答"玩家按了那个按钮"（`resetKeys`）；"恢复键盘
+         * 还是触屏"在这里按**设备能力**分流 —— 用户 2026-10-12：
+         * "同一时间显示一个按钮……根据当前是否是触屏"。
+         * 判定在 `./resetButton.resetTargetFor`（纯函数、可单测）。
+         */
+        case 'resetKeys': {
+          const target = resetTargetFor(do_.touch());
+          if (target === 'touch') do_.resetTouch();
+          else do_.resetKeys();
+          do_.notice(resetDoneKey(target));
           return { consumed: true };
-        case 'resetTouch':
-          do_.resetTouch();
-          do_.notice('settings.touchResetDone');
-          return { consumed: true };
+        }
         case 'close':
           do_.close();
           return { consumed: true };
