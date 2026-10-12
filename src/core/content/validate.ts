@@ -18,6 +18,7 @@ import {
   type CapabilityIssue,
   type ContentRoot,
 } from './capabilityAudit';
+import { offGridTimeIssues } from './timeGrid';
 import type {
   Ability,
   BuffDef,
@@ -86,7 +87,20 @@ export type ValidationCode =
    * 其中只有 `SUPPORTED_HOOKS` 会被真的处理。写进内容却不在表里的
    * hook **静默无效** —— 所以默认拒绝，而不是让人"写了却没反应"。
    */
-  | 'UNSUPPORTED_HOOK';
+  | 'UNSUPPORTED_HOOK'
+  /**
+   * 时间值不在 **0.1 秒（一个逻辑步）的刻度**上，例如 `castTime: logicMs(2.5)`
+   * = 250ms。
+   *
+   * 与上面几条不同：这不是"引擎还没实现"，而是**内容写错了**，而且错得
+   * 很安静 —— 显示会向上折到 0.3 秒、引擎按 250ms 跑，两边**差一整个
+   * 刻度**，不报错、不崩、肉眼看不出来。所以照 AGENTS.md §2 的第三类
+   * 处理：**校验报错拦下**。
+   *
+   * ⚠️ 拦哪些字段（含为什么排除 `holdDrain.perLogicTick`、`gapMs` 怎么判）
+   * 全写在 `./timeGrid.ts` 的文件头 —— 判据在那里，这里只登记校验码。
+   */
+  | 'OFF_GRID_TIME';
 
 export interface ValidationIssue {
   readonly severity: 'error' | 'warning';
@@ -153,6 +167,11 @@ export function validateContent(
   // `Expr.counter` 读出来恒为 0（没有写入者），用了就是**静默算错** ——
   // 所以默认拒绝，而不是让它在战斗里安静地给出错误数值。
   pushCapabilityIssues(counterExprIssues(contentRootsOf(bundle)), push);
+
+  /* ---------- 2d. 时间值必须落在 0.1 秒刻度上 ---------- */
+  // 判据与字段清单在 `./timeGrid.ts` 的文件头（那是"内容写错了"这一类，
+  // 与上面那份"引擎能力对账"是两个职责，所以分开）。
+  pushTimeGridIssues(bundle, push);
 
   /* ---------- 3. 依赖图与环检测 ---------- */
   const allAbilities = [
@@ -255,6 +274,14 @@ function pushCapabilityIssues(
   push: (i: ValidationIssue) => void,
 ): void {
   for (const issue of issues) push(issue);
+}
+
+/** 把"时间值不在 0.1 秒刻度上"（`OFF_GRID_TIME`）转成校验问题。 */
+function pushTimeGridIssues(
+  bundle: ContentBundle,
+  push: (i: ValidationIssue) => void,
+): void {
+  for (const issue of offGridTimeIssues(bundle)) push(issue);
 }
 
 /** 对一组能力做"引擎会不会处理 / 有没有执行点"的对账。 */

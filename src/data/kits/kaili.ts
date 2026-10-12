@@ -172,7 +172,7 @@ export const BLAST: SkillDef = {
    * 这是有意的取舍：轰是凯丽最高伤害的一招，代价是"酝酿得久、
    * 更容易被打断"。玩家得挑 Boss 刚出完招的空档来放。
    */
-  castTime: 900,
+  castTime: logicMs(9),
   cooldown: 0,
   cost: [{ resource: 'douqi', value: S(50) }],
   targeting: { mode: 'primaryEnemy' },

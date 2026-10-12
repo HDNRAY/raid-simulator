@@ -10,6 +10,7 @@
  * 智力一变，势能与涌动必须同时跟着变。
  */
 
+import { logicMs } from '../../core/loopConstants';
 import type { EquipmentEntity, Expr, StatModifier } from '../../core/types';
 
 /** 效果 2 的命名空间。其他内容通过它引用"熵之钟当前的势能值"。 */
@@ -101,7 +102,7 @@ export const ENTROPY_CLOCK: EquipmentEntity = {
               nameKey: 'buff.entropySurge.name',
               icon: 'buff_surge',
               polarity: 'buff',
-              duration: 10_000,
+              duration: logicMs(100),
               maxStacks: 1,
               stacking: { mode: 'refresh' },
               modifiers: [
