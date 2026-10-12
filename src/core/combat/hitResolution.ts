@@ -38,7 +38,14 @@ import type {
 } from '../types';
 import { aggregateFlags, applyBuff } from '../buffs';
 import { runTriggers } from './triggers';
-import { applyDamage, applyHeal, changeResource, computeDamage, computeHeal } from './index';
+import {
+  applyDamage,
+  applyHeal,
+  changeResource,
+  computeDamage,
+  computeHeal,
+  flatBlocked,
+} from './index';
 import type { BattleState } from '../types';
 
 /** 命中结算阶段需要的引擎能力。 */
@@ -113,13 +120,60 @@ export function resolveHit(
     const victimFlags = aggregateFlags(target);
 
     /**
+     * 这一击里的全部伤害效果 —— 「格」的阈值判定需要**看完整一击**。
+     *
+     * ⚠️ 取出来不是为了遍历（下面的 switch 仍然按顺序结算），
+     * 而是因为判据属于"整次命中"：见下面 `guardBlocked` 的说明。
+     */
+    const damageSpecs = hit.effects
+      .filter((e) => e.kind === 'damage' && e.damage !== undefined)
+      .map((e) => e.damage)
+      .filter((d): d is NonNullable<typeof d> => d !== undefined);
+
+    /**
+     * **这一击是不是被「格」的阈值完全挡下了**（`伤害 ≤ N`）。
+     *
+     * ==================================================================
+     * 为什么是"整次命中一个判据"
+     * ==================================================================
+     *
+     * 用户的规则是两句：
+     *   `≤N` → 完全抵消，且【连它带的效果一起免】（如眩晕）
+     *   `>N`  → 伤害 − N，效果【照吃】
+     *
+     * 而"效果一起免"在引擎里**已经有实现** —— `avoided` 通路：
+     * `applyHitEffects` 里对"作用在挨打者身上的效果"直接跳过
+     * （那条注释记录了"我闪躲了还是倒地了"这个真实 bug）。
+     *
+     * 所以这里**不新写一套免效果逻辑**，只回答一个问题：
+     * "这一击够不够低，低到整击作废？" —— 答是，就让它走同一条
+     * `avoided` 通路，于是"连眩晕一起免"是天然的。
+     *
+     * ⚠️ 多个伤害效果时取**全部都要 ≤N 才算挡住**：只要有一段超过，
+     * 那一段就要吃 `伤害−N`，而"效果照吃"是整次命中的约定 ——
+     * 一半免效果一半不免会造出一个没人能预期的中间状态。
+     *
+     * ⚠️ 判据用 `crit: false`：这里问的是"**基础伤害**够不够低"，
+     * 而当前内容全部 `canCrit: false`，所以两者本来就相等。
+     * 更重要的是**不在这里调 `rollCrit`** —— 那会消耗随机数，
+     * 而"这次格挡判没判"不该影响后面的暴击结果（重放会因此变得
+     * 极难推理，与 `rollCrit` 自己的短路理由同源）。
+     */
+    const guardBlocked =
+      victimFlags.invulnerable !== true &&
+      flatBlocked(damageSpecs, casterStats, victimFlags, { crit: false, multiplier: 1 });
+
+    /**
      * 这次命中**有没有碰到人**。
      *
      * ⚠️ **在循环之前判定一次**，不要在每个效果里现算：
      * 判据属于"整次命中"，与效果的顺序、种类都无关（见 `applyHitEffects`
      * 里那段"我闪躲了还是倒地了"的说明）。
+     *
+     * ⚠️ 两个来源：无敌（`invulnerable`）与「格」的阈值（`guardBlocked`）。
+     * 后者也算"没碰到人"，所以它带的效果同样被免掉 —— 这正是需求。
      */
-    const avoided = victimFlags.invulnerable === true;
+    const avoided = victimFlags.invulnerable === true || guardBlocked;
 
     /** 本次命中实际扣掉的血（用于判断"是否算受伤"，见函数末尾）。 */
     let taken = 0;
@@ -128,6 +182,41 @@ export function resolveHit(
       switch (effect.kind) {
         case 'damage': {
           if (!effect.damage) break;
+          /**
+           * ============================================================
+           * **「格」挡下整击**：发 `avoided` 事件，不走进伤害公式。
+           * ============================================================
+           *
+           * ⚠️ 为什么必须在这里分叉，而不是"让 `computeDamage` 把伤害减到 0"：
+           *
+           *   - `≤N` 的语义是**整击作废**（连效果一起免），而"减到 0"的
+           *     那一击仍会发出 `damage` 事件 —— 飘字会显示「-0」，
+           *     玩家看不出自己挡住了，而**闪避与格挡的反馈就分不清了**
+           *   - `>N` 才是"减伤"（`computeDamage` 的平减），它会正常发
+           *     `damage` 事件并带上 `thinned`
+           *
+           * ⚠️ `avoidReason: 'invulnerable'` 是**复用**：`applyDamage` 据此
+           * 发 `reason: 'immune'`（而不是 `'dodged'`）。语义上是"这一击被
+           * 完全免疫了"，与无敌一致 —— 两者在引擎里的区别只有"判定来源"。
+           */
+          if (guardBlocked) {
+            const blocked = applyDamage(
+              ctx.current(target.id),
+              {
+                amount: 0,
+                absorbed: 0,
+                thinned: 0,
+                crit: false,
+                avoided: true,
+                avoidReason: 'invulnerable',
+              },
+              actor.id,
+              skill.id,
+              ctx.state.tick,
+            );
+            ctx.events.push(...blocked.events);
+            break;
+          }
           /**
            * 暴击判定。
            *

@@ -130,13 +130,20 @@ describe('能不能开一局：开发中的角色**不能**', () => {
   });
 
   it('名单说开发中 → 不能开始', () => {
-    expect(canStartRun(characterSelection('kaili'), isDeveloping)).toBe(false);
+    /**
+     * ⚠️ 用**真正的开发中**角色（黛玄）测这条规则。
+     * 2026-10-12 之前这里是 `kaili`，但她已经有自己的 5 招了，
+     * 不再是开发中（见 `data/roster.ts`）—— 断言会因此失败，
+     * 而那正是这条测试该被更新的信号。
+     */
     expect(canStartRun(characterSelection('daixuan'), isDeveloping)).toBe(false);
   });
 
-  it('真实名单：只有林晚风能开一局（这正是 P2 的现状）', () => {
+  it('真实名单：林晚风与凯丽都能开一局（2026-10-12 凯丽出师）', () => {
     const playable = PLAYER_ROSTER.filter((entry) => !isDeveloping(entry.id)).map((e) => e.id);
-    expect(playable).toEqual(['player']);
+    expect(playable).toEqual(['player', 'kaili']);
+    /** 黛玄仍然在名单里，但灰着。 */
+    expect(isDeveloping('daixuan')).toBe(true);
   });
 
   it('判定看的是**已确定的角色**，不是光标', () => {

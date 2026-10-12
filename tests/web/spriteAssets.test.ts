@@ -215,10 +215,16 @@ describe('开发中名单与现实一致', () => {
     expect(BOSS_ROSTER.some((e) => !isDeveloping(e.id))).toBe(true);
   });
 
-  it('本轮新增的 5 个 Boss + 2 个人物都在名单里（灰掉 + 标开发中）', () => {
-    for (const id of ['kaili', 'daixuan', 'envy', 'gluttony', 'wrath', 'sloth', 'greed']) {
+  it('还没做完的 5 个 Boss + 黛玄在名单里（灰掉 + 标开发中）', () => {
+    /**
+     * ⚠️ 2026-10-12：**凯丽从这里删掉了** —— 她有了自己的 5 招
+     * （拳 / 轰 / 凝 / 截 / 闪）与 120 血上限，可以开战
+     * （见 `data/roster.ts` 的 `DEVELOPING`）。
+     */
+    for (const id of ['daixuan', 'envy', 'gluttony', 'wrath', 'sloth', 'greed']) {
       expect(isDeveloping(id), `${id} 应当是开发中`).toBe(true);
     }
+    expect(isDeveloping('kaili'), '凯丽已经做完了，不该还标开发中').toBe(false);
   });
 
   it('已完成的两个 Boss 不在名单里（需求：替换掉程序化绘制，可以打）', () => {

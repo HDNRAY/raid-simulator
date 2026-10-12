@@ -50,6 +50,15 @@ export type EventDef =
       readonly amount: number;
       readonly crit: boolean;
       readonly absorbed: number;
+      /**
+       * 被**阈值抵消**磨掉的量（林晚风「格」的 `>N → 伤害 − N`）。
+       *
+       * ⚠️ 与 `absorbed` 是两个量：`absorbed` 是比例减免
+       * （`damageReduce`，如 Boss 的霸体），这一条是平减
+       * （`damageThreshold`）。日志与飘字要分开说 ——
+       * "减免了 55%"和"挡掉了 15 点"不是同一句话。
+       */
+      readonly thinned: number;
       readonly overkill: number;
       /**
        * 造成这次伤害的**招式**。

@@ -55,6 +55,7 @@ function damage(skillId: string, amount: number, tick = 1, sourceId = PLAYER): E
     amount,
     crit: false,
     absorbed: 0,
+    thinned: 0,
     overkill: 0,
     skillId,
   };
@@ -270,6 +271,7 @@ describe('reduceBattleStats —— 纯度与边界', () => {
       amount: 12,
       crit: false,
       absorbed: 0,
+      thinned: 0,
       overkill: 0,
       skillId: '',
       reflect: true,

@@ -5,19 +5,34 @@
  * 为什么单独一个文件
  * ==================================================================
  *
- * 这些是**内容装配**：血量上限、基础属性、Boss 的行为表。放在 `main.ts`
- * 里会把"入口装配"和"内容数值"混在一起，而且 `main.ts` 长期贴着 700 行
- * 上限（AGENTS.md §3）—— 加一个 Boss 就要挤一次。
+ * 这些是**内容装配**：血量上限、基础属性、技能表、Boss 的行为表。
+ * 放在 `main.ts` 里会把"入口装配"和"内容数值"混在一起，而且 `main.ts`
+ * 长期贴着 700 行上限（AGENTS.md §3）—— 加一个 Boss 就要挤一次。
  *
  * ⚠️ 行为表是**每个 Boss 自己的**，而技能注册表是**共用的**：
  * 两个 Boss 的技能都在 `ALL_SKILLS` 里是正常的，各自只放自己轮转里
  * 列出的那些。
+ *
+ * ==================================================================
+ * 2026-10-12：玩家**按角色**装配（技能与血上限）
+ * ==================================================================
+ *
+ * 原先所有角色用的是同一个 `PLAYER_CAPS` 与同一套通用技能。现在两样都
+ * 按备战界面选中的角色走：
+ *
+ *   `makePlayer(id)`         → 血上限取那个角色的 kit（林晚风 150 / 凯丽 120）
+ *   `skillsForPlayer(id)`    → 那一套 5 个技能（见 `data/content.ts` 的转发）
+ *
+ * 定稿与"血上限为什么这样做"见 `docs/specs/2026-10-12-player-kits.md`。
+ * ⚠️ 这个文件**不决定**"这一局装哪一套"之外的事 —— 那是 app 层的选择。
  */
 
-import type { Behavior, Combatant, StatKey } from '../core/types';
+import type { Behavior, Combatant, SkillDef, StatKey } from '../core/types';
 import { applyBuff } from '../core/buffs';
 import { BOSS_HP_DISPLAY } from './entities/bossHp';
-import { DOUQI_MAX, ENERGY_MAX, HP_MAX } from './content';
+import { DOUQI_MAX, ENERGY_MAX, HP_MAX, skillsForPlayer } from './content';
+import { KAILI_HP } from './kits/kaili';
+import { LIN_WANFENG_HP } from './kits/linwanfeng';
 import { LUST_BEHAVIORS, LUST_PASSIVE } from './lustBoss';
 import { PRIDE_BEHAVIORS } from './bossPride';
 import { BOSS_ROSTER, PLAYER_ROSTER, findEntry } from './roster';
@@ -25,12 +40,14 @@ import { BOSS_ROSTER, PLAYER_ROSTER, findEntry } from './roster';
 /**
  * 玩家基础属性。
  *
- * 新刻度下**不需要**主属性参与伤害计算了 —— 6 个技能的伤害都是
- * 内容里写死的固定值（攻 10 / 轰 30）。所以这里只留最小的基础值，
+ * 新刻度下**不需要**主属性参与伤害计算了 —— 所有技能的伤害都是
+ * 内容里写死的固定值（斩 10 / 轰 30 / 劈 45）。所以这里只留最小的基础值，
  * 属性系统本身仍然可用（装备/增益可以往里加）。
  *
  * 缠回复**不走属性**：它是固定"每 0.1 秒 1 点"，
  * 由 `data/balance.ts` 的 `ENERGY_PER_LOGIC_TICK` 决定。
+ *
+ * ⚠️ 血上限**不在这里** —— 它是每个角色自己的（见 `PLAYER_HP_BY_ID`）。
  */
 export const PLAYER_BASE: Partial<Record<StatKey, number>> = {
   strength: 10,
@@ -40,16 +57,59 @@ export const PLAYER_BASE: Partial<Record<StatKey, number>> = {
 };
 
 /**
- * 资源上限。
+ * **每个角色的生命上限**（角色文档 §1）。
  *
- * 需求：双方都是 100 血，缠与炁上限也是 100。
+ * ==================================================================
+ * 它为什么是一张表，而不是 `PLAYER_CAPS` 里的一个数（W6）
+ * ==================================================================
  *
- * **直接用展示刻度**（不再乘 `DISPLAY_SCALE`）：内容的伤害值
- * （攻 10 / 轰 30）本身就是展示刻度，两边同刻度才能对上 ——
- * 早期把血量乘了 10 而伤害没乘，结果 10 点伤害变成打掉 1 点血，
- * 一场战斗要按上百次。
+ * 需求是"每个人的血量不同"（林晚风 150 / 凯丽 120 / 黛玄 100）。
+ * 原先 `HP_MAX = 100` 是**全局常量**，谁都改不了 ——
+ * 这就是 `docs/specs/2026-10-12-characters.md` §0.1 记的 W6。
+ *
+ * 落地方式刻意选**最窄的那一种**：只把"上限值"参数化，
+ * 不动资源结算的机制。也就是说：
+ *   - `combatant.caps.hp` 仍然是引擎夹血用的那个值（`changeResource` 读它）
+ *   - 它现在由**这个角色的 kit** 决定，而不是一个全局常量
+ *
+ * ⚠️ `maxHp` 这个 `StatKey` 现在仍然**算出来没人读**（见
+ * `core/combat/index.ts` 的 `changeResource`）—— 本次**没有**把它接线，
+ * 那是"装备/炁机动态改血上限"才需要的机制，属于以后。这里只是把
+ * 静态上限变成"按角色取值"，所以战斗的确定性语义**没有变化**
+ * （同一角色、同样的输入 → 同样的结果）。
+ */
+const PLAYER_HP_BY_ID: Readonly<Record<string, number>> = {
+  player: LIN_WANFENG_HP,
+  kaili: KAILI_HP,
+};
+
+/**
+ * 某个角色的血上限（展示刻度）。
+ *
+ * ⚠️ 未登记的角色回落到 `HP_MAX`（100）—— 那是"默认人类"的兜底，
+ * 让还没做完的角色（黛玄）也能上场而不至于 0 血。
+ */
+export function playerHpFor(id: string): number {
+  return PLAYER_HP_BY_ID[id] ?? HP_MAX;
+}
+
+/**
+ * **资源上限**（默认角色那一份）。
+ *
+ * ⚠️ 保留它是为了那些"只要一个 100 制上限"的调用点（测试、调试面板），
+ * 而**玩家的真实上限**一律走 `playerCapsFor(id)` —— 直接读这个常量
+ * 会让凯丽也拿到 150 血（症状是"她的血条比她该有的长"，很难注意到）。
  */
 export const PLAYER_CAPS = { hp: HP_MAX, energy: ENERGY_MAX, douqi: DOUQI_MAX };
+
+/** 某个角色的资源上限。炁/缠上限目前与角色无关。 */
+export function playerCapsFor(id: string): {
+  readonly hp: number;
+  readonly energy: number;
+  readonly douqi: number;
+} {
+  return { hp: playerHpFor(id), energy: ENERGY_MAX, douqi: DOUQI_MAX };
+}
 
 /**
  * Boss 资源上限。
@@ -59,14 +119,25 @@ export const PLAYER_CAPS = { hp: HP_MAX, energy: ENERGY_MAX, douqi: DOUQI_MAX };
  */
 export const BOSS_CAPS = { hp: BOSS_HP_DISPLAY, energy: 0, douqi: 0 };
 
+/**
+ * 造一个玩家单位。
+ *
+ * @param id 备战界面选中的角色 id（`PLAYER_ROSTER` 里那个）。
+ *
+ * ⚠️ 技能**不在 `Combatant` 上**（它是 `BattleEngineOptions.skills` 的
+ * 内容），所以这里只出"这个人是谁、多少血、什么属性"。技能由
+ * `app/battleSetup.ts` 用 `skillsForPlayer(id)` 交给引擎 ——
+ * 一个装载点，不是两处。
+ */
 export function makePlayer(id: string): Combatant {
+  const caps = playerCapsFor(id);
   return {
     id,
     /** 显示名来自 roster（需求："这个人物目前就叫 林晚风"）。 */
     nameKey: findEntry(PLAYER_ROSTER, id)?.nameKey ?? 'hud.you',
     side: 'ally',
-    caps: { ...PLAYER_CAPS },
-    resources: { hp: PLAYER_CAPS.hp, energy: PLAYER_CAPS.energy, douqi: 0 },
+    caps,
+    resources: { hp: caps.hp, energy: caps.energy, douqi: 0 },
     counters: {},
     basePrimary: { strength: 120, agility: 100, intelligence: 110, spirit: 100 },
     buffs: [],
@@ -76,6 +147,17 @@ export function makePlayer(id: string): Combatant {
     behaviors: [],
     alive: true,
   };
+}
+
+/**
+ * 这个角色带的技能表（**装配用的转发**）。
+ *
+ * ⚠️ 实现住在 `data/content.ts`（它才是"玩家技能全集"的家）。这里转发
+ * 而不是让 app 层直接读 content，是因为"一个单位的技能"属于**装配**，
+ * 与"血量上限"是同一件事的两半 —— 拆开放会让人只找到一半。
+ */
+export function playerSkillsFor(id: string): readonly SkillDef[] {
+  return skillsForPlayer(id);
 }
 
 /**
@@ -175,4 +257,3 @@ const EMPTY_FOR_INNATE: Combatant = {
   behaviors: [],
   alive: true,
 };
-

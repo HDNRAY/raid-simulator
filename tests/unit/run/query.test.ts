@@ -46,6 +46,7 @@ function damage(skillId: string, amount: number, tick = 1, sourceId = PLAYER): E
     amount,
     crit: false,
     absorbed: 0,
+    thinned: 0,
     overkill: 0,
     skillId,
   };

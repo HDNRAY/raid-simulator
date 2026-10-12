@@ -42,8 +42,15 @@ describe('键位持久化：读的时候必须校验', () => {
     const raw = serializeBindings([{ key: 'z', skillId: 'attack' }]);
     const out = parseBindings(raw, VALID);
     expect(out.find((b) => b.skillId === 'attack')?.key).toBe('z');
-    /** ⚠️ 存储里没提到的技能**保留默认键位**（不是消失） */
-    expect(out.find((b) => b.skillId === 'dodge')?.key).toBe('a');
+    /**
+     * ⚠️ 存储里没提到的技能**保留默认键位**（不是消失）。
+     *
+     * ⚠️ 2026-10-12：「避」的默认键从 `a` 挪到了 **`s`** ——
+     * 两个角色拆分之后 `a` 给了「格」（林晚风的按住防御），
+     * 见 `DEFAULT_BINDINGS` 的说明。这里断言的是**默认表**，
+     * 所以它跟着那张表走是对的。
+     */
+    expect(out.find((b) => b.skillId === 'dodge')?.key).toBe('s');
   });
 
   it('【关键】存储里提到但内容里已不存在的技能 → 丢弃该条', () => {

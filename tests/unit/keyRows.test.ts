@@ -167,10 +167,13 @@ describe('行的内容：没有战斗快照时也要有结构化信息', () => {
     const rows = rowsWithoutSnapshot();
     const guard = rows.find((r) => r.skillId === 'guard');
     /**
-     * ⚠️ 「防」的 `cost: []` 是空的，代价在 `holdDrain` 里。
+     * ⚠️ 「格」（原「防」）的 `cost: []` 是空的，代价在 `holdDrain` 里。
      * 只读 `cost` 会让它显示"没有代价"。
+     *
+     * ⚠️ 2026-10-12：2 → **3 炁/秒**（用户定稿）。它是「格」的代价，
+     * 不是笔误 —— 阈值抵消比原来的 55% 减伤强，所以更贵。
      */
-    expect(guard?.costText, '「防」必须显示 2 炁/秒').toBe('2 炁/秒');
+    expect(guard?.costText, '「格」必须显示 3 炁/秒').toBe('3 炁/秒');
   });
 
   it('有冷却的技能要显示冷却', () => {

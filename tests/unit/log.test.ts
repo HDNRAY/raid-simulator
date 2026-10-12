@@ -53,6 +53,7 @@ function damage(over: Partial<DamageEvent> = {}): DamageEvent {
     amount: 12,
     crit: false,
     absorbed: 0,
+    thinned: 0,
     overkill: 0,
     skillId: 'blast',
     ...over,
@@ -232,7 +233,7 @@ describe('日志文案与布局', () => {
       { kind: 'buffExpired', tick: 12, targetId: 'meiichiro', buffId: 'boss-heavy-armor', stacks: 0, sourceId: 'meiichiro' },
       { kind: 'death', tick: 13, targetId: 'player' },
       { kind: 'enrageStarted', tick: 14, bossId: 'meiichiro' },
-      { kind: 'damage', tick: 15, sourceId: 'player', targetId: 'meiichiro', amount: 3, skillId: 'z', crit: false, absorbed: 0, overkill: 0, reflect: true },
+      { kind: 'damage', tick: 15, sourceId: 'player', targetId: 'meiichiro', amount: 3, skillId: 'z', crit: false, absorbed: 0, thinned: 0, overkill: 0, reflect: true },
     ]);
     const keys = new Set(f.all().map((e) => e.key));
     expect(keys.size).toBeGreaterThan(8);

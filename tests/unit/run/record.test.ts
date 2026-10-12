@@ -30,6 +30,7 @@ function dmg(skillId: string, amount: number, tick = 1): EventDef {
     amount,
     crit: false,
     absorbed: 0,
+    thinned: 0,
     overkill: 0,
     skillId,
   };

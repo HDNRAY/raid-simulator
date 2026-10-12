@@ -280,17 +280,18 @@ export function buffRemainingMs(
 /**
  * 汇总所有生效 buff 的判定旗标。
  *
- * **这是判定层的输入**：hit 结算时看 `invulnerable` / `damageReduce`，
- * 施法时看 `actionLock` 与 `restrictToTags`。
+ * **这是判定层的输入**：hit 结算时看 `invulnerable` / `damageReduce` /
+ * `damageThreshold`，施法时看 `actionLock` 与 `restrictToTags`。
  *
  * ⚠️ `comboWindow`（派生）**还没有使用者** —— 见文件头。
  *
- * 多个来源的 `damageReduce` 用"取最大值"而不是相加：
+ * 多个来源的 `damageReduce` / `damageThreshold` 都用"取最大值"而不是相加：
  * 相加会让两层 60% 减伤变成 120%（超过免疫），而且玩家无法预期。
  */
 export function aggregateFlags(combatant: Combatant): BuffFlags {
   let invulnerable = false;
   let damageReduce = 0;
+  let damageThreshold = 0;
   let ccImmune = false;
   let interruptImmune = false;
   let actionLock = false;
@@ -309,6 +310,9 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
     const f = def.flags;
     if (f.invulnerable) invulnerable = true;
     if (f.damageReduce !== undefined) damageReduce = Math.max(damageReduce, f.damageReduce);
+    if (f.damageThreshold !== undefined) {
+      damageThreshold = Math.max(damageThreshold, f.damageThreshold);
+    }
     if (f.ccImmune) ccImmune = true;
     if (f.interruptImmune) interruptImmune = true;
     if (f.actionLock) actionLock = true;
@@ -319,6 +323,7 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
   return {
     ...(invulnerable ? { invulnerable: true } : {}),
     ...(damageReduce > 0 ? { damageReduce } : {}),
+    ...(damageThreshold > 0 ? { damageThreshold } : {}),
     ...(ccImmune ? { ccImmune: true } : {}),
     ...(interruptImmune ? { interruptImmune: true } : {}),
     ...(actionLock ? { actionLock: true } : {}),

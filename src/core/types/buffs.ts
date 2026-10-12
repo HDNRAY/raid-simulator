@@ -27,11 +27,41 @@ export type StackingRule =
 
 /**
  * 判定旗标。闪避/格挡/限制/派生**全部落在数据上**，零新引擎机制：
- * `invulnerable` · `damageReduce` · `restrictToTags` · `comboWindow`。
+ * `invulnerable` · `damageReduce` · `damageThreshold` · `restrictToTags` ·
+ * `comboWindow`。
  */
 export interface BuffFlags {
   readonly invulnerable?: boolean;
   readonly damageReduce?: number;
+  /**
+   * **阈值抵消**（林晚风「格」）。
+   *
+   * ==================================================================
+   * 这是"判定层"的第三种形态，前两种都已在引擎里
+   * ==================================================================
+   *
+   * | flag | 语义 | 已有实现 |
+   * |---|---|---|
+   * | `invulnerable` | **整击作废**（伤害与效果一起丢） | ✓ `avoided` 通路 |
+   * | `damageReduce` | **按比例**减（乘法） | ✓ `computeDamage` |
+   * | `damageThreshold`（本字段） | **≤N 整击作废；>N 平减 N 点** | 🆕 2026-10-12 |
+   *
+   * 所以它不是"又一套防御系统"：**两半都复用已有通路** ——
+   * `≤N` 那一半走 `invulnerable` 用的同一条 `avoided` 判定
+   * （因此"连眩晕这类效果一起免"是**天然**的，不是新写的），
+   * `>N` 那一半接在 `damageReduce` 旁边做一次**平减**。
+   *
+   * ⚠️ **判据是"这一击的伤害值"**，由 `computeDamage` 先算出
+   * `preBlock`（含增伤/易伤/暴击，不含防御侧减免）再与它比较。
+   * 多段攻击**每段各判一次**。
+   *
+   * ⚠️ 值必须来自 `data/balance.ts` 的具名常量（`GUARD_THRESHOLD`），
+   * 不要在内容里散落魔法数 —— 用户明确说这个数会来回调（15 → 10）。
+   *
+   * ⚠️ 多个来源**取最大值**（与 `damageReduce` 同一条理由：
+   * 相加会越过"完全免疫"，而且玩家无法预期）。
+   */
+  readonly damageThreshold?: number;
   readonly ccImmune?: boolean;
   readonly interruptImmune?: boolean;
   /**

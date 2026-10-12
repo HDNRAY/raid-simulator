@@ -90,6 +90,24 @@ export interface TouchControlsOptions {
    * 这里不自己去翻 buff —— 否则又是两处真相。
    */
   readonly derivedSkill: () => { readonly skillId: string; readonly sourceSkillId: string } | undefined;
+  /**
+   * **这一局真的有哪些技能**（引擎注册表里的 id 集合）。
+   *
+   * ==================================================================
+   * 为什么触屏按钮要按它过滤（2026-10-12）
+   * ==================================================================
+   *
+   * 触屏按钮由键位表机械派生（AGENTS.md §3b），而键位表是**整场游戏**
+   * 的（Q 斩 / S 防 / A 避……）。但两个角色带的技能不一样 ——
+   * 凯丽**没有「防」也没有「避」**。不过滤的话她的双弧上会多出两个
+   * 按下去什么都不发生的按钮（`skillRejected`），而玩家只会觉得是 bug。
+   *
+   * ⚠️ 判据取**引擎的**技能集（`BattleLoop.engineState.skillIds`），
+   * 不是"再抄一份角色表"：引擎收到的技能表就是这一局的真相
+   * （`battleSetup` 按角色从注册表取），所以两边**结构上不可能漂**。
+   * 非战斗阶段（还没有 loop）返回 `undefined` = 不过滤。
+   */
+  readonly currentSkillIds: () => ReadonlySet<string> | undefined;
 }
 
 export interface TouchControls {
@@ -134,7 +152,21 @@ export interface TouchControls {
  */
 export function createTouchControls(options: TouchControlsOptions): TouchControls {
   const caps = detectBrowserPlatform();
-  const layout = createTouchLayout(touchButtonsFromBindings(options.bindings));
+  /**
+   * 按钮表 = 键位表 ∩ 这一局真的有的技能。
+   *
+   * ⚠️ 抽成一处并在**构造**与 `setBindings` **两处都用**：两处各写一遍
+   * 过滤，必然会出现"建局时对了、改键后又漏回来"（见 `currentSkillIds`）。
+   */
+  const buttonsOf = (
+    bindings: readonly { readonly key: string; readonly skillId: string }[],
+  ): ReturnType<typeof touchButtonsFromBindings> => {
+    const owned = options.currentSkillIds();
+    return touchButtonsFromBindings(
+      owned === undefined ? bindings : bindings.filter((b) => owned.has(b.skillId)),
+    );
+  };
+  const layout = createTouchLayout(buttonsOf(options.bindings));
   const layer = new TouchButtonLayer({
     pixi: options.pixi,
     translate: options.translate,
@@ -255,8 +287,11 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
        * 键位表是唯一真相 —— 它变了两件事跟着变：
        *   1. `TouchLayout`（进而按钮层重画）
        *   2. 触屏输入源的合成 key 表
+       *
+       * ⚠️ **先按"这一局有哪些技能"过滤**（见 `currentSkillIds` 的说明）：
+       * 键位表是整场游戏的，而按钮只该出现这一局按得出来的技能。
        */
-      layout.set(touchButtonsFromBindings(bindings));
+      layout.set(buttonsOf(bindings));
       /**
        * `setBindings` 在触屏输入源里**不读参数**（按钮是从布局推导的，
        * 不是玩家配的），但接口为了与键盘一致要求一个参数。

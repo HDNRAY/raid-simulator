@@ -189,9 +189,13 @@ export function createGame(o: CreateGameDeps): GameHandle {
    *
    * ⚠️ **只建工厂、不立刻开战**：工厂里的 `touchInput` 是取值函数，
    * 真正的 `touch` 在下面才装配（见文件头"顺序即正确性"第 3 条）。
+   *
+   * ⚠️ 传的是 **`registryFor`（按角色取注册表）**，不是一张固定的：
+   * 注册表里装着技能表，而两个角色的技能不一样（林晚风有「格」、
+   * 凯丽有「截」与「闪」）。固定一张会让"换角色"只在界面上生效。
    */
   const startBattle = createStartBattle({
-    registry: d.registry,
+    registryFor: d.registryFor,
     getBindings: () => state.bindings,
     getSelection: () => selection,
     noAi: params.get('noai') === '1',
@@ -288,6 +292,20 @@ export function createGame(o: CreateGameDeps): GameHandle {
 
     state.loop?.dispose();
     state.loop = startBattle();
+
+    /**
+     * ⚠️ **触屏按钮要按"这一局有哪些技能"重派生一次**（2026-10-12）。
+     *
+     * 触屏按钮由键位表机械派生（AGENTS.md §3b），而键位表是整场游戏的
+     * （Q 斩 / S 防 / A 避…）。两个角色的技能不一样 —— 不过滤的话凯丽的
+     * 双弧上会多出「防」「避」两个按不出东西的按钮。
+     *
+     * ⚠️ 过滤的判据在触屏层里读**引擎的技能集**（`currentSkillIds`），
+     * 所以这里只需在**换局之后**通知它一次；换角色之后再开一局就会
+     * 重新派生。放在 `applyPhase` **之前**与显隐无关（那时按钮整层隐藏）。
+     */
+    state.touch?.setBindings(state.bindings);
+
     applyPhase('battle');
   };
   onPrepareStart = (playerId: string, bossId: string): void => enterBattle(playerId, bossId);

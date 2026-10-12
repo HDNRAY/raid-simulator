@@ -386,15 +386,19 @@ describe('能不能开战：开发中的单位灰掉且**不能开战**', () => 
     expect(canStartBattle(s, developing)).toBe(true);
   });
 
-  it('真实名单：本轮新增的 7 个全部不能开战，2 个已完成的都能开', () => {
+  it('真实名单：开发中的仍然不能开战（2026-10-12 凯丽出师）', () => {
     const real = (id: string): boolean => isDeveloping(id);
+    /** 两个做完的人物、两个做完的 Boss —— 任意组合都能开战。 */
     expect(canStartBattle(sel({ focus: 'start' }), real)).toBe(true);
+    expect(canStartBattle(sel({ playerId: 'kaili', focus: 'start' }), real)).toBe(true);
     expect(canStartBattle(sel({ bossId: 'lust', focus: 'start' }), real)).toBe(true);
     for (const bossId of ['envy', 'gluttony', 'wrath', 'sloth', 'greed']) {
       expect(canStartBattle(sel({ bossId, focus: 'start' }), real)).toBe(false);
     }
-    for (const playerId of ['kaili', 'daixuan']) {
-      expect(canStartBattle(sel({ playerId, focus: 'start' }), real)).toBe(false);
-    }
+    /**
+     * ⚠️ **只剩黛玄**：她的 5 招里「盾」需要引擎还没有的机制，
+     * 所以她还灰着（见 `data/roster.ts` 的 `DEVELOPING`）。
+     */
+    expect(canStartBattle(sel({ playerId: 'daixuan', focus: 'start' }), real)).toBe(false);
   });
 });

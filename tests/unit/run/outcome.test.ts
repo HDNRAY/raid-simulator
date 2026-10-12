@@ -40,6 +40,7 @@ function someDamage(tick = 1): EventDef {
     amount: 10,
     crit: false,
     absorbed: 0,
+    thinned: 0,
     overkill: 0,
     skillId: 'jie',
   };

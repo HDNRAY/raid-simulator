@@ -16,6 +16,7 @@
 
 import type { SkillDef } from '../core/types';
 import { PLAYER_SKILL_IDS } from '../data/content';
+import { DEFAULT_BINDINGS } from '../input/keyboard';
 
 /** 一个技能格：位置、绑定的键、放哪个技能。 */
 export interface SlotBinding {
@@ -71,15 +72,19 @@ export function slotsFromBindings(
   return [...base, { index: base.length, key: source.key, skillId: derived.skillId }];
 }
 
-/** 默认技能槽（= 默认键位表推导出的那一份）。 */
-export const DEFAULT_SLOTS: readonly SlotBinding[] = slotsFromBindings([
-  { key: 'q', skillId: 'attack' },
-  { key: 'w', skillId: 'blast' },
-  { key: 'e', skillId: 'focus' },
-  { key: 'r', skillId: 'break' },
-  { key: 'a', skillId: 'dodge' },
-  { key: 's', skillId: 'guard' },
-]);
+/**
+ * 默认技能槽 = **默认键位表推导出的那一份**。
+ *
+ * ⚠️ 2026-10-12：它现在**直接由 `DEFAULT_BINDINGS` 推导**，不再手抄一张
+ * 六格表。原先手抄的那份在"两个角色各有自己的技能"之后立刻就是错的
+ * （它还带着 `break`，而那是黛玄的、两个角色都没有）——
+ * 这正是本文件开头那段"手写 slots 与键位表各说各话"的同一个坑。
+ *
+ * ⚠️ 它是**整场游戏**的默认（并集），不是"某个角色的"：真的开一局时
+ * `battleSetup` 会用 `bindingsForPlayer` 过滤后再推导（那才是这一局的）。
+ * 它主要给测试与"还没有战斗"的场合一个稳定的默认值。
+ */
+export const DEFAULT_SLOTS: readonly SlotBinding[] = slotsFromBindings(DEFAULT_BINDINGS);
 /** 派生窗口 buff 的 id。 */
 const COMBO_WINDOW_ID = 'combo-window';
 

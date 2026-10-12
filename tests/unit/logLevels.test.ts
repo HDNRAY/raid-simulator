@@ -63,7 +63,7 @@ describe('日志的分量与新增事件', () => {
   it('【需求】反伤单独成条，且属性对调（打出去的人自己挨了）', () => {
     const f = new LogFormatter();
     f.consume([
-      { kind: 'damage', tick: 1, sourceId: 'player', targetId: 'meiichiro', amount: 12, skillId: 'attack', crit: false, absorbed: 0, overkill: 0, reflect: true },
+      { kind: 'damage', tick: 1, sourceId: 'player', targetId: 'meiichiro', amount: 12, skillId: 'attack', crit: false, absorbed: 0, thinned: 0, overkill: 0, reflect: true },
     ]);
     const [e] = f.all();
     expect(e!.key).toBe('log.reflect');
@@ -101,6 +101,7 @@ describe('日志的分量与新增事件', () => {
       skillId: 'attack',
       crit: false,
       absorbed: 0,
+      thinned: 0,
       overkill: 0,
     });
     for (let i = 0; i < 200; i += 1) f.consume([hit(i)]);

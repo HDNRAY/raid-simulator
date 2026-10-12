@@ -23,12 +23,11 @@
  *   - 除法走 safeDiv，NaN 绝不允许进入状态
  */
 
-import { kahanSum, roundDamage, roundStat, safeDiv } from '../numeric';
+import { kahanSum, roundStat, safeDiv } from '../numeric';
 import type {
   BuffDef,
   BuffInstance,
   Combatant,
-  DamageSpec,
   EventDef,
   SkillDef,
   StatKey,
@@ -374,184 +373,25 @@ export function evaluateCondition(
 
 
 /* ------------------------------------------------------------------ *
- * 4. hit frame 判定（M2 的核心）
- * ------------------------------------------------------------------ */
-
-export interface DamageResult {
-  /** 实际扣掉的生命（已取整） */
-  readonly amount: number;
-  /** 被减伤/护盾吸收的量 */
-  readonly absorbed: number;
-  readonly crit: boolean;
-  readonly avoided: boolean;
-  readonly avoidReason?: 'invulnerable' | 'dodged';
-}
-
-/** 暴击判定结果。 */
-export interface CritRoll {
-  readonly crit: boolean;
-  readonly multiplier: number;
-}
-
-/**
- * 计算一次伤害。
+ * 4. 伤害 / 治疗 —— **实现搬到了 `./damage.ts`**
+ * ------------------------------------------------------------------ *
  *
- * 公式（数据模型规范 §5）：
- *   raw    = (base + Σ stat × ratio)
- *   boosted= raw × (1 + damageBoost/100)
- *   mult   = damageMult（乘子型，已经是"要乘的数"）
- *   crit   = × critDamage（如果暴击）
- *   final  = floor(boosted × mult × crit × (1 - damageReduce))
+ * ⚠️ 公式（`computeDamage` / `computeHeal`）、落地（`applyDamage` /
+ * `applyHeal`）与「格」的阈值判定入口（`preBlockDamage` /
+ * `flatBlocked`）都在那边。搬走的理由见 `damage.ts` 的文件头
+ * （`combat/index.ts` 到了 765 行，AGENTS.md §3）。
  *
- * 注意 `damageBoost` 除以 100：它是**累加器**，值 10 表示 +10%。
- * 这个单位约定在规范 §5.2 里写明了。
+ * ⚠️ 这里**转发**它们，所以 `from './index'` 的写法照旧可用。
  */
-export function computeDamage(
-  spec: DamageSpec,
-  casterStats: Readonly<Record<StatKey, number>>,
-  targetFlags: { readonly invulnerable?: boolean; readonly damageReduce?: number },
-  roll: CritRoll,
-): DamageResult {
-  // 无敌：直接免伤（不发伤害，但要告诉调用方是"被规避"）
-  if (targetFlags.invulnerable) {
-    return { amount: 0, absorbed: 0, crit: false, avoided: true, avoidReason: 'invulnerable' };
-  }
-
-  let raw = typeof spec.base === 'number' ? spec.base : 0;
-  for (const term of spec.scaling ?? []) {
-    raw += (casterStats[term.stat] ?? 0) * term.ratio;
-  }
-
-  let value = raw;
-  if (!spec.ignoreModifiers) {
-    const boost = (casterStats.damageBoost ?? 0) / 100;
-    value *= 1 + boost;
-    const mult = casterStats.damageMult ?? 0;
-    value *= mult > 0 ? mult : 1;
-    if (roll.crit) {
-      const critDamage = casterStats.critDamage ?? 0;
-      const critBoost = casterStats.critDamageBoost ?? 0;
-      // critDamage 是"额外倍率"（0.5 表示 +50%），critDamageBoost 是乘子
-      value *= 1 + (critDamage > 0 ? critDamage : 0);
-      value *= critBoost > 0 ? critBoost : 1;
-    }
-    if (targetFlags.damageReduce) value *= 1 - targetFlags.damageReduce;
-  }
-
-  const rounded = roundDamage(value);
-  return { amount: Math.max(0, rounded), absorbed: 0, crit: roll.crit, avoided: false };
-}
-
-/** 治疗：与伤害对称，但**向上取整**（治疗少一点会让玩家难受）。 */
-export function computeHeal(
-  spec: DamageSpec,
-  casterStats: Readonly<Record<StatKey, number>>,
-  roll: CritRoll,
-): number {
-  let raw = typeof spec.base === 'number' ? spec.base : 0;
-  for (const term of spec.scaling ?? []) {
-    raw += (casterStats[term.stat] ?? 0) * term.ratio;
-  }
-  let value = raw * (1 + (casterStats.healingBoost ?? 0) / 100);
-  if (roll.crit && spec.canCrit) value *= 1 + (casterStats.critDamage ?? 0);
-  return Math.max(0, Math.ceil(value));
-}
-
-/**
- * 对一个目标应用伤害。
- *
- * **闪避成功必须发 `avoided` 事件** —— 否则玩家不知道自己躲掉了，
- * 这个反馈缺失会让"躲避"这个机制在体感上不存在。
- */
-export function applyDamage(
-  target: Combatant,
-  result: DamageResult,
-  sourceId: string,
-  skillId: string,
-  tick: number,
-  /** 是否由触发器产出的**反伤**（日志要标注）。 */
-  reflect = false,
-): { readonly combatant: Combatant; readonly events: readonly EventDef[] } {
-  if (result.avoided) {
-    return {
-      combatant: target,
-      events: [
-        {
-          kind: 'avoided',
-          tick,
-          sourceId,
-          targetId: target.id,
-          skillId,
-          reason: result.avoidReason === 'invulnerable' ? 'immune' : 'dodged',
-        },
-      ],
-    };
-  }
-
-  const before = target.resources.hp;
-  const after = Math.max(0, before - result.amount);
-  const dealt = before - after;
-  const overkill = Math.max(0, result.amount - before);
-
-  const events: EventDef[] = [
-    {
-      kind: 'damage',
-      tick,
-      sourceId,
-      targetId: target.id,
-      amount: dealt,
-      crit: result.crit,
-      absorbed: result.absorbed,
-      overkill,
-      skillId,
-      ...(reflect ? { reflect: true } : {}),
-    },
-  ];
-
-  if (after <= 0) {
-    events.push({ kind: 'death', tick, targetId: target.id });
-  }
-
-  return {
-    combatant: {
-      ...target,
-      resources: { ...target.resources, hp: after },
-      alive: after > 0,
-    },
-    events,
-  };
-}
-
-/** 治疗。 */
-export function applyHeal(
-  target: Combatant,
-  amount: number,
-  sourceId: string,
-  crit: boolean,
-  tick: number,
-): { readonly combatant: Combatant; readonly events: readonly EventDef[] } {
-  const cap = capOf(target, 'hp');
-  const before = target.resources.hp;
-  const after = Math.min(cap, before + amount);
-  const healed = after - before;
-
-  if (healed === 0 && amount === 0) return { combatant: target, events: [] };
-
-  return {
-    combatant: { ...target, resources: { ...target.resources, hp: after } },
-    events: [
-      {
-        kind: 'heal',
-        tick,
-        sourceId,
-        targetId: target.id,
-        amount: healed,
-        crit,
-        overheal: Math.max(0, amount - healed),
-      },
-    ],
-  };
-}
+export {
+  applyDamage,
+  applyHeal,
+  computeDamage,
+  computeHeal,
+  flatBlocked,
+  preBlockDamage,
+} from './damage';
+export type { CritRoll, DamageResult, DefenseFlags } from './damage';
 
 /* ------------------------------------------------------------------ *
  * 5. 冷却

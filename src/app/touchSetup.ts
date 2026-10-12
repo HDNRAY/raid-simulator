@@ -75,6 +75,23 @@ export function createTouchSetup(d: TouchSetupDeps): TouchControls {
       const l = d.battle();
       return l === undefined ? undefined : derivedOfSnapshot(l.snapshot);
     },
+    /**
+     * **这一局真的有哪些技能** —— 取引擎注册表里的 id 集合。
+     *
+     * ⚠️ 与 `battleSetup.bindingsForPlayer` 是**同一条判据的两个消费者**
+     * （那边过滤技能栏，这边过滤双弧按钮）：凯丽没有「防」也没有「避」，
+     * 不过滤的话她的弧上会多出两个按不出东西的按钮。
+     *
+     * ⚠️ 取**引擎**的技能集而不是另抄一份角色表：引擎收到的那张表就是
+     * 这一局的真相（`battleSetup` 按角色从注册表取），两边不可能漂。
+     *
+     * ⚠️ 没有战斗时返回 `undefined`（= 不过滤）：非战斗阶段触屏按钮整层
+     * 隐藏（`isBattleActive`），而且那时也没有"这一局"可言。
+     */
+    currentSkillIds: () => {
+      const l = d.battle();
+      return l === undefined ? undefined : new Set(l.engineState.skillIds);
+    },
   });
 
   /** 回填预览数据源（见 `TouchPreviewSource` 的说明）。 */
