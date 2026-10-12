@@ -85,6 +85,34 @@ addEventListener: (type, listener) =>
   用 `logicTicks()` / `logicMs()`，不许手写乘除
 - 数值用 `S()` 包一层（`DISPLAY_SCALE = 1`），不要散落魔法数
 
+### ⚠️ 未实现的机制：**保留类型，但拒绝静默误用**
+
+引擎里有一批"**设计过、还没接线**"的能力（`Expr.counter`、
+`Hook: 'onPhaseChange'`、`Ability: 'grantSkill'` / `'consume'` …）。
+它们的类型**保留**（删掉会丢设计），但**内容不许写** —— 写了会被内容
+校验器拦下（`COUNTER_UNIMPLEMENTED` / `UNSUPPORTED_HOOK` /
+`ABILITY_UNIMPLEMENTED`），`createRegistry` 默认严格，**启动即失败**。
+
+这是**有意**的：一份"看起来会生效、实际什么也不做"的内容，比一句 TODO
+危险得多（静默无效 / 静默算错是最难查的一类 bug）。
+
+要写**设计稿**（明知还没实现）时**显式**传：
+
+```ts
+validateContent(bundle, { strict: false })
+```
+
+⚠️ **必须显式**，不许把默认改回去 —— 改回去等于把这条防线删了。
+判据与对账表在 `src/core/content/capabilityAudit.ts` 顶部。
+
+### 删 / 留 的判据（同一条线）
+
+| 性质 | 处理 |
+|---|---|
+| **重复**：同一件事有第二份表达，而第一份是活的 | **删**（删第二份）|
+| **未实现**：设计过、引擎还没有消费者 | **保留 + 标注**，并拒绝静默误用 |
+| **会静默算错 / 静默无效**：用了不报错、结果错 | **校验报错拦下** |
+
 ---
 
 ## 3. 单文件不超过 700 行

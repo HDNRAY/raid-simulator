@@ -57,7 +57,7 @@ const RETALIATE: BuffDef = {
 };
 
 /** 玩家打一下的技能（boss 用来打玩家，玩家用来打 boss）。 */
-function strike(id: string, damage: number): SkillDef {
+function strike(id: string, damage: number, canCrit = false): SkillDef {
   return {
     id,
     kind: 'activeSkill',
@@ -75,21 +75,91 @@ function strike(id: string, damage: number): SkillDef {
       {
         at: 0,
         effects: [
-          { kind: 'damage', damage: { base: damage, canCrit: false, countsAsHit: true } },
+          { kind: 'damage', damage: { base: damage, canCrit, countsAsHit: true } },
         ],
       },
     ],
   };
 }
 
-function makeEngine(options: { withTrigger?: boolean } = {}) {
+/* ------------------------------------------------------------------ *
+ * 内容：给 buff 钩子（onBuffApplied / onBuffExpired / onCritDealt）用的夹具
+ * ------------------------------------------------------------------ */
+
+/** 一个"挂上就回应"的标记 buff —— 用来证明钩子真的响了。 */
+function marker(id: string): BuffDef {
+  return {
+    id,
+    nameKey: `test.${id}`,
+    icon: '标',
+    polarity: 'buff',
+    duration: 60_000,
+    maxStacks: 1,
+    stacking: { mode: 'refresh' },
+  };
+}
+
+/**
+ * 一个"响应某个 buff 钩子"的观察者。
+ *
+ * ⚠️ `maxTriggersPerEncounter: 1` 是**必须**的：`onBuffApplied` 的载荷里
+ * 只有 `sourceId`，没有"挂的是哪个 buff"，所以观察者给自己的标记也会让它
+ * 再次响应（"挂 A 时再挂 A"的环）。上限 1 让它只回应一次 —— 顺带也测了
+ * `maxTriggersPerEncounter` 真的生效。
+ */
+function watcher(id: string, on: 'onBuffApplied' | 'onBuffExpired' | 'onCritDealt'): BuffDef {
+  return {
+    id,
+    nameKey: `test.${id}`,
+    icon: '观',
+    polarity: 'buff',
+    duration: 60_000,
+    maxStacks: 1,
+    stacking: { mode: 'refresh' },
+    triggers: [
+      {
+        on,
+        maxTriggersPerEncounter: 1,
+        then: [{ kind: 'grant', target: { mode: 'self' }, buff: marker(`${id}-mark`) }],
+      },
+    ],
+  };
+}
+
+/** 一个"给自己挂一个短 buff"的技能 —— 制造一次真实的 `buffApplied`。 */
+function bless(id: string, buff: BuffDef): SkillDef {
+  return {
+    id,
+    kind: 'activeSkill',
+    nameKey: `test.${id}`,
+    descKey: `test.${id}.desc`,
+    icon: '祝',
+    abilities: [],
+    castTime: 0,
+    cooldown: 0,
+    cost: [],
+    targeting: { mode: 'self' },
+    tags: [],
+    interruptible: true,
+    hits: [{ at: 0, effects: [{ kind: 'grantBuff', target: { mode: 'self' }, buff }] }],
+  };
+}
+
+function makeEngine(options: {
+  withTrigger?: boolean;
+  extraBuffs?: readonly BuffDef[];
+  extraSkills?: readonly SkillDef[];
+  playerStats?: Readonly<Record<string, number>>;
+} = {}) {
   const buffs = new Map<string, BuffDef>();
   if (options.withTrigger !== false) buffs.set('retaliate', RETALIATE);
+  for (const buff of options.extraBuffs ?? []) buffs.set(buff.id, buff);
 
   const skills = new Map<string, SkillDef>([
     ['player-hit', strike('player-hit', 10)],
     ['boss-hit', strike('boss-hit', 7)],
   ]);
+  for (const skill of options.extraSkills ?? []) skills.set(skill.id, skill);
 
   const player = makeCombatant({ id: 'player', side: 'ally' });
   const boss = makeCombatant({
@@ -105,7 +175,7 @@ function makeEngine(options: { withTrigger?: boolean } = {}) {
     buffs,
     skills,
     baseStats: new Map([
-      ['player', { strength: 100, intelligence: 100 }],
+      ['player', { strength: 100, intelligence: 100, ...(options.playerStats ?? {}) }],
       ['boss', { strength: 100, intelligence: 100 }],
     ]),
     passiveModifiers: new Map(),
@@ -129,16 +199,111 @@ function grantBuff(engine: BattleEngine, id: string, def: BuffDef): void {
 }
 
 describe('哪些 hook 真的会被派发', () => {
-  it('本期只支持 3 个，且 `isSupportedHook` 与表一致', () => {
+  it('运行时白名单与 `isSupportedHook` 一致（且死 hook 一律为 false）', () => {
     /**
-     * ⚠️ 其余 hook（`onKill` / `onCritTaken` …）类型还在、内容也能写，
-     * 但引擎**不认**。所以 `validate.ts` 要拿这张表去警告内容作者，
-     * 而不是让人写了个触发器却毫无反应也查不出原因。
+     * ⚠️ 其余 hook（`onKill` / `onCritTaken` / 还没接线的 `onPhaseChange` …）
+     * 类型还在、内容也能写，但引擎**不认** —— `content/capabilityAudit.ts`
+     * 的 `SUPPORTED_HOOKS` 会把它们当错误报出来。
+     *
+     * ⚠️ `onCastFinish` **不在这张表**里却是活的：技能能力里的
+     * `onCastFinish` 触发器由 `castPipeline` 直接处理，不走 `runTriggers`。
      */
-    expect([...SUPPORTED_HOOKS].sort()).toEqual(['onBuffApplied', 'onBuffExpired', 'onHitTaken']);
+    expect([...SUPPORTED_HOOKS].sort()).toEqual([
+      'onBuffApplied',
+      'onBuffExpired',
+      'onCritDealt',
+      'onHitTaken',
+    ]);
     expect(isSupportedHook('onHitTaken')).toBe(true);
+    expect(isSupportedHook('onCritDealt')).toBe(true);
+    expect(isSupportedHook('onBuffApplied')).toBe(true);
+    expect(isSupportedHook('onBuffExpired')).toBe(true);
     expect(isSupportedHook('onKill')).toBe(false);
     expect(isSupportedHook('onTick')).toBe(false);
+    expect(isSupportedHook('onPhaseChange')).toBe(false);
+  });
+});
+
+describe('buff 钩子真的会被派发（onBuffApplied / onBuffExpired）', () => {
+  /**
+   * 这两条以前只在白名单 / 类型里存在，**没有任何派发调用** —— 也就是
+   * "写了静默无效"。现在 `battleState.dispatchBuffHooks()` 在每个 tick 末
+   * 扫 buff 事件并派发，这两条测试就是"链真的跑通"的实测。
+   */
+
+  it('【核心】挂 buff 会触发挂在 `onBuffApplied` 上的触发器', () => {
+    const blessing = marker('blessing');
+    const engine = makeEngine({
+      extraBuffs: [watcher('applied-watcher', 'onBuffApplied'), blessing],
+      extraSkills: [bless('bless', blessing)],
+    });
+    /** 观察者用测试入口直接挂上（不产生事件，所以不会自触发）。 */
+    grantBuff(engine, 'player', watcher('applied-watcher', 'onBuffApplied'));
+
+    engine.applyActions([{ type: 'useSkill', skillId: 'bless', atTick: 0 }], 'player');
+    engine.tick([]);
+
+    const buffs = engine.snapshot.combatants.find((c) => c.id === 'player')?.buffs.map((b) => b.defId);
+    /** 真实挂上 → 观察者响应 → 它挂的标记出现。 */
+    expect(buffs).toContain('blessing');
+    expect(buffs).toContain('applied-watcher-mark');
+  });
+
+  it('buff 自然过期会触发挂在 `onBuffExpired` 上的触发器', () => {
+    const short: BuffDef = { ...marker('short-lived'), duration: 100 };
+    const engine = makeEngine({
+      extraBuffs: [watcher('expired-watcher', 'onBuffExpired'), short],
+      extraSkills: [bless('short-bless', short)],
+    });
+    grantBuff(engine, 'player', watcher('expired-watcher', 'onBuffExpired'));
+
+    engine.applyActions([{ type: 'useSkill', skillId: 'short-bless', atTick: 0 }], 'player');
+    /** 跑够它过期（100ms ≈ 6 tick），留足余量。 */
+    for (let i = 0; i < 20; i += 1) engine.tick([]);
+
+    const buffs = engine.snapshot.combatants.find((c) => c.id === 'player')?.buffs.map((b) => b.defId);
+    expect(buffs).not.toContain('short-lived');
+    expect(buffs).toContain('expired-watcher-mark');
+  });
+});
+
+describe('暴击钩子真的会被派发（onCritDealt）', () => {
+  it('【核心】暴击 → 触发挂在 `onCritDealt` 上的触发器', () => {
+    /**
+     * 这是熵之钟"暴击后授予势能涌动"那条链的引擎级证明：在补上派发点
+     * 之前，`rollCrit` 有了但没人派发 `onCritDealt`，那条链从来没跑过。
+     *
+     * `critChance: 1` 让 `rollCrit` **短路返回 true、不消耗随机数**
+     * （见 `BattleEngine.rollCrit`），所以这条测试是确定性的。
+     */
+    const engine = makeEngine({
+      extraBuffs: [watcher('crit-watcher', 'onCritDealt')],
+      extraSkills: [strike('crit-hit', 10, true)],
+      playerStats: { critChance: 1 },
+    });
+    grantBuff(engine, 'player', watcher('crit-watcher', 'onCritDealt'));
+
+    engine.applyActions([{ type: 'useSkill', skillId: 'crit-hit', atTick: 0 }], 'player');
+    engine.tick([]);
+
+    const buffs = engine.snapshot.combatants.find((c) => c.id === 'player')?.buffs.map((b) => b.defId);
+    expect(buffs).toContain('crit-watcher-mark');
+  });
+
+  it('不暴击时不派发（不是无条件触发）', () => {
+    const engine = makeEngine({
+      extraBuffs: [watcher('crit-watcher', 'onCritDealt')],
+      /** 同一个技能，但 `canCrit: false`。 */
+      extraSkills: [strike('plain-hit', 10, false)],
+      playerStats: { critChance: 1 },
+    });
+    grantBuff(engine, 'player', watcher('crit-watcher', 'onCritDealt'));
+
+    engine.applyActions([{ type: 'useSkill', skillId: 'plain-hit', atTick: 0 }], 'player');
+    engine.tick([]);
+
+    const buffs = engine.snapshot.combatants.find((c) => c.id === 'player')?.buffs.map((b) => b.defId);
+    expect(buffs).not.toContain('crit-watcher-mark');
   });
 });
 

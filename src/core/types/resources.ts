@@ -6,7 +6,6 @@ import type { CombatantId } from './ids';
  * 2. 资源
  * ================================================================== */
 
-/** 具名资源。有上限、会回复的那几种。 */
 /**
  * 具名资源。
  *
@@ -22,6 +21,13 @@ export type ResourceKey = 'hp' | 'energy' | 'douqi';
  * 使用次数做成资源而不是独立字段（数据模型规范 §2.2）：
  * "用 1 次的药水"就是 `uses: { current: 1, max: 1 }`，
  * 于是消耗、回复、UI 显示、事件全部复用同一套机制。
+ *
+ * ⚠️ **引擎尚未实现（2026-10-12 核对）**：没有任何写入者会写它，
+ * 战斗路径读 `Expr.counter` 的 `getCounter` 是个 `() => 0` 的桩。
+ * 类型与字段**保留**（这是设计过、将来要做的能力，删掉会丢设计），
+ * 但**默认拒绝静默误用**：内容里写 `Expr.counter` 会被
+ * `validate.ts` 报 `COUNTER_UNIMPLEMENTED`（error）拦下，而不是
+ * 静默算成 0。实现之后把那条校验删掉即可。
  */
 export interface Counter {
   readonly current: number;

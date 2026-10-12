@@ -79,6 +79,16 @@ export type Expr =
   | { readonly e: 'missingResourceRatio'; readonly who: Who; readonly resource: ResourceKey }
   | { readonly e: 'buffStacks'; readonly who: Who; readonly buffId: BuffId }
   | { readonly e: 'hasBuff'; readonly who: Who; readonly buffId: BuffId }
+  /**
+   * 读内容实例的离散计数器（使用次数 / 充能）。
+   *
+   * ⚠️ **引擎尚未实现（2026-10-12 核对）**：没有任何写入者会写
+   * `Combatant.counters`，战斗路径的求值上下文把 `getCounter`
+   * 实现成 `() => 0`。**类型保留**（这是设计过的能力），但内容里写它
+   * 会被 `validate.ts` 的 `COUNTER_UNIMPLEMENTED` 拦下 —— 否则作者会
+   * **静默拿到 0**（不是报错，是算错，最坏的一种）。
+   * 实现之后把那条校验删掉即可。
+   */
   | { readonly e: 'counter'; readonly ref: ResourcePoolRef; readonly counter: string }
   /**
    * 引用某个**命名空间**下所有修正的当前值之和。

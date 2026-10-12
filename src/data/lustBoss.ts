@@ -322,7 +322,6 @@ export const LUST_BUFFS: readonly BuffDef[] = [LUST_MARK, LUST_STUN, LUST_PASSIV
  *   - 「魅惑」CD 140 → gap 12.0s
  */
 export const LUST_BEHAVIORS: readonly Behavior[] = [
-  { kind: 'timeLimit', ms: 180_000 },
   { kind: 'enrage', atMs: 120_000, dmgMult: 2 },
   /** 开场先「轻吟」：第一次就让它是一记**快招**，与傲慢的「碾压」形成对比。 */
   { kind: 'opener', skillId: 'lust-hum', delayMs: 1000 },

@@ -52,7 +52,7 @@ function makeEngine(extra: readonly SkillDef[] = []) {
     caps: { hp: 100000, energy: 0, douqi: 0 },
     resources: { hp: 100000, energy: 0, douqi: 0 },
     /** 用**真实**的色欲行为表（但不含会干扰断言的技能）。 */
-    behaviors: LUST_BEHAVIORS.filter((b) => b.kind === 'timeLimit' || b.kind === 'enrage'),
+    behaviors: LUST_BEHAVIORS.filter((b) => b.kind === 'enrage'),
   });
   const engine = new BattleEngine({
     combatants: [player, boss],

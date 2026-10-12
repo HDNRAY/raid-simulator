@@ -148,7 +148,7 @@ raid-simulator/
 │  │  ├─ content/                     # validate.ts normalize.ts registry.ts
 │  │  ├─ expr/                        # eval.ts deps.ts
 │  │  ├─ stats/                       # pipeline.ts aggregate.ts breakdown.ts
-│  │  ├─ abilities/                   # modifier/derived/trigger/grant/deal/grantSkill/consume
+│  │  ├─ abilities/                   # modifier/derived/trigger/grant/deal/resource + grantSkill/consume（后两个是设计稿，无执行点）
 │  │  ├─ buffs/                       # apply.ts expire.ts stack.ts resolve.ts
 │  │  ├─ skills/                      # cast.ts cooldown.ts cost.ts book.ts
 │  │  ├─ combat/                      # hit.ts damage.ts heal.ts interrupt.ts
@@ -713,7 +713,7 @@ ro.observe(stage);
 | 2 | 缩放模式 | 默认 `fit`（填满屏幕），设置可切 `integer`（§10.2） |
 | 3 | UI 层 | ✅ **全部走 canvas，零 DOM**，包括设置与改键（§6.0、§6.5） |
 | 4 | 第三方库 | ✅ **默认不引**；PixiJS 覆盖不到时允许引入（Konva / Three / Spine 等），但只允许出现在 `render/` 与 `ui/`（§6.4） |
-| 5 | 使用次数 / 消耗品 | ✅ 统一资源模型 `ResourcePool.counters`（数据模型 §2.2） |
+| 5 | 使用次数 / 消耗品 | ⚠️ **设计稿，引擎未实现**（`ResourcePool.counters` 的读取是 `() => 0` 的桩；内容用 `Expr.counter` 会被校验器拒。见数据模型 §2.2 顶部的核对说明） |
 | 6 | UI 库 | ✅ 不引 |
 | 7 | 包管理器 | ✅ pnpm |
 | 8 | CI 硬门槛 | ✅ typecheck / lint / test 不通过则不发布 |

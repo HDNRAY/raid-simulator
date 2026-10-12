@@ -88,6 +88,12 @@ describe('evalExpr —— 每个分支都要有测试', () => {
     expect(evalExpr({ e: 'hasBuff', who: 'self', buffId: 'nope' }, ctx)).toBe(0);
   });
 
+  /**
+   * ⚠️ `counter` 仍然是**类型的一部分**（设计过的能力），所以求值器
+   * 这一段照旧要测：`evalExpr` 会把池子 id 归一后交给上下文。
+   * 但引擎还没有计数器 —— 内容里用它会被 `validate.ts` 拒绝
+   * （`COUNTER_UNIMPLEMENTED`），见 `content.test.ts`。
+   */
   it('counter（使用次数这类离散资源）', () => {
     const expr: Expr = {
       e: 'counter',
@@ -98,9 +104,6 @@ describe('evalExpr —— 每个分支都要有测试', () => {
   });
 
   it('counter 支持三种池子引用', () => {
-    const pools: Array<[Expr['e'] extends never ? never : Parameters<typeof evalExpr>[0], string]> =
-      [];
-    void pools;
     const asCtx = makeCtx({
       getCounter: (pool) => (pool === 'player' ? 1 : pool === 'ent_1' ? 2 : 3),
     });

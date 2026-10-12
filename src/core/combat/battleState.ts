@@ -57,6 +57,8 @@ import {
 } from './stats';
 import { nextRandom, type RngState } from '../rng';
 import { triggerContextFor } from './triggerContext';
+import { runTriggers } from './triggers';
+import { BuffHookDispatch } from './buffHookDispatch';
 import {
   checkDeaths,
   checkTimeLimit,
@@ -108,6 +110,9 @@ export class BattleEngine {
    * 这样随机选招不会扰动玩家侧的黄金基线（见 `AiState.aiRngSeed`）。
    */
   private aiState: AiState;
+
+  /** buff 钩子派发器：理由与实现都在 `./buffHookDispatch.ts`。 */
+  private readonly buffHooks = new BuffHookDispatch();
 
   constructor(options: CreateBattleOptions) {
     this.options = options;
@@ -167,6 +172,9 @@ export class BattleEngine {
   drainEvents(): readonly EventDef[] {
     const out = [...this.events];
     this.events.length = 0;
+    // ⚠️ 游标与事件数组是同一份状态：清了事件就必须归零，
+    // 否则下一 tick 的派发会从越界下标开始（静默漏掉所有 buff 钩子）。
+    this.buffHooks.reset();
     return out;
   }
 
@@ -525,6 +533,9 @@ export class BattleEngine {
     // 5b. 按住型技能的持续消耗（按逻辑步）
     tickHolds(this.holds());
 
+    // 5c. buff 钩子（在 `commitWork` 之前，触发器的改动才能随工作副本提交）
+    this.dispatchBuffHooks();
+
     // 6. 时间限制
     this.checkTimeLimit();
 
@@ -562,6 +573,13 @@ export class BattleEngine {
    */
   private expireBuffs(): void {
     expireBuffs(this.upkeepContext());
+  }
+
+  /** 把本 tick 新产生的 buff 事件派发成触发器（理由见 `./buffHookDispatch.ts`）。 */
+  private dispatchBuffHooks(): void {
+    this.buffHooks.drain(this.events, (ownerId, hook, payload) => {
+      runTriggers(this.hitContext(), ownerId, hook, payload);
+    });
   }
 
   private regenerateResources(): void {

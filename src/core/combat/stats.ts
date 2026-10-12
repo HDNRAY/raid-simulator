@@ -135,6 +135,14 @@ export function computeStatsFor(
           ctx.resolveCombatantFor(combatantId, who).buffs
             .filter((b: BuffInstance) => b.defId === buffId)
             .reduce((sum: number, b: BuffInstance) => sum + b.stacks, 0),
+        /**
+         * ⚠️ **未实现的桩**：离散计数器还没有接线，所以这里恒返回 0。
+         *
+         * 这就是"写 `counter` 表达式会静默算错"的来源。当前的防线是
+         * **校验层**：`validate.ts` 的 `COUNTER_UNIMPLEMENTED` 拒绝任何
+         * 用到 `Expr.counter` 的内容，所以这句话不会被合法内容读到。
+         * 实现时把这里换成真的池子查询，并删掉那条校验。
+         */
         getCounter: () => 0,
       },
     });

@@ -34,7 +34,12 @@ export interface Combatant {
   readonly caps: Record<ResourceKey, number>;
   /** 当前资源。**整数**（见架构规范 §12：整数生命消灭了一整类判定 bug） */
   readonly resources: Record<ResourceKey, number>;
-  /** 离散计数器 */
+  /**
+   * 离散计数器（使用次数 / 充能）。
+   *
+   * ⚠️ **未接线**：没有任何写入者，读取路径是 `() => 0` 的桩。
+   * 字段保留（设计过的能力），但内容用 `Expr.counter` 会被校验器拒绝。
+   */
   readonly counters: Record<string, Counter>;
   /** 基础主属性 */
   readonly basePrimary: Record<PrimaryStat, number>;

@@ -163,6 +163,24 @@ export function resolveHit(
           taken += Math.max(0, result.amount);
 
           /**
+           * **暴击 → 派发 `onCritDealt`**（挂在**造成暴击的人**身上）。
+           *
+           * 这条链以前从来没跑过：`rollCrit` 有了、但没有任何地方派发这个
+           * hook，于是熵之钟"暴击后授予势能涌动"永远不触发（那个内容示例
+           * 被当成"完整的被动装备例子"，其实是死的）。
+           *
+           * ⚠️ 判据是"**真的打出去了**"（`result.amount > 0`）：被无敌 /
+           * 闪避吃掉的暴击不算"造成暴击"，否则"闪避反而白送对手一个增益"。
+           * 与 `onHitTaken` 的 `taken > 0` 判据同一条原则。
+           */
+          if (crit && result.amount > 0) {
+            runTriggers(ctx, actor.id, 'onCritDealt', {
+              amount: result.amount,
+              skillId: skill.id,
+            });
+          }
+
+          /**
            * 炁按伤害换算：**造成伤害的人**与**受到伤害的人**各得一份。
            * 放在这里（而不是内容里）才能覆盖所有伤害来源。
            */

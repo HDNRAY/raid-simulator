@@ -373,7 +373,6 @@ const encounter: EncounterDef = {
     items: [],
     talents: [],
     behaviors: [
-      { kind: 'timeLimit', ms: 180_000 },
       { kind: 'enrage', atMs: 180_000, dmgMult: 2 },
       { kind: 'opener', skillId: crimsonArcSkill.id, delayMs: 4000 },
       {
@@ -504,7 +503,6 @@ describe('类型层能表达规范承诺的内容', () => {
 
   it('Boss 行为是数据数组，且能嵌套', () => {
     const kinds = encounter.boss.behaviors.map((b) => b.kind);
-    expect(kinds).toContain('timeLimit');
     expect(kinds).toContain('rotation');
     expect(kinds).toContain('onHpBelow');
   });

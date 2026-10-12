@@ -106,6 +106,12 @@ export interface ComputeStatsOptions {
     getResource(who: Who, resource: ResourceKey): number;
     getMaxResource(who: Who, resource: ResourceKey): number;
     getBuffStacks(who: Who, buffId: string): number;
+    /**
+     * 读离散计数器。
+     *
+     * ⚠️ 这里只是**透传**：战斗路径的实现在 `core/combat/stats.ts`，
+     * 目前是 `() => 0` 的桩（计数器尚未接线，见 `types/resources.ts`）。
+     */
     getCounter(pool: string, counter: string): number;
   };
 }

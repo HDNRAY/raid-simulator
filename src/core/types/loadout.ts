@@ -50,6 +50,27 @@ export interface SkillBook {
   readonly barSlotCount: number;
 }
 
+/**
+ * 装备方案。
+ *
+ * ⚠️⚠️ **引擎目前没有消费者 —— 本类型是设计稿，不是可用的机制。**
+ *
+ * 全仓没有任何地方构造 `Loadout` 并把它交给引擎/内容注册表：注册用的
+ * `entities` 是空数组，"装配"这一步不存在。所以 `items` 里放什么都不会
+ * 影响战斗 —— 写了不会有报错，也不会有任何效果。
+ *
+ * 为什么**不删**：它是设计过但**还没实现**的系统（与"重复/陈旧"的死值
+ * 性质不同），删掉会丢失设计。所以按"让代码与文档不再说谎"处理：
+ * 保留形状 + 在这里和 `README` 里显式标注未实现。
+ *
+ * 已知与它配套但同样未接线的东西：`GameEntityInstance.pool`（离散计数器
+ * 未实现，见 `resources.ts`）、`EquipmentEntity.grantsSkills`、
+ * `EquipmentEntity` / `ConsumableEntity` / `PassiveEntity` 三种实体 kind、
+ * `SkillBook` / `KnownSkill` 都没有运行期消费者。
+ *
+ * 真要实现，最小闭环需要：内容注册表接受 `entities` → 按 `items` 展开成
+ * `passiveModifiers` / 已学技能表 → 一条单测证明"装上装备真的改变了数值"。
+ */
 export interface Loadout {
   readonly items: readonly GameEntityInstance[];
   readonly talents: readonly EntityId[];

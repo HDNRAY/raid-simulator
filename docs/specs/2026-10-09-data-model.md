@@ -119,7 +119,15 @@ interface DealAbility {
   hit: HitDef;
 }
 
-/** 授予技能：装备/天赋/buff 把一个主动技能给到技能书（G5） */
+/** 授予技能：装备/天赋/buff 把一个主动技能给到技能书（G5）
+ *
+ * ⚠️ **设计稿，引擎尚未实现（2026-10-12）**：`grantSkill` 有类型、有校验，
+ * 但**没有任何执行点**（`castPipeline` / `runAi` / `combat/triggers.ts`
+ * 都不认它），"`grantsSkills` 规范化成 grantSkill"那条规范化也从没写过。
+ * 类型**保留**（这是要做的那条路），但内容里写它会被校验器拒绝
+ * （`ABILITY_UNIMPLEMENTED`）—— 写了战斗里静默无效，所以要响亮地失败。
+ * 要写设计稿就显式 `validateContent(bundle, { strict: false })`。
+ */
 interface GrantSkillAbility {
   kind: 'grantSkill';
   skillId: SkillId;
@@ -130,6 +138,10 @@ interface GrantSkillAbility {
 /**
  * 消耗：使用次数、充能 — 走**统一的资源模型**，不是独立机制。
  * 见 §2.2。
+ *
+ * ⚠️ **设计稿，引擎尚未实现（2026-10-12）**：同 `GrantSkillAbility`，
+ * 有类型有校验、没有执行点；它依赖的离散计数器也还没接线。
+ * 同样会被 `ABILITY_UNIMPLEMENTED` 拒绝。
  */
 interface ConsumeAbility {
   kind: 'consume';
@@ -174,11 +186,26 @@ const ABILITY_HANDLERS: Record<Ability['kind'], AbilityHandler> = {
 
 ### 2.2 使用次数与消耗品：统一资源模型
 
+> ⚠️⚠️ **本节是设计稿，引擎尚未实现（2026-10-12 全仓核对）。**
+>
+> `ResourcePool.counters` / `Counter` / `Combatant.counters` **类型保留**
+> （这是设计过、要做的能力），但它们的**读取路径**目前在战斗里是个
+> `() => 0` 的桩：没有任何写入者。
+>
+> 所以引擎采取"**拒绝静默误用**"：内容里写 `Expr.counter` 会被校验器
+> 报 `COUNTER_UNIMPLEMENTED`（error）拦下 —— 否则作者会**静默算错**
+> （不是报错，是恒为 0）。计数器接线之后把那条校验删掉即可。
+>
+> 要真的做出来，需要同时落地三件事：**唯一写入路径** + 能读到它的
+> `Expr` 变体（`core/combat/stats.ts` 的 `getCounter` 换成真实现）
+> + 校验与单测（证明读到的不是常量 0）。
+> 见 `src/core/types/resources.ts` 顶部的说明。
+
 需求里提到"消耗品"和"有使用次数的奇物"。**不要为它们加 `maxUses` 字段**——
 那是把同一件事实现两遍。使用次数就是**资源**，只是池子挂在内容实例上而不是角色上。
 
 ```ts
-/** 任何实例都可以有自己的资源池 */
+/** 任何实例都可以有自己的资源池（⚠️ `counters` 的读取尚未接线，见上方警告） */
 interface ResourcePool {
   hp?: number; energy?: number; douqi?: number;
   /** 自定义离散资源：使用次数、充能、弹药、封印数…… 全部走这里 */
@@ -1165,6 +1192,15 @@ type Hook =
   | 'onResourceSpent' | 'onResourceGained'
   | 'onLowHp' | 'onDamagedBelow' | 'onHealed'
   | 'onTick' | 'onEncounterStart' | 'onEncounterEnd' | 'onPhaseChange';
+  // ⚠️ 本表是**声明**，不等于引擎会派发：引擎只处理
+  // `core/content/capabilityAudit.ts` 的 `SUPPORTED_HOOKS` 那五个
+  // （`onCastFinish` / `onHitTaken` / `onCritDealt` / `onBuffApplied` / `onBuffExpired`）。
+  // 其余写进内容会被校验器报 `UNSUPPORTED_HOOK` —— 这是有意的
+  // "拒绝静默误用"：否则触发器会永远不触发而没有任何提示。
+  //
+  // `onPhaseChange` 属于"设计过但未实现"：引擎**根本没有 "phase" 这个概念**，
+  // 「傲慢」的二阶段是内容用 `onHpBelow`（血量阈值）+ `grantBuff`（阶段 buff）
+  // 拼出来的。它保留是因为阶段是这个游戏明确会有的东西（二阶段 / 肉鸽强度曲线）。
 
 type HookFilter =
   | { by:'self' } | { by:'other' }

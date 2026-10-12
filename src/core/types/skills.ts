@@ -59,7 +59,14 @@ export interface GameEntity {
   readonly icon: string;
   readonly descKey?: LocaleKey;
   readonly abilities: readonly Ability[];
-  /** 自己的资源池：使用次数、充能住这里 */
+  /**
+   * 自己的资源池（使用次数、充能住这里）。
+   *
+   * ⚠️ **引擎尚未实现**：计数器没有任何写入者，读 `Expr.counter` 的
+   * `getCounter` 是 `() => 0` 的桩 —— 写了 `pool.counters` 不会有运行期
+   * 效果，而内容里用 `Expr.counter` 会被校验器拒（`COUNTER_UNIMPLEMENTED`）。
+   * 见 `resources.ts` 里 `Counter` / `ResourcePool` 的说明。
+   */
   readonly pool?: ResourcePool;
   readonly rarity?: Rarity;
   readonly requires?: readonly Condition[];
@@ -83,7 +90,21 @@ export interface EquipmentEntity extends GameEntity {
   readonly slot: EquipSlot;
   /** 可同时装备多份 */
   readonly multiEquip?: boolean;
-  /** 授予的主动技能（规范化后变成 grantSkill ability） */
+  /**
+   * 授予的主动技能。
+   *
+   * ⚠️ **引擎目前没有消费者，本字段是设计稿。** 它说"规范化后变成
+   * grantSkill ability"，而那条规范化**从来没有实现**：`grantSkill`
+   * 这个 kind 有类型、有校验，但没有任何执行点（见
+   * `abilities.ts` 里 `GrantSkillAbility` 的说明）；装备系统整体
+   * 也还没接线（见 `loadout.ts` 的 `Loadout`）。
+   *
+   * 唯一读它的是内容校验器：检查这里引用的技能 id 存在
+   * （`validate.ts` 里的 `grantsSkills`）。**别以为写了它就装上了技能。**
+   *
+   * ⚠️ 而 `grantSkill` ability 本身会被 `ABILITY_UNIMPLEMENTED` 拒绝
+   * （它没有执行点），所以要写这条设计稿只能显式 `{ strict: false }`。
+   */
   readonly grantsSkills?: readonly SkillId[];
 }
 

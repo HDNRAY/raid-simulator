@@ -263,7 +263,6 @@ describe('可扩展性：新增一个 Boss 只需要写数据', () => {
    * 这就是"阶段用能力实现"的意思。
    */
   const behaviors: readonly Behavior[] = [
-    { kind: 'timeLimit', ms: 120_000 },
     { kind: 'enrage', atMs: 60_000, dmgMult: 3 },
     { kind: 'opener', skillId: 'test-boss-beam', delayMs: 1000 },
     {

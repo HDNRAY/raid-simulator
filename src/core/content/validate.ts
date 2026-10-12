@@ -10,6 +10,14 @@
  */
 
 import { assertNoCycles, buffAbilities, buildDependencyGraph } from '../expr/deps';
+import {
+  SUPPORTED_HOOKS,
+  abilityHookIssues,
+  abilityKindIssues,
+  counterExprIssues,
+  type CapabilityIssue,
+  type ContentRoot,
+} from './capabilityAudit';
 import type {
   Ability,
   BuffDef,
@@ -20,6 +28,13 @@ import type {
   Behavior,
 } from '../types';
 import { STAT_RULES } from '../stats/aggregate';
+
+/**
+ * 重新导出：`SUPPORTED_HOOKS` 是"引擎会处理哪些 hook"的唯一真相源，
+ * 现在住在 `./capabilityAudit.ts`（对账那个职责里），但调用方
+ * （测试、工具）一直从校验器入口拿它。
+ */
+export { SUPPORTED_HOOKS };
 
 export type ValidationCode =
   | 'DUP_ID'
@@ -43,7 +58,35 @@ export type ValidationCode =
    * 「截」的"成功不进 CD"就是靠这两个数字相等实现的 —— 不等会静默
    * 坏掉（退多了被钳住看不出来，退少了成功之后还剩一截 CD）。
    */
-  | 'COOLDOWN_REFUND_MISMATCH';
+  | 'COOLDOWN_REFUND_MISMATCH'
+  /**
+   * 内容用了 `Expr.counter`（离散计数器）。
+   *
+   * ⚠️ 这是个**能力尚未接线**的检查，不是"内容写错了"：计数器没有写入者，
+   * 战斗路径的 `getCounter` 是 `() => 0` 的桩 —— 用它会**静默得到 0**
+   * （不是报错，是算错，最坏的一种）。所以这里**默认拒绝**：
+   * 类型保留、能力保留，但在实现之前不可能被静默误用。
+   *
+   * 实现计数器之后把这条检查删掉即可。
+   */
+  | 'COUNTER_UNIMPLEMENTED'
+  /**
+   * 内容用了引擎**没有执行点**的 `Ability` kind（`grantSkill` / `consume`）。
+   *
+   * 同 `COUNTER_UNIMPLEMENTED` 的性质：它们是**设计过但还没接线**的能力
+   * （类型保留），可写进内容会**静默无效** —— 所以默认拒绝。
+   * "故意留给未来"也不例外：那该写成注释/TODO，而不是一份看起来会生效的内容。
+   * 想写设计稿就显式 `{ strict: false }`。
+   */
+  | 'ABILITY_UNIMPLEMENTED'
+  /**
+   * 内容挂了引擎**不会派发**的 hook。
+   *
+   * 同 `COUNTER_UNIMPLEMENTED` 的性质：`Hook` 是一整张声明表，
+   * 其中只有 `SUPPORTED_HOOKS` 会被真的处理。写进内容却不在表里的
+   * hook **静默无效** —— 所以默认拒绝，而不是让人"写了却没反应"。
+   */
+  | 'UNSUPPORTED_HOOK';
 
 export interface ValidationIssue {
   readonly severity: 'error' | 'warning';
@@ -106,6 +149,11 @@ export function validateContent(
     validateEntity(entity, entityIds, buffIds, skillIds, bundle.localeKeys, push);
   }
 
+  /* ---------- 2c. 未接线能力的"拒绝静默误用" ---------- */
+  // `Expr.counter` 读出来恒为 0（没有写入者），用了就是**静默算错** ——
+  // 所以默认拒绝，而不是让它在战斗里安静地给出错误数值。
+  pushCapabilityIssues(counterExprIssues(contentRootsOf(bundle)), push);
+
   /* ---------- 3. 依赖图与环检测 ---------- */
   const allAbilities = [
     ...bundle.entities.flatMap((e) => e.abilities),
@@ -160,8 +208,21 @@ export function validateContent(
     }
   }
 
+  /**
+   * 严格模式（默认开）：**warning 也算问题**。
+   *
+   * 这条以前是个空壳 —— `options.strict` 被读了却什么都不做（注释写着
+   * "warning 也视为需要处理"，代码里没有一行）。现在让它真的生效：
+   * 把 warning 提升成 error，于是 `assertValidContent` 会因此抛错。
+   *
+   * 为什么要有这个开关：warning 是"内容合法、但引擎不会照它做"（例如
+   * 挂了不派发的 hook）。开发/CI 应当失败，让人立刻发现；而"承认现状"
+   * 的场合（例如检查设计样本本身）可以显式传 `strict: false` 只看分级。
+   */
   if (options.strict !== false) {
-    // 严格模式下 warning 也视为需要处理（但仍然分级报告）
+    return issues.map((issue) =>
+      issue.severity === 'warning' ? { ...issue, severity: 'error' as const } : issue,
+    );
   }
 
   return issues;
@@ -181,6 +242,40 @@ export function assertValidContent(bundle: ContentBundle): void {
 /* ------------------------------------------------------------------ *
  * 内部检查
  * ------------------------------------------------------------------ */
+
+/**
+ * 把"内容 ↔ 引擎能力的对账"结果转成校验问题。
+ *
+ * 对账本身（哪些 hook 引擎不处理、`Expr.counter` 为什么不能碰）在
+ * `./capabilityAudit.ts` —— 那是**另一个职责**：判据随"引擎实现了什么"
+ * 变化，与"内容字段是否合法"分开。
+ */
+function pushCapabilityIssues(
+  issues: readonly CapabilityIssue[],
+  push: (i: ValidationIssue) => void,
+): void {
+  for (const issue of issues) push(issue);
+}
+
+/** 对一组能力做"引擎会不会处理 / 有没有执行点"的对账。 */
+function checkAbilityHooks(
+  abilities: readonly Ability[],
+  prefix: string,
+  push: (i: ValidationIssue) => void,
+): void {
+  pushCapabilityIssues(abilityHookIssues(abilities, prefix), push);
+  pushCapabilityIssues(abilityKindIssues(abilities, prefix), push);
+}
+
+/** 内容树的所有根（实体 / 技能 / buff / 遭遇战），供 `Expr.counter` 深度扫描用。 */
+function contentRootsOf(bundle: ContentBundle): readonly ContentRoot[] {
+  return [
+    ...bundle.entities.map((e) => ({ path: `${e.kind}:${e.id}`, node: e })),
+    ...bundle.skills.map((s) => ({ path: `skill:${s.id}`, node: s })),
+    ...bundle.buffs.map((b) => ({ path: `buff:${b.id}`, node: b })),
+    ...(bundle.encounters ?? []).map((e) => ({ path: `encounter:${e.id}`, node: e })),
+  ];
+}
 
 function checkDuplicates(ids: readonly string[], kind: string, push: (i: ValidationIssue) => void): void {
   const seen = new Set<string>();
@@ -256,7 +351,7 @@ function validateSkill(
     }
   }
 
-  // 技能能力里引用的技能必须存在
+  // 技能能力里引用的技能必须存在（`grantSkill` 是"授予主动技能"那条路）
   for (const ability of skill.abilities) {
     if (ability.kind === 'grantSkill' && !skillIds.has(ability.skillId)) {
       push({
@@ -267,6 +362,9 @@ function validateSkill(
       });
     }
   }
+
+  // 触发器挂的 hook 必须在引擎**真的会处理**的那几个里
+  checkAbilityHooks(skill.abilities, at('abilities'), push);
 
   /**
    * **退还的冷却不能超过自己扣的冷却**。
@@ -372,6 +470,9 @@ function validateBuff(
       }
     }
   }
+
+  // 触发器挂的 hook 必须在引擎**真的会派发**的那几个里
+  checkAbilityHooks(buffAbilities(buff), at(''), push);
 }
 
 function validateEntity(
@@ -456,6 +557,9 @@ function validateEntity(
     }
   }
 
+  // 触发器挂的 hook 必须在引擎**真的会处理**的那几个里
+  checkAbilityHooks(entity.abilities, at('abilities'), push);
+
   void entityIds;
 }
 
@@ -520,15 +624,12 @@ function behaviorSkillRefs(behavior: Behavior): readonly string[] {
      */
     case 'weightedRotation':
       return behavior.steps.map((s) => s.skillId);
-    case 'interruptible':
-      return behavior.skillIds;
     case 'onHpBelow':
       // `then` 现在是能力数组：grant 引用的 buff 需要校验存在性，
       // 所以这里只关心 skillId 引用（grantSkill）
       return behavior.then.flatMap((a) =>
         a.kind === 'grantSkill' ? [a.skillId] : [],
       );
-    case 'timeLimit':
     case 'enrage':
       return [];
   }

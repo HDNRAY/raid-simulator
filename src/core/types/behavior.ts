@@ -39,9 +39,16 @@ export interface WeightedRotationStep {
 /**
  * Boss 行为：**"每一招怎么打"由行为数组决定，"遇到什么条件换招"由条件
  * 数组决定** —— 两者分开，所以同一个行为能被多个条件复用。
+ *
+ * ⚠️ 这里**曾经**有过一个 `{ kind: 'timeLimit'; ms }`，已删。
+ *
+ * 它是**重复的表达**：战斗时限的真相在 **`BattleEngineOptions.timeLimitMs`**
+ * （`core/combat/battleState.ts` 读它 → `encounterLifecycle.checkTimeLimit`
+ * → `encounterEnd.timeoutEvent`）。行为数组里的那个 `ms` **没有任何消费者**
+ * —— 内容写了它不会改变时限，只会让人以为"时限在这里配"。
+ * 时限是**整场遭遇战**的属性，不是 Boss 行为数组的一项。
  */
 export type Behavior =
-  | { readonly kind: 'timeLimit'; readonly ms: number }
   /** 超时狂暴的**便利写法**（等价于"到点授予一个增伤 buff"） */
   | { readonly kind: 'enrage'; readonly atMs: number; readonly dmgMult: number }
   | { readonly kind: 'opener'; readonly skillId: SkillId; readonly delayMs: number }
@@ -89,5 +96,4 @@ export type Behavior =
       readonly ratio: number;
       readonly who?: Who;
       readonly then: readonly Ability[];
-    }
-  | { readonly kind: 'interruptible'; readonly skillIds: readonly SkillId[] };
+    };

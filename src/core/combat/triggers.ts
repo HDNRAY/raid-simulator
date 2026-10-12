@@ -41,16 +41,22 @@ import { evaluateCondition } from './index';
 const DEPTH_LIMIT = 4;
 
 /**
- * 本引擎**实际支持派发**的 hook。
+ * 本引擎**实际会派发**的 hook（走进 `runTriggers` 的那些）。
  *
- * ⚠️ 只有这 3 个。其余 hook（`onCritTaken` / `onAvoided` / `onKill` …）
+ * ⚠️ 只有这 4 个。其余 hook（`onCritTaken` / `onAvoided` / `onKill` …）
  * 类型还在、内容也能写，但引擎**不认** —— 它们会静默无效。
  *
- * 所以 `content/validate.ts` 要拿这张表去警告内容作者（见 `isSupportedHook`），
- * 而不是让人写了一个触发器却毫无反应也查不出原因。
+ * ⚠️ 注意 `onCastFinish` **不在**这张表里，但它**是活的**：
+ * 技能能力里的 `onCastFinish` 触发器由 `castPipeline` 的读条完成结算
+ * 直接处理（不走 `runTriggers`）。所以"引擎会处理的 hook"比这张表更大 ——
+ * 完整的集合在 `content/capabilityAudit.ts` 的 `SUPPORTED_HOOKS`
+ * （校验器拿它拒绝内容里的死 hook）。
+ *
+ * 两张表的关系由 `tests/unit/content.test.ts` 断言（单向：本表 ⊆ 那张表）。
  */
 export const SUPPORTED_HOOKS: readonly string[] = [
   'onHitTaken',
+  'onCritDealt',
   'onBuffApplied',
   'onBuffExpired',
 ];
@@ -245,8 +251,9 @@ function runAbilities(
        * 在本引擎里**不生效**（静默）。
        *
        * 前四类是"持续存在"或"改技能池"的语义，与"某一刻发生"的触发器
-       * 不匹配；内容校验会拦掉它们（见 `validate.ts`），这里只保证运行时
-       * 不崩。`trigger` 是嵌套触发器，本期不做（没有内容需要它）。
+       * 不匹配（`consume` / `grantSkill` 是设计过但还没接线的能力，
+       * 见 `types/abilities.ts`）；`trigger` 是嵌套触发器，本期不做
+       * （没有内容需要它）。这里只保证运行时不崩。
        */
       default:
         break;

@@ -29,7 +29,14 @@ export interface EvalContext {
   getMaxResource(who: Who, resource: ResourceKey): number;
   /** 读 buff 层数（不存在返回 0） */
   getBuffStacks(who: Who, buffId: string): number;
-  /** 读内容实例的离散计数器 */
+  /**
+   * 读内容实例的离散计数器。
+   *
+   * ⚠️ **引擎尚未实现**：战斗路径的实现是 `() => 0` 的桩（见
+   * `core/combat/stats.ts`）。为了避免内容作者**静默算错**，
+   * `validate.ts` 会拒绝任何用到 `Expr.counter` 的内容
+   * （`COUNTER_UNIMPLEMENTED`）—— 实现之后把那条校验删掉。
+   */
   getCounter(poolKey: string, counter: string): number;
   /**
    * 读某个命名空间下所有修正的当前值之和。
@@ -82,6 +89,12 @@ export function evalExpr(expr: Expr, ctx: EvalContext): number {
     case 'hasBuff':
       return ctx.getBuffStacks(expr.who, expr.buffId) > 0 ? 1 : 0;
 
+    /**
+     * ⚠️ 这条**能算**，但引擎还没有计数器：战斗路径的 `getCounter`
+     * 是 `() => 0`，所以读出来恒为 0。内容里写它会被校验器
+     * （`COUNTER_UNIMPLEMENTED`）拦下 —— 这里保留求值分支，是为了
+     * "实现时只改上下文实现 + 删一条校验"，而不是连类型一起重加。
+     */
     case 'counter':
       // 池子的引用方式与命名空间共用一套字符串约定，由调用方解释
       return guard(ctx.getCounter(counterRefId(expr.ref), expr.counter));

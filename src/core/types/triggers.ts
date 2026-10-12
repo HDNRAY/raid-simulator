@@ -31,6 +31,24 @@ export type Hook =
   | 'onTick'
   | 'onEncounterStart'
   | 'onEncounterEnd'
+  /**
+   * 「阶段变化」。
+   *
+   * ⚠️ **引擎尚未派发 —— 当前是设计稿。** 全仓没有它的触发点，
+   * `combat/triggers.ts` 的运行时白名单里也没有它。
+   *
+   * 为什么留着：**阶段是这个游戏明确会有的东西**（傲慢 / 色欲的二阶段，
+   * 以及肉鸽的强度曲线都要用），所以它是一个"设计过、还没接线"的能力，
+   * 不是陈旧值 —— 删掉会丢设计。
+   *
+   * 为什么现在没人用：引擎**根本没有 "phase" 这个概念**，「傲慢」的二阶段
+   * 是内容用 `onHpBelow`（跨过血量阈值）+ `grantBuff`（授予阶段 buff）
+   * 拼出来的，不经过这个 hook。
+   *
+   * ⚠️ 别以为写上它就会触发：`validate.ts` 的 `SUPPORTED_HOOKS` 不在表里，
+   * 内容用了会被报 `UNSUPPORTED_HOOK`（默认严格模式下就是 error）。
+   * 真要做，需要先有"阶段"的归属者与派发点，见 `docs/` 的落地清单。
+   */
   | 'onPhaseChange';
 
 /**

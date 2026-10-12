@@ -279,8 +279,14 @@ describe('「傲慢」的半血「回补」：一次性、可打断', () => {
        */
       caps: { hp: BOSS_HP_DISPLAY, energy: 0, douqi: 0 },
       resources: { hp: BOSS_HP_DISPLAY, energy: 0, douqi: 0 },
-      /** 只留时限：让 Boss 不会自己出招，测试完全控制它的施法 */
-      behaviors: PRIDE_BEHAVIORS.filter((b) => b.kind === 'timeLimit'),
+      /**
+       * 空行为表：让 Boss 不会自己出招，测试完全控制它的施法。
+       *
+       * ⚠️ 这里原来写的是 `PRIDE_BEHAVIORS.filter((b) => b.kind === 'timeLimit')`
+       * —— 那个行为变体已删（时限来自 `BattleEngineOptions.timeLimitMs`），
+       * 所以现在直接给空数组，语义不变。
+       */
+      behaviors: [],
     });
     const engine = new BattleEngine({
       combatants: [player, boss],

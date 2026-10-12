@@ -409,7 +409,6 @@ export const PRIDE_BUFFS: readonly BuffDef[] = [
  * 保底 —— 那会让它退化成固定顺序，把设计目标毁掉。
  */
 export const PRIDE_BEHAVIORS: readonly Behavior[] = [
-  { kind: 'timeLimit', ms: 180_000 },
   { kind: 'enrage', atMs: 120_000, dmgMult: 2 },
 
   /**
