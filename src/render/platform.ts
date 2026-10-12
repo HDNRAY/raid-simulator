@@ -15,7 +15,7 @@
  *   | 「按键」页显示**键盘绑定**还是**触屏键位** | `caps.mode` / `caps.touch` |
  *   | 要不要显示键名提示（含齿轮按钮上的快捷键） | `caps.showKeyHints` |
  *   | 战斗里双弧按钮层显不显示 / 吃不吃指针 | `caps.touch` |
- *   | 读哪一份键位存储（`raid.bindings.*.v1`） | `caps.mode` |
+ *   | 读哪一份键位存储（`raid.bindings.<mode>.<playerId>.v1`） | `caps.mode` |
  *
  * ⚠️ `showKeyHints` 是 `mode` 的**派生**（`capsOf` 里算的一次），
  * 不是第二个**来源** —— 一个来源派生多个视图可以，两个来源不行。

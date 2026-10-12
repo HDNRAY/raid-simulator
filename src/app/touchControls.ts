@@ -72,7 +72,8 @@ export interface TouchControlsOptions {
    *
    * ⚠️ 与**键盘绑定表无关**（用户 2026-10-12 推翻了原来的派生）：
    * 它来自设置页「按键」页右下角的模拟键位（点键位 → 点技能 → 绑定），
-   * 存 `raid.touchButtons.v1`。这里再按 `currentSkillIds`（这一局真的有的
+   * 存 `raid.touchButtons.<playerId>.v1`（**按角色分**，与键位表同一套坐标）。
+   * 这里再按 `currentSkillIds`（这一局真的有的
    * 技能）过滤一次 —— 那是"别画出按不出东西的按钮"这条既有纪律，
    * 见下面 `buttonsOf`。
    */

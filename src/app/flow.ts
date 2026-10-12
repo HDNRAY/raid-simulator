@@ -121,7 +121,11 @@ export interface GameState {
    *
    * ⚠️ 与 `bindings` **互不派生**（用户 2026-10-12："触屏和键盘当然是
    * 2 套……只是可选技能是一样的"）。它由设置页「按键」页右下角的
-   * **模拟键位**指派（点键位 → 点技能），存 `raid.touchButtons.v1`。
+   * **模拟键位**指派（点键位 → 点技能），存
+   * `raid.touchButtons.<playerId>.v1`（**按角色分**）。
+   *
+   * ⚠️ 换角色时它与 `bindings` **一起**被换掉 —— 唯一写入点是
+   * `app/playerKeys.switchPlayerProfile`（换一个人 = 换一整套键位）。
    *
    * ⚠️ 放在 `GameState` 而不是 `TouchControls` 里：设置面板**先于**
    * 触屏层构造（它要接收触屏的能力值），所以面板必须有一个**与触屏层

@@ -3,7 +3,6 @@ import {
   ICON_BUTTON_DEFAULTS,
   estimateMonoWidth,
   iconHintPlacement,
-  type IconHintInput,
 } from '../../src/ui/IconButton';
 import { LOGICAL } from '../../src/ui/layout';
 import { buildFocusContext } from '../../src/ui/settings/panelFocus';
@@ -31,61 +30,82 @@ describe('IconButton：角落提示的位置由图标位置推出来', () => {
   const hintW = estimateMonoWidth('Esc', ICON_BUTTON_DEFAULTS.cornerSize);
   const hintH = ICON_BUTTON_DEFAULTS.cornerSize;
 
-  const place = (icon: typeof gear, corner: IconHintInput['corner'] = 'auto') =>
-    iconHintPlacement({ icon, canvasW: LOGICAL.width, canvasH: LOGICAL.height, corner }, hintW, hintH);
+  const place = (icon: typeof gear) =>
+    iconHintPlacement({ icon, canvasW: LOGICAL.width, canvasH: LOGICAL.height }, hintW, hintH);
 
-  /** 提示包围盒（`anchorX = 1` 时锚点是它的右缘）。 */
+  /** 提示包围盒（`anchorX/Y = 0` = 锚点是它的左上角）。 */
   const boxOf = (p: ReturnType<typeof place>) => ({
     x: p.anchorX === 1 ? p.x - hintW : p.x,
-    y: p.y,
+    y: p.anchorY === 1 ? p.y - hintH : p.y,
     right: p.anchorX === 1 ? p.x : p.x + hintW,
-    bottom: p.y + hintH,
+    bottom: p.anchorY === 1 ? p.y : p.y + hintH,
   });
 
-  it('【关键】右上角的齿轮 → 提示贴它的**左上角**（往左展开）', () => {
-    const p = place(gear);
-    expect(p.anchorX).toBe(1);
-    const b = boxOf(p);
-    // 提示在图标左缘附近（压住它一小块），而不是跑到图标右边去
-    expect(b.x).toBeLessThan(gear.x + gear.w);
-    expect(b.right).toBeGreaterThan(gear.x);
-    expect(b.x).toBeGreaterThanOrEqual(0);
-  });
-
-  it('【关键】左上角的返回箭头 → 提示贴它的**右上角**（往右展开）', () => {
-    const p = place(back);
-    expect(p.anchorX).toBe(0);
-    const b = boxOf(p);
-    // 提示在图标右缘附近（往画布内侧展开），而不是伸到画布外
-    expect(b.x).toBeGreaterThanOrEqual(0);
-    expect(b.right).toBeLessThanOrEqual(LOGICAL.width);
-    expect(b.x).toBeLessThan(back.x + back.w);
-  });
-
-  it('两边的提示都在画布内（含描边的余量），且都**不在**自己外侧', () => {
+  it('【关键】一条全局规则：提示的**左上角**压在**图标的左上角**', () => {
+    /**
+     * ⚠️ 用户 2026-10-12 把规格说死了（原话）："**快捷键在图标的左上角**，
+     * 目前在**正中间**"。
+     *
+     * 判据不是"两个按钮的绝对坐标相同"（它们在对角，不可能相同），
+     * 而是"**同一个公式 + 同一个锚点**"：
+     *   - 锚点都是提示的**左上角**（`anchorX = 0` / `anchorY = 0`）
+     *   - 提示左缘 = **图标左缘**（`b.x === icon.x`，不是"以图标左缘为中心"）
+     *   - 提示上缘 = 图标上缘 + `hintOverlap`（角标压住一角）
+     */
     for (const icon of [gear, back]) {
-      const b = boxOf(place(icon));
-      expect(b.x, JSON.stringify(icon)).toBeGreaterThanOrEqual(0);
-      expect(b.y, JSON.stringify(icon)).toBeGreaterThanOrEqual(0);
-      expect(b.right, JSON.stringify(icon)).toBeLessThanOrEqual(LOGICAL.width);
-      expect(b.bottom, JSON.stringify(icon)).toBeLessThanOrEqual(LOGICAL.height);
+      const p = place(icon);
+      const b = boxOf(p);
+      const tag = JSON.stringify(icon);
+      expect(p.anchorX, tag).toBe(0);
+      expect(p.anchorY, tag).toBe(0);
+      /** 左对齐图标左缘 —— 这正是"不在正中间"的判据。 */
+      expect(b.x, tag).toBe(icon.x);
+      expect(b.y - icon.y, tag).toBe(ICON_BUTTON_DEFAULTS.hintOverlap);
+      /** 提示要**压住**图标：横向与图标的交叠必须为正。 */
+      expect(Math.min(b.right, icon.x + icon.w) - Math.max(b.x, icon.x), tag).toBeGreaterThan(0);
     }
   });
 
-  it('"贴哪一侧"是**算出来的**：同一个图标换到画布另一半，提示就翻过去', () => {
+  it('提示**不按位置换规则**：把图标搬到画布四个角，落位公式不变', () => {
     /**
-     * ⚠️ 这条正是"不许写死两个常量"的判据：把齿轮放到左上角，
-     * `'auto'` 必须给它 `top-right`；把箭头放到右上角，必须给 `top-left`。
+     * ⚠️ 旧版有个 `'auto'` 会按"按钮在画布哪一半"翻角 —— 用户否掉了。
+     * 这条断言就是那条否决的回归测试：同样的图标放到画布四个角，
+     * **相对自己图标**的落位都不变。
      */
-    const gearTopLeft = { ...gear, x: 8 };
-    expect(place(gearTopLeft).anchorX).toBe(0);
-    const backTopRight = { ...back, x: LOGICAL.width - 30 };
-    expect(place(backTopRight).anchorX).toBe(1);
+    const atCorners = [
+      { ...gear, x: 8, y: 8 },
+      { ...gear, x: LOGICAL.width - 30, y: 8 },
+      { ...gear, x: 8, y: LOGICAL.height - 30 },
+      { ...gear, x: LOGICAL.width - 30, y: LOGICAL.height - 30 },
+    ];
+    for (const icon of atCorners) {
+      const p = place(icon);
+      const b = boxOf(p);
+      const tag = JSON.stringify(icon);
+      expect(p.anchorX, tag).toBe(0);
+      expect(b.x, tag).toBe(icon.x);
+      expect(b.y - icon.y, tag).toBe(ICON_BUTTON_DEFAULTS.hintOverlap);
+    }
   });
 
-  it('显式给角就是那个角（不做二次翻转）', () => {
-    expect(place(gear, 'top-left').anchorX).toBe(1);
-    expect(place(gear, 'top-right').anchorX).toBe(0);
+  it('两个真实调用点的提示都**不需要**避让（整块在画布内）', () => {
+    /**
+     * ⚠️ 这条是"**别再加第二套避让逻辑**"的判据（用户 2026-10-12 明确否掉
+     * 避让）。规则只让提示**往右下方**长，而两个按钮的图标左上角本来
+     * 就留了 8px 边距 —— 所以整块提示天然落在画布内。
+     *
+     * ⚠️ 若哪天有人把图标挪到贴边处，这条会先失败 —— 那时候该改的是
+     * **布局**（或者去问用户），**不是**在 `iconHintPlacement` 里悄悄加一段
+     * 夹取把它推回来（那会让两个按钮看起来又不一样）。
+     */
+    for (const icon of [gear, back]) {
+      const b = boxOf(place(icon));
+      const tag = JSON.stringify(icon);
+      expect(b.x, tag).toBeGreaterThanOrEqual(0);
+      expect(b.y, tag).toBeGreaterThanOrEqual(0);
+      expect(b.right, tag).toBeLessThanOrEqual(LOGICAL.width);
+      expect(b.bottom, tag).toBeLessThanOrEqual(LOGICAL.height);
+    }
   });
 });
 

@@ -166,13 +166,36 @@ export function isReservedKey(key: string): boolean {
 }
 
 /**
- * 保留键的**可读名字**（提示文案里用）。
+ * 保留键的**可读名字**。
+ *
+ * ==================================================================
+ * ⚠️ 这是**键名显示**的唯一映射（key → 显示名）
+ * ==================================================================
+ *
+ * 输入是 `normalizeKey` 归一化后的**小写 key**（源头是 `event.key`，
+ * 不是 `keyCode` / `code` —— 见 `normalizeKey` 的说明）。输出是人类读的
+ * 短名：`'escape'` → `'Esc'`、`'arrowup'` → `'↑'` 之类。
+ *
+ * **别处不许自己拼**：返回按钮曾经写
+ * `ESCAPE_KEY.charAt(0).toUpperCase() + slice(1)`，拼出 `Escape` ——
+ * 全游戏其它地方（设置页那句"…Enter 改键，Esc 返回"）写的是 `Esc`，
+ * 同一个键两个写法，看起来就是"返回按钮没跟设置同步"（用户 2026-10-12
+ * 报的正是这个）。现在两边都从这里取。
+ *
+ * ⚠️ 它是**键位表**不是文案，所以**不进 i18n**（AGENTS.md §3b）：
+ * 改键时只动这里，语言包不用碰。
  *
  * 返回的是 i18n key 而不是中文：这一层不该出现文案。
  */
 export function reservedKeyLabel(key: string): string {
   if (/^f\d+$/.test(key)) return 'F1–F12';
   switch (key) {
+    /**
+     * ⚠️ **显式**列出来（而不是落到 `default`）：它是"返回 / 取消"这个功能键
+     * 的显示名，`ui/settings/keyNames` 的 `KEY_EDIT_KEYS.cancel.label`
+     * 以及 `ScreenControls` 的返回按钮都指着它。写成显式分支才看得出
+     * "这里有约定"。
+     */
     case 'escape':
       return 'Esc';
     case 'tab':
@@ -190,27 +213,38 @@ export function reservedKeyLabel(key: string): string {
 }
 
 /**
- * 把 `KeyboardEvent` 归一成一个键名。
+ * 把 `KeyboardEvent` 归一成一个键名（**全部来自 `event.key`**）。
  *
- * 归一化的必要性：`event.key` 的大小写随 Shift 变化
- * （按 Shift+1 得到 '!'），直接拿它查表会漏。
- * 所以用 `event.code` 推导出**物理键**，再单独带上修饰键前缀。
+ * ==================================================================
+ * ⚠️ 只用 `event.key` —— 不用 `keyCode`、也不用 `code`
+ * ==================================================================
+ *
+ * 用户 2026-10-12 定的口径（原话）："**用 key 不是 keycode 也不是 code**"。
+ *
+ *   - `keyCode` 是废弃的数字码（且与布局无关）
+ *   - `code` 是**物理位置**（`KeyQ` / `Digit1`）—— 它会在非 QWERTY 布局上
+ *     把"玩家按的字符"与"绑定的字符"错开（Dvorak / AZERTY 上按 Q 位置出的
+ *     是别的字符，而玩家想绑的是**那个字符**）
+ *   - `key` 才是**语义键名**（`'Escape'` / `'ArrowUp'` / `'q'` / `'F1'`）
+ *
+ * 所以本函数从 `event.key` 取字符、`toLowerCase()` 归一；Shift 变成的那个
+ * 符号（`!` `@` `#` …）再用 `SHIFTED_TO_BASE` **折回**它的数字/符号键 ——
+ * 这是"逻辑键名"的表达，不是"物理位置"。
+ *
+ * 归一化的必要性：`event.key` 的大小写随 Shift 变化（按 `Shift+1` 得到
+ * `'!'`），直接拿它查表会漏。而 `Shift+Q` 得到的是 `'Q'`，
+ * `toLowerCase()` 之后与 `'q'` 是同一个键 —— 所以字母不需要查表。
  */
 export function normalizeKey(event: {
   readonly key: string;
-  readonly code?: string;
   readonly shiftKey?: boolean;
   readonly ctrlKey?: boolean;
   /** Mac 的 Command。需求要求 ctrl/command 都支持。 */
   readonly metaKey?: boolean;
   readonly altKey?: boolean;
 }): string {
-  let base = event.key.toLowerCase();
-
-  // 数字键：Shift+1 会给出 '!'，用 code 还原成 '1'
-  if (event.code?.startsWith('Digit')) base = event.code.slice(5);
-  else if (event.code?.startsWith('Key')) base = event.code.slice(3).toLowerCase();
-  else if (event.code?.startsWith('Numpad')) base = `num${event.code.slice(6)}`;
+  const lower = event.key.toLowerCase();
+  const base = SHIFTED_TO_BASE[lower] ?? lower;
 
   const parts: string[] = [];
   if (event.ctrlKey) parts.push('ctrl');
@@ -223,10 +257,50 @@ export function normalizeKey(event: {
    */
   if (event.metaKey) parts.push('meta');
   if (event.altKey) parts.push('alt');
+  /**
+   * 数字键**不加** `shift` 前缀：`Shift+1` 的 `event.key` 是 `'!'`，
+   * 已经折回 `'1'` 了，再加前缀会让同一个动作产生两个键名。
+   * （这条与旧实现一致。）
+   */
   if (event.shiftKey && !/^[0-9]$/.test(base)) parts.push('shift');
   parts.push(base);
   return parts.join('+');
 }
+
+/**
+ * `Shift` 变成的那个符号 → 它的基础字符。
+ *
+ * 只用 `event.key` 之后，"`Shift+1` 得到 `'!'`"这件事必须靠一张表折回来
+ * —— 旧实现用 `event.code.startsWith('Digit')` 绕过了它，而 `code` 是
+ * 物理位置（用户已否掉）。
+ *
+ * ⚠️ 只覆盖**美式布局的可打印键**。非美式布局下 `event.key` 给的就是那个
+ * 布局的字符（这正是"逻辑键名"的意思），折不了也不算错 —— 玩家绑什么
+ * 字符就记什么字符。
+ */
+const SHIFTED_TO_BASE: Readonly<Record<string, string>> = {
+  '~': '`',
+  '!': '1',
+  '@': '2',
+  '#': '3',
+  $: '4',
+  '%': '5',
+  '^': '6',
+  '&': '7',
+  '*': '8',
+  '(': '9',
+  ')': '0',
+  _: '-',
+  '+': '=',
+  '{': '[',
+  '}': ']',
+  '|': '\\',
+  ':': ';',
+  '"': "'",
+  '<': ',',
+  '>': '.',
+  '?': '/',
+};
 
 export interface InputSource {
   /** 本 tick 要交给引擎的动作 */

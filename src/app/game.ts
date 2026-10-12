@@ -56,6 +56,7 @@ import { translator } from '../i18n/translator';
 import { observeStage } from '../render/sizes';
 import { UI_SCALE_MAX, UI_SCALE_MIN, type ScalingMode } from '../render/scaling';
 import { parseUiScale } from './settingsStore';
+import { switchPlayerProfile } from './playerKeys';
 import { createStartBattle } from './battleSetup';
 import { createRunSession } from './runSession';
 import { createGameState, settingsAnchorOf } from './flow';
@@ -171,7 +172,12 @@ export function createGame(o: CreateGameDeps): GameHandle {
    * 都要读**当前**值 —— 所以下游一律通过取值函数拿它，不复制。
    */
   const selection = {
-    playerId: resolvePlayerId(d.settingsStore.playerIdRaw),
+    /**
+     * ⚠️ 初值直接取 `d.playerId`（`deps.ts` 已经 `resolvePlayerId` 过一次）
+     * —— 键位按角色分存，那个值同时也是"启动时读的是谁的键位"，
+     * 这里再 `resolvePlayerId` 一遍就是同一件事的第二份表达。
+     */
+    playerId: d.playerId,
     bossId: resolveBossId(d.settingsStore.bossIdRaw),
   };
 
@@ -271,6 +277,22 @@ export function createGame(o: CreateGameDeps): GameHandle {
     selection.playerId = resolvePlayerId(playerId);
     selection.bossId = resolveBossId(bossId);
     d.settingsStore.savePick(selection.playerId, selection.bossId);
+
+    /**
+     * ⚠️ **换角色 = 换一整套键位**（用户："不同的人按键设置应该是分开的"）。
+     * 四件连带的事整块在 `./playerKeys`（那里写着为什么要一起发生），
+     * 这里是它**唯一**的调用点。
+     *
+     * ⚠️ 同一个角色再进来（重开一局）是**空操作** —— 守卫在那边：键位表在
+     * 内存里已经是最新的，从存储重读反而可能丢掉刚改的那一次。
+     *
+     * ⚠️ **战斗中换不了角色**：本函数是"开一局新战斗"的入口，而战斗中
+     * 没有界面能换人 —— 所以不会出现"打着打着键变了"。
+     */
+    switchPlayerProfile(
+      { state, store: d.settingsStore, registry: d.registry, touch: () => state.touch },
+      selection.playerId,
+    );
 
     /**
      * ⚠️ **先换形象再开战**（需求：玩家与 Boss 都要播 idle / attack 动画）。

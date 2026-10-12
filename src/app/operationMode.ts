@@ -48,9 +48,12 @@ export interface OperationModeSwitchDeps {
  *   1. `GameState.operationMode` —— 所有"键盘 / 触屏"判断的**唯一**来源
  *      （面板、触屏层、场景与齿轮的键名提示下一次重画就读到新值）
  *   2. 存档（`raid.operationMode.v1`）—— 刷新之后还记得
- *   3. **读哪一份键位表**（`raid.bindings.keyboard.v1` /
- *      `raid.bindings.touch.v1`）—— 两张表分开存（用户要求"方便我用电脑
+ *   3. **读哪一份键位表**（`raid.bindings.keyboard.<playerId>.v1` /
+ *      `raid.bindings.touch.<playerId>.v1`）—— 两张表分开存（用户要求"方便我用电脑
  *      测试"），所以换方式就得换那一份
+ *      ⚠️ 键名里还有**角色**（用户："不同的人按键设置应该是分开的"）——
+ *      本函数只换"形态"那一半，角色那一半归 `app/playerKeys.ts`。
+ *      两者都只是 `SettingsStore` 上的一个坐标，读的时候自然拼在一起。
  *   4. 战斗循环里的键位（这一局立刻生效）
  *   5. 让设置面板重画 + 把焦点挪到一个**现在存在**的区
  *

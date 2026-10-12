@@ -22,6 +22,30 @@
  *     （需求："滚动条/可视范围要看得出还有内容"）
  *
  * ==================================================================
+ * ⚠️⚠️ 2026-10-12 第二轮：`maxLines` 那一下"**放开**"（行为真的变了）
+ * ==================================================================
+ *
+ * 用户原话："**放开**"。
+ *
+ * ⚠️ 上面那三样**当时其实一样都走不到**：折行上限写的是
+ * `min(DESC_MAX_LINES, viewRows() - 2)`，而总行数是
+ * `1 + 说明行数 + 1` —— 于是 `total ≤ viewRows()` **恒成立**，
+ * `scrollable()` 永远为假。表现是："滚轮 / 拖拽 / 滚动条 / 方向提示"
+ * 全写好了却**不可达**，超长说明被**静默截断**。
+ *
+ * 现在上限只由 `DESC_MAX_LINES` 决定（推导与判据在 `./detailWindow`），
+ * 所以**行为变化**是：
+ *
+ *   | | 之前 | 现在 |
+ *   |---|---|---|
+ *   | 比一屏高的说明 | 被静默截断到一屏，**看不出来少了** | **能滚出来**，右边有滚动条、底部有方向提示 |
+ *   | 一屏内的说明 | 不滚、不画滚动条 | **一样**（滚不动就不画 —— 这条没变）|
+ *   | 裁剪 | 靠"折行时就不许折满" | 靠 `clipToWindow()` 按 `offset` 逐行判可见性 |
+ *
+ * ⚠️ 最后一行是**必须**的连带改动：放开之后窗口外的行会被画到详情区
+ * 外面（本仓库的 Pixi 遮罩在 headless 下不生效，见 `./wrapText`）。
+ *
+ * ==================================================================
  * ⚠️ 滚动**不是**新发明的一套（AGENTS.md：本仓库已有先例）
  * ==================================================================
  *
@@ -49,6 +73,7 @@ import { Label, type PixiCtor } from '../primitives';
 import { wrapText, type MeasureText } from './wrapText';
 import { FONT_FAMILY, PALETTE, css } from '../../render/theme';
 import { skillDetailContentRect, skillDetailViewport } from './keyGridLayout';
+import { DESC_MAX_LINES, contentRowVisible } from './detailWindow';
 import {
   clampOffset,
   scrollFraction,
@@ -59,19 +84,13 @@ import type { KeyRow } from './rows';
 import type { TranslateFn } from '../../i18n/translator';
 
 /**
- * 说明最多折几行。
+ * ⚠️ **折行上限**与**"这一行在不在窗口里"**的判据搬到了 `./detailWindow`。
  *
- * ⚠️ 上限存在的理由是**性能**：`wrapText` 的每一行要做一次二分（每步一次
- * 文本测量），而说明每换一个技能都要折一遍。24 行远超任何现实长度的说明
- * （400px 宽、11px 字号下一行约 30 个字 → 24 行 ≈ 700 字），而它同时是
- * `descLines` 数组的长度（那些 `Text` 对象**一次建好、之后只改字**，
- * 不重建 —— 见 `primitives.Label` 的性能说明）。
- *
- * ⚠️ 另一条上限是"滚动范围"：`totalRows` 由**折出来的行数**决定，
- * 而它若超过 `viewRows()` 就出现滚动。所以这个数不能太小（那会让长说明
- * 被**静默截断**而没有滚动条），也不能太大（浪费 Text 对象）。
+ * 那是这一轮修掉的一行算术（`min(DESC_MAX_LINES, viewRows() - 2)` 让
+ * `total > rows` 结构上永不可能成立 → 滚动那四样永远走不到），而它是
+ * **纯函数**、能在 node 里真的断言；留在这个 Pixi 组件里就只能靠看截图猜。
+ * 理由与踩过的坑随代码一起搬过去了，这里不重复。
  */
-const DESC_MAX_LINES = 24;
 
 /**
  * 一行的行距 —— **量出来的，不是估的**。
@@ -263,7 +282,7 @@ export class SkillDetail {
       offset: this.offset,
       total: this.totalRows,
       rows: viewRows(),
-      lines: [1, Math.max(1, this.wrapped.length), 1],
+      lines: [1, this.descRows(), 1],
     };
   }
 
@@ -326,14 +345,19 @@ export class SkillDetail {
       width: this.descWidth(),
       measure: this.measure,
       /**
-       * ⚠️ 上限 = `DESC_MAX_LINES` 与"还能画几行"里**更小**的那个。
+       * ⚠️ **放开**（2026-10-12 用户："放开"）：上限**只**由
+       * `DESC_MAX_LINES` 决定。
        *
-       * 这是**裁剪的兜底**：详情区只画得下 `viewRows()` 行，而名字与代价
-       * 各占一行 —— 所以说明最多占 `viewRows() - 2` 行。折出来的行数
-       * 不超过它，就不可能画到区外（本仓库的 Pixi 遮罩在 headless 下
-       * 不生效，见 `./wrapText`；所以裁剪**必须在折行这一步**兜住）。
+       * 修之前这里是 `Math.min(DESC_MAX_LINES, viewRows() - 2)` ——
+       * 那个 `viewRows() - 2` 让 `total ≤ viewRows()` **结构上恒成立**，
+       * 于是 `scrollable()` 永远为假：滚轮 / 拖拽 / 滚动条 / 方向提示
+       * **四样全都走不到**，超长说明只是被静默截断。推导见
+       * `./detailWindow` 的文件头。
+       *
+       * ⚠️ 放开之后裁剪**不能再靠折行兜**（行数真的会比一屏多）——
+       * 改由 `clipToWindow` 按 `offset` 逐行判可见性，见那里。
        */
-      maxLines: Math.max(1, Math.min(DESC_MAX_LINES, viewRows() - 2)),
+      maxLines: DESC_MAX_LINES,
     });
 
     /**
@@ -351,7 +375,7 @@ export class SkillDetail {
      * ⚠️ 代价行必须**按说明折了几行**往下摆 —— 写死 `y = LINE_H * 2`
      * 会在说明折成 2 行时被压住（这一轮踩过）。
      */
-    const descRows = Math.max(1, this.wrapped.length);
+    const descRows = this.descRows();
     this.stats.root.y = LINE_H * (1 + descRows);
     for (let i = 0; i < this.descLines.length; i += 1) {
       const line = this.descLines[i];
@@ -367,6 +391,53 @@ export class SkillDetail {
     this.applyOffset();
     this.drawFrame();
     this.root.visible = true;
+  }
+
+  /**
+   * 说明占了几行（**唯一**算法：至少 1 行 —— 空说明也占掉名字下面那一行，
+   * 否则代价行会顶上来）。
+   *
+   * ⚠️ 抽成方法而不是在两处各写一遍 `Math.max(1, wrapped.length)`：
+   * `render`（摆代价行）与 `applyOffset`（判窗口）都要它，两处漂了就会
+   * 出现"代价行在窗口外却还画着"。
+   */
+  private descRows(): number {
+    return Math.max(1, this.wrapped.length);
+  }
+
+  /**
+   * **按当前 `offset` 把窗口外的行藏起来**（自己做的裁剪）。
+   *
+   * ==================================================================
+   * ⚠️ 为什么放开 `maxLines` 之后必须有它
+   * ==================================================================
+   *
+   * `content` 容器靠 `y` 上移实现滚动，而 `descLines` 这一池 `Text` 是
+   * **内容行**的槽位（第 i 槽放 `wrapped[i]`，第 i 槽的内容行号是 `1 + i`
+   * —— 第 0 行是名字）。
+   *
+   * 内容没超过一屏时，一行都不会跑到区外（旧代码正是靠这条）。一旦长说明
+   * 真的比一屏高，窗口外的行就会被画到详情区**外面**，压在下面的提示行上
+   * （本仓库的 Pixi 遮罩在 headless 下不生效，见 `./wrapText`）—— 所以
+   * 裁剪只能自己做，判据是 `./detailWindow.contentRowVisible`。
+   *
+   * ⚠️ 只切 `visible`、**不改 `text`**：`text` 由 `render` 填一次（换技能
+   * 才变），滚动时反复写同样的字串只会白花测量/重绘的开销。
+   */
+  private clipToWindow(): void {
+    const rows = viewRows();
+    const offset = this.offset;
+    const descRows = this.descRows();
+    /** ⚠️ 名字（内容行 0）只在**滚到顶**时可见 —— 它跟着内容一起上移。 */
+    const nameVisible = contentRowVisible(0, offset, rows);
+    this.name.root.visible = nameVisible;
+    this.tags.root.visible = nameVisible;
+    this.stats.root.visible = contentRowVisible(1 + descRows, offset, rows);
+    for (let i = 0; i < this.descLines.length; i += 1) {
+      const line = this.descLines[i];
+      if (line === undefined) continue;
+      line.visible = contentRowVisible(1 + i, offset, rows);
+    }
   }
 
   /**
@@ -393,12 +464,19 @@ export class SkillDetail {
     this.moreHint.root.y = vp.y + vp.h - 14;
   }
 
-  /** 把偏移套到内容上，并画滚动条。 */
+  /**
+   * 把偏移套到内容上：**钳位 → 上移 → 裁掉窗口外的行 → 重画**。
+   *
+   * ⚠️ `clipToWindow()` 必须在这里（而不是只在 `render` 里）：滚动会换
+   * 窗口，而"哪些行画得出来"完全由 `offset` 决定 —— 漏了它就会在**滚起来
+   * 之后**把内容画到详情区外面（这正是"放开 `maxLines`"带来的新情况）。
+   */
   private applyOffset(): void {
     const rows = viewRows();
     this.offset = clampOffset(this.offset, this.totalRows, rows);
     /** ⚠️ 从**内框**顶开始上移（留白不参与滚动 —— 它是边框，不是内容）。 */
     this.content.y = skillDetailContentRect().y - this.offset * LINE_H;
+    this.clipToWindow();
     this.drawFrame();
   }
 

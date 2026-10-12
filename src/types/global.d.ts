@@ -179,10 +179,10 @@ declare global {
         /**
          * `Esc` 提示的**包围盒**（逻辑坐标；触屏隐藏时也仍然算得出来）。
          *
-         * ⚠️ 提示的位置是**推导**出来的（`IconButton.iconHintPlacement`：
-         * 按按钮在画布哪一半决定贴哪个角），这个读数是那条推导在**真实
-         * 布局**下的证据 —— 截图只能看出"看着像在角上"，看不出它有没有
-         * 被画布边裁掉。
+         * ⚠️ 提示的位置来自 `IconButton.iconHintPlacement` 的**一条全局
+         * 规则**（压在图标左上角，与按钮在画布哪个角无关）。这个读数是
+         * 那条规则在**真实布局**下的证据 —— 截图只能看出"看着像在角上"，
+         * 看不出它有没有被画布边裁掉、也看不出两个按钮是不是同一条规则。
          */
         shortcutBounds():
           | { readonly x: number; readonly y: number; readonly w: number; readonly h: number }

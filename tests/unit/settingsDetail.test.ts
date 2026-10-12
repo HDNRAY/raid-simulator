@@ -10,6 +10,7 @@ import {
   DETAIL_BOTTOM,
 } from '../../src/ui/settings/settingsGeometry';
 import { skillDetailContentRect, skillDetailViewport } from '../../src/ui/settings/keyGridLayout';
+import { DESC_MAX_LINES, contentRowVisible } from '../../src/ui/settings/detailWindow';
 import { flattenCatalog } from '../../src/i18n/translator';
 import { zhCN } from '../../src/i18n/locales/zh-CN';
 import { resetButtonRect, touchResetButtonRect } from '../../src/ui/settings/logic';
@@ -231,5 +232,79 @@ describe('② 详情区的可视范围（"格阵下沿..提示行上沿"那一�
      * 只能看到一行 —— 而那正是用户报的那个问题（截断）。
      */
     expect(skillDetailViewport().h).toBeGreaterThanOrEqual(22 * 3);
+  });
+});
+
+/**
+ * ==================================================================
+ * ③ `maxLines` **放开**（用户 2026-10-12 原话："放开"）
+ * ==================================================================
+ *
+ * ⚠️ 这一组的**唯一**目的：钉住"滚动真的可达"这件事。
+ *
+ * 修之前是 `maxLines = min(DESC_MAX_LINES, viewRows() - 2)`，而内容总行数
+ * 是 `1 + 说明行数 + 1` ⇒ `total ≤ viewRows()` **结构上恒成立**
+ * ⇒ `scrollable()` 永为假 ⇒ 滚轮 / 拖拽 / 滚动条 / 方向提示**全不可达**，
+ * 超长说明只是被**静默截断**。
+ *
+ * 只有纯算术能测（`SkillDetail` 是 Pixi 组件，jsdom 里画不出来），
+ * 所以判据放在 `detailWindow` 那两个导出上 —— 与 `render` 用的是**同一份**。
+ */
+describe('③ 放开 `maxLines`：长说明真的能滚', () => {
+  /** 行高 22（`SkillDetail.LINE_H`；理由写在那边）。 */
+  const LINE_H = 22;
+  const inner = skillDetailContentRect();
+  const rows = Math.max(1, Math.floor(inner.h / LINE_H));
+  /** 每个字固定 10px（折行只看宽度，与字体无关）。 */
+  const measure = (v: string): number => [...v].length * 10;
+  /** 一行装得下几个字（内框宽减去给滚动条的让位）。 */
+  const perLine = Math.floor((inner.w - 10) / 10);
+  const width = inner.w - 10;
+
+  it('【关键·回归】长说明的 `total` **可以**超过一屏 —— 旧代码结构上不可能', () => {
+    /** 折满 `DESC_MAX_LINES` 都装不下的长文案（这里再多一行）。 */
+    const long = '啊'.repeat(perLine * (DESC_MAX_LINES + 1));
+    const lines = wrapText({ text: long, width, measure, maxLines: DESC_MAX_LINES });
+    expect(lines).toHaveLength(DESC_MAX_LINES);
+
+    /** 现在：`total > rows` ⇒ `scrollable()` 为真 ⇒ 那四样开始工作。 */
+    expect(1 + lines.length + 1).toBeGreaterThan(rows);
+
+    /**
+     * ⚠️ **反证**（这条才是回归测试）：旧的钳位 `rows - 2` 下，
+     * `total` 永远不超过 `rows` —— 无论说明多长。若哪天有人把钳位加回来，
+     * 上面那条断言会挂，而这条会告诉你"为什么它曾经不可达"。
+     */
+    const oldMax = Math.max(1, Math.min(DESC_MAX_LINES, rows - 2));
+    const oldLines = wrapText({ text: long, width, measure, maxLines: oldMax });
+    expect(1 + oldLines.length + 1).toBeLessThanOrEqual(rows);
+  });
+
+  it('短说明照旧**不滚**（`total ≤ rows` —— 滚不动就不画滚动条）', () => {
+    const short = '普通攻击，造成 10 点伤害。';
+    const lines = wrapText({ text: short, width, measure, maxLines: DESC_MAX_LINES });
+    expect(1 + lines.length + 1).toBeLessThanOrEqual(rows);
+  });
+
+  it('裁剪窗口 = `[offset, offset + rows)`（窗口外的行不画）', () => {
+    /** 滚到顶：第 0 .. rows-1 行可见。 */
+    expect(contentRowVisible(0, 0, rows)).toBe(true);
+    expect(contentRowVisible(rows - 1, 0, rows)).toBe(true);
+    /** ⚠️ 第 `rows` 行的上沿落在可视底边**之外** —— 算它可见就会画出区外。 */
+    expect(contentRowVisible(rows, 0, rows)).toBe(false);
+    /** 滚到中间：窗口**上方**的行看不见（它们已被移出详情区）。 */
+    expect(contentRowVisible(0, 3, rows)).toBe(false);
+    expect(contentRowVisible(3, 3, rows)).toBe(true);
+  });
+
+  it('【关键】滚到底（`offset = total - rows`）时**最后一行完整可见**', () => {
+    const total = rows + 12;
+    const offset = total - rows;
+    const last = total - 1;
+    expect(contentRowVisible(last, offset, rows)).toBe(true);
+    /** 它正好是窗口的最后一行 —— 下沿贴内框底边，不多不少。 */
+    expect(last).toBe(offset + rows - 1);
+    /** 而"整整一屏"确实装得进内框（padding 数学复核）。 */
+    expect(rows * LINE_H).toBeLessThanOrEqual(inner.h);
   });
 });

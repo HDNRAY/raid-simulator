@@ -67,29 +67,27 @@ export interface IconButtonOptions {
    */
   readonly hintSide?: 'corner' | 'left' | 'right';
   /**
-   * 角落提示画在图标**外面**时，往画布内侧翻到哪一边。
+   * 角落提示**摆在哪里** —— 全应用**一条规则**，与按钮在画布哪个角无关。
    *
    * ==================================================================
-   * 为什么这是一个**推导的开关**，而不是一组手调偏移
+   * ⚠️ 这一项**不存在**（连"哪种摆法"的可选项都不给）
    * ==================================================================
    *
-   * `corner` 提示的锚点是它自己的一个角（`anchor = (1,1)` 之类），所以
-   * 提示的**包围盒**落在"锚点 → 图标那一侧"之间 —— 它必然占掉
-   * `提示宽 × 提示高` 那么大的地方。
+   * 用户 2026-10-12 的两条否决把它收敛成了一条：
    *
-   * 返回箭头挂在画布左上角（`边距 8`），提示**没有**地方可占：往左溢出、
-   * 往上只够 8px（字形高约 13px，实测顶部会被裁）。所以那里不是"提示
-   * 挪一挪"，而是**提示的锚点落在图标的另一个角上**。
+   *   1. "**不用看在哪一半，全局统一风格**" —— 旧版有个 `hintCorner`，
+   *      取值 `'auto'` 时**按按钮在画布哪一半**决定提示翻到左边还是右边；
+   *      于是"左上角的返回"和"右上角的齿轮"各走一条分支，看起来就是
+   *      **两套算法**。那个选项已删。
+   *   2. "**快捷键在图标的左上角**，目前在正中间" —— 规格就是**左上角角标**。
    *
-   * 于是这一项只说"往哪边翻"（`auto` = 按按钮在画布哪一半推出来），
-   * 具体坐标由 `iconHintPlacement()` 从**图标矩形 + 提示尺寸 + 画布尺寸**
-   * 算出来 —— 不留任何"调出来的数字"。
+   * 所以既没有"按位置选边"，也没有"另一种摆法"可选 —— 有分支就意味着两个
+   * 按钮可能走不同的路，正是这一轮要消掉的东西。位置由
+   * `iconHintPlacement` 从**图标本地的坐标**一条算出来（见那里）。
    *
-   * ⚠️ 旧版这里是 `hintOffset: { dx, dy }`（`+34 / +22` 之类）。那是拿
-   * 手调数字去补"按钮贴在画布边上"这个真实约束，两个角落各一套算法。
-   * 已删 —— 它没有任何其它调用方。
+   * ⚠️ 更早还叫 `hintOffset: { dx, dy }`（`+34 / +22`）—— 拿手调数字硬拗
+   * 左上的落位。也已删（它没有任何其它调用方）。
    */
-  readonly hintCorner?: HintCornerMode;
   /**
    * 键盘焦点时在图标外画一圈**描边**（不填色）。
    *
@@ -120,57 +118,49 @@ export interface IconButtonOptions {
   readonly onClick: () => void;
 }
 
-/**
- * 角落提示贴到图标的**哪一个角**。
- *
- * `'auto'`（默认）= 按按钮在画布哪一半算出来：右半边的按钮（设置齿轮）
- * 往它的**左上角**贴，左半边的按钮（返回箭头）往**右上角**贴 —— 于是
- * 两边的提示都朝画布内侧展开，谁都不会伸到画布外面。
- */
-export type HintCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
-export type HintCornerMode = HintCorner | 'auto';
-
-/** 推理要看的几何：图标在画布里的矩形 + 画布尺寸。 */
+/** 落位要看的几何：图标在画布里的矩形（+ 兜底夹取用的画布尺寸）。 */
 export interface IconHintInput {
   readonly icon: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   readonly canvasW: number;
   readonly canvasH: number;
-  readonly corner: HintCornerMode;
 }
 
 /**
  * 角落提示的**落位** —— 纯函数（可在 node 里测，不碰 Pixi）。
  *
  * ==================================================================
- * 推导过程（每一步都只有一条理由，没有"调出来的数字"）
+ * 规则（一条，两个角落共用；没有"看位置"的判断、也没有模式开关）
  * ==================================================================
  *
- *   1. **先用图标的哪个角**（`resolveHintCorner`）：`'auto'` = 按按钮在
- *      画布哪一半推 —— 靠右 → 左上角、靠左 → 右上角，于是提示总朝
- *      **画布内侧**展开。齿轮在右上角 → `top-left`；箭头在左上角 →
- *      `top-right`。这一步就是"提示该在哪一侧"的**唯一**判据。
- *   2. **锚点落在图标那个角上**（`icon.x` / `icon.x + icon.w` …）——
- *      提示挂在图标上，不悬空。
- *   3. **两个方向各做一次钳位**，而且钳位是**单调内收**的：
+ * 设图标矩形为 `(ix, iy, iw, ih)`、提示尺寸 `hintW × hintH`：
  *
- *      | 方向 | 目标 | 兜底（真实约束） |
- *      |---|---|---|
- *      | 横向 | 提示外缘不越过图标那个角**再往外 `HINT_OVERLAP`**（于是它压住图标那一角，看起来是"标在图标上"）| 不许伸出画布（`画布边距`） |
- *      | 纵向 | 提示的上缘贴图标的上缘（下半同理取底缘）| 不许伸出画布 |
+ * ```
+ * 提示的【左上角】 = (ix, iy + OVERLAP)
+ * ```
  *
- *      ⚠️ 兜底**只会把提示往画布内侧推**，不会翻到另一侧 —— 所以"贴自己
- *      那一侧"这条性质在极端位置（按钮贴着画布边）下也成立。
+ * 也就是**提示的左缘与图标的左缘对齐**、上缘比图标上缘低 `OVERLAP`
+ * —— 提示因此压住图标的**左上角**，读起来是一个**角标**。
+ * 锚点是提示的左上角（`anchorX/Y = 0`），提示**往右下方**长。
  *
- *        - 左半边的箭头 `(8,8)` 实测：横向被推到 `x = 15`（再往左就伸出
- *          画布），纵向 `y = 18`；`Esc` 的包围盒约 `x 15..36, y 18..27`
- *        - 右半边的齿轮 `(924,8)` 实测：横向 `x = 923`、纵向 `y = 18`；
- *          它的提示是左上角，所以包围盒往**左**展开
+ * ⚠️ **用户 2026-10-12 把"在哪"说死了**（原话）："**快捷键在图标的左上角**，
+ * 目前在**正中间**"。
  *
- *      （两处都是 `iconHintPlacement` 算出来的，不是量出来写死的 ——
- *      数字写在注释里只是为了让人能对着看。）
+ * ⚠️ 旧版把锚点放在提示的**右下角**、且右缘对齐到 `ix + OVERLAP` ——
+ * 那让提示以"图标左缘"为中心横跨，看起来就**在正中间**（用户报的正是
+ * 这个）。现在左缘对齐 `ix`。
  *
- * 返回的 `anchorX` / `anchorY` 是 Pixi 文本的锚点：提示从它的外缘/边缘
- * **朝图标那一侧**展开。
+ * ⚠️ **不做越界避让**（没有夹取、没有第二套逻辑）—— 用户 2026-10-12 明确
+ * 否掉了（"别再加第二套避让逻辑"）。判据：画布是 letterbox 的，返回箭头在
+ * 逻辑 `x = 8`、齿轮在 `x = 924`，两处**图标的左上角都在画布内**，而这条
+ * 规则只让提示**往右下方**长：
+ *
+ * | 调用点 | 图标左上角 | 提示包围盒（`Esc` 估计宽 21） | 在 960×540 内？ |
+ * |---|---|---|---|
+ * | 返回箭头 | `(8, 8)` | `x 8..29, y 12..21` | ✅ |
+ * | 设置齿轮 | `(924, 8)` | `x 924..945, y 12..21` | ✅ |
+ *
+ * ⚠️ 所以这里**故意不写兜底**：真有调用方把图标放到会溢出的位置，那是
+ * 它自己的 bug，应当在截图/测试里**看见**，而不是被一段夹取悄悄推回来。
  */
 export function iconHintPlacement(
   input: IconHintInput,
@@ -178,53 +168,18 @@ export function iconHintPlacement(
   hintH: number,
 ): { x: number; y: number; anchorX: number; anchorY: number } {
   const { icon } = input;
-  const corner = resolveHintCorner(input);
-  const left = corner === 'top-left' || corner === 'bottom-left';
-  const top = corner === 'top-left' || corner === 'top-right';
-  const { hintCanvasGap: gap, hintOverlap: overlap } = ICON_BUTTON_DEFAULTS;
-
-  /** 纵向：贴图标的上/下缘，再保证不伸出画布。 */
-  const yWanted = top ? icon.y : icon.y + icon.h - hintH;
-  const y = clamp(yWanted, gap, input.canvasH - gap - hintH);
-
+  const { hintOverlap: overlap } = ICON_BUTTON_DEFAULTS;
   /**
-   * 横向：锚点（提示的外缘）落在图标那个角 + `HINT_OVERLAP`，表示
-   * "提示压住图标的这个角"；再保证整块提示不伸出画布。
+   * 提示的左上角 = 图标左上角 + 纵向 `OVERLAP`。
+   *
+   * ⚠️ 两个按钮都走这里 —— 没有分支看"按钮在画布哪一半"；
+   * `canvasW` / `canvasH` 仍在入参里（调用方要说明"这块提示是画在哪张
+   * 画布上的"），但**规则本身不使用它们**。
    */
-  const cornerX = left ? icon.x : icon.x + icon.w;
-  const wantedEdge = left ? cornerX + overlap : cornerX - overlap;
-  const x = left
-    ? clamp(wantedEdge, gap + hintW, input.canvasW - gap)
-    : clamp(wantedEdge, gap, input.canvasW - gap - hintW);
-
-  return { x, y, anchorX: left ? 1 : 0, anchorY: 0 };
+  void hintW;
+  void hintH;
+  return { x: icon.x, y: icon.y + overlap, anchorX: 0, anchorY: 0 };
 }
-
-/** 区间钳位（`lo > hi` 时取 `lo` —— "不伸出画布"优先于"贴住图标"）。 */
-function clamp(value: number, lo: number, hi: number): number {
-  return Math.min(Math.max(value, lo), Math.max(lo, hi));
-}
-
-/**
- * 用图标的哪个角。
- *
- * `'auto'` = 按按钮在画布哪一半推：**靠右**的按钮往左上角贴、**靠左**的
- * 往右上角贴（下半同理），于是提示总是朝画布内侧展开。齿轮在右上角 →
- * `top-left`；返回箭头在左上角 → `top-right`。**"哪一侧"是算出来的**，
- * 不是两个写死的常量。
- *
- * ⚠️ 显式给的角不再二次翻转：那是调用方的判断，而"提示伸出去"由
- * `iconHintPlacement` 的钳位兜住（钳位只允许"更往内"，不会翻到另一边）。
- */
-function resolveHintCorner(input: IconHintInput): HintCorner {
-  if (input.corner !== 'auto') return input.corner;
-  const horizontal = iconCenterX(input) < input.canvasW / 2 ? 'right' : 'left';
-  const vertical = iconCenterY(input) < input.canvasH / 2 ? 'top' : 'bottom';
-  return `${vertical}-${horizontal}` as HintCorner;
-}
-
-const iconCenterX = (i: IconHintInput): number => i.icon.x + i.icon.w / 2;
-const iconCenterY = (i: IconHintInput): number => i.icon.y + i.icon.h / 2;
 
 export interface ContentBox {
   readonly x: number;
@@ -354,18 +309,11 @@ export const ICON_BUTTON_DEFAULTS = {
    *   - `hintCanvasGap`：提示与画布边的**最小**呼吸空间。它是"别伸出
    *     画布"那条兜底的余量（提示字形自带描边，贴到 0 会看着被切）。
    *
-   * ⚠️ 这两个不是"调位置"的数字：它们不决定提示在**哪一侧**（那是
-   * `iconHintPlacement` 按按钮在画布哪一半推出来的），只决定重叠与安全区。
+   * ⚠️ 这两个不是"调位置"的数字：提示在**哪一侧**由 `iconHintPlacement`
+   * 的规则定死（图标左上角），它们只决定**压多少**与**离画布边多远**。
    */
   hintOverlap: 4,
   hintCanvasGap: 2,
-  /**
-   * 角落提示**默认**往哪边翻。
-   *
-   * 默认 `'auto'`（按按钮在画布哪一半算）—— 两个角落的调用方
-   * （`SettingsButton` / `ScreenControls`）都不必写这一项。
-   */
-  hintCorner: 'auto' as HintCornerMode,
   /**
    * 焦点环的默认几何。
    *
@@ -519,15 +467,13 @@ export class IconButton {
          * esc 应该**盖住**小部分齿轮 icon"。所以它不是"贴在旁边"，而是
          * 压住图标的一个角。
          *
-         * ⚠️ **哪一个角由 `iconHintPlacement` 推**（`'auto'` = 按按钮在
-         * 画布哪一半）：齿轮在右上角 → 提示贴它的**左上角**；返回箭头在
-         * 左上角 → 提示贴**右上角**，于是两边都朝画布内侧展开，谁都不会
-         * 被画布的边裁掉。
+         * ⚠️ **位置由 `iconHintPlacement` 一条规则推**（不按按钮在画布
+         * 哪一半、也没有任何偏移常量）：齿轮在右上角、返回箭头在左上角，
+         * 两边都是**提示压在自己图标的左上角**。
          *
          * ⚠️ 旧版这里写的是 `box.iconX + 12 + hintOffset.dx`、`box.iconY + 12
          * + hintOffset.dy`，而 `ScreenControls` 传了 `+34 / +22` 去硬拗
-         * 左上的落位（"调了三版"）。那个参数已删 —— 它存在的唯一理由就是
-         * 补"两个角落两套算法"这个不该存在的差异。
+         * 左上的落位（"调了三版"）。那个参数已删。
          *
          * ⚠️ 描边宽度 2 → **3**（需求："esc 的描边没有让它看起来足够清晰"）：
          * 3px 才让 Esc 从齿轮的浅色笔画里跳出来。那条约束现在体现在
@@ -539,7 +485,6 @@ export class IconButton {
             icon: { x: box.iconX, y: box.iconY, w: size, h: size },
             canvasW: LOGICAL.width,
             canvasH: LOGICAL.height,
-            corner: options.hintCorner ?? ICON_BUTTON_DEFAULTS.hintCorner,
           },
           cornerW,
           ICON_BUTTON_DEFAULTS.cornerSize,
@@ -548,10 +493,17 @@ export class IconButton {
         this.hint.root.y = placed.y;
         this.hint.root.anchor.x = placed.anchorX;
         this.hint.root.anchor.y = placed.anchorY;
-        /** 探针用（`hintBounds`）—— 提示真的画在哪儿只有这里知道。 */
+        /**
+         * 探针用（`hintBounds`）—— 提示真的画在哪儿只有这里知道。
+         *
+         * ⚠️ 锚点现在是提示的**左上角**（规则改成"左缘对齐图标左缘"之后），
+         * 所以包围盒的左上角就是 `placed` —— 这里只把估算宽度补上。
+         * 公式与 `iconHintPlacement` 的锚点语义**必须同步**：锚点一改，
+         * 这个盒子就会算错（截图脚本读它判断"有没有压住图标左上角"）。
+         */
         this.cornerHintBox = {
           x: placed.anchorX === 1 ? placed.x - cornerW : placed.x,
-          y: placed.y,
+          y: placed.anchorY === 1 ? placed.y - ICON_BUTTON_DEFAULTS.cornerSize : placed.y,
           w: cornerW,
           h: ICON_BUTTON_DEFAULTS.cornerSize,
         };

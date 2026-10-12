@@ -19,7 +19,7 @@ import {
   DERIVED_SKILL_IDS,
   skillsForPlayer,
 } from '../data/content';
-import { DEFAULT_PLAYER_ID } from '../data/roster';
+import { DEFAULT_PLAYER_ID, resolvePlayerId } from '../data/roster';
 import { flattenCatalog } from '../i18n/translator';
 import { zhCN } from '../i18n/locales/zh-CN';
 import { resolveOperationMode } from '../render/platform';
@@ -27,8 +27,10 @@ import {
   SettingsStore,
   browserStorage,
   loadTouchButtons,
+  migrateLegacySettings,
   parseBindings,
   savedOperationMode,
+  savedPlayerId,
   type InputMode,
 } from './settingsStore';
 import { touchButtonIdsFromBindings } from '../input/touchLayout';
@@ -73,6 +75,14 @@ export interface GameDeps {
   readonly touchButtons: readonly string[];
   /** 本机的输入方式（触屏 / 键鼠）—— 设置存储用它决定默认键位表。 */
   readonly inputMode: InputMode;
+  /**
+   * **启动时选中的角色**（存档 `raid.pick.player.v1` 校验之后）。
+   *
+   * ⚠️ 键位按角色分存，所以"读谁的键位"在**读之前**就要定下来 —— 这个值
+   * 是那个坐标的**唯一**出处（`game.ts` 的 `selection.playerId` 初值、
+   * 以及老存档迁移的目标，都读它，不再各自 `resolvePlayerId` 一遍）。
+   */
+  readonly playerId: string;
 }
 
 /**
@@ -159,7 +169,29 @@ export function createGameDeps(): GameDeps {
     globalThis.location?.search ?? '',
     savedOperationMode(storage),
   );
-  const settingsStore = new SettingsStore(storage, inputMode);
+  /**
+   * ================================================================
+   * 键位按**角色**分存（2026-10-12 用户拍板）
+   * ================================================================
+   *
+   * 用户原话："不同的人按键设置应该是分开的"。
+   *
+   * ⚠️ 顺序是**硬约束**：
+   *
+   *   1. 先知道是谁（存档里的 `raid.pick.player.v1`，校验后）
+   *   2. 再把**老存档**（不按角色分的那一份）迁给他，并**消费掉**老 key
+   *   3. 最后才按正常路径读他的键位
+   *
+   * ⚠️ 第 2 步必须在第 3 步之前：否则第一次加载读到的还是"没有存档"，
+   * 老玩家的键位会**看起来丢了**。
+   *
+   * ⚠️ 迁移**只在这里发生一次**（`createGameDeps` 是启动路径）。运行期
+   * 换角色走 `app/playerKeys.switchPlayerProfile`，它**不碰**老 key
+   * ——这正是"迁移只做一次"的含义。
+   */
+  const playerId = resolvePlayerId(savedPlayerId(storage));
+  migrateLegacySettings(storage, playerId);
+  const settingsStore = new SettingsStore(storage, inputMode, playerId);
   /**
    * ⚠️ 存档里记的选择与本次解析出来的值**可能不同**（`?touch=` 覆盖了它）。
    * 但**不在这里写回**：覆盖是"这一次会话"的事，不该悄悄改掉玩家的偏好
@@ -209,5 +241,6 @@ export function createGameDeps(): GameDeps {
     bindings,
     touchButtons: touchLoad.skillIds,
     inputMode,
+    playerId,
   };
 }

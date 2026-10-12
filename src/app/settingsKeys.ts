@@ -27,6 +27,8 @@
  * 按键是给弹窗的"，否则改键那一次按键会同时被两边处理（技能真的放出去）。
  */
 
+import { normalizeKey } from '../input/keyboard';
+
 /** 接线需要的依赖。 */
 export interface SettingsKeyTargets {
   readonly settings: { handleKey(key: string): boolean };
@@ -107,7 +109,17 @@ export function wireSettingsKeys(t: SettingsKeyTargets): SettingsKeyHandle {
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
-    const key = event.key.toLowerCase();
+    /**
+     * ⚠️ 这里也走 `input/keyboard.normalizeKey` —— **全用 `event.key`**，
+     * 不读 `keyCode` / `code`（用户 2026-10-12 的口径："用 key 不是
+     * keycode 也不是 code"）。
+     *
+     * 原先这里自己写 `event.key.toLowerCase()`，与输入层那份归一化是
+     * **两份**：`Shift+1` 在本文件得到 `'!'`、在输入层得到 `'1'` ——
+     * "设置里按下的键"和"真正绑上去的键"于是会不一致。
+     * 归一化只该有一处。
+     */
+    const key = normalizeKey(event);
 
     /** 弹窗打开：整块交给它，并标记"这次按键归设置"。 */
     if (t.settingsOpen()) {

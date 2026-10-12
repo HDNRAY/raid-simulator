@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   SettingsStore,
   loadTouchButtons,
+  migrateLegacySettings,
   parseBindings,
   parseTouchButtons,
   parseUiScale,
+  savedPlayerId,
   serializeBindings,
   serializeTouchButtons,
   type StorageLike,
@@ -14,6 +16,15 @@ import { touchButtonIdsFromBindings } from '../../src/input/touchLayout';
 
 const VALID = new Set(['attack', 'blast', 'focus', 'break', 'dodge', 'guard', 'flash', 'jie']);
 
+/**
+ * 测试用的两个**真实**角色 id（`data/roster` 里的那两个）。
+ *
+ * ⚠️ 用真 id 而不是 `'a' / 'b'`：键名里带的就是它，而"key 长什么样"
+ * 正是这一轮要钉住的东西（`raid.bindings.keyboard.player.v1`）。
+ */
+const PLAYER = 'player';
+const OTHER = 'kaili';
+
 /** 内存版存储（也用来断言"写了什么"）。 */
 function memStorage(initial: Record<string, string> = {}): StorageLike & { data: Record<string, string> } {
   const data = { ...initial };
@@ -22,6 +33,13 @@ function memStorage(initial: Record<string, string> = {}): StorageLike & { data:
     getItem: (k) => (k in data ? (data[k] ?? null) : null),
     setItem: (k, v) => {
       data[k] = v;
+    },
+    /**
+     * ⚠️ 迁移要**消费**老 key（迁移只做一次）。有这个就用它；没有的话
+     * 本模块退化成写空串 —— 那条路也有一条专门的测试（见文件末尾）。
+     */
+    removeItem: (k) => {
+      delete data[k];
     },
   };
 }
@@ -244,26 +262,26 @@ describe('触屏按钮集合：老存档迁移一次（用户要求）', () => {
 describe('触屏按钮集合：存取器（第三个 key）', () => {
   it('与键位表是**两个 key**，互不覆盖', () => {
     const st = memStorage();
-    const store = new SettingsStore(st, 'keyboard');
+    const store = new SettingsStore(st, 'keyboard', PLAYER);
     store.saveBindings([{ key: 'z', skillId: 'attack' }]);
     store.saveTouchButtons(['attack', 'guard']);
 
-    expect(st.data['raid.bindings.keyboard.v1']).toContain('"z"');
-    expect(st.data['raid.touchButtons.v1']).toBe('["attack","guard"]');
+    expect(st.data['raid.bindings.keyboard.player.v1']).toContain('"z"');
+    expect(st.data['raid.touchButtons.player.v1']).toBe('["attack","guard"]');
     /** 触屏按钮**不按设备分份**：换一种形态读到的还是同一份。 */
-    expect(new SettingsStore(st, 'touch').touchButtonsRaw).toBe('["attack","guard"]');
+    expect(new SettingsStore(st, 'touch', PLAYER).touchButtonsRaw).toBe('["attack","guard"]');
   });
 
   it('存储不可用 / setItem 抛时不炸', () => {
-    expect(new SettingsStore(undefined, 'touch').touchButtonsRaw).toBeNull();
-    expect(() => new SettingsStore(undefined, 'touch').saveTouchButtons(['a'])).not.toThrow();
+    expect(new SettingsStore(undefined, 'touch', PLAYER).touchButtonsRaw).toBeNull();
+    expect(() => new SettingsStore(undefined, 'touch', PLAYER).saveTouchButtons(['a'])).not.toThrow();
     const throwing: StorageLike = {
       getItem: () => null,
       setItem: () => {
         throw new Error('QuotaExceeded');
       },
     };
-    expect(() => new SettingsStore(throwing, 'touch').saveTouchButtons(['a'])).not.toThrow();
+    expect(() => new SettingsStore(throwing, 'touch', PLAYER).saveTouchButtons(['a'])).not.toThrow();
   });
 });
 
@@ -290,26 +308,26 @@ describe('两套存储按设备分开（需求："分2个key"）', () => {
      * 两套配置，调触屏不能把键盘那份冲掉。
      */
     const st = memStorage();
-    const kb = new SettingsStore(st, 'keyboard');
-    const touch = new SettingsStore(st, 'touch');
+    const kb = new SettingsStore(st, 'keyboard', PLAYER);
+    const touch = new SettingsStore(st, 'touch', PLAYER);
     kb.saveBindings(bindings('z', 'attack'));
     touch.saveBindings(bindings('x', 'attack'));
 
     expect(kb.bindings).toContain('"z"');
     expect(touch.bindings).toContain('"x"');
     // 两份是不同的键
-    expect(st.data['raid.bindings.keyboard.v1']).not.toBe(st.data['raid.bindings.touch.v1']);
+    expect(st.data['raid.bindings.keyboard.player.v1']).not.toBe(st.data['raid.bindings.touch.player.v1']);
   });
 
   it('读写走各自的键', () => {
-    const st = memStorage({ 'raid.bindings.touch.v1': serializeBindings(bindings('t', 'guard')) });
-    expect(new SettingsStore(st, 'touch').bindings).toContain('"t"');
+    const st = memStorage({ 'raid.bindings.touch.player.v1': serializeBindings(bindings('t', 'guard')) });
+    expect(new SettingsStore(st, 'touch', PLAYER).bindings).toContain('"t"');
     /** ⚠️ 触屏那份不该影响键盘那份 */
-    expect(new SettingsStore(st, 'keyboard').bindings).toBeNull();
+    expect(new SettingsStore(st, 'keyboard', PLAYER).bindings).toBeNull();
   });
 
   it('存储不可用（隐私模式）时不炸', () => {
-    const store = new SettingsStore(undefined, 'keyboard');
+    const store = new SettingsStore(undefined, 'keyboard', PLAYER);
     expect(store.bindings).toBeNull();
     expect(() => store.saveBindings(bindings('q', 'attack'))).not.toThrow();
     expect(store.uiScaleRaw).toBeNull();
@@ -322,7 +340,7 @@ describe('两套存储按设备分开（需求："分2个key"）', () => {
         throw new Error('QuotaExceeded');
       },
     };
-    const store = new SettingsStore(throwing, 'touch');
+    const store = new SettingsStore(throwing, 'touch', PLAYER);
     expect(() => store.saveBindings(bindings('q', 'attack'))).not.toThrow();
     expect(() => store.saveUiScale(1.2)).not.toThrow();
   });
@@ -331,14 +349,14 @@ describe('两套存储按设备分开（需求："分2个key"）', () => {
 describe('出战选择（备战界面记下、进战斗时读）', () => {
   it('存了能读回来', () => {
     const st = memStorage();
-    const store = new SettingsStore(st, 'keyboard');
+    const store = new SettingsStore(st, 'keyboard', PLAYER);
     store.savePick('player', 'meiichiro');
     expect(store.playerIdRaw).toBe('player');
     expect(store.bossIdRaw).toBe('meiichiro');
   });
 
   it('没存过 → null', () => {
-    const store = new SettingsStore(memStorage(), 'touch');
+    const store = new SettingsStore(memStorage(), 'touch', PLAYER);
     expect(store.playerIdRaw).toBeNull();
     expect(store.bossIdRaw).toBeNull();
   });
@@ -349,13 +367,176 @@ describe('出战选择（备战界面记下、进战斗时读）', () => {
      * 与设备无关 —— 分成两份只会让触屏每次都要重选。
      */
     const st = memStorage();
-    new SettingsStore(st, 'keyboard').savePick('player', 'meiichiro');
-    expect(new SettingsStore(st, 'touch').playerIdRaw).toBe('player');
+    new SettingsStore(st, 'keyboard', PLAYER).savePick('player', 'meiichiro');
+    expect(new SettingsStore(st, 'touch', PLAYER).playerIdRaw).toBe('player');
   });
 
   it('存储不可用时不炸', () => {
-    const store = new SettingsStore(undefined, 'keyboard');
+    const store = new SettingsStore(undefined, 'keyboard', PLAYER);
     expect(() => store.savePick('player', 'meiichiro')).not.toThrow();
     expect(store.playerIdRaw).toBeNull();
+  });
+});
+
+/**
+ * ==================================================================
+ * ① 键位按**角色**分存（用户 2026-10-12："不同的人按键设置应该是分开的"）
+ * ==================================================================
+ *
+ * 三份键**都**按角色分（用户说的是"按键设置"，而触屏那套也是按键设置）：
+ *
+ *   `raid.bindings.keyboard.<playerId>.v1`
+ *   `raid.bindings.touch.<playerId>.v1`
+ *   `raid.touchButtons.<playerId>.v1`
+ */
+describe('键位按角色分存', () => {
+  const bindings = (key: string, skillId: string) => [{ key, skillId }];
+
+  it('【关键】存储形状：key 名里带角色 id', () => {
+    const st = memStorage();
+    const store = new SettingsStore(st, 'keyboard', PLAYER);
+    store.saveBindings(bindings('z', 'attack'));
+    store.saveTouchButtons(['attack', 'guard']);
+    expect(st.data['raid.bindings.keyboard.player.v1']).toContain('"z"');
+    expect(st.data['raid.touchButtons.player.v1']).toBe('["attack","guard"]');
+  });
+
+  it('【关键】两个角色互不覆盖 —— 给一个人改键，另一个人还是默认', () => {
+    /**
+     * 这就是用户要的语义（实测那条路也走了一遍）：
+     * 给林晚风改一个键 → 切到凯丽 → 她是**默认**的 → 切回去改动还在。
+     */
+    const st = memStorage();
+    const lin = new SettingsStore(st, 'keyboard', PLAYER);
+    lin.saveBindings(bindings('z', 'attack'));
+
+    const kai = new SettingsStore(st, 'keyboard', OTHER);
+    /** 凯丽没有存档 → 调用方拿到 `null` → 走 `DEFAULT_BINDINGS`。 */
+    expect(kai.bindings).toBeNull();
+    kai.saveBindings(bindings('x', 'attack'));
+
+    expect(lin.bindings).toContain('"z"');
+    expect(kai.bindings).toContain('"x"');
+  });
+
+  it('触屏键位槽位**也按角色分**', () => {
+    const st = memStorage();
+    new SettingsStore(st, 'touch', PLAYER).saveTouchButtons(['attack', 'guard']);
+    const kai = new SettingsStore(st, 'touch', OTHER);
+    expect(kai.touchButtonsRaw).toBeNull();
+    kai.saveTouchButtons(['flash']);
+    /** 林晚风那份没被凯丽动过。 */
+    expect(new SettingsStore(st, 'touch', PLAYER).touchButtonsRaw).toBe('["attack","guard"]');
+    expect(kai.touchButtonsRaw).toBe('["flash"]');
+  });
+
+  it('`setPlayer` 换的是**以后**读写的那一份（运行期坐标）', () => {
+    const st = memStorage();
+    const store = new SettingsStore(st, 'keyboard', PLAYER);
+    store.saveBindings(bindings('z', 'attack'));
+    store.setPlayer(OTHER);
+    expect(store.playerId).toBe(OTHER);
+    expect(store.bindings).toBeNull();
+    /** 切回去还是原来那份 —— 换坐标没有丢掉任何东西。 */
+    store.setPlayer(PLAYER);
+    expect(store.bindings).toContain('"z"');
+  });
+});
+
+/**
+ * ==================================================================
+ * ① 老存档（不按角色分的那一份）**迁移一次**
+ * ==================================================================
+ *
+ * 规则：老的那一份属于**启动时选中的那个角色**，其余角色拿默认值。
+ * 所以老 key 必须被**消费**掉 —— 留着的话第二个角色也会读到它，
+ * 表现成"凯丽的键位怎么跟我给林晚风改的一样"。
+ */
+describe('老存档迁移：给当前角色一次，然后消费掉', () => {
+  const bindings = (key: string, skillId: string) => [{ key, skillId }];
+  /** 老形状：**一份**（键名里没有角色 id）。 */
+  const LEGACY: Record<string, string> = {
+    'raid.bindings.keyboard.v1': serializeBindings(bindings('z', 'attack')),
+    'raid.bindings.touch.v1': serializeBindings(bindings('x', 'guard')),
+    'raid.touchButtons.v1': serializeTouchButtons(['guard', 'flash']),
+  };
+
+  it('【关键】三种老 key 都迁给**启动时那个角色**', () => {
+    const st = memStorage({ ...LEGACY });
+    expect(migrateLegacySettings(st, PLAYER)).toBe(true);
+    expect(st.data['raid.bindings.keyboard.player.v1']).toBe(LEGACY['raid.bindings.keyboard.v1']);
+    expect(st.data['raid.bindings.touch.player.v1']).toBe(LEGACY['raid.bindings.touch.v1']);
+    expect(st.data['raid.touchButtons.player.v1']).toBe(LEGACY['raid.touchButtons.v1']);
+  });
+
+  it('【关键】老 key 被消费 → **其余角色是默认值**（不是把老那份撒给所有人）', () => {
+    const st = memStorage({ ...LEGACY });
+    migrateLegacySettings(st, PLAYER);
+
+    expect(st.data['raid.bindings.keyboard.v1']).toBeUndefined();
+    expect(st.data['raid.bindings.touch.v1']).toBeUndefined();
+    expect(st.data['raid.touchButtons.v1']).toBeUndefined();
+
+    /** 凯丽：新 key 没有 → 默认值。 */
+    expect(new SettingsStore(st, 'keyboard', OTHER).bindings).toBeNull();
+    expect(new SettingsStore(st, 'touch', OTHER).touchButtonsRaw).toBeNull();
+
+    /** 再迁一次是空操作（老 key 已经不在了）= "迁移只做一次"。 */
+    expect(migrateLegacySettings(st, PLAYER)).toBe(false);
+  });
+
+  it('没有 `removeItem` 也能消费（退化成写空串，本模块同样认它）', () => {
+    /**
+     * ⚠️ `StorageLike.removeItem` 是**可选**的（测试里的假存储、某些受限
+     * 环境未必有）。没有它时必须仍然**消费**：写 `''`（本模块一律把
+     * 空串当"没有存档"）。否则"其余角色给默认值"这条会在这里破功。
+     */
+    const st = memStorage({ ...LEGACY });
+    const noRemove: StorageLike = { getItem: st.getItem, setItem: st.setItem };
+    expect(noRemove.removeItem).toBeUndefined();
+
+    expect(migrateLegacySettings(noRemove, PLAYER)).toBe(true);
+    expect(noRemove.getItem('raid.bindings.keyboard.v1')).toBe('');
+    expect(new SettingsStore(noRemove, 'keyboard', OTHER).bindings).toBeNull();
+    /** 凯丽第一次加载**不会**再迁一次（老 key 是 `''`，不是有值）。 */
+    expect(migrateLegacySettings(noRemove, OTHER)).toBe(false);
+  });
+
+  it('没有老存档 → 什么都不做（新玩家照旧走默认值）', () => {
+    const st = memStorage();
+    expect(migrateLegacySettings(st, PLAYER)).toBe(false);
+    expect(Object.keys(st.data)).toEqual([]);
+  });
+
+  it('新 key 已经有值 → **不覆盖**（迁移不该盖掉更新的东西），但老 key 照样消费', () => {
+    const st = memStorage({
+      'raid.bindings.keyboard.v1': serializeBindings(bindings('z', 'attack')),
+      'raid.bindings.keyboard.player.v1': serializeBindings(bindings('n', 'attack')),
+    });
+    migrateLegacySettings(st, PLAYER);
+    expect(st.data['raid.bindings.keyboard.player.v1']).toContain('"n"');
+    expect(st.data['raid.bindings.keyboard.v1']).toBeUndefined();
+  });
+
+  it('坏数据照既有纪律处理：迁移只搬**原始字符串**，校验仍归解析器', () => {
+    /**
+     * ⚠️ 迁移**不做校验**（它不懂键位表）。坏 JSON 搬过去之后由
+     * `parseBindings` 按纪律回落到默认 —— 这样"校验规则"永远只有一处。
+     */
+    const st = memStorage({ 'raid.bindings.keyboard.v1': '{ 半截' });
+    migrateLegacySettings(st, PLAYER);
+    const raw = st.data['raid.bindings.keyboard.player.v1'] ?? null;
+    expect(raw).toBe('{ 半截');
+    expect(parseBindings(raw, VALID)).toEqual(DEFAULT_BINDINGS);
+  });
+
+  it('存储不可用时不炸', () => {
+    expect(migrateLegacySettings(undefined, PLAYER)).toBe(false);
+  });
+
+  it('`savedPlayerId` 读的是存档里那个人（键名只有一处）', () => {
+    expect(savedPlayerId(memStorage({ 'raid.pick.player.v1': 'kaili' }))).toBe('kaili');
+    expect(savedPlayerId(memStorage())).toBeNull();
+    expect(savedPlayerId(undefined)).toBeNull();
   });
 });

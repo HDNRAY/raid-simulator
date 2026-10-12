@@ -9,37 +9,68 @@
  * "分2个key哈 方便我用电脑测试"。
  *
  * ==================================================================
- * ⚠️ 为什么是**两个存储键**（按设备分开）
+ * ⚠️ 存储形状：**每个角色各一份**（2026-10-12 用户拍板）
  * ==================================================================
  *
- * 运行期键位表**仍然是一张**，但**存储分两份**：
+ * 用户原话："**不同的人按键设置应该是分开的**"。
  *
- *   `raid.bindings.keyboard.v1`  桌面
- *   `raid.bindings.touch.v1`     触屏
+ *   `raid.bindings.keyboard.<playerId>.v1`  桌面的键位表（键 → 技能）
+ *   `raid.bindings.touch.<playerId>.v1`     触屏的键位表
+ *   `raid.touchButtons.<playerId>.v1`       触屏**键位槽位**（技能 id 数组）
  *
- * 理由（用户要求）：同一台电脑上可以同时验证两套配置 —— 切到触屏模式读
- * 触屏那份、用键鼠读键盘那份，互不覆盖。否则调触屏时把键盘的设置冲掉，
- * 来回测很烦。
+ * 三条键**都按角色分** —— 用户说的是"按键设置"，而触屏那套也是按键设置，
+ * 只分键盘那一份会让语义一半按角色、一半按全局。
+ *
+ * ⚠️ **切角色 = 换一整套键位**。这是本需求的**直接含义**：林晚风绑的键
+ * 不会跟到凯丽身上。运行期的唯一写入点在 `app/playerKeys.ts`
+ * （照 `app/operationMode.ts` 的样子：换一次角色要改哪几件事，一处说完）。
+ *
+ * ==================================================================
+ * ⚠️ 为什么还要按**设备**分（键盘 / 触屏各一份）
+ * ==================================================================
+ *
+ * 需求："分2个key哈 方便我用电脑测试"。同一台电脑上可以同时验证两套配置
+ * —— 切到触屏模式读触屏那份、用键鼠读键盘那份，互不覆盖。否则调触屏时
+ * 把键盘的设置冲掉，来回测很烦。
  *
  * ⚠️ 代价要清楚：同一个浏览器里**两端不再自动同步**（在桌面改的键位不会
  * 出现在触屏模式里）。这是有意的 —— 它换来的是"可以分别验证"。
  *
+ * ⚠️ 触屏**键位槽位**（`raid.touchButtons.*`）也按角色分，但**不按设备分**
+ * ——它本来就是"触屏那一套配置"，在电脑上配好、手机上打开就该在。
+ *
  * ==================================================================
- * ⚠️ 触屏按钮集合是**第三个键**，而且与"键位表"是两回事（2026-10-12）
+ * ⚠️ 触屏键位槽位与"键位表"是**两回事**（2026-10-12）
  * ==================================================================
  *
  * 用户原话："触屏和键盘**当然是 2 套**，连 localStorage 都是分 2 个 key
  * 存的，只是**可选技能是一样的**。"
  *
- *   `raid.bindings.*.v1`      键盘绑定表（键 → 技能）
- *   `raid.touchButtons.v1`    **触屏按钮集合**（技能 id 数组，顺序即槽位）
- *
  * ⚠️ 这两份**互不派生**：触屏按钮不再是"有键的技能"（那会让没绑键的
  * 技能在触屏上永远上不了场，而触屏又进不去改键）。可选技能同一个池，
  * 选中子集各存各的。
  *
- * ⚠️ 触屏按钮**不按设备分两份**：它本来就是"触屏那一套配置"，
- * 在电脑上配好、手机上打开就该在（键位表分两份是另一条理由，见上）。
+ * ==================================================================
+ * ⚠️ 老存档（不按角色分的那一版）**迁移一次**
+ * ==================================================================
+ *
+ * 老形状是**一份**（`raid.bindings.keyboard.v1` / `raid.bindings.touch.v1`
+ * / `raid.touchButtons.v1`）。启动时把它**复制给当前选中的那个角色**，
+ * 并**把老 key 消费掉**：
+ *
+ *   ```
+ *   老 key 有一份 + 当前角色 = 凯丽   → 凯丽拿到它，老 key 被消费
+ *   其余角色                          → 默认值（不是把老那份撒给所有人）
+ *   ```
+ *
+ * ⚠️ **必须消费**（删除 / 置空）：只复制不消费的话，第二个角色第一次加载
+ * 时也会读到那份老存档 —— 于是"我给凯丽改过"变成**假象**，正是用户
+ * 明确否掉的那种结果（"其余角色给默认值"）。
+ *
+ * ⚠️ 迁移**只做一次**，做完之后运行期**再也不读**老 key
+ * （`migrateLegacySettings` 是唯一读它们的地方，而且只从 `createGameDeps`
+ * 调一次）。坏数据照既有纪律逐条丢弃 —— 迁移只搬**原始字符串**，
+ * 真正的校验仍然走 `parseBindings` / `parseTouchButtons`。
  *
  * ==================================================================
  * ⚠️ `localStorage` 的内容是**未经验证的输入**
@@ -68,8 +99,9 @@ import type { OperationMode } from '../render/platform';
  * ⚠️ 带**版本后缀**：以后结构变了就换 `v2`，老键自然作废 ——
  * 比在解析时猜"这是哪一版"可靠得多。
  *
- * 键的**归属**：`BINDING_KEYS` 是"每种形态各一份**配置**"，
- * `KEY_OPERATION_MODE` 是"用哪种形态"本身 —— 后者是唯一 flag 的存档。
+ * ⚠️ **键名只有这里一处拼**（`bindingKey` / `touchButtonsKey`）。别处
+ * 不许自己拼 `raid.bindings.…` —— 那正是"存储形状改了、有一处没跟着改"
+ * 的来源，而它的表现是"改键没存上"这种最难查的一类 bug。
  */
 /**
  * 设备形态 —— 决定读写哪一份键位。
@@ -80,10 +112,38 @@ import type { OperationMode } from '../render/platform';
  */
 export type InputMode = OperationMode;
 
-const BINDING_KEYS: Readonly<Record<InputMode, string>> = {
-  keyboard: 'raid.bindings.keyboard.v1',
-  touch: 'raid.bindings.touch.v1',
+/** 存储形状的版本号（进键名，见 `bindingKey`）。 */
+const KEY_VERSION = 'v1';
+
+/**
+ * 某个角色、某种形态的**键位表**键名。
+ *
+ * 例：`raid.bindings.keyboard.kaili.v1`。
+ */
+function bindingKey(mode: InputMode, playerId: string): string {
+  return `raid.bindings.${mode}.${playerId}.${KEY_VERSION}`;
+}
+
+/**
+ * 某个角色的**触屏键位槽位**键名。
+ *
+ * 例：`raid.touchButtons.kaili.v1`。
+ */
+function touchButtonsKey(playerId: string): string {
+  return `raid.touchButtons.${playerId}.${KEY_VERSION}`;
+}
+
+/**
+ * ⚠️ **老存档**（按角色分之前的那一版）—— 只在 `migrateLegacySettings`
+ * 那一次读，读完就消费掉。**别处不许读它们**（读了就会把"老配置"重新
+ * 灌给别的角色，见文件头那段）。
+ */
+const LEGACY_BINDING_KEYS: Readonly<Record<InputMode, string>> = {
+  keyboard: `raid.bindings.keyboard.${KEY_VERSION}`,
+  touch: `raid.bindings.touch.${KEY_VERSION}`,
 };
+const LEGACY_TOUCH_BUTTONS_KEY = `raid.touchButtons.${KEY_VERSION}`;
+
 const KEY_UI_SCALE = 'raid.uiScale.v1';
 /**
  * **操作方式**（键盘 / 触屏）—— 用户自己在「通用」页切的，刷新后还记得。
@@ -92,13 +152,6 @@ const KEY_UI_SCALE = 'raid.uiScale.v1';
  * `render/platform.resolveOperationMode`）。
  */
 const KEY_OPERATION_MODE = 'raid.operationMode.v1';
-/**
- * **触屏按钮集合**（技能 id 数组，顺序即双弧上的槽位）。
- *
- * ⚠️ 与键位表分开、且**不按设备分**：它就是"触屏那一套"配置本身。
- * 见文件头那段说明。
- */
-const KEY_TOUCH_BUTTONS = 'raid.touchButtons.v1';
 /** 上次选的人物 / 对手（备战界面用）。 */
 const KEY_PLAYER = 'raid.pick.player.v1';
 const KEY_BOSS = 'raid.pick.boss.v1';
@@ -107,6 +160,37 @@ const KEY_BOSS = 'raid.pick.boss.v1';
 export interface StorageLike {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  /**
+   * 删掉一个键。
+   *
+   * ⚠️ 迁移**消费**老 key 用（见 `migrateLegacySettings`）。写成**可选**：
+   * 测试里的假存储、以及某些受限环境未必有它 —— 没有就退化成写空串，
+   * 那也是"消费"（本模块一律把 `''` 当"没有存档"）。
+   */
+  removeItem?(key: string): void;
+}
+
+/**
+ * 读一个键的原始字符串。
+ *
+ * ⚠️ `try` 收在**这一处**（`getItem` 在隐私模式 / 存储被禁用时会抛）。
+ * 每个 getter 各写一遍 try 就是同一件事的第二份表达。
+ */
+function readRaw(storage: StorageLike | undefined, key: string): string | null {
+  try {
+    return storage?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** 写一个键（`setItem` 在配额满时抛 —— 那不该让游戏崩）。 */
+function writeRaw(storage: StorageLike | undefined, key: string, value: string): void {
+  try {
+    storage?.setItem(key, value);
+  } catch {
+    /* 配额满 / 隐私模式：这次没存上，不影响这一局 */
+  }
 }
 
 /**
@@ -117,12 +201,84 @@ export interface StorageLike {
  * 而键名属于本模块的知识，不该让调用方自己拼字符串。
  */
 export function savedOperationMode(storage: StorageLike | undefined): string | null {
+  return readRaw(storage, KEY_OPERATION_MODE);
+}
+
+/**
+ * 读"上次选的人物"存档 —— 同样发生在构造 `SettingsStore` **之前**。
+ *
+ * ⚠️ 启动时**必须先知道是谁**才能决定读哪一份键位（键名里带 `playerId`），
+ * 以及把老存档迁给谁。所以这个读法不能是 store 的方法。
+ * 校验（可能是被删掉的角色）仍然交给 `data/roster.resolvePlayerId`。
+ */
+export function savedPlayerId(storage: StorageLike | undefined): string | null {
+  return readRaw(storage, KEY_PLAYER);
+}
+
+/**
+ * 把老 key **消费掉**（迁移只做一次）。
+ *
+ * 能删就删；没有 `removeItem` 就写空串 —— 本模块一律把 `''` 当"没有存档"，
+ * 所以两种写法对 `parseBindings` / `parseTouchButtons` 是同一个意思。
+ */
+function consumeKey(storage: StorageLike, key: string): void {
   try {
-    return storage?.getItem(KEY_OPERATION_MODE) ?? null;
+    if (storage.removeItem !== undefined) storage.removeItem(key);
+    else storage.setItem(key, '');
   } catch {
-    return null;
+    /* 消费不掉 → 下次加载会再迁一次（迁移是幂等的：同样的输入给同样的结果） */
   }
 }
+
+/**
+ * **老存档 → 当前角色**的一次性迁移（启动时调一次）。
+ *
+ * ==================================================================
+ * 为什么是"复制给一个人 + 消费掉"而不是"复制给所有人"
+ * ==================================================================
+ *
+ * 老形状只有**一份**配置。用户的要求是"不同的人按键设置分开"，
+ * 而这一份属于**启动时选中的那个角色**（存档 `raid.pick.player.v1`）。
+ * 其余角色拿**默认值**。
+ *
+ * ⚠️ 所以老 key 必须被**消费**：留着的话第二个角色第一次加载也会读到它
+ * —— 表现成"凯丽的键位怎么跟我给林晚风改的一样"，正是要避免的假象。
+ *
+ * ⚠️ 三种键都迁（键盘键位 / 触屏键位 / 触屏槽位），**包括当前不是的那种
+ * 形态**：老存档是一次性遗产，不能等玩家切到触屏才"顺便"分给谁 ——
+ * 那时当前角色可能已经换人了。
+ *
+ * @returns 是否真的迁了东西（调用方/测试用；没有老存档时是 `false`）
+ */
+export function migrateLegacySettings(
+  storage: StorageLike | undefined,
+  playerId: string,
+): boolean {
+  if (storage === undefined) return false;
+
+  /** 老 key → 这个角色的新 key；老 key 有东西时搬过去并消费。 */
+  const move = (legacyKey: string, targetKey: string): boolean => {
+    const legacy = readRaw(storage, legacyKey);
+    if (legacy === null || legacy === '') return false;
+    /** ⚠️ 新 key 已有值就不覆盖（迁移不该盖掉更新的东西）。 */
+    const existing = readRaw(storage, targetKey);
+    if (existing !== null && existing !== '') {
+      consumeKey(storage, legacyKey);
+      return false;
+    }
+    writeRaw(storage, targetKey, legacy);
+    consumeKey(storage, legacyKey);
+    return true;
+  };
+
+  let migrated = false;
+  for (const mode of ['keyboard', 'touch'] as const) {
+    if (move(LEGACY_BINDING_KEYS[mode], bindingKey(mode, playerId))) migrated = true;
+  }
+  if (move(LEGACY_TOUCH_BUTTONS_KEY, touchButtonsKey(playerId))) migrated = true;
+  return migrated;
+}
+
 
 /**
  * 取浏览器的 `localStorage`，不可用时返回 `undefined`。
@@ -333,14 +489,26 @@ export function parseUiScale(raw: string | null, min: number, max: number): numb
 /**
  * 一个**很薄的**设置存取器。
  *
- * ⚠️ 写入包 `try`：`setItem` 在配额满时会抛，而那不该让游戏崩 ——
- * 最坏情况只是"这次改动没存上"。
+ * ⚠️ 写入包 `try`（收在 `writeRaw` 一处）：`setItem` 在配额满时会抛，
+ * 而那不该让游戏崩 —— 最坏情况只是"这次改动没存上"。
+ *
+ * ⚠️ 它同时知道**两个坐标**：当前设备形态（键盘 / 触屏）与**当前角色**
+ * ——键名由这两个一起决定（`bindingKey`）。两者都是可变的：
+ * 切操作方式的唯一写入点在 `app/operationMode.ts`、切角色的在
+ * `app/playerKeys.ts`。**别处不许自己拼 key**。
  */
 export class SettingsStore {
   constructor(
     private readonly storage: StorageLike | undefined,
     /** 当前设备形态 —— 决定读/写哪一份键位。 */
     private modeValue: InputMode,
+    /**
+     * **当前出战角色** —— 键名里带它，所以"换角色"就是"换一整套键位"。
+     *
+     * ⚠️ 构造时就必须给：启动时"读哪一份键位"取决于存档里选的是谁
+     * （`savedPlayerId` + `resolvePlayerId`），那发生在读键位**之前**。
+     */
+    private playerIdValue: string,
   ) {}
 
   /**
@@ -358,47 +526,59 @@ export class SettingsStore {
     this.modeValue = mode;
   }
 
+  /**
+   * 当前角色（**可变**）。
+   *
+   * ⚠️ 运行期**唯一**的写入点是 `app/playerKeys.switchPlayerProfile`
+   * （换角色时要同时换掉键位表与触屏槽位，那三件事必须一起发生）。
+   */
+  get playerId(): string {
+    return this.playerIdValue;
+  }
+
+  setPlayer(playerId: string): void {
+    this.playerIdValue = playerId;
+  }
+
+  /** 当前角色 + 当前形态那一份键位（原始字符串）。 */
   get bindings(): string | null {
-    try {
-      return this.storage?.getItem(BINDING_KEYS[this.mode]) ?? null;
-    } catch {
-      return null;
-    }
+    return readRaw(this.storage, bindingKey(this.modeValue, this.playerIdValue));
   }
 
   saveBindings(bindings: readonly KeyBinding[]): void {
-    try {
-      this.storage?.setItem(BINDING_KEYS[this.mode], serializeBindings(bindings));
-    } catch {
-      /* 配额满 / 隐私模式：存不上就算了，不影响这一局 */
-    }
+    writeRaw(
+      this.storage,
+      bindingKey(this.modeValue, this.playerIdValue),
+      serializeBindings(bindings),
+    );
   }
 
   /**
-   * 清空**当前设备**的键位（保留另一种形态的）。
+   * 清空**当前角色 + 当前形态**的键位（别的角色、另一种形态都不动）。
    *
-   * ⚠️ 只清自己那份：否则在触屏上点"恢复默认"会把你在电脑上配好的键盘
+   * ⚠️ 只清自己那一格：否则在触屏上点"恢复默认"会把你在电脑上配好的键盘
    * 设置也抹掉 —— 而"分开存"的全部意义就是不互相影响。
    */
   clearBindings(): void {
-    try {
-      this.storage?.setItem(BINDING_KEYS[this.mode], '');
-    } catch {
-      /* 同上 */
-    }
+    writeRaw(this.storage, bindingKey(this.modeValue, this.playerIdValue), '');
   }
 
-  /** 清掉全部已存设置（含另一种形态）。调试/自救用。 */
+  /**
+   * 清掉**当前角色**的全部已存设置 + 全局设置。调试/自救用。
+   *
+   * ⚠️ 不遍历所有角色（那要知道名单，而本模块是存储层、不认识 roster）
+   * —— 它清的是"当前这个人 + 全局那几项"。
+   */
   clearAll(): void {
-    try {
-      this.storage?.setItem(BINDING_KEYS.keyboard, '');
-      this.storage?.setItem(BINDING_KEYS.touch, '');
-      this.storage?.setItem(KEY_UI_SCALE, '');
-      this.storage?.setItem(KEY_TOUCH_BUTTONS, '');
-      this.storage?.setItem(KEY_OPERATION_MODE, '');
-    } catch {
-      /* 同上 */
+    for (const mode of ['keyboard', 'touch'] as const) {
+      writeRaw(this.storage, bindingKey(mode, this.playerIdValue), '');
+      /** 老 key 也一并清掉：不然下次启动又会把老存档迁进来。 */
+      writeRaw(this.storage, LEGACY_BINDING_KEYS[mode], '');
     }
+    writeRaw(this.storage, touchButtonsKey(this.playerIdValue), '');
+    writeRaw(this.storage, LEGACY_TOUCH_BUTTONS_KEY, '');
+    writeRaw(this.storage, KEY_UI_SCALE, '');
+    writeRaw(this.storage, KEY_OPERATION_MODE, '');
   }
 
   /**
@@ -407,76 +587,61 @@ export class SettingsStore {
    * 与 `uiScaleRaw` / `playerIdRaw` 同一条纪律）。
    */
   get operationModeRaw(): string | null {
-    return this.rawOf(KEY_OPERATION_MODE);
+    return readRaw(this.storage, KEY_OPERATION_MODE);
   }
 
   /** 记住用户选的**操作方式**（刷新后接着用这一种）。 */
   saveOperationMode(mode: InputMode): void {
-    try {
-      this.storage?.setItem(KEY_OPERATION_MODE, mode);
-    } catch {
-      /* 配额满 / 隐私模式：存不上就算了，这次会话里仍然切得动 */
-    }
+    writeRaw(this.storage, KEY_OPERATION_MODE, mode);
   }
 
   /**
-   * 触屏按钮集合的原始字符串。
+   * **当前角色**的触屏键位槽位（原始字符串）。
    *
    * ⚠️ 这里**不做解析** —— 校验走 `parseTouchButtons`（与
    * `uiScaleRaw` 交给 `parseUiScale` 同一条纪律：存取器只管存取的失败）。
    */
   get touchButtonsRaw(): string | null {
-    return this.rawOf(KEY_TOUCH_BUTTONS);
+    return readRaw(this.storage, touchButtonsKey(this.playerIdValue));
   }
 
-  /** 记住触屏按钮集合（顺序即槽位）。 */
+  /** 记住当前角色的触屏键位槽位（顺序即槽位）。 */
   saveTouchButtons(skillIds: readonly string[]): void {
-    try {
-      this.storage?.setItem(KEY_TOUCH_BUTTONS, serializeTouchButtons(skillIds));
-    } catch {
-      /* 配额满 / 隐私模式：存不上就算了，不影响这一局 */
-    }
+    writeRaw(
+      this.storage,
+      touchButtonsKey(this.playerIdValue),
+      serializeTouchButtons(skillIds),
+    );
   }
 
-  /** 上次选的人物 id（原始字符串，交给 `resolvePlayerId` 校验）。 */
+  /**
+   * 上次选的人物 id（原始字符串，交给 `resolvePlayerId` 校验）。
+   *
+   * ⚠️ 与 `playerId`（**运行期**的当前角色）不是一回事：这个是**存档**里
+   * 记的那一个，启动时用它决定读谁的键位。两者在启动那一刻相同，
+   * 之后 `playerId` 会随备战界面换人而变。
+   */
   get playerIdRaw(): string | null {
-    return this.rawOf(KEY_PLAYER);
+    return readRaw(this.storage, KEY_PLAYER);
   }
 
   /** 上次选的对手 id。 */
   get bossIdRaw(): string | null {
-    return this.rawOf(KEY_BOSS);
+    return readRaw(this.storage, KEY_BOSS);
   }
 
   /** 记住这次的选择（备战界面用）。 */
   savePick(playerId: string, bossId: string): void {
-    try {
-      this.storage?.setItem(KEY_PLAYER, playerId);
-      this.storage?.setItem(KEY_BOSS, bossId);
-    } catch {
-      /* 配额满 / 隐私模式：存不上就算了 */
-    }
+    writeRaw(this.storage, KEY_PLAYER, playerId);
+    writeRaw(this.storage, KEY_BOSS, bossId);
   }
 
   /** 原始字符串 —— 交给 `parseUiScale` 校验（不要在存取器里做数值解析）。 */
   get uiScaleRaw(): string | null {
-    return this.rawOf(KEY_UI_SCALE);
-  }
-
-  /** 读一个原始字符串（把 `try` 收在一处，避免每个 getter 各写一遍）。 */
-  private rawOf(key: string): string | null {
-    try {
-      return this.storage?.getItem(key) ?? null;
-    } catch {
-      return null;
-    }
+    return readRaw(this.storage, KEY_UI_SCALE);
   }
 
   saveUiScale(value: number): void {
-    try {
-      this.storage?.setItem(KEY_UI_SCALE, String(value));
-    } catch {
-      /* 同上 */
-    }
+    writeRaw(this.storage, KEY_UI_SCALE, String(value));
   }
 }

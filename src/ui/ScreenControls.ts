@@ -23,14 +23,15 @@
  * ==================================================================
  *
  * 提示里那三个字母 `Esc` 是**键位**、不是文案（AGENTS.md §3b）。
- * 所以它从 `phaseLogic.ESCAPE_KEY` 取，由本组件拼出来；触屏不显示
- * （`IconButton.setShowShortcut`，与设置齿轮同一条路）。
+ * 它的显示名从 `ui/settings/keyNames` 的 `KEY_EDIT_KEYS.cancel` 取 ——
+ * 与设置页第二行提示**同一份**映射（见 `ESC_SHORTCUT` 的说明）；
+ * 触屏不显示（`IconButton.setShowShortcut`，与设置齿轮同一条路）。
  */
 
 import type { Container } from 'pixi.js';
 import { IconButton } from './IconButton';
 import { PALETTE } from '../render/theme';
-import { ESCAPE_KEY } from '../app/phaseLogic';
+import { KEY_EDIT_KEYS } from './settings/keyNames';
 import type { PixiCtor } from './primitives';
 
 export interface ScreenControlsOptions {
@@ -58,13 +59,28 @@ const ARROW_SIZE = 22;
 const MARGIN = 8;
 
 /**
- * 提示文字：`Esc` 的**大写写法**。
+ * 提示文字：`Esc`。
  *
- * ⚠️ 从 `ESCAPE_KEY`（`'escape'`）拼出来，而不是再写一遍字面量：
- * 键位只有一处定义，改键时不会出现"提示还写着旧键"
- * （这正是 AGENTS.md §3b 要防的那类漂移）。
+ * ==================================================================
+ * ⚠️ 用全仓**那一份**键名显示映射，不许自己拼
+ * ==================================================================
+ *
+ * 旧版这里是 `ESCAPE_KEY.charAt(0).toUpperCase() + ...` —— 拼出来是
+ * **`Escape`**，而全游戏其它地方（设置页那句"方向键选择，Enter 改键，
+ * **Esc** 返回"）写的是 `Esc`。同一个键两个写法，看起来就是"返回按钮
+ * 没跟设置同步"。
+ *
+ * 用户 2026-10-12 报的正是这个（"esc 看起来也没同步"）。
+ *
+ * 现在取「取消 / 返回」这个键**显示名**的唯一定义 —— 设置页第二行提示
+ * 拼的就是它（`KEY_EDIT_KEYS.cancel.label`，值来自
+ * `input/keyboard.reservedKeyLabel('escape')`）。它属于**键位表**而不是
+ * 文案（AGENTS.md §3b：键名不进 i18n），所以改键时显示名跟着改。
+ *
+ * ⚠️ `ESCAPE_KEY`（`app/phaseLogic`）仍然是**行为**那一侧的真相
+ * （按哪个键算返回）；两者各司其职：那边是 keycode，这边是显示名。
  */
-const ESC_SHORTCUT = ESCAPE_KEY.charAt(0).toUpperCase() + ESCAPE_KEY.slice(1);
+const ESC_SHORTCUT = KEY_EDIT_KEYS.cancel.label;
 
 export class ScreenControls {
   readonly root: Container;
@@ -87,20 +103,19 @@ export class ScreenControls {
       color: PALETTE.textDim,
       brightColor: PALETTE.focus,
       /**
-       * 与设置齿轮**同一套视觉语言、同一个组件**（`IconButton`）：提示缩小、
-       * 带黑色描边、压住图标的一个角（`corner` 模式）。这里没有 `focusRing`
-       * —— 返回不参与键盘焦点（`F1` 那个流程只管齿轮），画一圈永远不会亮的
+       * 与设置齿轮**同一个组件、同一套视觉语言**（`IconButton`）：提示缩小、
+       * 带黑色描边、压在自己图标的**左上角**。这里没有 `focusRing` ——
+       * 返回不参与键盘焦点（`F1` 那个流程只管齿轮），画一圈永远不会亮的
        * 环只会误导。
        *
-       * ⚠️ **没有 `hintCorner`，也没有任何偏移** —— 提示贴图标的哪一个角由
-       * `IconButton` 按"按钮在画布哪一半"推出来：齿轮在右上角 → 提示贴它的
-       * 左上角；本按钮在左上角 → 提示贴**右上角**，两边都朝画布内侧展开，
-       * 谁都不会被画布边裁掉。
+       * ⚠️ **没有 `hintPlacement`，也没有任何偏移** —— 提示摆哪儿是全应用
+       * **一条规则**（`ICON_BUTTON_DEFAULTS.hintPlacement = 'overlap'` =
+       * 压在图标左上角），与按钮在画布哪个角**无关**。齿轮在右上、本按钮
+       * 在左上，两边都照它画。
        *
-       * 旧版这里写的是 `hintOffset: { dx: 34, dy: 22 }` —— 那是拿手调数字
-       * 去补"箭头贴在画布边上、提示没地方放"这个真实约束，于是两个角落各
-       * 一套算法（迟早不一致）。参数已删，见 `IconButton` 的
-       * `iconHintPlacement`。
+       * 旧版这里先写 `hintOffset: { dx: 34, dy: 22 }`（手调数字），后来又
+       * 按"按钮在画布哪一半"翻角 —— 两条都是"两个角落两套算法"，用户
+       * 2026-10-12 明确否掉（"**不用看在哪一半，全局统一风格**"）。
        */
       shortcut: ESC_SHORTCUT,
       hintSide: 'corner',
@@ -141,8 +156,9 @@ export class ScreenControls {
    * `Esc` 提示的**包围盒**（逻辑坐标；触屏隐藏时仍然算得出来）。
    *
    * ⚠️ 它**不是**给布局用的，是给验证用的：提示的落位全在
-   * `IconButton.iconHintPlacement` 里推出来，"贴右上角、且没伸出画布"
-   * 这条结论需要一个读得到的数（见 `__raidBattle.back.shortcutBounds`）。
+   * `IconButton.iconHintPlacement` 里推出来（一条全局规则），"压在自己
+   * 图标左上角、且没伸出画布"这条结论需要一个读得到的数
+   * （见 `__raidBattle.back.shortcutBounds`）。
    */
   get shortcutBounds(): { readonly x: number; readonly y: number; readonly w: number; readonly h: number } | undefined {
     return this.button.hintBounds;
