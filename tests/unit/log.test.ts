@@ -71,7 +71,17 @@ describe('LogFormatter：事件 → 条目', () => {
      * （"所有的 受到**伤害，都注明一下招式，造成 也是"）。
      * `LogPanel.resolveParams` 会把它翻掉，所以这里仍然只有 key。
      */
-    expect(entry!.params).toEqual({ amount: 12, skill: 'log.unknownSource' });
+    /**
+     * 现在是四个参数：**谁 → 用什么 → 打谁 → 多少**。
+     * ⚠️ `actor` / `target` / `skill` 三者都是 **i18n key**，数字才是值 ——
+     * 这个分工是硬约定（`LogPanel.resolveParams` 只翻字符串）。
+     */
+    expect(entry!.params).toEqual({
+      actor: 'log.unknownActor',
+      target: 'log.unknownActor',
+      skill: 'log.unknownSource',
+      amount: 12,
+    });
     // 整条里不能出现任何中文 —— 文案在 i18n 里，不在数据里
     expect(JSON.stringify(entry)).not.toMatch(/[\u4e00-\u9fff]/);
   });
@@ -85,7 +95,16 @@ describe('LogFormatter：事件 → 条目', () => {
     expect(f.all()[0]!.category).toBe('deal');
     expect(f.all()[0]!.key).toBe('log.damage');
     expect(f.all()[1]!.category).toBe('take');
-    expect(f.all()[1]!.key).toBe('log.takeDamage');
+    /**
+     * ⚠️ **两条用的是同一个 key**（`log.damage`），靠 `category` 配色区分。
+     *
+     * 原先有两个 key（`log.damage` / `log.takeDamage`），是因为文案里
+     * 没有"谁 → 谁"的信息，只能靠 key 表达方向。现在 `actor` / `target`
+     * 都在参数里了，一个模板就够：`{actor}用「{skill}」击中{target}`。
+     */
+    expect(f.all()[1]!.key).toBe('log.damage');
+    expect(f.all()[0]!.params?.target).toBeDefined();
+    expect(f.all()[1]!.params?.actor).toBeDefined();
   });
 
   it('id 单调自增（渲染层靠它判断"这是新的一条"）', () => {
@@ -147,17 +166,29 @@ describe('LogFormatter：事件 → 条目', () => {
     ]);
   });
 
-  it('闪躲记为 avoid —— 与"未命中"用不同的 key', () => {
+  it('闪避与免疫是**两个不同的 key**（语义不能反）', () => {
     const f = new LogFormatter();
     f.consume([
       { kind: 'avoided', tick: 1, sourceId: 'meiichiro', targetId: 'player', skillId: 'boss-cleave', reason: 'immune' },
       { kind: 'avoided', tick: 2, sourceId: 'meiichiro', targetId: 'player', skillId: 'boss-cleave', reason: 'dodged' },
     ]);
-    expect(f.all()[0]!.key).toBe('log.avoided');
-    expect(f.all()[1]!.key).toBe('log.missed');
+    /**
+     * ⚠️ 这里**修过一个语义反了的 bug**：旧代码是
+     * `reason === 'immune' ? 'log.avoided' : 'log.missed'` ——
+     * 免疫显示成「闪躲」、闪避显示成「未命中」，两者都错 ✗
+     * 而这条测试当时**把那个错固化下来了**（断言 immune → avoided）。
+     */
+    expect(f.all()[0]!.key, '免疫').toBe('log.immune');
+    expect(f.all()[1]!.key, '闪避').toBe('log.avoided');
   });
 
-  it('按 limit 截断最旧的（内存不会无限增长）', () => {
+
+
+
+
+
+
+  it('limit 仍然兜底（极端情况下不会无限增长）', () => {
     const f = new LogFormatter({ limit: 3 });
     for (let i = 0; i < 10; i += 1) f.consume([damage({ tick: i })]);
     expect(f.all()).toHaveLength(3);
@@ -177,7 +208,12 @@ describe('LogFormatter：事件 → 条目', () => {
 
 describe('日志文案与布局', () => {
   it('格式化层产生的每个 key 都有文案', () => {
-    const f = new LogFormatter();
+    /**
+     * ⚠️ 必须传 `notableBuffIds` —— 不传时 `buffApplied` 一条都不记，
+     * `log.buffApplied` / `log.buffExpired` 这两个 key 就**覆盖不到**，
+     * 缺文案也不会被这条抓到 ✗
+     */
+    const f = new LogFormatter({ notableBuffIds: new Set(['boss-heavy-armor']) });
     f.consume([
       damage(),
       damage({ targetId: 'player', sourceId: 'meiichiro' }),
@@ -190,6 +226,13 @@ describe('日志文案与布局', () => {
       { kind: 'skillRejected', tick: 7, sourceId: 'player', skillId: 'z', reason: 'cost' },
       { kind: 'heal', tick: 8, sourceId: 'player', targetId: 'player', amount: 5, crit: false, overheal: 0 },
       { kind: 'encounterEnd', tick: 9, result: 'victory', reason: 'hpZero' },
+      /** 新增的几类也要覆盖到 —— 否则新 key 缺文案不会被这条抓到。 */
+      { kind: 'skillUsed', tick: 10, sourceId: 'meiichiro', skillId: 'z' },
+      { kind: 'buffApplied', tick: 11, targetId: 'meiichiro', buffId: 'boss-heavy-armor', stacks: 1, sourceId: 'meiichiro' },
+      { kind: 'buffExpired', tick: 12, targetId: 'meiichiro', buffId: 'boss-heavy-armor', stacks: 0, sourceId: 'meiichiro' },
+      { kind: 'death', tick: 13, targetId: 'player' },
+      { kind: 'enrageStarted', tick: 14, bossId: 'meiichiro' },
+      { kind: 'damage', tick: 15, sourceId: 'player', targetId: 'meiichiro', amount: 3, skillId: 'z', crit: false, absorbed: 0, overkill: 0, reflect: true },
     ]);
     const keys = new Set(f.all().map((e) => e.key));
     expect(keys.size).toBeGreaterThan(8);

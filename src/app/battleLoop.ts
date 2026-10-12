@@ -129,6 +129,39 @@ export class BattleLoop {
       skillNameKeys: new Map(
         [...options.engineOptions.skills].map(([id, skill]) => [id, skill.nameKey]),
       ),
+      buffNameKeys: new Map(
+        [...options.engineOptions.buffs].map(([id, buff]) => [id, buff.nameKey]),
+      ),
+      /**
+       * ⚠️ 传**函数**而不是 Map：日志要写"**傲慢**用「碾压」击中你"，
+       * 而"这一局有谁"是运行期才知道的（构造 formatter 时引擎还没建好）。
+       * 惰性解析顺带保证重开一局换了对手也不用重建 formatter。
+       */
+      combatantNameKey: (id) =>
+        this.engine.snapshot.combatants.find((c) => c.id === id)?.nameKey,
+      /**
+       * 哪些 buff 值得写进日志（需求："boss 二阶段了，发生了什么事情"）。
+       *
+       * ⚠️ 判据是"**这个 buff 是不是一个事件**"，不是"重不重要" ——
+       * `buffApplied` 是最频的事件（每层印记都发），全记会把日志埋掉。
+       * 而"二阶段""霸体""倒地""眩晕"恰恰都是 buff，所以必须能筛出来。
+       *
+       * 用的判据与 `app/skillHints.ts` 同一套：**会锁住行动**或**是霸体**的
+       * 才算事件。这样以后新增控制类 buff 会自动进日志，不用记得回来加。
+       */
+      notableBuffIds: new Set(
+        [...options.engineOptions.buffs]
+          .filter(([, b]) => {
+            const f = b.flags;
+            if (f === undefined) return false;
+            return (
+              f.actionLock === true ||
+              (f.restrictToTags?.length ?? 0) > 0 ||
+              f.interruptImmune === true
+            );
+          })
+          .map(([id]) => id),
+      ),
     });
     this.attachInput(options.input);
   }

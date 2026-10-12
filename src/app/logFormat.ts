@@ -47,6 +47,18 @@ export type LogCategory =
   | 'system';
 
 /**
+ * 条目的**分量** —— 决定它出现在哪一层（需求："战斗中的面板不要被刷屏，
+ * 但战报要尽可能全"）。
+ *
+ * `major` = 战斗中左侧那几条实时滚动的
+ * `minor` = **只进战报**（回炁、buff 过期、非关键 buff 这类）
+ *
+ * ⚠️ 这就是"信息尽可能多"与"面板别刷屏"的调和点：
+ * **不是不记，是不往实时面板塞。**
+ */
+export type LogLevel = 'major' | 'minor';
+
+/**
  * 一条日志。
  *
  * `key` 是 i18n key，`params` 是插值参数。渲染层用
@@ -58,6 +70,8 @@ export interface LogEntry {
   /** 引擎 tick。渲染层可以据此算"多少秒前"。 */
   readonly tick: number;
   readonly category: LogCategory;
+  /** 见 `LogLevel`。 */
+  readonly level: LogLevel;
   /** 本地化 key（如 `log.damage`） */
   readonly key: string;
   readonly params?: Readonly<Record<string, string | number>>;
@@ -80,9 +94,39 @@ export interface LogFormatterOptions {
    * 这里给的是 **key**（不是文案），翻译由渲染层做（i18n 规范 I1）。
    */
   readonly skillNameKeys?: ReadonlyMap<string, string>;
+  /**
+   * 单位 id → 名称的 i18n key。
+   *
+   * ⚠️ 传**函数**而不是 Map：日志要写"**傲慢** 用「碾压」击中你"，
+   * 而"这一局有谁"是运行期才知道的（构造 formatter 时引擎可能还没建好）。
+   * 惰性解析顺带保证重开一局换了对手也不用重建 formatter。
+   */
+  readonly combatantNameKey?: (id: string) => string | undefined;
+  /**
+   * 哪些 buff 值得写进日志。
+   *
+   * ⚠️ **不传 = 一个 buff 都不记**（保持旧行为）。
+   * 为什么必须由外面筛：`buffApplied` 是**最频的事件**
+   * （每层印记、每个判定窗口都发），全记会瞬间把日志埋掉。
+   * 但"二阶段""霸体""倒地""眩晕"恰恰是 buff ——
+   * 所以筛的不是"重不重要"，而是"**这个 buff 是不是一个事件**"。
+   * 调用方按 buff 的 `flags`（`actionLock` / `restrictToTags` /
+   * `interruptImmune`）来定，与 `app/skillHints.ts` 同一套判据。
+   */
+  readonly notableBuffIds?: ReadonlySet<string>;
+  /** buff id → 名称的 i18n key（与 `notableBuffIds` 配套）。 */
+  readonly buffNameKeys?: ReadonlyMap<string, string>;
 }
 
-const DEFAULT_LIMIT = 60;
+/**
+ * 保留上限 —— 是**安全阀**，不是"只留 60 条"那种截断。
+ *
+ * ⚠️ 需求："一局结束也显示完整 log，玩家好复盘"。
+ * 原先这里是 **60**，打满 95 秒的傲慢早就不止 60 条 ——
+ * 复盘时看到的会是被砍掉开头的残卷。所以它必须**大到不会触发的程度**，
+ * 只在内存异常时才兜底。
+ */
+const DEFAULT_LIMIT = 5000;
 
 /**
  * 把引擎事件流格式化成日志条目。
@@ -101,30 +145,41 @@ export class LogFormatter {
   private readonly limit: number;
   private readonly skillNameKeys: ReadonlyMap<string, string>;
 
+  private readonly notableBuffIds: ReadonlySet<string> | undefined;
+  private readonly combatantNameKey: ((id: string) => string | undefined) | undefined;
+  private readonly buffNameKeys: ReadonlyMap<string, string>;
+
   constructor(options: LogFormatterOptions = {}) {
     this.limit = Math.max(1, options.limit ?? DEFAULT_LIMIT);
     this.skillNameKeys = options.skillNameKeys ?? new Map();
+    this.buffNameKeys = options.buffNameKeys ?? new Map();
+    this.notableBuffIds = options.notableBuffIds;
+    this.combatantNameKey = options.combatantNameKey;
+  }
+
+  /** 单位 id → 名称 key（解析不出就给一个读得通的兜底）。 */
+  private actorKey(id: string): string {
+    return this.combatantNameKey?.(id) ?? 'log.unknownActor';
+  }
+
+  /** 招式 id → 名称 key。 */
+  private skillKey(id: string): string {
+    return this.skillNameKeys.get(id) ?? 'log.unknownSource';
+  }
+
+  /** buff id → 名称 key。 */
+  private buffKey(id: string): string {
+    return this.buffNameKeys.get(id) ?? 'log.unknownBuff';
   }
 
   /**
-   * 这次伤害是哪来的（日志的 `skill` 参数）。
+   * ⚠️ 这里**曾经**有个 `damageSource()`，返回 `{ skill: 'log.reflect' }`
+   * 或招式名 —— 那是"用参数兼职表达来源"的做法。
    *
-   * - 触发器产出的反伤 → `log.reflect`（**标注"反伤"而不是招式名**，
-   *   否则玩家会以为 Boss 有个自己不知道的技能）
-   * - 技能打的 → 招式的 i18n key
-   * - 两者都不是（理论上不会有）→ 不传参数，文案回落
+   * 现在来源拆成了三个独立参数（`actor` / `target` / `skill`），
+   * 反伤也单独成一条（`log.reflect`，属性对调着读）。
+   * 所以那个函数没有存在理由了，已删。
    */
-  private damageSource(event: { readonly skillId: string; readonly reflect?: boolean }): {
-    readonly skill?: string;
-  } {
-    if (event.reflect === true) return { skill: 'log.reflect' };
-    /**
-     * ⚠️ 回落不能是 `{}`：文案里有 `{skill}`，缺参数会**原样显示
-     * `{skill}`**（`i18n.test.ts` 的"占位符参数齐全"就是守这个的）。
-     * 未知来源统一叫「未知」，至少读得通。
-     */
-    return { skill: this.skillNameKeys.get(event.skillId) ?? 'log.unknownSource' };
-  }
 
   /** 消费一批引擎事件，追加日志。 */
   consume(events: readonly EventDef[]): void {
@@ -161,37 +216,68 @@ export class LogFormatter {
    */
   private toEntry(event: EventDef): Omit<LogEntry, 'id'> | undefined {
     const tick = event.tick;
+    /**
+     * ⚠️ `params` 里的**字符串会被渲染层当成 i18n key 翻译**
+     * （见 `LogPanel.resolveParams`），数字原样插值。
+     * 所以凡是"名字"都必须传 **key**，凡是"数量"都必须传 **number** ——
+     * 传错了屏幕上就会出现 `boss.cleave.name` 或 `{amount}` 这种东西。
+     */
     switch (event.kind) {
       case 'damage': {
         if (event.amount <= 0) return undefined;
-        // 用"打谁/谁挨打"决定类别：日志读起来是一条时间线，
-        // 玩家最关心"我打出去多少"和"我挨了多少"
+        /**
+         * **反伤**单独一条：它不是"谁打谁"，而是"打出去的人自己挨了" ——
+         * 属性对调着读才通顺（"傲慢 受到 12 点反伤"）。
+         */
+        if (event.reflect === true) {
+          return {
+            tick,
+            category: 'take',
+            level: 'major',
+            key: 'log.reflect',
+            params: {
+              actor: this.actorKey(event.sourceId),
+              skill: this.skillKey(event.skillId),
+              amount: event.amount,
+            },
+          };
+        }
         const onBoss = event.targetId !== 'player';
         return {
           tick,
           category: onBoss ? 'deal' : 'take',
-          key: onBoss ? 'log.damage' : 'log.takeDamage',
-          params: { amount: event.amount, ...this.damageSource(event) },
+          level: 'major',
+          key: 'log.damage',
+          params: {
+            actor: this.actorKey(event.sourceId),
+            target: this.actorKey(event.targetId),
+            skill: this.skillKey(event.skillId),
+            amount: event.amount,
+          },
         };
       }
       case 'avoided': {
+        /**
+         * ⚠️ `reason` 是**枚举**（`'dodged' | 'immune'`），不是名字 ——
+         * 所以拼成 `log.reason.*` 再交给渲染层翻。
+         * 直接传 `'dodged'` 会被当成 key 去查，查不到就原样显示英文 ✗
+         */
+        const dodged = event.reason === 'dodged';
         return {
           tick,
           category: 'avoid',
-          key: event.reason === 'immune' ? 'log.avoided' : 'log.missed',
-          params: {},
+          level: dodged ? 'major' : 'minor',
+          key: dodged ? 'log.avoided' : 'log.immune',
+          params: {
+            actor: this.actorKey(event.targetId),
+            source: this.actorKey(event.sourceId),
+            skill: this.skillKey(event.skillId),
+          },
         };
       }
       /**
-       * ⚠️ `castStarted` **不记**（需求："log里不要开始读条"）。
-       *
-       * 它是最频繁的事件之一（Boss 与玩家每放一招都发），而信息量极低：
-       * "开始读条"本身不说明任何结果 —— 结果要么是命中（记了伤害）、
-       * 要么是被打断（记了打断）。读条**过程**已经由画面上的预警条
-       * 实时表达，日志里再记一条只是噪声。
-       *
-       * 去掉它之后日志剩下的都是**有结果的事**：伤害、闪躲、打断、
-       * 霸体、结束。这才是"战斗日志"该有的密度。
+       * ⚠️ `castStarted` **仍然不记**（需求："log里不要开始读条"，见文件头）。
+       * "开始读条"不说明任何结果，而结果那条一定会有（伤害/打断/闪避）。
        */
       case 'castStarted':
         return undefined;
@@ -199,46 +285,121 @@ export class LogFormatter {
         return {
           tick,
           category: 'interrupt',
+          level: 'major',
           key: 'log.castInterrupted',
-          params: { reason: String(event.reason) },
+          params: {
+            actor: this.actorKey(event.sourceId),
+            skill: this.skillKey(event.skillId),
+            reason: `log.reason.${event.reason ?? 'interrupted'}`,
+          },
         };
       }
       case 'interruptSuccess': {
-        return { tick, category: 'interrupt', key: 'log.interruptSuccess', params: {} };
+        return {
+          tick,
+          category: 'interrupt',
+          level: 'major',
+          key: 'log.interruptSuccess',
+          params: {
+            actor: this.actorKey(event.sourceId),
+            target: this.actorKey(event.targetId),
+            skill: this.skillKey(event.skillId),
+          },
+        };
       }
       case 'interruptImmune': {
-        return { tick, category: 'interrupt', key: 'log.interruptImmune', params: {} };
+        return {
+          tick,
+          category: 'interrupt',
+          level: 'major',
+          key: 'log.interruptImmune',
+          params: {
+            target: this.actorKey(event.targetId),
+            skill: this.skillKey(event.skillId),
+          },
+        };
       }
       /**
-       * ⚠️ `skillRejected` **完全不进日志**。
+       * ⚠️ `skillRejected` **完全不进日志**（需求："闪避 cd 的 log，这是 bug"）。
        *
-       * 需求："闪避现在还是会触发，闪避 cd 的 log，这是 bug"。
-       *
-       * 核实过程：
-       *   1. 先确认闪避的 1 秒 CD **工作正常**（实测接受于 tick 0/60/120/180）
-       *   2. 再量噪声有多大：连续按闪避 6 秒产生 **295 次 cooldown +
-       *      60 次 cost** 拒绝
-       *   3. 先试"只过滤 cooldown" —— 剩下的 cost 照样刷屏（按住键就是
-       *      每秒 10 次尝试）；再试"按技能去重" —— 被"成功时清标记"
-       *      破坏，效果不稳定
-       *
-       * 想清楚之后结论很简单：**"技能被拒"不是战斗事件，是输入反馈。**
-       * 它不属于战斗日志这条时间线，而是"我刚才那一下为什么没生效"。
-       * 而画面上的技能格已经实时表达了同一件事：
-       *   - 冷却中 → 白色遮罩 + 中心剩余秒数
-       *   - 资源不足 / 读条中 → 技能字变暗
-       * 战斗中的**状态行**也会给一条短提示。
-       *
-       * 所以日志里再写一遍是纯重复，而且必然被按键频率放大。
+       * 理由见文件头：**它**不是**战斗事件，是输入反馈** —— 连续按闪避 6 秒会产生
+       * 295 次 cooldown 拒绝，记下来必然把真正的战斗信息冲走。
+       * 画面上的技能格已经实时表达了同一件事（白遮罩 + 剩余秒数 / 字变暗）。
        */
       case 'skillRejected':
         return undefined;
+      case 'skillUsed': {
+        /**
+         * 需求："boss 的什么能力" —— 这条就是它。
+         *
+         * ⚠️ 玩家自己的出招是 `minor`：玩家当然知道自己按了什么 ✗
+         * 而 Boss 的是 `major` —— **它才是玩家需要知道的**（要应对）。
+         */
+        const boss = event.sourceId !== 'player';
+        return {
+          tick,
+          category: 'cast',
+          level: boss ? 'major' : 'minor',
+          key: 'log.skillUsed',
+          params: { actor: this.actorKey(event.sourceId), skill: this.skillKey(event.skillId) },
+        };
+      }
       case 'heal': {
         if (event.amount <= 0) return undefined;
-        return { tick, category: 'resource', key: 'log.heal', params: { amount: event.amount } };
+        return {
+          tick,
+          category: 'resource',
+          level: 'major',
+          key: 'log.heal',
+          /** ⚠️ `heal` 事件**不带 `skillId`**（回血可能来自触发器）——
+           *  所以这条没有"用什么回的"，别硬凑。 */
+          params: { actor: this.actorKey(event.targetId), amount: event.amount },
+        };
+      }
+      /**
+       * **值得记的 buff 才记**（需求："boss 二阶段了"）。
+       *
+       * ⚠️ 由调用方用 `notableBuffIds` 筛 —— 见那个选项的说明：
+       * 筛的不是"重不重要"，而是"**这个 buff 是不是一个事件**"。
+       * 不传就一个都不记（保持旧行为，也保证旧测试不受影响）。
+       */
+      case 'buffApplied':
+      case 'buffExpired': {
+        if (this.notableBuffIds?.has(event.buffId) !== true) return undefined;
+        const applied = event.kind === 'buffApplied';
+        return {
+          tick,
+          category: 'resource',
+          /**
+           * ⚠️ **上 buff 是 major，buff 结束是 minor**：
+           * "傲慢获得「霸体」"是玩家必须立刻知道的，
+           * "「霸体」结束了"晚一点知道没关系。
+           */
+          level: applied ? 'major' : 'minor',
+          key: applied ? 'log.buffApplied' : 'log.buffExpired',
+          params: { actor: this.actorKey(event.targetId), buff: this.buffKey(event.buffId) },
+        };
+      }
+      case 'death': {
+        return {
+          tick,
+          category: 'system',
+          level: 'major',
+          key: 'log.death',
+          params: { actor: this.actorKey(event.targetId) },
+        };
+      }
+      case 'enrageStarted': {
+        return {
+          tick,
+          category: 'system',
+          level: 'major',
+          key: 'log.enrage',
+          params: { actor: this.actorKey(event.bossId) },
+        };
       }
       case 'encounterEnd': {
-        return { tick, category: 'system', key: 'log.encounterEnd', params: {} };
+        return { tick, category: 'system', level: 'major', key: 'log.encounterEnd', params: {} };
       }
       default:
         return undefined;

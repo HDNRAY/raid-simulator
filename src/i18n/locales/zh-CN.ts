@@ -599,28 +599,43 @@ export const zhCN = {
   log: {
     title: '战斗日志',
     /**
-     * ⚠️ 都带 `{skill}`（招式名），并有一个"反伤"分支。
+     * ⚠️ 措辞抄的是**博德之门3 的战斗日志**（需求："描述风格你可以抄博德之门3"）：
+     * 一条 = "**谁 → 做了什么 → 对谁 → 数字 → 来源**"，而不是一串干巴巴的短语。
      *
-     * 需求："反伤的log里，要注明是反伤，所有的 受到**伤害，都注明一下
-     * 招式，造成 也是。"
-     *
-     * 不注明招式时，玩家分不清这一下是谁打的 —— 有了反伤与多来源之后
-     * 尤其明显（会以为 Boss 有个自己不知道的技能）。
+     * 三条约定，改文案时都要守：
+     *   1. 参数里的**字符串是 i18n key**（渲染层会翻），**数字是值** —— 见
+     *      `LogPanel.resolveParams`
+     *   2. 中文里**不要**在 `{...}` 两侧加空格（"击中{target}"而不是"击中 {target}"）
+     *   3. 每个分支都要有兜底 key（`unknownActor` / `unknownSource` / `unknownBuff`），
+     *      否则玩家的名字解析不出时屏幕上会出现 `{actor}` 本身
      */
-    damage: '{skill} · 造成 {amount}',
-    takeDamage: '{skill} · 受到 {amount}',
-    /** 反伤（触发器产出，不是技能打的）。 */
-    reflect: '反伤',
-    /** 找不出招式名时的兜底（不能让 `{skill}` 漏到界面上）。 */
-    unknownSource: '未知来源',
-    avoided: '闪躲',
-    missed: '未命中',
-    castInterrupted: '读条被打断（{reason}）',
-    interruptSuccess: '打断成功',
-    interruptImmune: '目标霸体，打断无效',
-    skillRejected: '技能被拒（{reason}）',
-    heal: '回复 {amount}',
+    damage: '{actor}用「{skill}」击中{target}，造成 {amount} 点伤害',
+    /** 反伤：属性对调着读（打出去的人自己挨了），所以没有 `{target}`。 */
+    reflect: '{actor}受到 {amount} 点反伤（{skill}）',
+    avoided: '{actor}闪开了{source}的「{skill}」',
+    immune: '{actor}对「{skill}」免疫',
+    castInterrupted: '{actor}的「{skill}」被打断（{reason}）',
+    interruptSuccess: '{actor}打断了{target}的「{skill}」',
+    interruptImmune: '{target}处于霸体，打断无效',
+    heal: '{actor}回复 {amount} 点生命',
+    /** Boss 出招走 major、玩家自己的走 minor（玩家当然知道自己按了什么）。 */
+    skillUsed: '{actor}使出「{skill}」',
+    buffApplied: '{actor}获得「{buff}」',
+    buffExpired: '{actor}的「{buff}」结束',
+    death: '{actor}倒下了',
+    enrage: '{actor}进入狂暴',
     encounterEnd: '战斗结束',
+    /** 找不出名字时的兜底（绝不能让占位符漏到界面上）。 */
+    unknownActor: '某人',
+    unknownSource: '未知来源',
+    unknownBuff: '某种状态',
+    /** 读条被打断的原因。⚠️ 它是**枚举**，必须包成 key 再传。 */
+    reason: {
+      interrupted: '被打断',
+      sourceLost: '施法者中断',
+      death: '施法者死亡',
+      replaced: '被覆盖',
+    },
   },
   screen: {
     pause: '暂停',
