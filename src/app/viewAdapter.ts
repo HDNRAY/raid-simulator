@@ -11,6 +11,7 @@
 
 import type { BattleEngine } from '../core/combat/battleState';
 import type { SkillDef, EventDef } from '../core/types';
+import { holdDrainPerSecond } from '../core/combat/holds';
 import { PALETTE } from '../render/theme';
 import { deriveSlots, type SlotBinding } from './derivedSlots';
 import { emptyCombatant, emptyView } from '../render/emptyView';
@@ -495,7 +496,7 @@ export class ViewAdapter {
      *
      * 现在的技能都只有一项代价；如果以后出现"同时消耗炁和缠"，
      * 这里要改成数组（格子右上角放不下两项，得换表达方式）。
-     * 按住技（「防」）的代价在 `holdDrain` 里，不是 `cost`。
+     * 按住技（「卸」）的代价在 `holdDrain` 里，不是 `cost`。
      */
     const firstCost = skill.cost[0];
     const drain = skill.holdDrain;
@@ -509,8 +510,10 @@ export class ViewAdapter {
       firstCost !== undefined && typeof firstCost.value === 'number'
         ? toSlotCost(firstCost.resource, firstCost.value)
         : drain !== undefined
-          ? // 按住技：代价是"每逻辑步扣一次" → 换算成**每秒**并标上 /s
-            toSlotCost(drain.resource, drain.perLogicTick, '/s')
+          ? // 按住技：代价按**逻辑步**扣，技能栏写的是"每秒多少"。
+            // 换算与设置页共用 `holdDrainPerSecond()` —— 曾把 `perLogicTick`
+            // 直接当成每秒，显示成 3/s 而实际 30/s（10 倍偏差）。
+            toSlotCost(drain.resource, holdDrainPerSecond(drain), '/s')
           : undefined;
 
     return {

@@ -13,7 +13,7 @@
  * ⚠️ 代价与冷却**不在这里重算**
  * ==================================================================
  *
- * 它们直接复用**视图层已经算好的那套**（`snapshot.skills`，含「防」的
+ * 它们直接复用**视图层已经算好的那套**（`snapshot.skills`，含「卸」的
  * 按住消耗换算）。在这里重算一遍的话，两处的文案迟早会不一致 ——
  * 这类"同一件事两个真相来源"的问题很难查。
  */
@@ -22,6 +22,7 @@ import type { BattleLoop } from './battleLoop';
 import type { KeyBinding } from '../input/keyboard';
 import type { KeyRow } from '../ui/settings/rows';
 import type { ContentRegistry } from '../core/content/registry';
+import { holdDrainPerSecond } from '../core/combat/holds';
 import { PLAYER_SKILL_IDS } from '../data/content';
 import { hintKeysOf } from './skillHints';
 import type { TranslateFn } from '../i18n/translator';
@@ -141,32 +142,27 @@ export function buildKeyRows(options: BuildKeyRowsOptions): readonly KeyRow[] {
           )
         : skill.holdDrain !== undefined
           ? /**
-             * ⚠️ **按住技（「防」）的代价不在 `cost` 里，而在 `holdDrain`** ——
-             * 它的 `cost: []` 是空的，所以只读 `cost` 会让「防」显示"没有代价" ✗
+             * ⚠️ **按住技（「卸」）的代价不在 `cost` 里，而在 `holdDrain`** ——
+             * 它的 `cost: []` 是空的，所以只读 `cost` 会让它显示"没有代价" ✗
              *
-             * `perLogicTick` 就是技能栏上那个 `2/s` 的 2（同一口径，
-             * 不要在这里换算成 /秒 —— 那会让设置页与技能栏对不上）。
+             * ⚠️ `holdDrain.perLogicTick` 是**每逻辑步**的代价，而设置页
+             * 写的是"每秒多少"。换算走 `holdDrainPerSecond()` —— 与技能栏
+             * 用的是**同一个函数**，所以两处不可能各写一个数。
+             *
+             * 这里曾经把 `perLogicTick` **直接当成每秒**插进文案：显示 "3 炁/秒"，
+             * 而引擎实际按每步 3 点扣（= 30 炁/秒），10 倍偏差。
+             * 见 `data/balance.ts` 的 `GUARD_HOLD_DRAIN_PER_SECOND`。
              */
             translate('settings.detailCostPerSecond', {
-              value: skill.holdDrain.perLogicTick,
+              value: holdDrainPerSecond(skill.holdDrain),
               resource: translate(`resource.${skill.holdDrain.resource}`),
             })
           : staticCost === undefined || typeof staticCost.value !== 'number'
           ? ''
-          : translate(
-              /**
-               * ⚠️ 按住技（「防」）的代价是**每秒**扣的，后缀不能省 ——
-               * 否则 `2` 会被读成"一共 2 点"。快照那边靠 `suffix`，
-               * 静态这边靠 `holdDrain` 判断，两条路要给出同一个结果。
-               */
-              skill.holdDrain === undefined
-                ? 'settings.detailCost'
-                : 'settings.detailCostPerSecond',
-              {
-                value: Math.round(staticCost.value),
-                resource: translate(`resource.${staticCost.resource}`),
-              },
-            );
+          : translate('settings.detailCost', {
+              value: Math.round(staticCost.value),
+              resource: translate(`resource.${staticCost.resource}`),
+            });
     const cdText =
       slot !== undefined
         ? slot.skillCdSec <= 0
@@ -178,7 +174,7 @@ export function buildKeyRows(options: BuildKeyRowsOptions): readonly KeyRow[] {
     /**
      * **施放方式**从数据推导（需求："包括瞬发与否，这些应该是结构化的显示"）。
      *
-     * ⚠️ 优先级：`holdDrain` > `castTime`。按住型技能（「防」）的 `castTime`
+     * ⚠️ 优先级：`holdDrain` > `castTime`。按住型技能（「卸」）的 `castTime`
      * 是 0，但它显然不是"瞬发" —— 只看 `castTime` 会把它显示错。
      */
     const castText =

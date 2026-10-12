@@ -138,10 +138,18 @@ export interface SkillDef extends GameEntity {
   readonly charges?: ChargesDef;
   readonly cost: readonly Cost[];
   /**
-   * 「按住」技能：按住期间**每个逻辑步**扣一次资源。
+   * 「按住」技能：按住期间**每个逻辑步**扣 `perLogicTick` 点资源。
    *
-   * 用于「防」这类持续防御 —— 它的代价不是"施放一次"而是"一直按着"。
-   * 资源耗尽或松手都会让效果中止（引擎在 `holdTick` / `releaseKey` 处理）。
+   * 用于「卸」这类持续防御 —— 它的代价不是"施放一次"而是"一直按着"。
+   * 资源耗尽或松手都会让效果中止（引擎在 `tickHolds` / `endHold` 处理）。
+   *
+   * ⚠️ `perLogicTick` **允许是小数**（「卸」= 0.3 = 3 炁/秒 ÷ 10 步）。
+   * 界面写的是"每秒多少"，换算由 `core/combat/holds.ts` 的
+   * `holdDrainPerSecond()` 单向提供；别在显示处自己 `* 10`。
+   *
+   * ⚠️ 小数代价**不能**直接进 `changeResource`（`Math.round` 会每步
+   * 把它舍成 0，静默不扣）；引擎用整数欠账累加器结算，所以
+   * "按住 1 秒 = 恰好 3 炁"。
    *
    * 资源量用**内部刻度**（已乘 `DISPLAY_SCALE`）。
    */

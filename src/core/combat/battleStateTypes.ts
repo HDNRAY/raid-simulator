@@ -32,7 +32,7 @@ export interface MutableCombatant {
   cooldowns: Record<string, number>;
   casts: CastInstance[];
   uses: Record<string, number>;
-  activeHold?: { readonly skillId: string } | undefined;
+  activeHold?: { readonly skillId: string; readonly drainDebt?: number } | undefined;
   behaviors: Combatant['behaviors'];
   alive: boolean;
 }

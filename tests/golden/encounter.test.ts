@@ -365,78 +365,13 @@ describe('真实内容：玩家招式都接线了', () => {
   });
 
   /**
-   * ⚠️ 2026-10-12：「防」（按比例减伤 55%）**已经不在了** —— 用户定稿把
-   * 林晚风的防御换成了「卸」（阈值抵消），见
-   * `docs/specs/2026-10-12-player-kits.md`。
+   * ⚠️ 「卸」的**按住机制**（欠账累加器 / 一秒 = 3 炁 / 资源耗尽松开 /
+   * 显示口径同源）搬到了 `tests/unit/holdDrain.test.ts`。
    *
-   * 所以这条从"减伤"改成了**按住机制本身**（挂上 → 松开 → 摘掉）：
-   * 它测的是 `startHold` / `endHold` 的语义，与那个 buff 是减伤还是
-   * 阈值抵消无关。「卸」的**抵消规则**在
-   * `tests/unit/playerKits.test.ts` 里单独测（那边能精确构造伤害值）。
+   * 理由：那是"一个机制 + 它的显示口径"，本文件是"整场遭遇战"的集成
+   * 测试，混在一起两边都读不清；而且本文件已贴到 700 行上限
+   * （AGENTS.md §3）—— 拆出去比压注释正确。
    */
-  it('格：按住期间挂上 buff，松开即取消', () => {
-    const engine = makeEngine();
-    const player = engine.snapshot.combatants.find((c) => c.side === 'ally')!;
-    void player;
-
-    // 按住（hold 语义）
-    engine.tick([{ type: 'hold', skillId: 'guard', atTick: 0 }]);
-    expect(engine.drainEvents().some((e) => e.kind === 'buffApplied' && e.buffId === 'guard')).toBe(
-      true,
-    );
-    expect(engine.snapshot.combatants.find((c) => c.side === 'ally')!.activeHold?.skillId).toBe(
-      'guard',
-    );
-
-    // 松开
-    engine.tick([{ type: 'releaseSkill', skillId: 'guard', atTick: 1 }]);
-    engine.drainEvents();
-    const after = engine.snapshot.combatants.find((c) => c.side === 'ally')!;
-    expect(after.activeHold).toBeUndefined();
-    expect(after.buffs.some((b) => b.defId === 'guard')).toBe(false);
-  });
-
-  it('格：每 0.1 秒扣 3 点炁，炁耗尽自动松开', () => {
-    const options = makeGoldenEngineOptions();
-    const playable = options.combatants[0]!;
-    /**
-     * 只给 30 点炁 —— 净支出 `3 − 1 = 2`/逻辑步，所以 10 步左右就见了底。
-     *
-     * ⚠️ 「卸」的 `holdDrain` 是 **3 点/逻辑步**（旧的「防」是 2）——
-     * 定稿数字，见 `kits/linwanfeng.ts` 的 `GUARD`。
-     * ⚠️ 步数必须**留出耗尽的时间**：`3 − 1 = 2` 的净支出意味着
-     * "20 个 tick"这种短窗口根本耗不完，那时松开是**不会**发生的。
-     */
-    const engine = new BattleEngine({
-      ...options,
-      combatants: [
-        {
-          ...playable,
-          caps: { ...playable.caps, energy: 30 },
-          resources: { ...playable.resources, energy: 30 },
-        },
-        options.combatants[1]!,
-      ],
-    });
-
-    engine.tick([{ type: 'hold', skillId: 'guard', atTick: 0 }]);
-    engine.drainEvents();
-
-    // 推进 15 个逻辑步（每逻辑步 6 个 tick）—— 足够耗光那 30 点炁
-    for (let t = 1; t < 15 * 6; t += 1) {
-      engine.tick();
-      engine.drainEvents();
-    }
-    const after = engine.snapshot.combatants.find((c) => c.side === 'ally')!;
-    /**
-     * ⚠️ 不要断言"炁恰好等于 0"：炁**每个逻辑步还自然回 1 点**
-     * （`ENERGY_PER_LOGIC_TICK`），所以支出是净的 `3 − 1 = 2`。
-     * 判据写成"扣过 + 松开了"才是在测机制，而不是在测那两个常数的和。
-     */
-    expect(after.resources.energy).toBeLessThan(30);
-    expect(after.activeHold).toBeUndefined();
-    expect(after.buffs.some((b) => b.defId === 'guard')).toBe(false);
-  });
 });
 
 describe('炁按伤害换算', () => {

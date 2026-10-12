@@ -52,13 +52,26 @@ export interface Combatant {
   /** 整场战斗的技能使用次数统计 */
   readonly uses: Record<SkillId, number>;
   /**
-   * 当前按住不放的技能（「防」这类）。
+   * 当前按住不放的技能（「卸」这类）。
    *
    * 为什么放进状态而不是只靠输入层记：**按住是一个持续的状态**，
    * 它每个逻辑步都要扣资源，而且必须可重放（重放时按下/松开
    * 是通过 Action 重现的，状态本身要能被检查）。
+   *
+   * ⚠️ `drainDebt` 是按住消耗的**欠账累加器**（见 `core/combat/holds.ts`）。
+   * 内容可以把代价写成 `0.3`/逻辑步，而 `changeResource` 会
+   * `Math.round(before + delta)` —— 每步扣 0.3 会被舍回原值，一点不扣。
+   * 所以每步只把代价记进欠账，**攒够 1 个整点才真扣 1**。
+   *
+   * 单位是 **1/1000 点**的整数（`holds.ts` 的 `DRAIN_SCALE`）：
+   * 必须走整数 —— 浮点累加 10 次 0.3 会得到 `2.9999999999999996`，
+   * 正好差 1 点（"按住 1 秒 = 3 炁"就不成立了）。
+   *
+   * 它随按住一起生灭：`activeHold` 被清空 = 欠账清零，不需要额外重置。
    */
-  readonly activeHold?: { readonly skillId: SkillId } | undefined;
+  readonly activeHold?:
+    | { readonly skillId: SkillId; readonly drainDebt?: number }
+    | undefined;
   readonly behaviors: readonly Behavior[];
   readonly alive: boolean;
 }

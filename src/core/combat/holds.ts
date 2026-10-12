@@ -21,8 +21,40 @@
 
 import type { BuffDef, Combatant, EventDef, SkillDef } from '../types';
 import { DOUQI_PER_INTERNAL_DAMAGE } from '../../data/balance';
-import { TICKS_PER_LOGIC_TICK } from '../loopConstants';
+import { LOGIC_TICKS_PER_SECOND, TICKS_PER_LOGIC_TICK } from '../loopConstants';
 import { changeResource } from './index';
+
+/**
+ * 按住消耗的**欠账标度**（欠账以 1/DRAIN_SCALE 点为单位存整数）。
+ *
+ * 为什么需要它：`holdDrain.perLogicTick` 允许是小数（「卸」是 `0.3`
+ * = 3 炁/秒 ÷ 10 步）。而 `changeResource` 的结算是
+ * `Math.round(before + delta)` —— 每步扣 0.3 会被舍回原值，**一点不扣**，
+ * 而且是静默的。
+ *
+ * 所以每步只把 `Math.round(perLogicTick * DRAIN_SCALE)` 记进欠账
+ * （0.3 → 300，整数），攒够一整个 `DRAIN_SCALE` 才真的扣 1 点。
+ * 全程整数：浮点累加 10 次 0.3 得到的是 `2.9999999999999996`，
+ * "按住 1 秒 = 3 炁"会差 1 点。
+ *
+ * ⚠️ 取 1000 是为了给内容留出比 0.1 更细的代价（`0.001`/步）；
+ * 它同时决定了"代价能表达到几位小数"。
+ */
+const DRAIN_SCALE = 1000;
+
+/**
+ * 按住消耗的**显示口径**：每逻辑步 → 每秒。
+ *
+ * 设置页（`app/keyRows.ts`）与技能栏（`app/viewAdapter.ts`）都用它，
+ * 于是"界面写的数"永远等于"引擎按 `perLogicTick` 扣的数 × 每秒步数"，
+ * 不存在两边各写一个 3 的可能 —— 这次的 10 倍偏差就是显示与实现
+ * 各写各的造成的（见 `docs/specs/2026-10-12-player-kits.md` §9）。
+ */
+export function holdDrainPerSecond(drain: {
+  readonly perLogicTick: number;
+}): number {
+  return drain.perLogicTick * LOGIC_TICKS_PER_SECOND;
+}
 
 /** 按住型技能需要的引擎能力。 */
 export interface HoldsContext {
@@ -61,7 +93,11 @@ export function startHold(
       (a) => a.kind === 'grant' && after.buffs.some((b) => b.defId === a.buff.id),
     );
     if (!granted) return;
-    ctx.replaceCombatant({ ...after, activeHold: { skillId } });
+    /**
+     * 欠账从 0 起算：同一个技能重复按下会被上面的 `activeHold` 判断挡掉，
+     * 所以这里是"一次新的按住"，不能继承上一次的欠账。
+     */
+    ctx.replaceCombatant({ ...after, activeHold: { skillId, drainDebt: 0 } });
   }
 
 export function endHold(
@@ -103,7 +139,16 @@ export function tickHolds(ctx: HoldsContext): void {
       }
 
       const have = (actor.resources as Record<string, number>)[drain.resource] ?? 0;
-      if (have < drain.perLogicTick) {
+      /**
+       * 每逻辑步欠 `perLogicTick` 点，攒够整点才真扣（见 `DRAIN_SCALE`）。
+       *
+       * ⚠️ 不能写成 `changeResource(actor, ..., -drain.perLogicTick)`：
+       * `Math.round` 会把每步的 0.3 吃掉，结果是**按住整场也不扣炁**。
+       * 欠账走整数，所以"按住 1 秒"恰好是 `10 × 0.3 = 3`。
+       */
+      const debt = (hold.drainDebt ?? 0) + Math.round(drain.perLogicTick * DRAIN_SCALE);
+      const whole = Math.floor(debt / DRAIN_SCALE);
+      if (have < whole) {
         // 资源耗尽 → 自动松开，并告诉玩家原因
         endHold(ctx, hold.skillId, id);
         ctx.events.push({
@@ -115,7 +160,16 @@ export function tickHolds(ctx: HoldsContext): void {
         });
         continue;
       }
-      const result = changeResource(actor, drain.resource, -drain.perLogicTick, ctx.tick);
+      const settled: Combatant = {
+        ...actor,
+        activeHold: { skillId: hold.skillId, drainDebt: debt - whole * DRAIN_SCALE },
+      };
+      if (whole <= 0) {
+        // 还没攒够 1 点 —— 欠账照记，本步不产生资源变动
+        ctx.replaceCombatant(settled);
+        continue;
+      }
+      const result = changeResource(settled, drain.resource, -whole, ctx.tick);
       ctx.replaceCombatant(result.combatant);
       ctx.events.push(...result.events);
     }

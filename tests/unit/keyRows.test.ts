@@ -26,6 +26,7 @@ import { buildKeyRows, isBindablePlayerSkill } from '../../src/app/keyRows';
 import { createRegistry } from '../../src/core/content/registry';
 import { translator } from '../../src/i18n/translator';
 import { DEFAULT_BINDINGS } from '../../src/input/keyboard';
+import { GUARD_HOLD_DRAIN_PER_SECOND } from '../../src/data/balance';
 
 describe('按键设置只列玩家技能', () => {
   it('两个 Boss 的技能都不该可绑键', () => {
@@ -180,8 +181,14 @@ describe('行的内容：没有战斗快照时也要有结构化信息', () => {
      *
      * ⚠️ 2026-10-12：2 → **3 炁/秒**（用户定稿）。它是「卸」的代价，
      * 不是笔误 —— 阈值抵消比原来的 55% 减伤强，所以更贵。
+     *
+     * ⚠️ 断言用**杠杆常量**而不是字面量 3：显示必须由那个常量推导。
+     * 这里曾经把 `perLogicTick`（每逻辑步）当成每秒直接显示，于是
+     * 显示 3 炁/秒而引擎实际扣 30 炁/秒（见 `data/balance.ts` 的说明）。
      */
-    expect(guard?.costText, '「卸」必须显示 3 炁/秒').toBe('3 炁/秒');
+    expect(guard?.costText, '「卸」必须显示 3 炁/秒').toBe(
+      `${GUARD_HOLD_DRAIN_PER_SECOND} 炁/秒`,
+    );
   });
 
   /**

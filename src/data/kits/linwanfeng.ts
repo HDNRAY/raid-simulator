@@ -24,9 +24,9 @@
  * （要预判、要付炁）；凯丽快、防御是"免费短无敌"（要按得准）。
  */
 
-import { logicMs } from '../../core/loopConstants';
+import { LOGIC_TICKS_PER_SECOND, logicMs } from '../../core/loopConstants';
 import type { BuffDef, SkillDef } from '../../core/types';
-import { GUARD_HOLD_DRAIN_PER_LOGIC_TICK, GUARD_THRESHOLD } from '../balance';
+import { GUARD_HOLD_DRAIN_PER_SECOND, GUARD_THRESHOLD } from '../balance';
 import { C, S } from '../scale';
 import { FOCUS } from './shared';
 
@@ -212,11 +212,14 @@ export const PI: SkillDef = {
  * `holdDrain` 是引擎里"按住"机制的表达：每个逻辑步扣一次资源，
  * 资源耗尽或松手就自动取消。这样"一直按着"会有明确代价。
  *
- * ⚠️ 代价取自 `GUARD_HOLD_DRAIN_PER_LOGIC_TICK`（**3**，旧的「防」是 2）
+ * ⚠️ 代价取自 `GUARD_HOLD_DRAIN_PER_SECOND`（**3 炁/秒**，旧的「防」是 2）
  * —— 定稿数字，不是笔误：卸能整击免掉小招（连效果一起），比 55% 减伤强，
- * 所以它更贵。它和阈值一样是**具名常量**（用户的调参杠杆，"太强 → 5"），
- * 所以**不要**把 3 写死回这里。⚠️ 单位口径（设置页的 "3 炁/秒" vs
- * 引擎的 3 炁/逻辑步）写在那个常量的注释里。
+ * 所以它更贵。它和阈值一样是**具名常量**（用户的调参杠杆，"太强 → 5 炁/秒"），
+ * 所以**不要**把 3 写死回这里。
+ *
+ * ⚠️ 单位换算是**除法**：`holdDrain.perLogicTick` 是"每逻辑步"，
+ * 而杠杆是"每秒"。`5 炁/秒` ⇒ `perLogicTick: 0.5`；写成 `5` 就是 50 炁/秒。
+ * 显示侧由 `core/combat/holds.ts` 的 `holdDrainPerSecond()` 乘回来。
  */
 export const GUARD: SkillDef = {
   id: 'guard',
@@ -228,8 +231,16 @@ export const GUARD: SkillDef = {
   castTime: 0,
   cooldown: 0,
   cost: [],
-  /** 按住期间每 0.1 秒扣 `GUARD_HOLD_DRAIN_PER_LOGIC_TICK` 点炁。 */
-  holdDrain: { resource: 'energy', perLogicTick: GUARD_HOLD_DRAIN_PER_LOGIC_TICK },
+  /**
+   * 按住期间每 0.1 秒扣 `perLogicTick` 点炁。
+   *
+   * ⚠️ 0.3 这种小数**不能**直接进 `changeResource`（`Math.round` 会把它
+   * 每步吃掉）；`holds.ts` 用整数欠账累加器结算，所以"按住 1 秒 = 3 炁"。
+   */
+  holdDrain: {
+    resource: 'energy',
+    perLogicTick: GUARD_HOLD_DRAIN_PER_SECOND / LOGIC_TICKS_PER_SECOND,
+  },
   targeting: { mode: 'self' },
   /**
    * ⚠️ **没有 hit** —— 它不是一个"打出去"的技能，只是给自己挂 buff。

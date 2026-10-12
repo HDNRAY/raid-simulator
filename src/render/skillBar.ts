@@ -395,7 +395,7 @@ export class SkillBarView implements FramePart {
        * 左下面板的炁条是同一个绿 —— 玩家不需要学第二套映射。
        */
       if (view.cost) {
-        // 按住技带 `/s` 后缀（"2/s" = 每秒 2 点，不是一共 2 点）
+        // 按住技带 `/s` 后缀（"3/s" = 每秒 3 点，不是一共 3 点）
         s.cost.set(`${Math.round(view.cost.value)}${view.cost.suffix ?? ''}`);
         s.cost.setColor(RESOURCE_COLORS[view.cost.resource]);
       } else {

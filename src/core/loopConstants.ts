@@ -132,7 +132,7 @@ export function tickToMs(tick: number): number {
  *
  *   - 公共冷却 = 0.5 秒 = 5 个逻辑步
  *   - 「闪」的无敌窗口 = 0.5 秒 = 5 个逻辑步
- *   - 「防」每 0.1 秒扣 2 点缠
+ *   - 「卸」每 0.1 秒扣一次炁（`holdDrain`，见 `data/balance.ts`）
  *
  * 为什么不让引擎直接跑 10Hz：那样渲染插值粒度太粗，60fps 的画面
  * 会明显卡顿。所以分成"物理 tick 60Hz / 逻辑步长 0.1s"两层，
@@ -146,6 +146,16 @@ export const LOGIC_TICK_MS = 100;
 
 /** 一个逻辑步等于多少个物理 tick。必须是整数（100ms / 16.67ms ≈ 6）。 */
 export const TICKS_PER_LOGIC_TICK = LOGIC_TICK_MS / MS_PER_TICK;
+
+/**
+ * 每秒有多少个逻辑步（= 10）。
+ *
+ * ⚠️ **按住消耗的"每步 ↔ 每秒"换算就用它**，不要在显示处写 `* 10`：
+ * 引擎按逻辑步扣（`holdDrain.perLogicTick`），而设置页 / 技能栏写的是
+ * "每秒多少"。两处各写一个换算，就又会变成"两份真相"——这次那个
+ * 10 倍偏差正是这么来的（见 `docs/specs/2026-10-12-player-kits.md` §9）。
+ */
+export const LOGIC_TICKS_PER_SECOND = TICKS_PER_SECOND / TICKS_PER_LOGIC_TICK;
 
 /**
  * 把逻辑步数换算成物理 tick 数。

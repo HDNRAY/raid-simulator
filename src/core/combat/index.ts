@@ -33,7 +33,7 @@ import type {
   StatKey,
 } from '../types';
 import { aggregateFlags, applyBuff } from '../buffs';
-import { TICKS_PER_LOGIC_TICK } from '../loopConstants';
+import { LOGIC_TICKS_PER_SECOND, TICKS_PER_LOGIC_TICK } from '../loopConstants';
 import { ENERGY_PER_LOGIC_TICK } from '../../data/balance';
 
 /** 结算环境：引擎把内容定义与属性查询注入进来。 */
@@ -219,8 +219,8 @@ export function checkGate(
      * 调用点容易传反 —— 我就传反过一次，表现为"所有技能都被 casting
      * 拒绝、打断功能整个失效"。）
      *
-     * 默认 `false`。**按住型技能（「防」）传 `true`**：它每个逻辑步
-     * 都会重复请求一次，如果按默认规则办，按住「防」会把自己的读条
+     * 默认 `false`。**按住型技能（「卸」）传 `true`**：它每个逻辑步
+     * 都会重复请求一次，如果按默认规则办，按住「卸」会把自己的读条
      * 无限打断，「斩」永远打不出来。
      *
      * 放行时门禁跳过读条判断，由调用方**自己清掉读条**并补发中断事件
@@ -446,7 +446,7 @@ export function payCosts(
  * 需求是"每 0.1 秒恢复 1 点缠"。三种做法里只有一种是对的：
  *
  *   按秒聚合（每秒 +10）：玩家看到缠一秒跳一次，
- *     而「防」是按 0.1 秒扣的 —— 收支节奏对不上，手感会很怪。
+ *     而「卸」是按 0.1 秒扣的 —— 收支节奏对不上，手感会很怪。
  *   按 tick（每 1/60 秒 +1/6 点）：被整数化吃掉小数，实际不回复。
  *   按逻辑步：与内容里的时长单位一致，收支都在同一个时间网格上。
  *
@@ -471,7 +471,13 @@ export function regenerate(
   }
 
   // 生命回复仍走属性（内容可以给回血装备）
-  const hpPerLogicTick = (stats.hpRegen ?? 0) / 10;
+  /**
+   * ⚠️ `hpRegen` 这个 stat 的口径是**每秒**（见 `stats/aggregate.ts` 的
+   * "资源回复（每秒）"），而这里要的是**每逻辑步**。
+   * 用 `LOGIC_TICKS_PER_SECOND` 而不是字面量 `10` —— 否则"一步多长"
+   * 就有了第二份真相（正是「卸」那次 10 倍偏差的同一类问题）。
+   */
+  const hpPerLogicTick = (stats.hpRegen ?? 0) / LOGIC_TICKS_PER_SECOND;
   if (hpPerLogicTick > 0) {
     const result = changeResource(current, 'hp', Math.round(hpPerLogicTick), tick);
     current = result.combatant;
