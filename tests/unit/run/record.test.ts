@@ -560,10 +560,15 @@ describe('parseRecordedRun —— 坏数据整条丢弃（§11 风险 #9）', ()
         battles: [{ position: 1, bossId: 'x', seed: 1, outcome: 'victory' }],
       }),
     ).toBeUndefined();
-    // ⚠️ 值不是布尔 → 同样丢弃。用 `1` 而不是 `'no'`/`undefined`：
-    // 变异测试发现第一版只用了**真值**（`'no'`）与**缺键**两种输入，
-    // 而"宽松实现"（`flawless !== undefined && typeof !== boolean`）
-    // 对这两种都仍然拒绝它 —— 于是漏掉了"显式传一个真值非布尔"这一格。
+    /**
+     * 值不是布尔 → 同样丢弃。
+     *
+     * ⚠️ 这里**故意同时喂三种**：`1`（真值非布尔）、`'no'`（字符串）、
+     * `null`。只喂字符串会有个盲区：一个"宽松实现"
+     * （`flawless !== undefined && typeof !== 'boolean'` 这种先判空再判类型
+     * 的写法）在缺键时会把 `flawless` 变成 `undefined`，然后**只在真值上
+     * 出错**。三种一起喂，"缺键"与"类型不对"两条路径都被压到。
+     */
     for (const bad of [1, 'no', null] as const) {
       expect(
         parseRecordedRun({
