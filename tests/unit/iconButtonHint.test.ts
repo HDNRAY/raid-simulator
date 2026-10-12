@@ -5,12 +5,14 @@ import {
   BASE_HINT_FONT,
   BASE_ICON_SIZE,
   HINT_RISE,
+  HINT_SHIFT,
   MIN_HINT_FONT,
   estimateMonoWidth,
   iconHintBoxSize,
   iconHintFontSize,
   iconHintPlacement,
   iconHintRise,
+  iconHintShift,
 } from '../../src/ui/iconHint';
 import { buildFocusContext } from '../../src/ui/settings/panelFocus';
 import { keyGridMetrics } from '../../src/ui/settings/keyGridLayout';
@@ -66,31 +68,34 @@ describe('IconButton：提示是压在图标左上角上的**角标**（一条�
     bottom: p.y + hint.h,
   });
 
-  it('【关键】提示**左缘**对齐图标左缘、**上缘再往上抬 `rise`**（角标）', () => {
+  it('【关键】提示左上角 = 图标左上角 **再往左上各偏一点**（`shift` / `rise`）', () => {
     /**
-     * ⚠️ 用户 2026-10-13 的两句话叠起来才是现在的规格：
-     *   1. "**是角标在左上角啊？**"（`x` 对齐图标左缘）
+     * ⚠️ 用户 2026-10-13 的三句话叠起来才是现在的规格：
+     *   1. "**是角标在左上角啊？**"（角标，不是并排、不是正中）
      *   2. "**f1 还要再往上挪几个 px**"（`y` 再高 `rise`）
+     *   3. "**等会 往左再挪几个 px**"（`x` 再左 `shift`）
      *
      * 判据不是"两个按钮的绝对坐标相同"（它们在对角，不可能相同），
      * 而是"**同一个公式 + 同一个锚点**"：
      *   - 锚点都是提示的**左上角**（`anchorX = 0` / `anchorY = 0`）
-     *   - 提示左缘 = **图标左缘**（`b.x === icon.x`，不是"以图标左缘为中心"）
+     *   - 提示左缘 = **图标左缘 − `iconHintShift(图标宽)`**
      *   - 提示上缘 = **图标上缘 − `iconHintRise(图标宽)`**
      */
     for (const icon of [gear, back]) {
       const { hint, p } = place(icon);
       const b = boxOf(hint, p);
+      const shift = iconHintShift(icon.w);
       const rise = iconHintRise(icon.w);
       const tag = JSON.stringify(icon);
       expect(p.anchorX, tag).toBe(0);
       expect(p.anchorY, tag).toBe(0);
-      /** 左对齐图标左缘 —— 这正是"不在正中间"的判据。 */
-      expect(b.x, tag).toBe(icon.x);
-      /** 上缘比图标上缘高 `rise` —— 这正是"再往上挪几个 px"。 */
+      /** 左缘比图标左缘再往左 `shift` —— 这正是"往左再挪几个 px"。 */
+      expect(b.x, tag).toBe(icon.x - shift);
+      expect(shift, tag).toBeGreaterThan(0);
+      /** 上缘比图标上缘再往上 `rise` —— 这正是"再往上挪几个 px"。 */
       expect(b.y, tag).toBe(icon.y - rise);
       expect(rise, tag).toBeGreaterThan(0);
-      /** 提示与图标在同一角：横向交叠必须为正。 */
+      /** 提示与图标在同一角：横向交叠必须为正（偏一点，不是挪走）。 */
       expect(Math.min(b.right, icon.x + icon.w) - Math.max(b.x, icon.x), tag).toBeGreaterThan(0);
       /** ⚠️ 且提示**整块落在图标的上半部分**（"贴顶部"而不是"居中"）。 */
       expect(b.bottom, tag).toBeLessThan(icon.y + icon.h / 2);
@@ -114,7 +119,7 @@ describe('IconButton：提示是压在图标左上角上的**角标**（一条�
       const b = boxOf(hint, p);
       const tag = JSON.stringify(icon);
       expect(p.anchorX, tag).toBe(0);
-      expect(b.x, tag).toBe(icon.x);
+      expect(b.x, tag).toBe(icon.x - iconHintShift(icon.w));
       expect(b.y, tag).toBe(icon.y - iconHintRise(icon.w));
     }
   });
@@ -155,35 +160,52 @@ describe('IconButton：提示是压在图标左上角上的**角标**（一条�
  * 而抬升还只有 4px，那 4px 在视觉上就粘在图标上了。
  * `HINT_RISE = 4` 说的是**基准图标（20px）**上抬 4。
  */
-describe('角标抬升 `rise`：基准 4px、跟着图标缩放', () => {
-  it('基准图标 20px → 抬 4px（用户给的数）', () => {
+describe('角标偏移 `shift` / `rise`：基准各 4px、都跟着图标缩放', () => {
+  const SIZES = [10, 20, 22, 28, 30, 40, 44];
+
+  it('基准图标 20px → 上抬 4、左移 4（都是用户给的数）', () => {
     expect(HINT_RISE).toBe(4);
+    expect(HINT_SHIFT).toBe(4);
     expect(iconHintRise(BASE_ICON_SIZE)).toBe(HINT_RISE);
+    expect(iconHintShift(BASE_ICON_SIZE)).toBe(HINT_SHIFT);
   });
 
-  it('与字号**同一条公式**：同一个分母、同一个 `Math.round`', () => {
-    for (const size of [10, 20, 28, 30, 40, 44]) {
+  it('⚠️ 两个偏移**完全对称**：同一条公式、同一个分母、同一个 `Math.round`', () => {
+    /**
+     * ⚠️ 这是本轮的核心断言：`shift` 不是"另写一套"，而是与 `rise` 同形的
+     * 比例函数 —— 所以下面这个等式对每个 size 都必须成立。
+     */
+    for (const size of SIZES) {
       expect(iconHintRise(size), `size=${size}`).toBe(
         Math.round(HINT_RISE * (size / BASE_ICON_SIZE)),
       );
+      expect(iconHintShift(size), `size=${size}`).toBe(
+        Math.round(HINT_SHIFT * (size / BASE_ICON_SIZE)),
+      );
+      /** 基准值相同时，两个函数逐点相等（对称的最强形式）。 */
+      expect(iconHintShift(size), `size=${size}`).toBe(iconHintRise(size));
     }
     /** 几档实际值：0.5 倍 → 2；1 倍 → 4（返回箭头 22px 也落 4）；2 倍 → 8。 */
-    expect(iconHintRise(10)).toBe(2);
-    expect(iconHintRise(22)).toBe(4);
-    expect(iconHintRise(40)).toBe(8);
+    expect(iconHintShift(10)).toBe(2);
+    expect(iconHintShift(22)).toBe(4);
+    expect(iconHintShift(40)).toBe(8);
   });
 
-  it('⚠️ 上限 `HINT_RISE ≤ 8`：任何系数下都不出画布（安全区是 8×scale）', () => {
+  it('⚠️ 两者上限都是 8：任何系数下都不出画布（安全区是 8×scale）', () => {
     /**
-     * ⚠️ 这是"规则自己保证"的那条不等式：三个调用点的图标上缘都 ≥ `8×scale`
-     * （`chromeBoxAt` 贴边 / 战斗齿轮锚在玩家面板上缘），而抬升按同一个
-     * `scale` 缩 —— 所以只要基准值 ≤ 8，`抬升 ≤ 图标上缘` 恒成立。
+     * ⚠️ 这是"规则自己保证"的那条不等式：最紧的**返回箭头**同时靠上、靠左，
+     * 图标上缘 / 左缘都是 `round(8×scale)`；而两个偏移都按同一个 `scale` 缩
+     * —— 所以只要基准值 ≤ 8，`偏移 ≤ 图标边距` 恒成立。
      *
-     * 这条把**可用空间**钉住：改大到 9 就会在 scale ≥ 1 时顶出画布。
+     * 这条把**可用空间**钉住：任一个改到 9，就会在某个系数下顶出画布。
      */
-    expect(HINT_RISE).toBeLessThanOrEqual(8);
-    for (const size of [10, 20, 30, 40, 50]) {
-      expect(iconHintRise(size), `size=${size}`).toBeLessThanOrEqual(Math.round(8 * (size / 20)));
+    for (const base of [HINT_RISE, HINT_SHIFT]) {
+      expect(base).toBeLessThanOrEqual(8);
+    }
+    for (const size of [...SIZES, 50]) {
+      const room = Math.round(8 * (size / 20));
+      expect(iconHintRise(size), `rise size=${size}`).toBeLessThanOrEqual(room);
+      expect(iconHintShift(size), `shift size=${size}`).toBeLessThanOrEqual(room);
     }
   });
 });
@@ -248,7 +270,7 @@ describe('IconButton：提示随图标缩放（一条公式）', () => {
     expect(iconHintFontSize(iconSizeAt(1))).toBeGreaterThan(MIN_HINT_FONT);
   });
 
-  it('落位仍然只有一条规则（缩放不改"左缘对齐 + 上抬 `rise`"）', () => {
+  it('落位仍然只有一条规则（缩放不改"往左上各偏一点"）', () => {
     for (const scale of [0.5, 1, 2]) {
       const size = iconSizeAt(scale);
       const icon = { x: LOGICAL.width - 8 - size, y: 8, w: size, h: size };
@@ -259,7 +281,7 @@ describe('IconButton：提示随图标缩放（一条公式）', () => {
         hint.h,
       );
       const tag = `scale=${scale}`;
-      expect(p.x, tag).toBe(icon.x);
+      expect(p.x, tag).toBe(icon.x - iconHintShift(size));
       expect(p.y, tag).toBe(icon.y - iconHintRise(size));
     }
   });

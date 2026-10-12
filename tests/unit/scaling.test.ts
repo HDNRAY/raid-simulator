@@ -8,7 +8,13 @@ import {
   computeScale,
 } from '../../src/render/scaling';
 import { FONT, GLYPH_NUDGE, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../../src/ui/layout';
-import { iconHintBoxSize, iconHintFontSize, iconHintPlacement, iconHintRise } from '../../src/ui/iconHint';
+import {
+  iconHintBoxSize,
+  iconHintFontSize,
+  iconHintPlacement,
+  iconHintRise,
+  iconHintShift,
+} from '../../src/ui/iconHint';
 
 /**
  * 技能栏的实现**已拆到 `skillBar.ts`**（原文件超长）。
@@ -353,7 +359,7 @@ describe('键位提示的尺度：角标 + 抬升 + 随图标缩放', () => {
    *     （AGENTS.md §4）—— 所以这里不去正则扫源码里那句话，那是在锁实现
    *     而不是锁行为。
    */
-  it('提示的**左缘 = 图标左缘**、**上缘 = 图标上缘 − `rise`**（角标），不随缩放改规则', () => {
+  it('提示左上角 = 图标左上角 **再往左上各偏一点**，且不随缩放改规则', () => {
     for (const scale of [0.5, 1, 1.5, 2]) {
       const size = Math.max(1, Math.round(20 * scale));
       const icon = { x: 100, y: 200, w: size, h: size };
@@ -363,12 +369,14 @@ describe('键位提示的尺度：角标 + 抬升 + 随图标缩放', () => {
         hint.w,
         hint.h,
       );
+      const shift = iconHintShift(size);
       const rise = iconHintRise(size);
       const tag = `scale=${scale}`;
-      /** 角标：左缘对齐图标左缘、上缘比图标上缘再高 `rise`。 */
-      expect(p.x, tag).toBe(icon.x);
+      /** 角标：左上角比图标左上角再往**左上**各偏一点。 */
+      expect(p.x, tag).toBe(icon.x - shift);
       expect(p.y, tag).toBe(icon.y - rise);
-      /** 抬升随缩放变大（不是常数 4）。 */
+      /** 两个偏移都随缩放变大（不是常数 4）。 */
+      expect(shift, tag).toBe(Math.round(4 * (size / 20)));
       expect(rise, tag).toBe(Math.round(4 * (size / 20)));
       /** 提示只往**右下方**长（这正是"压在左上角"的形状）。 */
       expect(p.x + hint.w, tag).toBeGreaterThan(icon.x);
