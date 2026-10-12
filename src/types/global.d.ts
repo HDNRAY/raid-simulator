@@ -178,7 +178,7 @@ declare global {
         /** 此刻是否可见（= 当前这一屏有返回箭头）。 */
         visible(): boolean;
         /**
-         * 可点区域（含并排的 `Esc` 提示）。
+         * 可点区域（含图标外侧的 `hitSlop` 外扩 —— 角标提示**不占**布局宽度）。
          *
          * ⚠️ `null` 而不是 `undefined`：要跨 `Runtime.evaluate` 的 JSON 边界
          * （`undefined` 在那里会被丢掉 —— "这一屏没有箭头"与"忘了返回值"

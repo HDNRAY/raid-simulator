@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { battleGearBoxAt, chromeBlockBoxAt, chromeBoxAt } from '../../src/ui/ScreenChrome';
-import { HINT_GAP, iconHintBoxSize, iconHintPlacement, iconWithHintSize } from '../../src/ui/iconHint';
+import { battleGearBoxAt, chromeBoxAt } from '../../src/ui/ScreenChrome';
+import { iconHintBoxSize, iconHintPlacement } from '../../src/ui/iconHint';
 import { LAYOUT, LOGICAL, scaleUiRect } from '../../src/ui/layout';
 
 /**
  * ==================================================================
- * 边角控件的**落位**：贴边 + 随 UI 缩放 —— 一条规则，四条边共用
+ * 边角控件的**落位**：贴边 + 随 UI 缩放 —— 一条规则，几条边共用
  * ==================================================================
  *
  * 用户 2026-10-12 三条原话（其实是同一件事）：
@@ -17,15 +17,16 @@ import { LAYOUT, LOGICAL, scaleUiRect } from '../../src/ui/layout';
  * 前两条是"组件归它所在的界面所有"（结构，见 `ScreenChrome` 文件头）；
  * 这一份钉的是第三条：**齿轮与返回箭头都要按同一个系数重排**。
  *
- * ⚠️ 为什么这些算术值得单独钉：它们错了的表现是"缩放之后按钮跑出画布"
- * 或者"某一屏的齿轮比别人小一圈"—— 截图上看不出来（每张图单独看都"合理"），
- * 只有把不同系数、不同边角放**一起比**才看得出来。
+ * ⚠️ 2026-10-13 补第二条钉：**战斗齿轮锚在玩家面板右边**（用户原话：
+ * "战斗时，齿轮应该在人物面板的右边"）。上一版锚在画布左下角，`scale ≥ 1.4`
+ * 时会压住面板 / 血条 —— 这一份把"面板右边 + 不与日志/技能栏/画布边相撞"
+ * 逐档钉死。
  *
  * ⚠️ 只测纯函数（不构造 Pixi）：与 `iconButton.test.ts` 同一条纪律
  * （Pixi v8 在 jsdom 里不好跑，而"算得对不对"恰恰是最该钉的部分）。
  */
 
-/** 齿轮（右上）与返回箭头（左上）的基准尺寸 —— 与 `ScreenChrome` 内部常量一致。 */
+/** 齿轮（右上 / 战斗）与返回箭头（左上）的基准尺寸 —— 与 `ScreenChrome` 内部常量一致。 */
 const GEAR = 20;
 const ARROW = 22;
 const MARGIN = 8;
@@ -35,35 +36,54 @@ const GEAR_HINT = 'F1';
 const gearAt = (scale: number) => chromeBoxAt({ right: true, bottom: false }, GEAR, scale);
 const backAt = (scale: number) => chromeBoxAt({ right: false, bottom: false }, ARROW, scale);
 
-/** 齿轮**整块**（图标 + 并排提示）的包围盒 —— 与 `battleGearBoxAt` 同一套几何。 */
+/**
+ * **玩家面板**的缩放后矩形 —— 与 `UiLayout.playerPanel` 同一条锚点
+ * （`bottom-left`）。战斗齿轮的落位就锚在它上面，所以这一份是"基准"。
+ */
+const panelRectAt = (scale: number) => scaleUiRect(LAYOUT.player, 'bottom-left', scale);
+
+/** 缩放后的日志面板矩形（与 `UiLayout.logPanel` 同一条锚点：`top-left`）。 */
+const logRectAt = (scale: number) => scaleUiRect(LAYOUT.log, 'top-left', scale);
+
+/** 缩放后的技能栏整体 --- 与 `UiLayout.skillBarBounds` 同一条右对齐算术。 */
+function skillBarRectAt(scale: number, total = LAYOUT.skillBar.max) {
+  const size = Math.max(1, Math.round(LAYOUT.skillBar.slot * scale));
+  const spacing = Math.max(1, Math.round(LAYOUT.skillBar.gap * scale));
+  const margin = Math.max(1, Math.round(LAYOUT.skillBar.right * scale));
+  const count = Math.max(1, Math.min(total, LAYOUT.skillBar.max));
+  const totalW = count * size + (count - 1) * spacing;
+  const baseY = LAYOUT.skillBar.y + LAYOUT.skillBar.slot - size;
+  return {
+    x: LOGICAL.width - margin - totalW,
+    y: Math.round(baseY),
+    w: totalW,
+    h: size,
+  };
+}
+
+/**
+ * 战斗齿轮**整块**（图标 + 压在它左上角上的 `F1` 角标）的包围盒 —— 与
+ * `IconButton` 里那条落位规则同一套几何（`iconHintPlacement` + `iconHintBoxSize`）。
+ *
+ * ⚠️ 角标**不出图标范围**（它的左上角压在图标左上角上、往右下方长），所以整块的
+ * 上缘 / 左缘都取图标那一头。
+ */
 function gearBlockAt(scale: number) {
   const box = battleGearBoxAt(scale);
   const hint = iconHintBoxSize(GEAR_HINT, box.size);
-  /**
-   * ⚠️ 战斗齿轮的提示在**右侧**（齿轮贴画布左缘，右边有的是地方）——
-   * 与整屏界面右上角那个齿轮**镜像**（那边配 `'left'`）。
-   */
-  const placed = iconHintPlacement({
-    icon: { x: box.x, y: box.y, w: box.size, h: box.size },
-    hintW: hint.w,
-    hintH: hint.h,
-    side: 'right',
-    canvasW: LOGICAL.width,
-    canvasH: LOGICAL.height,
-  });
+  const placed = iconHintPlacement(
+    { icon: { x: box.x, y: box.y, w: box.size, h: box.size }, canvasW: LOGICAL.width, canvasH: LOGICAL.height },
+    hint.w,
+    hint.h,
+  );
   return {
     x: Math.min(box.x, placed.x),
     y: Math.min(box.y, placed.y),
     right: Math.max(box.x + box.size, placed.x + hint.w),
     bottom: Math.max(box.y + box.size, placed.y + hint.h),
     box,
-    block: iconWithHintSize(GEAR_HINT, box.size),
+    hint: { x: placed.x, y: placed.y, w: hint.w, h: hint.h },
   };
-}
-
-/** 缩放后的日志面板矩形（与 `UiLayout.logPanel` 同一条锚点：`top-left`）。 */
-function logRectAt(scale: number) {
-  return scaleUiRect(LAYOUT.log, 'top-left', scale);
 }
 
 function overlaps(
@@ -145,47 +165,46 @@ describe('边角落位：随 UI 缩放', () => {
   });
 });
 
-describe('战斗界面的齿轮：画布**左下角安全区**（不是四条边角之一）', () => {
+describe('战斗界面的齿轮：**玩家面板右缘 + 间距**', () => {
   /**
    * ================================================================
-   * ⚠️ 这一组是用户报告的那个 bug 的回归（"放大时齿轮溢出画布"）
+   * 规则（一条）：图标左上角 = `(面板右缘 + 8×scale, 面板上缘)`
    * ================================================================
    *
-   * 旧规则是"日志下方"：`y = (LAYOUT.log.y + LAYOUT.log.h) × scale + 8×scale`
-   * —— 而日志矩形**自己也乘系数**，于是 scale=2.0 时 `y = 556`，齿轮
-   * 整块掉出画布（`540`）。
+   * 演进：右下角 → 玩家面板右侧 → 右上角 → 日志下方 → 画布左下角 →
+   * **玩家面板右边**（2026-10-13，用户："战斗时，齿轮应该在人物面板的右边"）。
    *
-   * 现在的规则是**从画布边缘反推**（贴边控件的老规矩）：
-   * 图标左下角 = `(8×scale, 画布高 − 8×scale)`。下面用**五个系数**
-   * （含 1.4 / 1.5 这两个用户点名的档）把结论钉死。
+   * ⚠️ "画布左下角"那一版虽然任何系数都不越界，但 `scale ≥ 1.4` 时**压住
+   * 玩家面板 / 血条**（面板是 `bottom-left` 锚点，向上长）。锚在**面板**上
+   * 就没有这个取舍：往外挪的同时，压不着面板。
    */
-  it('贴左下角：左缘从安全区起、下缘从画布底反推', () => {
+  it('贴着面板的**右缘**，与面板**上缘**对齐（引用 `LAYOUT.player`，不是写死的数字）', () => {
     const b = battleGearBoxAt(1);
-    expect(b.x).toBe(MARGIN);
-    expect(b.y).toBe(LOGICAL.height - MARGIN - GEAR);
+    const panel = panelRectAt(1);
+    expect(b.x).toBe(panel.x + panel.w + MARGIN);
+    expect(b.y).toBe(panel.y);
     expect(b.size).toBe(GEAR);
   });
 
-  it('随系数缩放：边距与尺寸都乘系数（与 `chromeBoxAt` 同一条纪律）', () => {
-    for (const scale of [0.5, 1, 1.4, 1.5, 2]) {
+  it('随系数缩放，且始终**跟着面板走**（面板动了它就跟）', () => {
+    for (const scale of [0.5, 0.8, 1, 1.4, 1.5, 2]) {
       const b = battleGearBoxAt(scale);
-      expect(b.x, `scale=${scale}`).toBe(Math.round(MARGIN * scale));
-      expect(b.size, `scale=${scale}`).toBe(Math.max(1, Math.round(GEAR * scale)));
-      /** 下缘**始终**离画布底 `MARGIN × scale` —— 这条就是"不会越界"的来源。 */
-      expect(b.y + b.size, `scale=${scale}`).toBe(
-        LOGICAL.height - Math.round(MARGIN * scale),
-      );
+      const panel = panelRectAt(scale);
+      const tag = `scale=${scale}`;
+      expect(b.x, tag).toBe(panel.x + panel.w + Math.round(MARGIN * scale));
+      expect(b.y, tag).toBe(panel.y);
+      expect(b.size, tag).toBe(Math.max(1, Math.round(GEAR * scale)));
     }
   });
 
-  it('⚠️【硬验收】**整块**（齿轮 + `F1` 提示）在任何系数下都在 960×540 内', () => {
+  it('【硬验收】六档系数下**整块**（齿轮 + `F1` 角标）都在 960×540 内', () => {
     /**
-     * ⚠️ 这是"规则自己就保证不越界"的判据，**不是**"算完再夹"：
-     * 提示与图标**同一行**（右边），高度取 `max(图标, 字号)` —— 而字号
-     * 永远 ≤ 图标（13 < 20 起步，比例固定），所以整块高度 = 图标高，
-     * 于是"下缘 = `画布高 − 边距`"这句就同时是图标与提示的下缘。
+     * 判据是"规则自己就保证不越界"，**不是**"算完再夹"：
+     *   - 左缘 = 面板右缘 + 间距 ≥ 面板右缘 ✓
+     *   - 右缘 = 249 + 20 = 269（1 倍）、504 + 16 + 40 = 560（2 倍）≪ 960 ✓
+     *   - 上缘 = 面板上缘（≥ 444）✓ 下缘 = 上缘 + 图标 + 一点点 ✓
      */
-    for (const scale of [0.5, 0.75, 1, 1.4, 1.5, 2]) {
+    for (const scale of [0.5, 0.8, 1, 1.4, 1.5, 2]) {
       const { x, y, right, bottom } = gearBlockAt(scale);
       const tag = `scale=${scale}`;
       expect(x, tag).toBeGreaterThanOrEqual(0);
@@ -195,8 +214,21 @@ describe('战斗界面的齿轮：画布**左下角安全区**（不是四条边
     }
   });
 
+  it('⚠️ 与**玩家面板**不重叠（面板本身的几何，不是只有图标）', () => {
+    for (const scale of [0.5, 0.8, 1, 1.4, 1.5, 2]) {
+      const block = gearBlockAt(scale);
+      const panel = panelRectAt(scale);
+      expect(
+        overlaps(block, panel),
+        `scale=${scale}：齿轮整块 ${JSON.stringify(block)} 压住了面板 ${JSON.stringify(panel)}`,
+      ).toBe(false);
+      /** 而且齿轮确实在面板**右边**（不是"上方"或"下方"那种不重叠）。 */
+      expect(block.x, `scale=${scale}`).toBeGreaterThanOrEqual(panel.x + panel.w);
+    }
+  });
+
   it('⚠️ 与**缩放后的**日志面板不重叠（同一坐标系，不是基准矩形）', () => {
-    for (const scale of [0.5, 1, 1.4, 1.5, 2]) {
+    for (const scale of [0.5, 0.8, 1, 1.4, 1.5, 2]) {
       const block = gearBlockAt(scale);
       const log = logRectAt(scale);
       expect(
@@ -206,43 +238,22 @@ describe('战斗界面的齿轮：画布**左下角安全区**（不是四条边
     }
   });
 
-  it('提示在 1.5 与 2.0 下**确实变大了**（字号跟着缩放）', () => {
-    const a = gearBlockAt(1.5);
-    const b = gearBlockAt(2);
-    expect(b.block.w).toBeGreaterThan(a.block.w);
-    expect(b.box.size).toBeGreaterThan(a.box.size);
-    /**
-     * ⚠️ 整块**高度**在并排摆法下是 `max(图标, 提示)` —— 两档都是图标
-     * （40 / 30）在决定它，所以这里比的是**字号**（提示真正的尺寸）。
-     */
-    expect(iconHintBoxSize(GEAR_HINT, b.box.size).h).toBeGreaterThan(
-      iconHintBoxSize(GEAR_HINT, a.box.size).h,
-    );
-  });
-});
-
-describe('`chromeBlockBoxAt`：按整块贴边（提示也不出界）', () => {
-  it('⚠️ 提示在**左**时，贴右缘的是**提示的那一头**（图标被推离右缘）', () => {
-    for (const scale of [0.5, 1, 2]) {
-      const box = chromeBlockBoxAt(GEAR_HINT, GEAR, 'left', { right: true, bottom: true }, scale);
-      const hint = iconHintBoxSize(GEAR_HINT, box.size);
-      const margin = Math.round(MARGIN * scale);
-      /** 整块的右缘 = 提示的右缘 = 画布宽 − 边距。 */
-      expect(box.x + box.size + HINT_GAP + hint.w, `scale=${scale}`).toBe(LOGICAL.width - margin);
-      /** 整块的下缘（提示与图标同一行，取较高者）也在安全区上。 */
-      expect(box.y + Math.max(box.size, hint.h), `scale=${scale}`).toBe(
-        LOGICAL.height - margin,
-      );
+  it('⚠️ 与**技能栏**不重叠（右下角那块，`scale` 越大越往左长）', () => {
+    for (const scale of [0.5, 0.8, 1, 1.4, 1.5, 2]) {
+      const block = gearBlockAt(scale);
+      const bar = skillBarRectAt(scale);
+      expect(
+        overlaps(block, bar),
+        `scale=${scale}：齿轮整块 ${JSON.stringify(block)} 压住了技能栏 ${JSON.stringify(bar)}`,
+      ).toBe(false);
     }
   });
 
-  it('提示在**右**时，图标自己就是贴边的那一头（左缘 = 安全区）', () => {
-    const box = chromeBlockBoxAt('Esc', ARROW, 'right', { right: false, bottom: false }, 1.5);
-    expect(box.x).toBe(Math.round(MARGIN * 1.5));
-    expect(box.y).toBe(Math.round(MARGIN * 1.5));
-    expect(box.size).toBe(Math.round(ARROW * 1.5));
-    /** 整块（图标 + 右边的提示）都落在画布内。 */
-    const hint = iconHintBoxSize('Esc', box.size);
-    expect(box.x + box.size + HINT_GAP + hint.w).toBeLessThan(LOGICAL.width);
+  it('提示在 1.5 与 2.0 下**确实变大了**（字号跟着缩放）', () => {
+    const a = gearBlockAt(1.5);
+    const b = gearBlockAt(2);
+    expect(b.box.size).toBeGreaterThan(a.box.size);
+    expect(b.hint.w).toBeGreaterThan(a.hint.w);
+    expect(b.hint.h).toBeGreaterThan(a.hint.h);
   });
 });

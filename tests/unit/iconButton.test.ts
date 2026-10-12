@@ -24,50 +24,38 @@ describe('图标按钮：可点区域', () => {
     expect(box.y + box.h / 2).toBeCloseTo(100, 0);
   });
 
-  it('【关键】同行提示（left/right）要把提示框进可点区域', () => {
+  it('【关键】角标提示**不进**可点区域（它是附注，不是同行元素）', () => {
     /**
-     * 这是最容易错的一条：如果盒子只按图标算，键位提示就会
-     * 落在可点区域之外 —— 玩家点"按键提示"没有反应。
+     * 这条是"角标"与"并排"的分界：并排时提示占一行、必须框进可点区域
+     * （否则点提示没反应）；角标**压在图标自己身上**，它的坐标范围在
+     * 图标之内 —— 所以可点区域**只由图标决定**。
+     *
+     * ⚠️ 老版 `e64eb2d` 就是这么算的（`corner` 模式下 `hintW` 归零）。
      */
     const iconOnly = computeContentBox({ size: 20, anchor: { x: 100, y: 100 } });
     const withHint = computeContentBox({
       size: 20,
-      shortcut: ',',
-      hintSide: 'right',
+      shortcut: 'Esc',
       anchor: { x: 100, y: 100 },
     });
-    expect(withHint.w).toBeGreaterThan(iconOnly.w);
-    expect(withHint.w - iconOnly.w).toBe(estimateMonoWidth(',', FONT.small) + 4);
+    /** 有无提示，盒子一样大（提示不占布局宽度）。 */
+    expect(withHint.w).toBe(iconOnly.w);
+    expect(withHint.h).toBe(iconOnly.h);
   });
 
-  it('并排提示**占**布局宽度 —— 它是与图标同一行的元素', () => {
+  it('提示**不改变**图标在盒内的位置（角标不排布）', () => {
     /**
-     * ⚠️ 这条是 2026-10-12 那次"恢复历史版本"的回归：提示从"角标"（不占
-     * 布局宽度）改回**并排**（`d4e3fb7` 那版的 `hintSide: 'left' | 'right'`）。
-     *
-     * 并排时提示当然要占宽度 —— 否则可点区域会短一截、整块宽度也会算小，
-     * 于是"把整块摆进画布"那条规则（`chromeBlockBoxAt`）就失去依据。
+     * 并排摆法里"提示在左 → 图标右移"，角标没有这回事：图标永远在盒内左端，
+     * 提示压在它左上角上（落位见 `iconHint.test.ts` / `iconHint.ts`）。
      */
     const iconOnly = computeContentBox({ size: 20, anchor: { x: 100, y: 100 } });
-    const sideBySide = computeContentBox({
+    const withHint = computeContentBox({
       size: 20,
       shortcut: 'Esc',
-      hintSide: 'right',
       anchor: { x: 100, y: 100 },
     });
-    expect(sideBySide.w).toBeGreaterThan(iconOnly.w);
-    expect(sideBySide.w - iconOnly.w).toBeGreaterThan(0);
-  });
-
-  it('提示在左时图标右移；提示在右时图标在左', () => {
-    const left = computeContentBox({ size: 20, shortcut: ',', hintSide: 'left', anchor: { x: 0, y: 0 } });
-    const right = computeContentBox({ size: 20, shortcut: ',', hintSide: 'right', anchor: { x: 0, y: 0 } });
-    expect(left.iconX).toBeGreaterThan(right.iconX);
-    // 两种情况下图标都在盒子内
-    for (const b of [left, right]) {
-      expect(b.iconX).toBeGreaterThanOrEqual(b.x);
-      expect(b.iconX + 20).toBeLessThanOrEqual(b.x + b.w);
-    }
+    expect(withHint.iconX).toBe(iconOnly.iconX);
+    expect(withHint.iconY).toBe(iconOnly.iconY);
   });
 
   it('图标在盒内垂直居中', () => {

@@ -161,9 +161,10 @@ export class BattleScene {
      * **战斗界面的齿轮**：造在 **HUD 层**（不是 `stage`，也不是 `root` 的
      * 顶层）—— 因为它属于"战斗这一屏的界面"。
      *
-     * ⚠️ 落点是**战斗日志下方**（`battleGearBoxAt`），不是四个边角之一：
-     * 右上角被 Boss 血条（贴顶、通栏）与 debuff 行占着。这个位置由
-     * `ScreenChrome` 的落位函数表达（引用 `LAYOUT.log`，日志一改它就跟着走）。
+     * ⚠️ 落点是**玩家面板右缘 + 间距**（`battleGearBoxAt`，与面板上缘对齐）
+     * —— 用户 2026-10-13："**战斗时，齿轮应该在人物面板的右边**"。这个位置
+     * 由 `ScreenChrome` 的落位函数表达（引用 `LAYOUT.player`，面板一改它就
+     * 跟着走）。
      *
      * ⚠️ 加在**最后** = 压在 HUD 之上、`resultArea` 之下（后者是 `root` 的
      * 子节点，排在 `hud` 之后）。缩放走下面的 `setUiScale`。

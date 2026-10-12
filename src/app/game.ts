@@ -158,8 +158,8 @@ export function createGame(o: CreateGameDeps): GameHandle {
      *
      * ⚠️ 用户 2026-10-12："stage 上理论上不挂任何小组件"、"多个页面的齿轮，
      * 应该分别定义"、"UI 缩放要带上"。所以战斗这一屏的齿轮由**场景**持有
-     * （见 `BattleScene.chrome`），位置是**战斗日志下方**（`battleGearBoxAt`
-     * —— 右上角被 Boss 血条与 debuff 行占着）。
+     * （见 `BattleScene.chrome`），位置是**玩家面板右缘 + 间距** —— 用户
+     * 2026-10-13："**战斗时，齿轮应该在人物面板的右边**"（见 `battleGearBoxAt`）。
      *
      * ⚠️ `onGear` 引用 `settingsToggle`（本函数后面才构造）。这是**刻意的
      * 延后引用**：箭头体只在玩家点齿轮时才执行，那时它早就建好了。与

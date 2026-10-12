@@ -63,9 +63,9 @@
 
 import type { Container } from 'pixi.js';
 import { IconButton } from './IconButton';
-import { HINT_GAP, iconHintBoxSize, type HintSide } from './iconHint';
 import { PALETTE } from '../render/theme';
 import { LOGICAL } from './layout';
+import { UiLayout } from './uiLayout';
 import { KEY_EDIT_KEYS } from './settings/keyNames';
 import type { PixiCtor } from './primitives';
 
@@ -127,112 +127,66 @@ export function chromeBoxAt(
 }
 
 /**
- * **战斗界面的齿轮落点**：画布**左下角安全区**（左下角为锚点）。
+ * **战斗界面的齿轮落点**：**玩家面板右缘 + 间距**，与面板顶对齐。
  *
  * ==================================================================
- * ⚠️ 2026-10-12：从"日志下方"改成"画布左下角"—— 因为旧规则**必然越界**
+ * ⚠️ 2026-10-13：从"画布左下角"改成"面板右边"（用户给的方向）
  * ==================================================================
  *
- * 旧版是"日志下方、与日志左对齐"：
+ * 用户原话："**战斗时，齿轮应该在人物面板的右边**"。
  *
- * ```ts
- * x = round(LAYOUT.log.x * scale) + gap
- * y = round((LAYOUT.log.y + LAYOUT.log.h) * scale) + gap   // ← 这里
- * ```
- *
- * 日志矩形**自己也乘了系数**（`UiLayout.logPanel` 是 `top-left` 锚点，
- * `y 70..270` 随系数往下长），于是齿轮的 `y` 按 `(70 + 200) × scale` 走：
- *
- * | scale | 旧 y（= 270·scale + 8·scale） | 齿轮下缘 | 在 540 内？ |
- * |---|---|---|---|
- * | 0.5 | 139 | 149 | ✅ |
- * | 1   | 278 | 298 | ✅ |
- * | 1.4 | 389 | 417 | ✅ |
- * | 1.5 | 417 | 447 | ✅ |
- * | 2.0 | **556** | 596 | ✗ **出画布** |
- *
- * 用户实测报的正是这条（"放大时会溢出画布"）。根因不是"少夹了一下"，
- * 而是**锚点选错了**：把一个贴边的控件锚在一个"会跟着缩放长出去"的
- * 矩形上，越界是迟早的（画布高度是常量 540，而 `270 × scale` 无上界）。
+ * 上一版锚的是**画布左下角**（`(MARGIN×scale, 540 − MARGIN×scale)`）——
+ * 它确实"任何系数下都不出画布"，但代价是**压住了玩家面板 / 血条**：
+ * 面板左下锚定（`UI_ANCHORS.playerPanel = 'bottom-left'`，`y 452..532`），
+ * `scale ≥ ~1.4` 时它向上长到左下的那条带里，正是齿轮所在的位置 ✗
+ * （上一版自己在注释里报过这个取舍）。
  *
  * ==================================================================
- * 现在的规则：**从自己那条边反推**（贴边控件的老规矩）
+ * 现在的规则：**锚在"玩家面板"上**（不是"算完再夹"）
  * ==================================================================
  *
  * ```ts
- * 图标左下角 = (MARGIN × scale, 画布高 − MARGIN × scale)
+ * 图标左上角 = ( 面板右缘 + MARGIN×scale , 面板上缘 )
  * ```
  *
- * 与 `chromeBoxAt` 同一条纪律（"贴边的元素要从自己那条边长出来"）：
- * 边距与尺寸都乘系数，而**位置由画布边缘反推**。
+ * 面板矩形由 `UiLayout.playerPanel` 给（锚点 `'bottom-left'`）—— 与它被
+ * **真正画出来**用的是同一段缩放算术，所以齿轮跟着面板走，不会漂。
  *
- * ⚠️ **为什么它自己就保证不越界**（不是算完再夹）：
- *   - 下缘 = `画布高 − MARGIN×scale` ≤ 画布高 − 8 ✓（对任何 scale ≥ 1）
- *   - 提示与图标**同一行**（`iconHintPlacement` 一条规则），它的高度是
- *     `max(图标, 字号)` —— 而字号 ≤ 图标（`BASE_HINT_FONT=13 < 20`），
- *     所以整块高度 = 图标高，下缘就是这个下缘 ✓
- *   - 右缘 = `MARGIN×scale + 图标 + gap + 提示`，2 倍时才 ~118px ≪ 960 ✓
+ * ⚠️ **一条规则**，没有分支、没有夹取。各档的实测（几何对账见
+ * `tests/unit/screenChrome.test.ts` 的六档循环）：
  *
- * ⚠️ **一条规则**：没有"先算再夹"的第二套逻辑，也没有"看它在画布哪一半"
- * 的分支。四个边角控件都从**自己那条边**反推，战斗齿轮只是选了左下角。
+ * | scale | 面板 x..右缘 | 齿轮图标 x..右缘 | 提示角标右缘 | 日志 x..右缘 | 技能栏 x.. | 在画布内 |
+ * |---|---|---|---|---|---|---|
+ * | 0.5 | 8..122 | 126..136 | 140 | 8..88 | 782 | ✅ |
+ * | 0.8 | 8..190 | 196..212 | 210 | 8..136 | 677 | ✅ |
+ * | 1   | 8..236 | 244..264 | 260 | 8..168 | 604 | ✅ |
+ * | 1.4 | 8..327 | 338..366 | 359 | 8..232 | 459 | ✅ |
+ * | 1.5 | 8..350 | 362..392 | 384 | 8..248 | 426 | ✅ |
+ * | 2   | 8..464 | 480..520 | 507 | 8..328 | 248 | ✅ |
  *
- * ⚠️ 为什么是**左下**而不是别的角：画布左下角那条竖带是空的（玩家面板从
- * `y 452` 开始，而齿轮整块贴的是 `画布高 − 边距`）。右上角被 Boss 血条
- * （贴顶、通栏）与 debuff 行占着。
+ * ⚠️ 于是三条"不压谁"都是**算出来的**，不是碰巧：
+ *   - **不压面板**：`x` 从面板**右缘** + 间距起算（表格里每行都差一个间距）✓
+ *   - **不压日志**：日志右缘最远 `328`（scale 2），而齿轮左缘 `480` ✓
+ *   - **不压技能栏**：技能栏左缘随缩放**往左长**，scale 2 时到 `248`
+ *     （比齿轮的 `480` 还靠左）—— 但两者**纵向**分开：齿轮在面板顶那一行
+ *     （`y 372..412`），技能栏 `y 452..532`。所以判据是"**矩形不相交**"，
+ *     不是"x 上谁在左"（由单测的六档循环断言，不靠肉眼）✓
+ *   - **在画布内**：最右是提示角标的右缘 `507`（scale 2）≪ 960；
+ *     下缘 = 面板顶 + 图标 ≤ 532 ✓
  *
- * ⚠️ 提示在**右侧**（`'right'`）：齿轮贴的是画布左缘，右边有的是地方 ——
- * 与整屏界面右上角那个齿轮**镜像**（那边贴右缘，所以提示配 `'left'`）。
+ * ⚠️ **提示现在是角标**（它压在图标**自己的**左上角上，不再往旁边长），
+ * 所以"整块"只有**图标那么大**，不必再为提示留宽度 —— 这也是这一版能
+ * 直接把图标钉在面板右缘的原因（上一版并排摆法时，提示会伸到面板上）。
+ *
+ * ⚠️ 缩放的读法与别处一致：边距与尺寸都乘系数，位置由**面板**反推。
  */
 export function battleGearBoxAt(scale: number): ChromeBox {
-  const size = Math.max(1, Math.round(GEAR_SIZE * scale));
+  const panel = new UiLayout(scale).playerPanel;
+  const gap = Math.round(MARGIN * scale);
   return {
-    /** 贴左下角：左缘从安全区起、下缘从画布底反推。 */
-    x: Math.round(MARGIN * scale),
-    y: LOGICAL.height - Math.round(MARGIN * scale) - size,
-    size,
-  };
-}
-
-/**
- * **"图标 + 并排的键位提示"整块**摆到画布的某条边上 —— 纯函数。
- *
- * ==================================================================
- * 为什么落位要按**整块**算，而不是只看图标
- * ==================================================================
- *
- * 提示与图标并排（`⚙ F1`），所以"图标贴到右缘"会让提示伸出画布 ——
- * 而用户明确否掉了"越界再夹一下"（"别再加第二套避让逻辑"）。规则本身要
- * 保证不越界，唯一的办法是：**先把整块摆进去，再说图标落在哪**。
- *
- * ⚠️ 提示在**哪一侧**由调用方给（`hintSide`）：
- *   - `'left'`（提示在图标左边）→ 整块向右长，所以 `inset.right` 时贴的是
- *     **整块的右缘**（提示那一头才是靠边的），图标在它左边
- *   - `'right'` → 整块向左长，贴的是**图标的右/左缘**
- *
- * 三个调用点各自显式选一侧，公式只有这一条 —— 没有"按画布哪一半猜"。
- *
- * ⚠️ 估宽由 `ui/iconHint.ts` 的 `iconWithHintSize` 给（`estimateMonoWidth`，
- * 宁宽勿窄）—— 那是提示几何的**唯一来源**，不在这里重估一遍。
- */
-export function chromeBlockBoxAt(
-  shortcut: string,
-  iconSize: number,
-  hintSide: HintSide,
-  inset: { readonly right: boolean; readonly bottom: boolean },
-  scale: number,
-): ChromeBox {
-  const margin = Math.round(MARGIN * scale);
-  const scaled = Math.max(1, Math.round(iconSize * scale));
-  const hint = iconHintBoxSize(shortcut, scaled);
-  /**
-   * 图标那一头贴边：提示在左时，**靠着右缘的是提示**，所以图标要再往左
-   * 让出"提示宽 + 间隙"；提示在右时图标自己就是那一头。
-   */
-  const edgePad = hintSide === 'left' ? hint.w + HINT_GAP : 0;
-  return {
-    x: inset.right ? LOGICAL.width - margin - edgePad - scaled : margin,
-    y: inset.bottom ? LOGICAL.height - margin - scaled : margin,
-    size: scaled,
+    x: panel.x + panel.w + gap,
+    y: panel.y,
+    size: Math.max(1, Math.round(GEAR_SIZE * scale)),
   };
 }
 
@@ -421,10 +375,11 @@ export class ScreenChrome {
   /**
    * **齿轮**的键位提示（`F1`）包围盒（画布坐标）。
    *
-   * ⚠️ 与 `backShortcutBounds` 同一个 `boundsOf` —— 上一轮只有返回箭头有
+   * ⚠️ 与 `backShortcutBounds` 同一个 `boundsOf` —— 曾经只有返回箭头有
    * 这个读数，于是"齿轮的提示有没有伸出画布"**没有可读的证据**，只能靠
    * 肉眼看截图（而画布下缘和背景一样黑，"被裁掉"和"画在那"分不出来）。
-   * 本轮"任何缩放下都不出画布"这条硬要求需要一个数来对账：截图脚本读它。
+   * 现在战斗齿轮锚在**玩家面板右边**，同样需要一个数来对账：截图脚本读它
+   * 证明"角标压在齿轮左上角上、且没被裁"。**每个按钮都要有这个读数。**
    */
   get gearShortcutBounds():
     | { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
@@ -471,19 +426,17 @@ export class ScreenChrome {
 
     const f1 = this.options.f1Label();
     /**
-     * ⚠️ 齿轮的提示在**左边**（齿轮贴的是画布右缘，提示放右边会顶出去）。
-     * 这是**这一屏这个按钮的配置**，与战斗齿轮（贴左缘 → 提示在右）镜像。
-     */
-    const GEAR_HINT_SIDE: HintSide = 'left';
-    /**
-     * ⚠️ 默认落位（`chromeBoxAt`）**必须换成"按整块算"**：并排之后提示占宽度，
-     * 只按图标反推会让提示顶出画布（提示在左时尤其明显）。
+     * ⚠️ 提示是**角标**（压在图标自己的左上角上），所以它**不占**整块宽度 ——
+     * 落位只看**图标**的左上角，四个边角共用 `chromeBoxAt` 一条规则。
      *
-     * `gearAt` 仍是可注入的（战斗界面传自己的落位函数），所以这里只换
-     * **默认值** —— 注入的那份由它自己保证（见 `battleGearBoxAt` 的说明）。
+     * ⚠️ 于是不再有"按整块反推图标位置"那一套（`chromeBlockBoxAt` 已删）：
+     * 那是并排摆法的产物（提示会伸到图标外面，得先算整块多大）。
+     *
+     * `gearAt` 仍是可注入的（战斗界面传自己的落位函数），注入的那份由它
+     * 自己保证不出界（见 `battleGearBoxAt`）。
      */
     const gearBox = this.options.gearAt === undefined
-      ? chromeBlockBoxAt(f1, GEAR_SIZE, GEAR_HINT_SIDE, { right: true, bottom: false }, this.uiScale)
+      ? chromeBoxAt({ right: true, bottom: false }, GEAR_SIZE, this.uiScale)
       : this.gearAt(this.uiScale);
     const gear = new IconButton({
       pixi: this.pixi,
@@ -504,43 +457,28 @@ export class ScreenChrome {
        */
       focusRing: true,
       shortcut: f1,
-      hintSide: GEAR_HINT_SIDE,
       /**
-       * 锚点只用于**取尺寸**：真正的落位由 `place` 把内容盒钉到 `box`
-       * （见 `place` 的说明）。x 取内容盒中心 —— 提示在左时图标会被推到
-       * 盒内右侧，而"贴哪条边"是 `chromeBlockBoxAt` 算的，不是锚点算的。
+       * 锚点只用于**取尺寸**：真正的落位由 `place` 把**图标左上角**钉到
+       * `box`（见 `place` 的说明）。`anchor` 居中的是内容盒，而内容盒是
+       * 图标 + 可选文字标签 —— 齿轮没有标签，所以两者中心重合。
        */
       anchor: { x: gearBox.x + gearBox.size / 2, y: gearBox.y + gearBox.size / 2 },
       onClick: () => this.options.onGear(),
     });
-    /**
-     * ⚠️ 战斗界面注入的 `gearAt` 给的是**图标**左上角（它与提示的关系由
-     * `battleGearBoxAt` 自己保证）；默认落位给的是**整块**左上角。
-     * 所以这里按落位函数是谁来选翻译方式 —— 不是两套绘制，是同一个 `place`
-     * 的两种输入（见 `BLOCK_INSET` 的说明）。
-     */
-    this.gear = place(gear, gearBox, this.options.gearAt === undefined ? 'block' : 'icon', GEAR_HINT_SIDE);
+    this.gear = place(gear, gearBox);
 
     /**
      * 返回箭头：**只有给了 `onBack` 才画**（首页 / 战斗没有返回动作）。
      *
      * ⚠️ 它和齿轮**同一个组件、同一套视觉语言、同一个落位公式**
-     * （`chromeBlockBoxAt`：按整块贴边），只是贴的是**另一条边**（左上）
-     * —— 两条边角一条规则，没有"看在哪一半"的分支。
+     * （`chromeBoxAt`：图标左上角贴自己那条边），只是贴的是**另一条边**
+     * （左上）—— 两条边角一条规则，没有"看在哪一半"的分支。
+     *
+     * ⚠️ 用户 2026-10-13："今天我让你把返回改得跟设置一样之后，就都不对了"
+     * —— 现在"跟设置一样"就是"同一个组件 + 同一个角标"，唯一差别是贴哪条边。
      */
     if (this.options.onBack !== undefined) {
-      /**
-       * ⚠️ 返回箭头的提示在**右边**（箭头贴的是画布左缘，提示放左边会顶出去）
-       * —— 与齿轮**镜像**，这正是"并排摆法 + 每个按钮选一侧"的落点。
-       */
-      const BACK_HINT_SIDE: HintSide = 'right';
-      const box = chromeBlockBoxAt(
-        ESC_SHORTCUT,
-        ARROW_SIZE,
-        BACK_HINT_SIDE,
-        { right: false, bottom: false },
-        this.uiScale,
-      );
+      const box = chromeBoxAt({ right: false, bottom: false }, ARROW_SIZE, this.uiScale);
       const arrow = new IconButton({
         pixi: this.pixi,
         icon: 'arrow-left',
@@ -549,11 +487,10 @@ export class ScreenChrome {
         brightColor: PALETTE.focus,
         /** 返回不参与键盘焦点（`F1` 那条流程只管齿轮），所以不画永远不会亮的环。 */
         shortcut: ESC_SHORTCUT,
-        hintSide: BACK_HINT_SIDE,
         anchor: { x: box.x + box.size / 2, y: box.y + box.size / 2 },
         onClick: () => this.options.onBack?.(),
       });
-      this.back = place(arrow, box, 'block', BACK_HINT_SIDE);
+      this.back = place(arrow, box);
     }
 
     const nodes: Container[] = [];
@@ -573,55 +510,36 @@ export class ScreenChrome {
 }
 
 /**
- * 把按钮钉到 `box` —— **`box` 说的是"哪条边贴住安全区"，不是"图标在哪"**。
+ * 把按钮的**图标左上角**钉到 `box`。
  *
  * ==================================================================
- * 两种输入（同一条规则的两半，不是两套算法）
+ * 为什么是"图标左上角"这一件事，而不是"整块"
  * ==================================================================
  *
- * | `kind` | `box` 描述 | 谁给 |
- * |---|---|---|
- * | `'block'` | **整块**（图标 + 并排提示）的左上角 | `chromeBlockBoxAt` |
- * | `'icon'`  | **图标**的左上角（提示的方向由按钮自己的 `hintSide` 决定） | `battleGearBoxAt` |
+ * 提示是**角标**（压在图标自己的左上角上，见 `ui/iconHint.ts`），所以
+ * "整块"就是**图标**本身 —— 三个调用点（整屏齿轮 / 返回箭头 / 战斗齿轮）
+ * 给的都是"图标左上角该落在哪"，没有第二种输入，也没有需要按摆法分叉的翻译。
  *
- * ⚠️ 为什么需要 `'icon'` 那一种：战斗界面的齿轮锚在**左下角**，而"左下"
- * 对它的含义是"图标贴左下、提示往右长"（`battleGearBoxAt` 就是这么算的）。
- * 那里没有"整块"可言 —— 整块往右长不需要让位。硬套 `'block'` 会把提示
- * 也算进"贴边"，于是图标被推离它该在的位置。
+ * ⚠️ 更早这里有 `kind: 'block' | 'icon'` 与 `rightEdgePad()`：那是**并排**
+ * 摆法的产物（提示伸到图标外面，于是"贴边"贴的是提示那一头，图标得再让出
+ * 一个提示宽）。角标没有这个问题，两者都已删。
  *
- * ⚠️ 为什么 `'block'` 那一种要按**提示在哪一侧**补一个偏移：`anchor` 居中的
- * 是**整块**，提示在左时图标的左上角会被推到盒内右侧 —— 而 `chromeBlockBoxAt`
- * 给的是"整块该贴哪条边"（提示那一头贴边）。所以这里把整块钉到 `box`，
- * **图标在哪由 `IconButton` 自己算**（`bounds` / `hintBounds` 是同一段算术）。
+ * ⚠️ 为什么要挪 `root` 而不是只用 `anchor` 居中：`IconButton` 的 `anchor`
+ * 走的是"内容盒居中"那条路，而内容盒**含文字标签**（高度取
+ * `max(size, small+4, body+4)`）。想表达"图标的左上角落在哪"就得先知道
+ * 盒有多大 —— 那正是落位函数（`chromeBoxAt`）不该知道的细节。
+ * 所以这里反过来：照常按 `anchor` 居中构造（只借用它的**尺寸**信息），
+ * 再把 `root` 平移 `box − 图标在盒内的位置`，让图标精确落在 `box`。
  *
- * ⚠️ 平移 `root` 而不是重算子节点坐标：`IconButton` 内部那套绝对坐标
- * （可点区域 `rect`、命中测试、`bounds`、提示包围盒）**自动跟着走** ——
- * 因为它们都是相对 `root` 的。这正是它比"外面再套一层容器、命中测试手工
- * 减偏移"（旧 `SettingsButton`）干净的地方：画在哪与点在哪儿永远同一段算术。
+ * ⚠️ 平移之后 `IconButton` 内部那套绝对坐标（可点区域 `rect`、命中测试、
+ * `bounds`、提示包围盒）**自动跟着走** —— 因为它们都是相对 `root` 的。
+ * 这正是它比"外面再套一层容器、命中测试手工减偏移"（旧 `SettingsButton`）
+ * 干净的地方：画在哪与点在哪儿永远是同一段算术。
  */
-function place(
-  button: IconButton,
-  box: ChromeBox,
-  kind: 'block' | 'icon',
-  hintSide: HintSide,
-): IconButton {
-  const { x, y } = button.bounds;
-  button.root.x = Math.round(box.x) - (kind === 'block' ? x : rightEdgePad(button, hintSide));
-  button.root.y = Math.round(box.y) - y;
+function place(button: IconButton, box: ChromeBox): IconButton {
+  button.root.x = Math.round(box.x) - button.bounds.x;
+  button.root.y = Math.round(box.y) - button.bounds.y;
   return button;
-}
-
-/**
- * `'icon'` 落位时，内容盒左缘与盒子左缘之间该让出多少。
- *
- * 提示在左 → 让出"提示宽 + 间隙"（整块往右长，图标在整块里的右端）；
- * 提示在右 → 不让（图标就是整块的左端）。
- */
-function rightEdgePad(button: IconButton, hintSide: HintSide): number {
-  if (hintSide !== 'left') return button.bounds.x;
-  const hint = button.hintBounds;
-  if (hint === undefined) return button.bounds.x;
-  return hint.x - HINT_GAP;
 }
 
 /**

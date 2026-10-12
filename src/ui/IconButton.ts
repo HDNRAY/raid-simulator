@@ -20,8 +20,8 @@
  *
  * - **没有边框、没有底色** —— 状态只靠**颜色**表达（悬停/键盘选中时
  *   图标变亮）。这是本项目"画面上只有图形"的统一语言。
- * - 键位提示用**等宽字体**、暗色，像键帽一样贴在图标旁边。
- * - 图标在左、提示在右（阅读顺序）；`hintSide` 可以翻转。
+ * - 键位提示用**等宽字体**，是一枚压在**图标左上角**上的小角标
+ *   （更小一号 + 黑描边）—— 见 `hintBox` 与 `ui/iconHint.ts`。
  *
  * ==================================================================
  * 布局：两种定位方式
@@ -41,13 +41,11 @@ import { FONT, LOGICAL } from './layout';
 import { Label, type PixiCtor } from './primitives';
 import {
   BASE_HINT_FONT,
-  HINT_GAP,
   MIN_HINT_FONT,
   estimateMonoWidth,
   iconHintBoxSize,
   iconHintFontSize,
   iconHintPlacement,
-  type HintSide,
 } from './iconHint';
 
 export interface IconButtonOptions {
@@ -67,36 +65,23 @@ export interface IconButtonOptions {
    */
   readonly shortcut?: string;
   /**
-   * 提示在**图标的哪一侧**（默认 `'right'` —— 最早那一版的默认值）。
+   * ⚠️ **不存在"提示在哪一侧"这一项** —— 摆法只有一种：**角标**。
    *
-   * ==================================================================
-   * ⚠️ 这一侧**是每个按钮的配置**，不是"按画布哪一半"的运行时分支
-   * ==================================================================
+   * 用户 2026-10-13 原话："**是角标在左上角啊？** 你随便找个【昨天】的版本
+   * 都是这样。" 而昨天的 `e64eb2d` 里，两个按钮配的都是 `hintSide: 'corner'`
+   * —— 取值本来就一致，所以这次把那一项整个删掉，只留这套外观。
    *
-   * 并排摆法（`⚙ F1` / `F1 ⚙`）—— 用户 2026-10-12 从历史里找回来的那个：
-   * 原话"设置按钮的 快捷键 **无法找到之前好的那个版本的**位置了吗？？"。
+   * 曾有过、且都已删掉的三项（每一个都对应一次走错的路）：
    *
-   * ⚠️ 中间两轮它被改成了"角标"（`291a005` 引入 `'corner'`，`4fa55ef`
-   * 又调成"提示左上角 = 图标左上角"），依据是把用户那句"快捷键在图标的
-   * **左上角**"读成了"角标贴在左上角" ✗ —— 现在看更像是"提示在图标**左边**"
-   * （`'left'`）。所以照历史恢复，不自己再推第三种摆法。
-   *
-   * ⚠️ 与旧版 `hintCorner: 'auto'`（按按钮在画布哪一半自动翻边）**不同**：
-   * 那个是运行时按坐标猜，两个按钮会走不同分支；现在这一侧由调用点显式
-   * 写死（齿轮 `'left'`、返回 `'right'`），而落位公式**只有一条**。
-   */
-  readonly hintSide?: HintSide;
-  /**
-   * ⚠️ **不存在"按画布位置选边"这一项**（曾经叫 `hintCorner: 'auto'`）——
-   * 用户 2026-10-12 的原话："**不用看在哪一半，全局统一风格**"。
-   * 那时它会按按钮在画布哪一半自动翻边，于是"左上角的返回"和"右上角的齿轮"
-   * 各走一条分支，看起来就是**两套算法**。已删。
-   *
-   * 现在这一侧由**调用点显式给**（每个按钮自己知道哪边有地方），而落位
-   * 由 `iconHintPlacement` 从**图标本地的坐标**一条算出来（见那里）。
-   *
-   * ⚠️ 更早还叫 `hintOffset: { dx, dy }`（`+34 / +22`）—— 拿手调数字硬拗
-   * 落位。也已删（它没有任何其它调用方）。
+   *   1. `hintSide: 'left' | 'right'`（**并排**：`⚙ F1` / `F1 ⚙`）—— 首个提交
+   *      `d4e3fb7` 的摆法。`41ca468` 误以为"用户要的历史版本"就是它，于是
+   *      把角标拆掉恢复了并排 ✗ —— 用户否掉的从来不是角标。
+   *   2. `hintCorner: 'auto'`（按按钮在画布哪一半自动翻边）—— 会让"左上角的
+   *      返回"和"右上角的齿轮"各走一条分支，看起来是两套算法 ✗
+   *      （用户原话："**不用看在哪一半，全局统一风格**"）。
+   *   3. `hintOffset: { dx, dy }`（`+34 / +22` 手调数字）—— 拿手调偏移硬拗
+   *      左上的落位。角标的位置是**算出来的**（`iconHintPlacement` 一行），
+   *      不需要任何偏移量。
    */
   /**
    * 键盘焦点时在图标外画一圈**描边**（不填色）。
@@ -149,26 +134,28 @@ export function computeContentBox(options: {
   readonly size?: number;
   readonly shortcut?: string;
   readonly label?: string;
-  readonly hintSide?: HintSide;
   readonly rect?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   readonly anchor?: { readonly x: number; readonly y: number };
 }): ContentBox {
   const size = options.size ?? ICON_BUTTON_DEFAULTS.size;
-  const hintSide = options.hintSide ?? ICON_BUTTON_DEFAULTS.hintSide;
 
   /**
-   * 提示与图标**同一行并排**，所以它**占布局宽度**（这与"角标"那版相反：
-   * 角标是附注、不占位）。字号按图标边长推 —— 与 `IconButton` 里
-   * 画出来的那行字**同一个函数**，否则盒子与画出来的东西会错开。
+   * 角标提示**不占布局宽度** —— 它画在图标左上角**之内**（压着那一角），
+   * 属于"附注"而不是"同行元素"。这与 `e64eb2d` 逐字相同：
+   *
+   * ```ts
+   * // 老版：`corner` 模式下 hintW 直接归零（只有并排才占宽度）
+   * const hintW = options.shortcut === undefined || corner ? 0 : estimateMonoWidth(...);
+   * ```
+   *
+   * ⚠️ 所以按钮本体的尺寸仍然只由**图标 + 文字标签**决定：提示整块落在图标的
+   * 坐标范围里，`hintBounds` 只是把"真的画在哪"报出去，不参与命中区域
+   * （可点范围靠图标的 `hitSlop` 外扩，见 `contains`）。
    */
-  const hintW =
-    options.shortcut === undefined
-      ? 0
-      : estimateMonoWidth(options.shortcut, iconHintFontSize(size));
   const labelW = options.label === undefined ? 0 : estimateMonoWidth(options.label, FONT.body);
-  const parts = [size, hintW, labelW].filter((w) => w > 0).length;
-  const contentW = size + hintW + labelW + Math.max(0, parts - 1) * ICON_BUTTON_DEFAULTS.gap;
-  const contentH = Math.max(size, iconHintFontSize(size) + 4, FONT.body + 4);
+  const parts = [size, labelW].filter((w) => w > 0).length;
+  const contentW = size + labelW + Math.max(0, parts - 1) * ICON_BUTTON_DEFAULTS.gap;
+  const contentH = Math.max(size, FONT.small + 4, FONT.body + 4);
 
   const box =
     options.rect !== undefined
@@ -183,24 +170,14 @@ export function computeContentBox(options: {
           };
         })();
 
-  // 图标在提示的**另一侧**
-  const iconX =
-    box.x + (hintSide === 'left' ? hintW + (hintW > 0 ? ICON_BUTTON_DEFAULTS.gap : 0) : 0);
   return {
     ...box,
-    iconX,
+    /** 图标在盒内左端（文字标签在它右侧）；角标不参与排布，图标不位移。 */
+    iconX: box.x,
     iconY: Math.round(box.y + box.h / 2 - size / 2),
   };
 }
 
-/**
- * 估算等宽字体下一段文字的宽度。
- *
- * 存在的理由：`Text` 的宽度要等纹理生成才有值，而命中矩形必须在
- * 布局期定下来。等宽字体的字宽是稳定的（约 0.6em），所以估算足够准；
- * 这里取 0.62 并向上取整，**宁宽勿窄** —— 估窄了会出现
- * "看起来在按钮里、点不到"。
- */
 /**
  * 焦点环的**几何**（纯函数，可在 node 里测）。
  *
@@ -234,38 +211,29 @@ export const ICON_BUTTON_DEFAULTS = {
    */
   brightColor: PALETTE.focus,
   /**
-   * 提示默认在图标**右侧**（阅读顺序：图标 → 键位）—— 最早那一版的值
-   * （`d4e3fb7` 的 `ICON_BUTTON_DEFAULTS.hintSide = 'right'`）。
+   * 图标与**文字标签**之间的间隙（只有同时给了 `label` 才会用到）。
    *
-   * ⚠️ 靠右边角的调用方（右上角的齿轮）要显式传 `'left'`：那边放右边
-   * 会顶出画布。这是**每个按钮的配置**，不是运行时按位置猜。
+   * ⚠️ 角标提示**不占这个间隙** —— 它压在图标的左上角上，不参与排布
+   * （见 `computeContentBox`）。
    */
-  hintSide: 'right' as const,
-  /**
-   * 提示与图标之间的间隙 —— **转发 `iconHint.HINT_GAP`**。
-   *
-   * ⚠️ 不在这里重写一个字面量 4：`iconHint.ts` 的 `iconWithHintSize()`
-   * 也要用它来算"图标 + 提示"整块多大，而 `ScreenChrome` 靠那个值
-   * 把齿轮摆进画布。两个 4 就是"同一件事两份表达"。
-   */
-  gap: HINT_GAP,
+  gap: 4,
   /**
    * 提示字号的两个基准 —— **转发 `ui/iconHint.ts`**（不在这里重写数字）。
    *
-   *   `hintFont`    = 提示在**图标 20px 时的字号**（13，与 `FONT.small` 一致）
-   *   `minHintFont` = 缩放时字号的**下限**
+   *   `hintFont`    = 提示在**图标 20px 时的字号**（**9**，角标那一档）
+   *   `minHintFont` = 缩放时字号的**下限**（8）
    *
    * ⚠️ 真正的读值是 `iconHintFontSize(size)` —— 那里写着"按图标边长缩放 +
    * 下限"那条规则。这里留着只是为了让调用方有一处可读的默认值表。
    *
-   * ⚠️ 这两项**曾经是"提示不随 UI 缩放"的全部依据**（上一轮判断：
-   * "角标放大到 40px 会比图标还抢眼"）—— 用户 2026-10-12 推翻了它，
-   * 现在它们只是**比例的分母与下限**。
+   * ⚠️ `hintFont` 是 **9 而不是 `FONT.small`（13）**：角标压在图标角上，
+   * 必须比图标明显小一圈（老版 `e64eb2d` 的 `cornerSize` 就是 9）。
+   * 13 是"并排"那一版的值（那时提示与图标同一行、是同级元素）——
+   * `41ca468` 恢复并排时把它一起改过去了，现在跟着角标改回来。
    *
-   * ⚠️ 沿革：这里曾是 `cornerSize: 9` / `cornerStroke: 3`（"角标"那版
-   * 的字号与描边）。用户把摆法改回**并排**之后，那两个值没有意义了 ——
-   * 并排的提示不压在图标上，不需要小一号、也不需要描边（那正是历史
-   * `d4e3fb7` 的取值：`FONT.small` + `PALETTE.textDim`）。
+   * ⚠️ 沿革：这两项**曾经是"提示不随 UI 缩放"的全部依据**（某轮判断：
+   * "角标放大到 40px 会比图标还抢眼"）—— 用户推翻了它，现在它们只是
+   * **比例的分母与下限**。缩放与"角标"是两件事，可以叠加。
    *
    * ⚠️ 更早还有 `hintOverlap: 4` 与 `hintCanvasGap: 2` —— 前者是"让角标
    * 压住那一角"（用户报的"左中"就是它造成的），后者从第一天起就没有读者
@@ -274,6 +242,15 @@ export const ICON_BUTTON_DEFAULTS = {
    */
   hintFont: BASE_HINT_FONT,
   minHintFont: MIN_HINT_FONT,
+  /**
+   * 角标提示的**黑描边宽度** —— 老版 `e64eb2d` 的 `cornerStroke: 3`。
+   *
+   * ⚠️ 它**不是装饰**：角标压在图标上，而齿轮本身是浅色笔画 —— 不加描边时
+   * `F1` 的深灰字与齿轮糊成一团（用户原话："**esc 的描边没有让它看起来足够
+   * 清晰**"）。实测 3px 才让它"跳"出来。并排摆法不需要它（提示不压图标），
+   * 所以这一项是**角标专属**的几何特征。
+   */
+  cornerStroke: 3,
   /**
    * 可点区域在**图标外侧**的外扩量（逻辑像素）。
    *
@@ -361,7 +338,6 @@ export class IconButton {
     const { pixi } = options;
     const size = options.size ?? ICON_BUTTON_DEFAULTS.size;
     const color = options.color ?? ICON_BUTTON_DEFAULTS.color;
-    const hintSide = options.hintSide ?? ICON_BUTTON_DEFAULTS.hintSide;
 
     this.root = new pixi.Container();
 
@@ -377,20 +353,25 @@ export class IconButton {
     }
     if (options.shortcut !== undefined) {
       /**
-       * 键位提示：与图标**同一行并排**，暗色。
+       * 键位提示：**压在图标左上角上的角标**。
        *
-       * ⚠️ 字号走 `iconHintFontSize(size)` —— 它是**图标边长的函数**
-       * （用户要求"提示整块跟着 UI 缩放"），并且带了规则给出的下限。
+       * ⚠️ 三条都照 `e64eb2d` 抄（老版的 `corner` 分支）：
        *
-       * ⚠️ 颜色是历史那一版的 `PALETTE.textDim`（**不是**角标那版的亮色 +
-       * 3px 描边）：并排摆法下提示不压在图标上，没有"糊在一起"的问题，
-       * 而描边会让它看起来比图标还重。
+       *   1. **亮色 `PALETTE.text`**（不是 `textDim`）—— 老版的理由写得很具体：
+       *      "根因不是描边不够粗，而是**文字本身太暗**：Esc 压在浅色的齿轮上，
+       *      深灰字与齿轮笔画糊成一团"
+       *   2. **黑描边 3px**（`cornerStroke`）—— 角标压图标，没有描边读不出来
+       *   3. **9px**（`iconHintFontSize` 在 20px 图标时的值）—— 附注要比图标
+       *      明显小一圈。字号仍然是**图标边长的函数**（跟随 UI 缩放那条规则
+       *      叠在角标上），只是基准从并排的 13 改回角标的 9。
        */
       this.hint = new Label(pixi, {
         x: 0,
         y: 0,
         size: iconHintFontSize(size),
-        color: PALETTE.textDim,
+        color: PALETTE.text,
+        stroke: 0x000000,
+        strokeWidth: ICON_BUTTON_DEFAULTS.cornerStroke,
       });
       this.hint.set(options.shortcut);
     }
@@ -402,10 +383,6 @@ export class IconButton {
     this.iconY = box.iconY;
     this.iconSize = size;
     const midY = box.y + box.h / 2;
-    const hintFont = iconHintFontSize(size);
-    const hintW =
-      options.shortcut === undefined ? 0 : estimateMonoWidth(options.shortcut, hintFont);
-    const labelW = options.label === undefined ? 0 : estimateMonoWidth(options.label, FONT.body);
 
     this.icon = new Icon({ pixi, name: options.icon, size, color });
     this.icon.root.x = box.iconX;
@@ -428,57 +405,46 @@ export class IconButton {
       this.root.addChild(this.ring);
     }
 
-    // 提示与文字按同一顺序排布，垂直各自居中
-    let cursor = box.x;
-    const place = (node: Container, w: number): void => {
-      node.x = cursor;
-      cursor += w + ICON_BUTTON_DEFAULTS.gap;
-    };
-    if (hintSide === 'left' && this.hint) {
-      this.hint.root.y = Math.round(midY - hintFont / 2);
-      place(this.hint.root, hintW);
-    }
+    /**
+     * 文字标签排在**图标右侧**（只有它有排布；角标提示不参与）。
+     *
+     * ⚠️ 游标从图标右缘起 —— 角标不占宽度，所以这里只有 `label` 一个元素。
+     */
     if (this.text) {
+      this.text.root.x = box.iconX + size + ICON_BUTTON_DEFAULTS.gap;
       this.text.root.y = Math.round(midY - FONT.body / 2);
-      place(this.text.root, labelW);
     }
-    // 图标已由 box.iconX 定位；把游标推到图标右侧，供右侧提示使用
-    cursor = box.iconX + size + ICON_BUTTON_DEFAULTS.gap;
-    if (hintSide === 'right' && this.hint) {
-      this.hint.root.y = Math.round(midY - hintFont / 2);
-      place(this.hint.root, hintW);
-    }
-    void cursor;
 
     this.root.addChild(this.icon.root);
     if (this.text) this.root.addChild(this.text.root);
     if (this.hint) {
       /**
        * ============================================================
-       * 提示的**落位**由 `iconHintPlacement` 一条规则算出（不手调偏移）
+       * 角标的**落位**由 `iconHintPlacement` 一条规则算出（不手调偏移）
        * ============================================================
        *
-       * 规则只有一行：**同一行、垂直居中、按 `hintSide` 决定在左还是在右**
-       * （`⚙ F1` / `F1 ⚙`）。这就是从 `d4e3fb7` 恢复回来的那个摆法 ——
-       * 中间那两轮的"角标"已经拿掉了。
+       * 规则只有一行：**提示的左上角 = 图标的左上角**（`x = icon.x`,
+       * `y = icon.y`，锚点是提示的左上角）。这就是 `e64eb2d` 的角标 ——
+       * 用户 2026-10-13 指认的那个"昨天随便哪个版本都这样"的摆法。
        *
-       * ⚠️ 历史那版这里是**两段几乎相同的 `place()` 调用**（上面那两处），
-       * 而 `iconHintPlacement` 把"算在哪"收成了一处 —— 画与算不再各写一遍，
-       * 包围盒（`hintBox`）也直接由它得出，不会漂。
+       * ⚠️ `41ca468` 那次"恢复历史"挖错了版本（挖到首个提交 `d4e3fb7` 的
+       * **并排**），把这里改成了"同一行、垂直居中、按 `hintSide` 在左右" ✗
+       * —— 现在逐字改回角标。
        *
        * ⚠️ 落位**不做越界避让**（用户明确否掉："别再加第二套避让逻辑"）：
-       * "整块在画布内"由**摆图标那条规则**保证（`ScreenChrome.
-       * chromeBlockBoxAt` 先算整块多大再从画布边缘反推）。
+       * 角标只从图标左上角**往右下方**长，而图标的左上角本来就留了边距
+       * （返回 `(8,8)`、齿轮 `(924,8)`）—— 所以整块天然落在画布内。
        */
       const hint = iconHintBoxSize(options.shortcut ?? '', size);
-      const placed = iconHintPlacement({
-        icon: { x: box.iconX, y: box.iconY, w: size, h: size },
-        hintW: hint.w,
-        hintH: hint.h,
-        side: hintSide,
-        canvasW: LOGICAL.width,
-        canvasH: LOGICAL.height,
-      });
+      const placed = iconHintPlacement(
+        {
+          icon: { x: box.iconX, y: box.iconY, w: size, h: size },
+          canvasW: LOGICAL.width,
+          canvasH: LOGICAL.height,
+        },
+        hint.w,
+        hint.h,
+      );
       this.hint.root.x = placed.x;
       this.hint.root.y = placed.y;
       this.hint.root.anchor.x = placed.anchorX;
