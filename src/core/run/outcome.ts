@@ -55,6 +55,23 @@ export interface BattleOutcomeRecord {
 /**
  * 这一场的结果。`undefined` = **还没打完**（没有 `encounterEnd` 事件）。
  *
+ * ⚠️⚠️ **它目前在 `core/` 里没有消费者 —— 不要以为它已经在用。**
+ *
+ * 这句话得写在最显眼处：一个"看起来像基础设施"的便利函数最容易被顺手
+ * 依赖，也最容易在人以为它有用时被改坏。事实是：
+ *
+ *   - **归约与查询都不用它**。`lifecycle.ts` 的 `advanceRun` 收的是调用方
+ *     **显式传**的 `outcome`（`Q-b` 把它收成了必填）—— 猜"哪边算赢"
+ *     这种事的正确位置是知道 `snapshot.status` 的那一层。
+ *   - 它是 **P2 / P3 的 app 层入口**：那里要从这一场的事件流里取
+ *     `encounterEnd.result`（`RunOutcome` 的摘要 / 结算屏 / 记录装配）。
+ *     现在写它，是因为**它是 `outcome.ts` 这个叶子存在的语义理由**。
+ *
+ * ⚠️ **为什么不删它（尽管"死值先删"）**：删了就得把 `BattleOutcomeRecord`
+ * 挪回 `stats.ts`，于是 `stats.ts ⇄ query.ts` 的类型环**又回来了** ——
+ * 用"删一个便利函数"换"重新引入一条每次读代码都要确认的环"不划算。
+ * 这条权衡也写在 `query.ts` 的文件头。
+ *
  * ⚠️ 只认 `encounterEnd` 的 `result`，**不**看"谁的血先归零"之类的推演：
  * 引擎已经把判定做完了（超时 / 死亡 / 狂暴都由
  * `core/combat/encounterEnd.ts` 定），这里再推一遍就是**第二份判据**，

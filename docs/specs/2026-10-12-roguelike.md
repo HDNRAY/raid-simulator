@@ -906,6 +906,45 @@ M1（二阶段）+ M2（霸体）+ M3（控制）三条通道**；至少一条�
 | **一局肉鸽的记录（P0 已实现）** | `RunRecord = { runFormatVersion, state: RunState, battles: RunBattleRecord[] }`（`core/run/record.ts`）。⚠️ **不内嵌**引擎的 `RecordedRun`：那会让一局肉鸽的记录在战斗重放格式变更时被迫一起变。**校验规则与 `replayRun` 刻意不同**：`replayRun` 的入参是开发者给的重放文件（版本不匹配 → **英文抛错**），而这里的入参是**用户的存档**（版本旧了是常态 → **整条丢弃**返回 `undefined`）。同一件事的正确反应天生不同，所以刻意不一致 |
 | **`REPLAY_FORMAT_VERSION` 要不要 +1** | **看具体工作项**（见下表）。判断依据是 `run.ts:37-45` 的原文："改动引擎的**确定性语义**时必须 +1" |
 
+#### ⚠️ 两个版本号，**判据不同，不要互相套用**
+
+仓库里有两个"格式版本号"，它们长得像、后果完全不同：
+
+```text
+REPLAY_FORMAT_VERSION   引擎的**确定性语义**（动了要重标定黄金基线）
+RUN_FORMAT_VERSION      我们**自己的记录格式**（加了字段就该 +1）
+```
+
+| | `REPLAY_FORMAT_VERSION`（`src/core/run.ts`） | `RUN_FORMAT_VERSION`（`src/core/run/record.ts`） |
+|---|---|---|
+| 管什么 | **一场战斗**的重放：`{version, seed, ticks, input}` | **一局肉鸽**的记录：`{runFormatVersion, state, battles}` |
+| 判据 | "有没有动**引擎的确定性语义**"（`run.ts:37-45` 原文） | "**记录的形状 / 字段含义**有没有变"（与引擎无关） |
+| 改它的后果 | 旧重放在同一份 `(seed + 输入)` 下得到**不同结果** | 旧记录**读不回来**（本层是**整条丢弃**） |
+| +1 时必须做什么 | **重标定** `tests/golden/replay.test.ts` 的 `GOLDEN_OUTCOME` | 什么都不用重标定（没有基线可标） |
+| 版本不匹配时 | **英文抛错**（开发者错误） | **返回 `undefined`**（用户存档，整条丢弃） |
+| 当前值 | **2** | **2** |
+
+⚠️ **最容易套错的一步**：给一局肉鸽的记录**加一个字段**时，**不要**去论证
+"它不参与判定所以不用 +1" ✗ —— 那句话是 `REPLAY_FORMAT_VERSION` 的判据。
+**记录格式加字段就该 +1。**
+
+**本仓库刚发生过一次，可以当例子**：`RunBattleRecord` 加了 `flawless`
+（为了让 `Q-e` 的"满血对账"成立）——
+
+- `RUN_FORMAT_VERSION` **1 → 2** ✅（记录形状变了）
+- `REPLAY_FORMAT_VERSION` **不动，仍是 2** ✅（引擎一个字没动，黄金重放 18/18 逐位不变）
+- 而**同一轮**给 `interruptSuccess` 加 `sourceSkillId` 时，判断**恰好相反**：
+  引擎的事件字段变了，但**它不参与判定、事件流也不进 `BattleState`**，
+  所以 `REPLAY_FORMAT_VERSION` **不必 +1** —— 那时**也不要**去动
+  `RUN_FORMAT_VERSION`（它不是记录格式的事）。
+
+**一句话记法**：问"**这改变的是引擎算出来的东西，还是我们写下来的东西？**"
+前者 → `REPLAY_FORMAT_VERSION`；后者 → `RUN_FORMAT_VERSION`。
+
+⚠️ 顺带一条**当前状态**：`RunRecord` **从来没有被真正写出去过**（存档是 P7）。
+所以 `RUN_FORMAT_VERSION` 的每次 +1 现在都**没有要兼容的旧数据** ——
+它此刻的作用是"形状变了就改号"，而不是"救回一份旧存档"。
+
 | 工作项 | 是否改变现有战斗的确定性语义 | 要不要 +1 |
 |---|---|---|
 | W1 计数器写入 / W2 计数器条件 | ❌ 现有内容不用它 → 结果逐位不变 | 不必（**且已推迟**：等战斗内机制的真实消费者） |

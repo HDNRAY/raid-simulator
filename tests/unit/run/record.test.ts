@@ -527,27 +527,60 @@ describe('parseRecordedRun —— 坏数据整条丢弃（§11 风险 #9）', ()
     expect(
       parseRecordedRun({ ...good, state, battles: [battleRecord(state, 1, 'victory', true)] }),
     ).toBeDefined();
+    // ⚠️ 反方向也要查：骨架说"满血"、记录说"不是满血" → 同样不一致
+    expect(
+      parseRecordedRun({ ...good, state, battles: [battleRecord(state, 1, 'victory', false)] }),
+    ).toBeUndefined();
   });
 
-  it('⚠️ 记录**缺** `flawless` 时那半条对账不生效（兼容不含它的 v1 记录）', () => {
+  it('⚠️ 记录**缺** `flawless` → 整条 undefined（`RUN_FORMAT_VERSION: 2` 起必填）', () => {
     /**
-     * ⚠️ 这个"口子"是刻意留的：`flawless` 是 `RUN_FORMAT_VERSION: 1`
-     * **之后**加上的字段，收成必填会让"不含它的旧记录"读不回来。
+     * ⚠️ 这条用例**改过一次**，而且改的原因值得留着：
      *
-     * 所以缺 = 不参与对账（长度与胜负那两条**仍然**在查）。
-     * ⚠️ **P7 真正写存档时必须把它收成必填并 +1** —— 长期留着这个口子
-     * 等于那半条对账不存在（见 `RunBattleRecord.flawless` 的说明）。
+     * 它原来叫"记录缺 `flawless` 时那半条对账不生效（兼容不含它的 v1 记录）"，
+     * 断言的正是那个**口子**。后来判定：**没有任何 v1 记录存在**
+     * （`RunRecord` 从来没被真正写出去过，存档是 P7），所以那个口子
+     * 只换来"一条有洞的检查" —— 而**有洞的检查等于没有检查**。
+     *
+     * 现在 `flawless` 是**必填**：缺它整条丢弃。
+     * ⚠️ 这次收严**同时**把 `RUN_FORMAT_VERSION` 从 1 改成了 2 ——
+     * 加的字段改了**我们的记录格式**（+1），而引擎一个字没动
+     * （`REPLAY_FORMAT_VERSION` 仍 2）。这就是"两个版本号判据不同"的
+     * 一个实例，见 `record.ts` 的 `RUN_FORMAT_VERSION` 注释。
      */
     const state = {
       ...good.state,
       battleStats: { ...good.state.battleStats, battles: [{ won: true, flawless: true }] },
     };
-    const noFlawless = { position: 1, bossId: state.order[0] ?? 'x', seed: 1, outcome: 'victory' as const };
-    expect(parseRecordedRun({ ...good, state, battles: [noFlawless] })).toBeDefined();
-    // 但长度与胜负照查
+    // 缺字段 → 整条丢弃（不再"跳过这半条对账"）
     expect(
-      parseRecordedRun({ ...good, state, battles: [{ ...noFlawless, outcome: 'defeat' }] }),
+      parseRecordedRun({
+        ...good,
+        state,
+        battles: [{ position: 1, bossId: 'x', seed: 1, outcome: 'victory' }],
+      }),
     ).toBeUndefined();
-    expect(parseRecordedRun({ ...good, state, battles: [] })).toBeUndefined();
+    // 值不是布尔 → 同样丢弃
+    expect(
+      parseRecordedRun({
+        ...good,
+        state,
+        battles: [{ position: 1, bossId: 'x', seed: 1, outcome: 'victory', flawless: 'no' }],
+      }),
+    ).toBeUndefined();
+    // 带上正确的 `flawless` → 通过（证明上面的失败是"缺字段"而不是别的原因）
+    expect(
+      parseRecordedRun({
+        ...good,
+        state,
+        battles: [{ position: 1, bossId: 'x', seed: 1, outcome: 'victory', flawless: true }],
+      }),
+    ).toBeDefined();
+  });
+
+  it('⚠️ `RUN_FORMAT_VERSION` 现在是 2（记录格式加了必填字段），v1 记录被拒', () => {
+    expect(RUN_FORMAT_VERSION).toBe(2);
+    expect(parseRecordedRun({ ...good, runFormatVersion: 1 })).toBeUndefined();
+    expect(parseRecordedRun({ ...good, runFormatVersion: RUN_FORMAT_VERSION })).toBeDefined();
   });
 });
