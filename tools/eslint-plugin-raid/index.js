@@ -265,12 +265,21 @@ const rules = {
       schema: [],
       messages: {
         internal:
-          "渲染层不许 import core 内部模块 '{{name}}'（架构规范 C3）。只允许 core/snapshot 与 core/protocol 暴露的类型。",
+          "渲染层不许 import core 内部模块 '{{name}}'（架构规范 C3）。只允许 core/protocol / core/workerProtocol 暴露的类型。",
       },
     },
     create(context) {
       // 允许的 core 公开面
-      const ALLOWED = /^.*core\/(snapshot|protocol|workerProtocol)$/;
+      /**
+ * ⚠️ **这里曾经写着 `snapshot`，而 `core/snapshot.ts` 从来不存在**（已删）。
+ *
+ * 它不只是白名单多一项 —— 那串路径还印在**报错文案**里，于是这条规则
+ * 在**指导开发者去 import 一个不存在的模块** ✗
+ *
+ * 与 `eslint.config.js` 里那条死掉的 `files:` 是同一类：
+ * **规则声明它管某件事，而实际匹配/放行的是空集。**
+ */
+const ALLOWED = /^.*core\/(protocol|workerProtocol)$/;
       const isCore = /(^|\/)core\//;
       return {
         ImportDeclaration(node) {

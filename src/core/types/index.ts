@@ -10,6 +10,12 @@
  * 所以这里只做**同目录相对 import**。这些都是 `import type`，编译期即
  * 擦除，**不产生运行期的 import 环** —— 这正是能横向切的前提。
  *
+ * ⚠️ `qiji.ts` 是**唯一**在这里没有 `../../xxx` 消费者的段（肉鸽的
+ * `core/run/` 直接 import 它的文件）：它转发进来是**纪律的一致** ——
+ * `from '../core/types'` 应该能拿到全部类型，而不该有"这个类型要
+ * 换个路径 import"的例外。缺了它，下一个人会在 `types/` 目录里找不到
+ * `RunCounter`，然后以为它不存在（或者更糟：在 `run/` 里另起一份）。
+ *
  * 本文件只是**转发**，方便 `from '../core/types'` 这种整体导入。
  */
 
@@ -25,6 +31,7 @@ export * from './loadout';
 export * from './behavior';
 export * from './runtime';
 export * from './encounter';
+export * from './qiji';
 
 /** 事件 / 输入的定义在各自的叶子里（见其文件头）。 */
 export type { EncounterEndEvent, EventDef, EventKind, SkillRejectReason } from '../events';
