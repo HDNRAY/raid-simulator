@@ -77,6 +77,19 @@ export interface BattleOutcomeRecord {
  * `core/combat/encounterEnd.ts` 定），这里再推一遍就是**第二份判据**，
  * 而两份判据必然漂。
  */
+/**
+ * 从事件流里取这一场的胜负。
+ *
+ * ⚠️ **取【第一个】 `encounterEnd`** —— 引擎一场战斗**恰好发一个**结束事件
+ * （`encounterLifecycle` 结束后战斗即终止 ✓）。
+ *
+ * 这条不变量**特意用注释写明、而不是写成测试** ✗ —— 因为"多个 `encounterEnd`"
+ * 是一个**不可能的状态** ✓ 给它定语义等于**凭空造一条规则** ✓
+ * （与"死值先删"是同一个判断的两面:不该留没人用的东西,也不该造没人触发的规则 ✓）
+ *
+ * ⚠️ 变异测试实测:把这里改成"返回**最后**一个" **不会被任何测试抓住** ✓ ——
+ * 这是**已知且有意**的覆盖边界,不是遗漏 ✓
+ */
 export function outcomeOf(events: readonly EventDef[]): 'victory' | 'defeat' | undefined {
   for (const event of events) {
     if (event.kind === 'encounterEnd') return event.result;
