@@ -27,9 +27,10 @@ import { createRegistry } from '../../src/core/content/registry';
 import { translator } from '../../src/i18n/translator';
 import { DEFAULT_BINDINGS } from '../../src/input/keyboard';
 import { GUARD_HOLD_DRAIN_PER_SECOND } from '../../src/data/balance';
-import { FLASH_IFRAME } from '../../src/data/kits/kaili';
+import { FLASH, FLASH_IFRAME } from '../../src/data/kits/kaili';
 import { DODGE_IFRAME } from '../../src/data/kits/linwanfeng';
-import { LOGIC_TICKS_PER_SECOND, logicMs } from '../../src/core/loopConstants';
+import { logicMs } from '../../src/core/loopConstants';
+import { displaySeconds } from '../../src/app/displayTime';
 
 describe('按键设置只列玩家技能', () => {
   it('两个 Boss 的技能都不该可绑键', () => {
@@ -230,6 +231,25 @@ describe('行的内容：没有战斗快照时也要有结构化信息', () => {
     expect(jie?.cdText).toBe('冷却 10 秒');
   });
 
+  /**
+   * ================================================================
+   * ⚠️ 冷却**不能进位**：「闪」的 0.6 秒曾经显示成 1 秒
+   * ================================================================
+   *
+   * 真实 bug（用户报告）：`FLASH.cooldown = logicMs(6)` = 600ms = 0.6 秒，
+   * 而这一行原先写的是 `Math.round(skill.cooldown / 1000)` = **1** ——
+   * 比内容定义多了 67%。
+   *
+   * 修法收在 `app/displayTime.ts` 的 `displaySeconds()`（一处实现），
+   * 本条是那个函数的**端到端回归**：值必须等于内容定义，且不能被进位。
+   */
+  it('⚠️ 「闪」的冷却显示 0.6 秒，不是 1 秒', () => {
+    const row = rowsWithoutSnapshot().find((r) => r.skillId === 'flash');
+    expect(FLASH.cooldown, '内容里的冷却就是 600ms').toBe(logicMs(6));
+    expect(row?.cdText).toBe('冷却 0.6 秒');
+    expect(row?.cdText).not.toBe('冷却 1 秒');
+  });
+
   it('⚠️ 文案里的占位符必须被插值，不能把 `{seconds}` 原样显示出来', () => {
     const rows = rowsWithoutSnapshot();
     for (const r of rows) {
@@ -298,16 +318,14 @@ describe('说明里的秒数 = buff 的真实时长（不再写死）', () => {
   }
 
   /**
-   * 把"毫秒时长"按本作**逻辑步**（0.1 秒）口径折成一个数。
+   * 毫秒时长 → 说明里那个秒数。
    *
-   * ⚠️ 不能写 `ms / 1000`：`logicMs(2) / 1000 = 0.19999999999999998`，
-   * 而玩家看到的、以及推导出来的都是 `0.2`。这条换算与
-   * `app/keyRows.ts` 的 `secondsFromMs()` 是**同一条口径**。
+   * ⚠️ 走**产品代码那一个函数**（`app/displayTime.ts` 的 `displaySeconds`），
+   * 不在这里抄一份换算 —— 抄一份的话，"0.6 被进位成 1"这类错会同时出现在
+   * 实现和测试里，两边一起错就没人发现（本轮那个 bug 正是这个形状：
+   * 实现与测试都以为 `Math.round` 是对的）。
    */
-  function secondsNumber(ms: number): number {
-    const steps = Math.round((ms / 1000) * LOGIC_TICKS_PER_SECOND);
-    return steps / LOGIC_TICKS_PER_SECOND;
-  }
+  const secondsNumber = displaySeconds;
 
   it('模板清单里提到的技能，行数据都要带上 `descParams`', () => {
     const all = rows();

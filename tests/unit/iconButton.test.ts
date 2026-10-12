@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ICON_BUTTON_DEFAULTS, computeContentBox, estimateMonoWidth, focusRingRect } from '../../src/ui/IconButton';
+import { ICON_BUTTON_DEFAULTS, computeContentBox, focusRingRect } from '../../src/ui/IconButton';
+import { estimateMonoWidth } from '../../src/ui/iconHint';
 import { FONT } from '../../src/ui/layout';
 
 /**
@@ -39,20 +40,23 @@ describe('图标按钮：可点区域', () => {
     expect(withHint.w - iconOnly.w).toBe(estimateMonoWidth(',', FONT.small) + 4);
   });
 
-  it('角落提示（corner）**不占**布局宽度 —— 它是附注，不是同级元素', () => {
+  it('并排提示**占**布局宽度 —— 它是与图标同一行的元素', () => {
     /**
-     * 需求："esc 应该比较小，然后再设置按钮的左上角"。
-     * 角落里的小字不该把按钮撑大（否则齿轮会被挤偏）。
+     * ⚠️ 这条是 2026-10-12 那次"恢复历史版本"的回归：提示从"角标"（不占
+     * 布局宽度）改回**并排**（`d4e3fb7` 那版的 `hintSide: 'left' | 'right'`）。
+     *
+     * 并排时提示当然要占宽度 —— 否则可点区域会短一截、整块宽度也会算小，
+     * 于是"把整块摆进画布"那条规则（`chromeBlockBoxAt`）就失去依据。
      */
     const iconOnly = computeContentBox({ size: 20, anchor: { x: 100, y: 100 } });
-    const corner = computeContentBox({
+    const sideBySide = computeContentBox({
       size: 20,
       shortcut: 'Esc',
-      hintSide: 'corner',
+      hintSide: 'right',
       anchor: { x: 100, y: 100 },
     });
-    expect(corner.w).toBe(iconOnly.w);
-    expect(corner.iconX).toBe(iconOnly.iconX);
+    expect(sideBySide.w).toBeGreaterThan(iconOnly.w);
+    expect(sideBySide.w - iconOnly.w).toBeGreaterThan(0);
   });
 
   it('提示在左时图标右移；提示在右时图标在左', () => {

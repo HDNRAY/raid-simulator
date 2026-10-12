@@ -8,6 +8,7 @@ import {
   computeScale,
 } from '../../src/render/scaling';
 import { FONT, GLYPH_NUDGE, LAYOUT, LOGICAL, skillSlotLabels, skillSlotRect } from '../../src/ui/layout';
+import { HINT_GAP, iconHintBoxSize, iconHintFontSize, iconHintPlacement } from '../../src/ui/iconHint';
 
 /**
  * 技能栏的实现**已拆到 `skillBar.ts`**（原文件超长）。
@@ -339,17 +340,45 @@ describe('技能格：图标尺寸与冷却时的可读性', () => {
 
 });
 
-describe('角落快捷键提示（Esc）的可读性', () => {
-  it('描边 3px 且文字用亮色 —— 深色字压在浅色图标上会糊', async () => {
-    const src = readFileSync(new URL('../../src/ui/IconButton.ts', import.meta.url), 'utf8');
-    /**
-     * 需求："esc 的描边没有让它看起来足够清晰"。
-     *
-     * 根因不是描边不够粗，而是**文字本身太暗**：Esc 压在浅色齿轮上，
-     * 深灰字与齿轮笔画糊在一起。所以两件事都要保证。
-     */
-    expect(src).toMatch(/cornerStroke: 3,/);
-    expect(src).toMatch(/color: corner \? PALETTE\.text : PALETTE\.textDim/);
+describe('键位提示的尺度：并排 + 随图标缩放', () => {
+  /**
+   * ⚠️ 2026-10-12 用户把摆法从"角标"改回**并排**（`d4e3fb7` 那版）。
+   *
+   * 这类"视觉尺度"的判据分两层：
+   *   - **算得对不对**（并排、居中、随缩放 + 下限）→ 纯函数，这里钉
+   *   - **画出来是什么样**（暗色、无描边、看得清）→ **截图**（AGENTS.md §4）
+   *     —— 所以这里不再去正则扫源码里那句话，那是在锁实现而不是锁行为。
+   */
+  it('提示与图标**同一行、垂直居中**，且按 `hintSide` 在指定一侧', () => {
+    for (const scale of [0.5, 1, 1.5, 2]) {
+      const size = Math.max(1, Math.round(20 * scale));
+      const icon = { x: 100, y: 200, w: size, h: size };
+      const hint = iconHintBoxSize('F1', size);
+      for (const side of ['left', 'right'] as const) {
+        const p = iconHintPlacement({
+          icon,
+          hintW: hint.w,
+          hintH: hint.h,
+          side,
+          canvasW: LOGICAL.width,
+          canvasH: LOGICAL.height,
+        });
+        const tag = `scale=${scale} side=${side}`;
+        /** 同一行：提示的垂直中心 = 图标的垂直中心。 */
+        expect(p.y + hint.h / 2, tag).toBeCloseTo(icon.y + icon.h / 2, 6);
+        expect(p.x, tag).toBe(
+          side === 'left' ? icon.x - HINT_GAP - hint.w : icon.x + icon.w + HINT_GAP,
+        );
+      }
+    }
+  });
+
+  it('字号随图标缩放，并**在 0.5 倍时落到规则给出的下限**', () => {
+    /** 1 倍 = 历史那一版的 13px（`FONT.small`）；下限 8（0.5 倍按比例是 7）。 */
+    expect(iconHintFontSize(20)).toBe(FONT.small);
+    expect(iconHintFontSize(10)).toBe(8);
+    expect(iconHintFontSize(30)).toBe(20);
+    expect(iconHintFontSize(40)).toBe(26);
   });
 });
 

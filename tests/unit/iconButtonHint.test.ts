@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
+import { ICON_BUTTON_DEFAULTS } from '../../src/ui/IconButton';
+import { FONT, LOGICAL } from '../../src/ui/layout';
 import {
-  ICON_BUTTON_DEFAULTS,
+  BASE_HINT_FONT,
+  BASE_ICON_SIZE,
+  HINT_GAP,
+  MIN_HINT_FONT,
   estimateMonoWidth,
+  iconHintBoxSize,
+  iconHintFontSize,
   iconHintPlacement,
-} from '../../src/ui/IconButton';
-import { LOGICAL } from '../../src/ui/layout';
+  iconWithHintSize,
+} from '../../src/ui/iconHint';
 import { buildFocusContext } from '../../src/ui/settings/panelFocus';
 import { keyGridMetrics } from '../../src/ui/settings/keyGridLayout';
 import { KEY_GRID, TOUCH_GRID_COLS } from '../../src/ui/settings/settingsGeometry';
@@ -12,106 +19,169 @@ import { rowsCapacity } from '../../src/ui/settings/logic';
 
 /**
  * ==================================================================
- * 角落提示的**落位是推出来的**（不是手调偏移）
+ * 键位提示的摆法：**并排**（`⚙ F1` / `F1 ⚙`）—— 从历史恢复的那一版
  * ==================================================================
  *
- * 这一条说的是需求："返回按钮应该和设置按钮用同样的组件，保证 Esc 在
- * 左上" —— 而"提示贴自己那一侧、又不被画布边裁掉"这件事必须**算出来**。
+ * 用户 2026-10-12 的原话："设置按钮的 快捷键 **无法找到之前好的那个版本的
+ * 位置了吗**？？" —— 他指的是最早那一版（`d4e3fb7` 的 `IconButton`）：
  *
- * ⚠️ 旧版是 `hintOffset: { dx: 34, dy: 22 }`（返回按钮专供）。那个参数
- * 已删：它存在的唯一理由就是补"两个角落两套算法"这个不该存在的差异。
- * 这里钉住的正是"删掉它之后两边仍然各自贴自己那一侧"。
+ * ```ts
+ * readonly hintSide?: 'left' | 'right';   // 只有这两个值
+ * hintSide: 'right' as const;              // 默认
+ * // "图标在左、提示在右（阅读顺序）；`hintSide` 可以翻转。"
+ * ```
+ *
+ * 也就是提示与图标**同一行、垂直居中**（不是"角标压在图标角上"）。
+ * 中间两轮（`291a005` / `4fa55ef`）把它改成了角标 —— 那是一次**理解错误**
+ * （把"快捷键在图标的左上角"读成了"角标"），本文件钉的就是恢复之后的样子。
+ *
+ * ⚠️ 一侧由**每个按钮自己配**（齿轮 `'left'`、返回 `'right'`），不是运行时
+ * 按"按钮在画布哪一半"猜 —— 后者才是被用户否掉的那条。
  */
-describe('IconButton：角落提示的位置由图标位置推出来', () => {
-  /** 两个真实调用点的图标矩形（尺寸与锚点抄自组件自己的常量）。 */
-  const gear = { x: LOGICAL.width - 8 - 44 / 2 - 20 / 2, y: 8 + 44 / 2 - 20 / 2, w: 20, h: 20 };
+describe('IconButton：提示与图标**并排**（一条落位公式）', () => {
+  /** 两个真实调用点的图标矩形（尺寸与锚点抄自 `ScreenChrome` 的常量）。 */
+  const gear = { x: LOGICAL.width - 8 - 20, y: 8, w: 20, h: 20 };
   const back = { x: 8, y: 8, w: 22, h: 22 };
 
-  const hintW = estimateMonoWidth('Esc', ICON_BUTTON_DEFAULTS.cornerSize);
-  const hintH = ICON_BUTTON_DEFAULTS.cornerSize;
+  const place = (icon: typeof gear, side: 'left' | 'right') => {
+    const hint = iconHintBoxSize('Esc', icon.w);
+    return {
+      hint,
+      p: iconHintPlacement({
+        icon,
+        hintW: hint.w,
+        hintH: hint.h,
+        side,
+        canvasW: LOGICAL.width,
+        canvasH: LOGICAL.height,
+      }),
+    };
+  };
 
-  const place = (icon: typeof gear) =>
-    iconHintPlacement({ icon, canvasW: LOGICAL.width, canvasH: LOGICAL.height }, hintW, hintH);
-
-  /** 提示包围盒（`anchorX/Y = 0` = 锚点是它的左上角）。 */
-  const boxOf = (p: ReturnType<typeof place>) => ({
-    x: p.anchorX === 1 ? p.x - hintW : p.x,
-    y: p.anchorY === 1 ? p.y - hintH : p.y,
-    right: p.anchorX === 1 ? p.x : p.x + hintW,
-    bottom: p.anchorY === 1 ? p.y : p.y + hintH,
+  /** 提示包围盒（锚点是它的左上角，`anchorX/Y = 0`）。 */
+  const boxOf = (hint: { w: number; h: number }, p: { x: number; y: number }) => ({
+    x: p.x,
+    y: p.y,
+    right: p.x + hint.w,
+    bottom: p.y + hint.h,
   });
 
-  it('【关键】一条全局规则：提示的**左上角**就是**图标的左上角**', () => {
-    /**
-     * ⚠️ 用户 2026-10-12 把规格说死了（原话）："**快捷键在图标的左上角**"。
-     *
-     * 判据不是"两个按钮的绝对坐标相同"（它们在对角，不可能相同），
-     * 而是"**同一个公式 + 同一个锚点**"：
-     *   - 锚点都是提示的**左上角**（`anchorX = 0` / `anchorY = 0`）
-     *   - 提示左缘 = **图标左缘**（`b.x === icon.x`，不是"以图标左缘为中心"）
-     *   - 提示上缘 = **图标上缘**（`b.y === icon.y`）
-     *
-     * ⚠️ 上一版这里断言的是 `b.y - icon.y === hintOverlap`（上缘比图标低
-     * 4px）。那 4px 在 20~22px 的图标上让提示**纵向几乎居中** —— 用户报的
-     * 正是"F1 位置不对，现在是**左中**"。那个常量已删，`hintOverlap` 也
-     * 不再存在（这条断言本身就是回归测试）。
-     */
-    for (const icon of [gear, back]) {
-      const p = place(icon);
-      const b = boxOf(p);
-      const tag = JSON.stringify(icon);
+  it('【关键】提示在指定一侧、与图标**同一行**、**垂直居中**', () => {
+    for (const [icon, side] of [
+      [gear, 'left'],
+      [back, 'right'],
+    ] as const) {
+      const { hint, p } = place(icon, side);
+      const b = boxOf(hint, p);
+      const tag = `${side} ${JSON.stringify(icon)}`;
+      /** 锚点永远是提示的左上角。 */
       expect(p.anchorX, tag).toBe(0);
       expect(p.anchorY, tag).toBe(0);
-      /** 左对齐图标左缘 —— 这正是"不在正中间"的判据。 */
-      expect(b.x, tag).toBe(icon.x);
-      /** 上对齐图标上缘 —— 这正是"不在左中"的判据。 */
-      expect(b.y, tag).toBe(icon.y);
-      /** 提示与图标在同一角：横向交叠必须为正。 */
-      expect(Math.min(b.right, icon.x + icon.w) - Math.max(b.x, icon.x), tag).toBeGreaterThan(0);
-      /** ⚠️ 且提示**整块落在图标的上半部分**（"贴顶部"而不是"居中"）。 */
-      expect(b.bottom, tag).toBeLessThan(icon.y + icon.h / 2);
+      /** 垂直居中：提示中心 = 图标中心。 */
+      expect(b.y + hint.h / 2, tag).toBeCloseTo(icon.y + icon.h / 2, 6);
+      if (side === 'left') {
+        /** 提示在左：它的**右缘**贴住图标的**左缘**（间隔 `HINT_GAP`）。 */
+        expect(b.right, tag).toBe(icon.x - HINT_GAP);
+      } else {
+        /** 提示在右：它的**左缘**贴住图标的**右缘**。 */
+        expect(b.x, tag).toBe(icon.x + icon.w + HINT_GAP);
+      }
     }
   });
 
-  it('提示**不按位置换规则**：把图标搬到画布四个角，落位公式不变', () => {
-    /**
-     * ⚠️ 旧版有个 `'auto'` 会按"按钮在画布哪一半"翻角 —— 用户否掉了。
-     * 这条断言就是那条否决的回归测试：同样的图标放到画布四个角，
-     * **相对自己图标**的落位都不变。
-     */
+  it('提示**不按位置换规则**：同样的图标放到画布四个角，落位公式不变', () => {
     const atCorners = [
       { ...gear, x: 8, y: 8 },
-      { ...gear, x: LOGICAL.width - 30, y: 8 },
-      { ...gear, x: 8, y: LOGICAL.height - 30 },
-      { ...gear, x: LOGICAL.width - 30, y: LOGICAL.height - 30 },
+      { ...gear, x: LOGICAL.width - 28, y: 8 },
+      { ...gear, x: 8, y: LOGICAL.height - 28 },
+      { ...gear, x: LOGICAL.width - 28, y: LOGICAL.height - 28 },
     ];
     for (const icon of atCorners) {
-      const p = place(icon);
-      const b = boxOf(p);
-      const tag = JSON.stringify(icon);
-      expect(p.anchorX, tag).toBe(0);
-      expect(b.x, tag).toBe(icon.x);
-      expect(b.y, tag).toBe(icon.y);
+      for (const side of ['left', 'right'] as const) {
+        const { hint, p } = place(icon, side);
+        const b = boxOf(hint, p);
+        const tag = `${side} ${JSON.stringify(icon)}`;
+        expect(b.y + hint.h / 2, tag).toBeCloseTo(icon.y + icon.h / 2, 6);
+        expect(b.x, tag).toBe(
+          side === 'left' ? icon.x - HINT_GAP - hint.w : icon.x + icon.w + HINT_GAP,
+        );
+      }
     }
   });
 
-  it('两个真实调用点的提示都**不需要**避让（整块在画布内）', () => {
+  it('⚠️ 落位里**没有夹取**（越界就是越界，由摆图标的规则负责）', () => {
     /**
-     * ⚠️ 这条是"**别再加第二套避让逻辑**"的判据（用户 2026-10-12 明确否掉
-     * 避让）。规则只让提示**往右下方**长，而两个按钮的图标左上角本来
-     * 就留了 8px 边距 —— 所以整块提示天然落在画布内。
-     *
-     * ⚠️ 若哪天有人把图标挪到贴边处，这条会先失败 —— 那时候该改的是
-     * **布局**（或者去问用户），**不是**在 `iconHintPlacement` 里悄悄加一段
-     * 夹取把它推回来（那会让两个按钮看起来又不一样）。
+     * ⚠️ 用户明确否掉了"别再加第二套避让逻辑" —— 所以这里**故意**让一个
+     * 贴右缘的图标 + 右侧提示算出画布外，用来钉住"这里不做兜底"这件事。
+     * 保证不出界的是**摆图标那条规则**（`chromeBlockBoxAt` 先算整块多大），
+     * 见 `screenChrome.test.ts`。
      */
-    for (const icon of [gear, back]) {
-      const b = boxOf(place(icon));
-      const tag = JSON.stringify(icon);
-      expect(b.x, tag).toBeGreaterThanOrEqual(0);
-      expect(b.y, tag).toBeGreaterThanOrEqual(0);
-      expect(b.right, tag).toBeLessThanOrEqual(LOGICAL.width);
-      expect(b.bottom, tag).toBeLessThanOrEqual(LOGICAL.height);
+    const icon = { x: LOGICAL.width - 20, y: 8, w: 20, h: 20 };
+    const { hint, p } = place(icon, 'right');
+    expect(p.x + hint.w).toBeGreaterThan(LOGICAL.width);
+  });
+});
+
+/**
+ * ==================================================================
+ * 提示**整块跟着图标缩放**（用户 2026-10-12 的要求，与摆法是两件事）
+ * ==================================================================
+ *
+ * 上一轮"提示故意不缩"的判断被推翻了。规格：字号 + 落位跟图标一起缩，
+ * 而且**一条公式**（只有图标边长一个输入）+ **规则给出的下限**。
+ */
+describe('IconButton：提示随图标缩放（一条公式）', () => {
+  /** 图标的实际边长：`chromeBoxAt` / `UiLayout.len` 都是 `round(base × scale)`。 */
+  const iconSizeAt = (scale: number) => Math.max(1, Math.round(BASE_ICON_SIZE * scale));
+
+  it('字号按比例放大：0.5 / 1 / 1.5 / 2 四档各不相同', () => {
+    const sizes = [0.5, 1, 1.5, 2].map((s) => iconHintFontSize(iconSizeAt(s)));
+    expect(sizes[0]).toBeLessThan(sizes[1] as number);
+    expect(sizes[1]).toBeLessThan(sizes[2] as number);
+    expect(sizes[2]).toBeLessThan(sizes[3] as number);
+    /** 1 倍时就是历史那一版的 13px（`FONT.small`）。 */
+    expect(iconHintFontSize(BASE_ICON_SIZE)).toBe(BASE_HINT_FONT);
+    expect(BASE_HINT_FONT).toBe(FONT.small);
+    expect(ICON_BUTTON_DEFAULTS.hintFont).toBe(BASE_HINT_FONT);
+  });
+
+  it('⚠️ 缩到 0.5 时仍有**规则给出的下限**（不是算完再夹）', () => {
+    const font = iconHintFontSize(iconSizeAt(0.5));
+    /** 按比例算出来是 7（13 × 0.5 = 6.5 → 7），而下限是 8。 */
+    expect(Math.round(BASE_HINT_FONT * 0.5)).toBeLessThan(MIN_HINT_FONT);
+    expect(font).toBe(MIN_HINT_FONT);
+    /** 而且下限**只在缩放 < 0.615 时生效**：1 倍仍然走 13。 */
+    expect(iconHintFontSize(iconSizeAt(1))).toBeGreaterThan(MIN_HINT_FONT);
+  });
+
+  it('整块（图标 + 提示）随缩放变大 —— `ScreenChrome` 靠它反推落位', () => {
+    const at = (scale: number) => iconWithHintSize('F1', iconSizeAt(scale));
+    expect(at(2).w).toBeGreaterThan(at(1).w);
+    expect(at(1).w).toBeGreaterThan(at(0.5).w);
+    /** 并排：高度取较大者（1 倍时图标 20 > 提示 13）。 */
+    expect(at(1).h).toBe(BASE_ICON_SIZE);
+    /** 整块宽 = 图标 + 间隙 + 提示框宽（宁宽勿窄，不会低估出界）。 */
+    const box = iconHintBoxSize('F1', iconSizeAt(1));
+    expect(at(1).w).toBe(BASE_ICON_SIZE + HINT_GAP + box.w);
+    expect(box.w).toBe(estimateMonoWidth('F1', iconHintFontSize(BASE_ICON_SIZE)));
+  });
+
+  it('落位仍然只有一条规则（缩放不改"并排 + 垂直居中"）', () => {
+    for (const scale of [0.5, 1, 2]) {
+      const size = iconSizeAt(scale);
+      const icon = { x: LOGICAL.width - 8 - size, y: 8, w: size, h: size };
+      const hint = iconHintBoxSize('F1', size);
+      const p = iconHintPlacement({
+        icon,
+        hintW: hint.w,
+        hintH: hint.h,
+        side: 'left',
+        canvasW: LOGICAL.width,
+        canvasH: LOGICAL.height,
+      });
+      const tag = `scale=${scale}`;
+      expect(p.x, tag).toBe(icon.x - HINT_GAP - hint.w);
+      expect(p.y + hint.h / 2, tag).toBeCloseTo(icon.y + icon.h / 2, 6);
     }
   });
 });

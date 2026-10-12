@@ -23,7 +23,8 @@ import type { KeyBinding } from '../input/keyboard';
 import type { KeyRow } from '../ui/settings/rows';
 import type { ContentRegistry } from '../core/content/registry';
 import { holdDrainPerSecond } from '../core/combat/holds';
-import { LOGIC_TICKS_PER_SECOND } from '../core/loopConstants';
+import { descParamsOf } from './descParams';
+import { displaySeconds } from './displayTime';
 import { PLAYER_SKILL_IDS } from '../data/content';
 import { hintKeysOf } from './skillHints';
 import type { TranslateFn } from '../i18n/translator';
@@ -42,14 +43,18 @@ import { zhCN } from '../i18n/locales/zh-CN';
  *
  * 现在的分工：
  *   - **模板**住在 i18n（`获得 {seconds} 秒无敌，不花炁，但窗口极窄。`）
- *   - **数值**只有一个来源 —— 技能授予的那个 buff 的 `duration`，
- *     由下面 `buffGrantedSeconds()` 推导
+ *   - **数值**只有一个来源 —— `SkillDef` 自己的字段，由
+ *     `app/descParams.ts` 的 `descParamsOf()` **按模板里的占位符**推导
  *   - **拼装**发生在 `SkillDetail.render`（把 `descParams` 交给 `t()`）
  *
- * ⚠️ 判据是**模板里有没有 `{seconds}`**，不是"技能有没有 buff"：
- * 只有真的要显示秒数的说明才传参。若不看模板，就会给那些**没有占位符**
- * 的说明也塞 `{seconds}` —— 虽然 `t()` 对多余参数是宽容的，但那是
+ * ⚠️ 判据是**模板里有没有占位符**，不是"技能有没有 buff"：
+ * 只有真的要显示数值的说明才传参。若不看模板，就会给那些**没有占位符**
+ * 的说明也塞一把参数 —— 虽然 `t()` 对多余参数是宽容的，但那是
  * "靠巧合正确"。
+ *
+ * ⚠️ 推导住在 `app/descParams.ts` 而**不是**这里：Boss / 色欲的说明
+ * （`boss.*.desc` / `lust.*.desc`）由同一张参数表服务，而那些说明不经过
+ * 设置页的行数据。两处各写一套推导必然漂移。
  */
 
 /**
@@ -74,51 +79,6 @@ export function messageKeysMatching(placeholder: string): readonly string[] {
     .filter(([, template]) => template.includes(needle))
     .map(([key]) => key)
     .sort();
-}
-
-/** 描述模板里出现的占位符名。 */
-function placeholdersOf(template: string): readonly string[] {
-  return [...template.matchAll(/\{(\w+)\}/g)].flatMap((m) =>
-    m[1] === undefined ? [] : [m[1]],
-  );
-}
-
-/**
- * 这个技能**授予自己**的 buff 的时长（秒）；没有就给 `undefined`。
- *
- * 只认 `target.mode === 'self'` 的 `grant`：给敌人挂的 debuff 时长
- * 与"我获得 X 秒……"不是同一句话（例如「轰」的易伤）。
- * 多个自我 grant 时取**第一个** —— 当前内容里每个技能最多一个，
- * 真出现两个时该由内容设计决定写哪一个，不该由这里默默挑一个。
- * 写成契约（返回 `undefined`）而不是猜，是为了让它**在测试里现形**。
- */
-function buffGrantedSeconds(skill: {
-  readonly abilities: readonly {
-    readonly kind: string;
-    readonly target?: { readonly mode: string };
-    readonly buff?: { readonly duration: number };
-  }[];
-}): number | undefined {
-  for (const ability of skill.abilities) {
-    if (ability.kind !== 'grant') continue;
-    if (ability.target?.mode !== 'self') continue;
-    const ms = ability.buff?.duration;
-    if (ms === undefined || !Number.isFinite(ms)) continue;
-    return secondsFromMs(ms);
-  }
-  return undefined;
-}
-
-/** 逻辑步口径的换算：毫秒 → 秒。 */
-function secondsFromMs(ms: number): number {
-  /**
-   * 先归到**逻辑步**（本作的逻辑最小单位，0.1 秒）再折成秒，而不是
-   * 直接 `ms / 1000` —— 那样浮点会给出 `0.19999999999999998`
-   * （`logicMs(2)` 的毫秒数除 1000），而文案要的正是玩家看到的
-   * **0.2**。四舍五入到逻辑步也顺带保证"显示的秒数 = 内容的逻辑步数"。
-   */
-  const steps = Math.round((ms / 1000) * LOGIC_TICKS_PER_SECOND);
-  return steps / LOGIC_TICKS_PER_SECOND;
 }
 
 /**
@@ -283,10 +243,10 @@ export function buildKeyRows(options: BuildKeyRowsOptions): readonly KeyRow[] {
       slot !== undefined
         ? slot.skillCdSec <= 0
           ? ''
-          : translate('settings.detailCd', { seconds: Math.round(slot.skillCdSec) })
+          : translate('settings.detailCd', { seconds: displaySeconds(slot.skillCdSec * 1000) })
         : skill.cooldown <= 0
           ? ''
-          : translate('settings.detailCd', { seconds: Math.round(skill.cooldown / 1000) });
+          : translate('settings.detailCd', { seconds: displaySeconds(skill.cooldown) });
     /**
      * **施放方式**从数据推导（需求："包括瞬发与否，这些应该是结构化的显示"）。
      *
@@ -298,7 +258,7 @@ export function buildKeyRows(options: BuildKeyRowsOptions): readonly KeyRow[] {
         ? translate('settings.detailHold')
         : skill.castTime <= 0
           ? translate('settings.detailInstant')
-          : translate('settings.detailCast', { seconds: skill.castTime / 1000 });
+          : translate('settings.detailCast', { seconds: displaySeconds(skill.castTime) });
     /**
      * ⚠️ 用 `hintKeysOf` 而不是直接读 `skill.hintTags`：控制类提示
      * （「倒地」「眩晕」）是**从效果推导**出来的，不在手写字段里。
@@ -327,21 +287,18 @@ export function buildKeyRows(options: BuildKeyRowsOptions): readonly KeyRow[] {
       VISIBLE_MECHANIC_TAGS.has(tag),
     );
     /**
-     * **说明里的秒数**（见本文件顶部的"两份真相"说明）。
+     * **说明里的数值**（见本文件顶部的"两份真相"说明）。
      *
-     * 只在**模板真的要秒数**且**数据真给了时长**时才传 —— 缺任何一边
-     * 就留 `undefined`，让 `SkillDetail` 走原来的"无参取词"。这样
-     * "模板写了 `{seconds}` 但数据没有时长"不会在渲染时抛错，而是
-     * 由 `tests/unit/keyRows.test.ts` 那条断言**在测试里**把它抓出来。
+     * ⚠️ 推导在 `app/descParams.ts` —— 它按**模板里真实出现的占位符**去
+     * `SkillDef` 取值（`{seconds}` / `{damage}` / `{percent}` …）。
+     * 模板里要的数值在数据里没有时，参数里就不会有那个键 —— 于是
+     * 渲染出的是占位符本身，由 `tests/unit/keyRows.test.ts` 那条断言
+     * **在测试里**把它抓出来（不是在这里猜一个值填上）。
      */
-    const descSeconds =
-      skill.descKey === undefined ? undefined : buffGrantedSeconds(skill);
-    const descTemplate =
-      skill.descKey === undefined ? '' : (TEMPLATES.get(skill.descKey) ?? '');
     const descParams =
-      descSeconds === undefined || !placeholdersOf(descTemplate).includes('seconds')
+      skill.descKey === undefined
         ? undefined
-        : { seconds: descSeconds };
+        : descParamsOf(skill, TEMPLATES.get(skill.descKey) ?? '');
     return {
       skillId: b.skillId,
       nameKey: skill.nameKey,

@@ -254,6 +254,14 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
         gear: active?.gearShown ?? false,
         /** 齿轮的可点区域（含角落提示；`null` = 这一屏没有齿轮）。 */
         gearBounds: active?.gearBounds ?? null,
+        /**
+         * 齿轮的**键位提示**（`F1`）包围盒（画布坐标；`null` = 没有）。
+         *
+         * ⚠️ 与 `back.shortcutBounds` 同一个读数（齿轮这一份是本轮补的）：
+         * "齿轮 + 提示在**任何缩放系数**下都不出画布"是本轮的硬验收，
+         * 而画布下缘与背景同色 —— 只有这个数能证明"没被裁掉"。
+         */
+        gearShortcutBounds: active?.gearShortcutBounds ?? null,
         /** 当前这一屏的返回箭头（只有选角色 / 自由模式有；`null` = 没有）。 */
         backBounds: active?.backBounds ?? null,
         /** 齿轮的键盘焦点（`↑` 那条路的读数）。 */

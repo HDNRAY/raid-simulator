@@ -50,6 +50,51 @@
  * （`window.__raidBattle.back.center()`），别在脚本里手写布局数字。
  *
  * ==================================================================
+ * ⚠️ 2026-10-12：为什么每个 CDP 调用都要有超时
+ * ==================================================================
+ *
+ * 现象（两个 subagent 各自独立报的）：进战斗等到 ~3 秒（一局结束那一刻）
+ * 脚本**挂住**，`Page.captureScreenshot` **不返回**；四道防线都生效
+ * （看门狗到点杀干净、无 Chrome 残留），但**截图拿不到**。
+ *
+ * 根因**不是**"等某个选择器"，而是：**CDP 命令可以永远不回包。**
+ * 页面主线程忙的时候 renderer 没机会处理命令 —— 它不报错、不拒绝，
+ * 就是不回。旧代码的 `send()` 是 `new Promise(...)` + 一张没有超时的
+ * pending 表，于是 `await send('Page.captureScreenshot')` **无限等**，
+ * 整个脚本停在那一行。
+ *
+ * 这是量出来的，不是推理（复现方法与前后日志见提交说明 / 测试报告）：
+ *
+ * | 页面状态 | `Page.captureScreenshot` |
+ * |---|---|
+ * | 正常 | 180~270ms 返回 |
+ * | 主线程被 9 秒同步忙循环占住 | **3 秒超时都没回来**；忙循环结束，下一张 190ms |
+ *
+ * 而且**真实页面上就会发生**：同一个 `?prepare=skip&noai=1` 页面连拍 60 张
+ * （每 500ms 一张），58 张 180~270ms，**2 张 4 秒没回来**。
+ * 所以这不是"某个极端场景"，是"迟早撞上"。
+ *
+ * 修法（**不是**"把超时调大"）：
+ *   1. **每次 CDP 调用都有上限**（`RAID_SHOT_CDP_TIMEOUT_MS`，默认 10000ms）
+ *      → 到点**报错**、走到 `finally` 收尾、**非 0 退出**。
+ *      挂不住：要么成、要么明确失败。
+ *   2. **`{ id, error }` 当失败**（旧代码把它当成功 → 调用方拿到
+ *      `undefined.data` → `Cannot read properties of undefined`，报错指错方向）。
+ *   3. **socket 关闭 → 在途调用立刻失败**（不留下永不 settle 的 Promise）。
+ *   4. **截图单独一套策略**：第一次只等 1.5 秒（正常 180~270ms，1.5 秒不回
+ *      就说明"忙"，不必干等 10 秒）→ 等两帧 rAF（确认主线程活过来了）→
+ *      重试一次（`RAID_SHOT_CDP_RETRIES`，默认 1，第二次用完整的
+ *      `RAID_SHOT_CDP_TIMEOUT_MS`）。忙是暂态的（实测下一秒就恢复），
+ *      重试一次正好吃下去；一直忙就**明确失败**，不无限等。
+ *   5. **调试端口不再写死 10103**：多个 subagent 同时跑时，第二个脚本会
+ *      连到**第一个**的 Chrome 上；那个 target 被他们关掉后就**永远不回包**。
+ *      现在默认让 OS 挑空闲端口（`RAID_SHOT_PORT` 可指定），并在起 Chrome 前
+ *      检查端口是否已被占用 —— 占用就**明确报错**，不静默连上去。
+ *
+ * ⚠️ 每一步都打时间戳（`[shot +1234ms] …`），所以"挂在哪一步"是日志里
+ * 直接读到的，不用再猜。
+ *
+ * ==================================================================
  * ⚠️ 它必须**收干净**：Chrome 不许留下
  * ==================================================================
  *
@@ -69,8 +114,10 @@
  * 整机 load 24）。**脚本"挂住"不是"慢"，是"泄漏"。**
  */
 
+import { createServer } from 'node:net';
 import { writeFileSync } from 'node:fs';
 import { startHeadlessChrome } from './headlessChrome.mjs';
+import { CdpTimeoutError, connectCdp } from './cdp.mjs';
 
 const OUT = process.argv[2] ?? '/tmp/shot.png';
 /** 要「放」的技能 id（`__raidBattle.act`），可给多个。 */
@@ -106,7 +153,9 @@ const KEYS = {
    */
   F1: { code: 'F1', key: 'F1', vk: 112 },
 };
-const PORT = 10103;
+
+/** 起始调试端口（`RAID_SHOT_PORT` 可覆盖；被占则往后找，见 `pickPort`）。 */
+const PORT_BASE = Number(process.env.RAID_SHOT_PORT ?? 0) || 10103;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /**
  * ⚠️ **硬超时**（`RAID_SHOT_TIMEOUT_MS`，默认 60000ms）：到点**无条件**
@@ -115,6 +164,149 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * 永远执行不到（见 AGENTS.md §4）。看门狗是唯一"卡在哪都能兜住"的机制。
  */
 const TIMEOUT_MS = Number(process.env.RAID_SHOT_TIMEOUT_MS ?? 60_000);
+/**
+ * ⚠️ **单次 CDP 调用的上限**（`RAID_SHOT_CDP_TIMEOUT_MS`，默认 10000ms）。
+ *
+ * 这是这次真正的修法：CDP 可以永远不回包（见文件头），所以每次调用都必须
+ * 自己收敛。默认 10 秒是"正常 200ms 的 50 倍"—— 慢到不会误杀正常的慢帧，
+ * 又短到不会让脚本看起来像挂住。
+ *
+ * ⚠️ 别把它调大来"解决"问题：调大到任意大就等于没有超时（挂住又回来了）。
+ * 真遇到慢页面，应该调的是 `RAID_SHOT_WAIT_MS`（等页面到某个状态），
+ * 而不是把"没回包"的容忍度拉长。
+ */
+const CDP_TIMEOUT_MS = Number(process.env.RAID_SHOT_CDP_TIMEOUT_MS ?? 10_000);
+/**
+ * 截图超时后**重试几次**（`RAID_SHOT_CDP_RETRIES`，默认 1 次）。
+ *
+ * ⚠️ 只重试**截图**，不重试按键 / `act()` 之类的"有副作用"的调用 ——
+ * 重试它们等于把动作做两遍。
+ */
+const SHOT_RETRIES = Number(process.env.RAID_SHOT_CDP_RETRIES ?? 1);
+/**
+ * **第一次**截图的超时（固定 1500ms，不跟 CDP 默认值走）。
+ *
+ * 理由：这个页面上正常截图是 180~270ms（实测 60 张），所以 1.5 秒不回
+ * 就已经是"忙"而不是"慢"了。第一次短、第二次长（用
+ * `RAID_SHOT_CDP_TIMEOUT_MS`），合起来既不会把正常的慢帧误判成失败，
+ * 也不会在页面忙死时干等两次 10 秒。
+ */
+const FIRST_SHOT_TIMEOUT_MS = 1500;
+/** 起 Chrome 的预算：到点就报错，而不是无限轮询 `/json/list`。 */
+const STARTUP_TIMEOUT_MS = 15_000;
+
+/** 带时间戳的日志（相对脚本启动）。"挂在哪一步"直接读这行。 */
+const T0 = Date.now();
+const logStep = (msg) => {
+  const dt = String(Date.now() - T0).padStart(5);
+  console.log(`[shot +${dt}ms] ${msg}`);
+};
+/** CDP 逐条调用日志 —— 只在不设 `RAID_SHOT_QUIET` 时打。 */
+const cdpLog = process.env.RAID_SHOT_QUIET ? undefined : (m) => logStep(`  cdp ${m}`);
+
+/**
+ * 端口空不空。
+ *
+ * ⚠️ 光看 `fetch(/json/list)` 不行：那个请求**成功**恰恰说明端口被占了，
+ * 而且它会连到**别人的** Chrome 上（多 subagent 并行时实测过）——
+ * 连上去之后对方一收尾，你的调用就永远不回包。所以这里主动检查。
+ */
+function portIsFree(port) {
+  return new Promise((resolve) => {
+    const srv = createServer();
+    srv.once('error', () => resolve(false));
+    srv.once('listening', () => srv.close(() => resolve(true)));
+    srv.listen(port, '127.0.0.1');
+  });
+}
+
+/** 从 `PORT_BASE` 往后找一个空闲端口；找不到就抛（不静默退化成"随便连一个"）。 */
+async function pickPort() {
+  for (let p = PORT_BASE; p < PORT_BASE + 50; p += 1) {
+    if (await portIsFree(p)) return p;
+  }
+  throw new Error(`从 ${PORT_BASE} 起 50 个端口都被占用 —— 用 RAID_SHOT_PORT 指定一个空闲端口`);
+}
+
+/**
+ * 等 Chrome 的调试端点就绪。
+ *
+ * ⚠️ 有预算（`STARTUP_TIMEOUT_MS`）：旧代码轮询 60 次 × 200ms，而且**不看
+ * 有没有超时**，`page` 为 `undefined` 时下一行 `page.webSocketDebuggerUrl`
+ * 才炸 —— 那时错误信息已经指错方向了。
+ */
+async function waitForPage(port) {
+  const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      const r = await fetch(`http://127.0.0.1:${port}/json/list`);
+      const list = await r.json();
+      const page = list.find((x) => x.type === 'page' && x.webSocketDebuggerUrl);
+      if (page) return page;
+    } catch {
+      /* 还没起来 */
+    }
+    await sleep(200);
+  }
+  throw new Error(`Chrome 的调试端点 ${STARTUP_TIMEOUT_MS}ms 内没就绪（127.0.0.1:${port}）`);
+}
+
+/**
+ * 截图前确认页面**还在产帧**：等两帧 `requestAnimationFrame`。
+ *
+ * ⚠️ 主线程被占死时 rAF 也不回 —— 这里同样给超时，超时不算失败（页面
+ * 只是忙），照拍；真正的判据是"截图有没有回来"。
+ */
+async function waitForFrames(call, frames = 2) {
+  const expr = `new Promise((r) => {
+    let n = 0;
+    const step = () => { n += 1; if (n >= ${frames}) r('ok'); else requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  })`;
+  try {
+    await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }, Math.min(CDP_TIMEOUT_MS, 3000));
+    return true;
+  } catch {
+    logStep('⚠️ 等 rAF 超时（页面主线程正忙）——仍尝试截图');
+    return false;
+  }
+}
+
+/**
+ * 拍一张（短超时 → 等 rAF 稳定 → 重试一次）。
+ *
+ * ⚠️ 三步都必要：
+ *   - **第一次短超时**（1.5s）—— "忙"要尽早发现，别干等 10 秒；
+ *   - **等两帧 rAF** —— 重试前先确认主线程真的活过来了（否则第二次也是白等）；
+ *   - **第二次用完整超时** —— 页面只是慢了一下的话，这一次能拍到。
+ */
+async function capturePng(call, format = 'png') {
+  let lastError;
+  for (let attempt = 0; attempt <= SHOT_RETRIES; attempt += 1) {
+    if (attempt > 0) {
+      logStep(`截图未返回，重试第 ${attempt} 次（共 ${SHOT_RETRIES} 次）`);
+      await waitForFrames(call);
+    }
+    const budget = attempt === 0 ? FIRST_SHOT_TIMEOUT_MS : CDP_TIMEOUT_MS;
+    try {
+      const r = await call('Page.captureScreenshot', { format }, budget);
+      // ⚠️ 旧代码不检查这里：`{ error }` 或没有 `data` 都会得到
+      // `Buffer.from(undefined)` → 报错指向 base64，指向错的地方。
+      if (!r || typeof r.data !== 'string' || r.data.length === 0) {
+        throw new Error(`Page.captureScreenshot 返回了空数据：${JSON.stringify(r)?.slice(0, 200)}`);
+      }
+      return Buffer.from(r.data, 'base64');
+    } catch (err) {
+      lastError = err;
+      // 只有"没回包"才值得重试；CDP 明确报错（目标没了之类）重试没意义。
+      if (!(err instanceof CdpTimeoutError)) throw err;
+    }
+  }
+  throw new Error(
+    `截图失败：${SHOT_RETRIES + 1} 次都没拿到图（${lastError.message}）。` +
+      `页面主线程可能被占死；先看上面的 cdp 日志卡在哪一步，再查页面在忙什么。`,
+  );
+}
 
 /**
  * **杀 Chrome 的纪律全部收在 `tools/headlessChrome.mjs`**（两个起 Chrome 的
@@ -124,40 +316,20 @@ const TIMEOUT_MS = Number(process.env.RAID_SHOT_TIMEOUT_MS ?? 60_000);
  * ⚠️ 这里只做两件事：起它、并把它**包进 `try/finally`**。
  * ⚠️ 绝不"全机扫 `--headless` 再 kill" —— 那会误杀用户自己的浏览器。
  */
+const PORT = await pickPort();
 const chrome = startHeadlessChrome({ port: PORT, windowSize: '1280,760', label: 'shot' });
 chrome.armGuards({ timeoutMs: TIMEOUT_MS });
+logStep(`headless Chrome 起在调试端口 ${PORT}`);
+
+/** 退出码：正常 0 / 失败 1（⚠️ 不能用流程末尾的 `process.exit(0)` 一把盖掉）。 */
+let exitCode = 1;
 
 try {
-  let page;
-  for (let i = 0; i < 60; i += 1) {
-    try {
-      const r = await fetch(`http://127.0.0.1:${PORT}/json/list`);
-      const t = await r.json();
-      page = t.find((x) => x.type === 'page' && x.webSocketDebuggerUrl);
-      if (page) break;
-    } catch {
-      /* 还没起来 */
-    }
-    await sleep(200);
-  }
+  const page = await waitForPage(PORT);
+  logStep(`调试 target 就绪：${page.id}`);
 
-  const ws = new WebSocket(page.webSocketDebuggerUrl);
-  let id = 1;
-  const pend = new Map();
-  await new Promise((r) => ws.addEventListener('open', r));
-  ws.addEventListener('message', (e) => {
-    const m = JSON.parse(e.data);
-    if (m.id && pend.has(m.id)) {
-      pend.get(m.id)(m.result);
-      pend.delete(m.id);
-    }
-  });
-  const send = (m, p = {}) =>
-    new Promise((r) => {
-      const i = id++;
-      pend.set(i, r);
-      ws.send(JSON.stringify({ id: i, method: m, params: p }));
-    });
+  const cdp = await connectCdp(page.webSocketDebuggerUrl, { defaultTimeoutMs: CDP_TIMEOUT_MS, log: cdpLog });
+  const send = (m, p = {}, ms) => cdp.call(m, p, ms);
 
   await send('Runtime.enable');
   await send('Page.enable');
@@ -181,7 +353,12 @@ try {
    * 而不是去写一个新的 e2e 脚本（AGENTS.md §4：这里只拍图）。
    */
   await sleep(Number(process.env.RAID_SHOT_WAIT_MS ?? 3400));
-  await send('Page.bringToFront').catch(() => {});
+  logStep('页面等待结束');
+  /**
+   * ⚠️ 非关键调用：`bringToFront` 失败（例如某个 headless 版本不支持）不该
+   * 让整次截图失败 —— 但也**必须有超时**，否则它自己就能把脚本挂住。
+   */
+  await send('Page.bringToFront', {}, 3000).catch((e) => logStep(`⚠️ Page.bringToFront 忽略：${e.message}`));
 
   const ev = async (expr) => {
     const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true });
@@ -322,9 +499,15 @@ try {
     await sleep(400);
   }
 
-  const shot = await send('Page.captureScreenshot', { format: 'png' });
-  writeFileSync(OUT, Buffer.from(shot.data, 'base64'));
-  console.log(`已保存 ${OUT}`);
+  /**
+   * ⚠️ 截图前先确认页面**还在产帧**：主线程被占死时 CDP 不回包（见文件头），
+   * 等两帧是最便宜的"它现在还活着吗"探针。
+   */
+  await waitForFrames(send);
+  const tShot = Date.now();
+  const png = await capturePng(send);
+  writeFileSync(OUT, png);
+  logStep(`已保存 ${OUT}（${png.length} 字节，截图本身 ${Date.now() - tShot}ms）`);
 
   /**
    * 可选：把 canvas 上**实际写进去的文字**打出来（`RAID_SHOT_TEXT=1`）。
@@ -382,6 +565,22 @@ try {
     console.log(`[canvas text] ${dump}`);
   }
 
+  /**
+   * ⚠️ 调试连接要主动关掉：它还开着的话会一直吊住事件循环。
+   * （Chrome 本身由上面的 `finally` 负责。）
+   */
+  cdp.close();
+  exitCode = 0;
+} catch (err) {
+  /**
+   * ⚠️ 这里是"失败得干脆"的落点：CDP 超时 / CDP error / 连接断了 / 截图拿不到
+   * 全都会走到这，打出**是哪一步、等了多久**，然后非 0 退出 —— 而不是挂着。
+   */
+  logStep(`❌ 失败：${err?.message ?? err}`);
+  if (err instanceof CdpTimeoutError) {
+    logStep('   提示：单次 CDP 调用超时。页面主线程被占死时就是这个形状（见文件头）。');
+  }
+  exitCode = 1;
 } finally {
   /**
    * ⚠️ 收尾的**唯一**正确位置是 `finally`，不是流程末尾 —— 中间任何一步
@@ -394,5 +593,7 @@ try {
 /**
  * ⚠️ 显式退出：CDP 的 WebSocket 还开着，它会一直吊住事件循环。
  * 此时 Chrome 已在上面的 `finally` 里**确认**死亡。
+ * ⚠️ 退出码**不能**写死 0：脚本"失败得干脆"必须是有信号的（否则调用方
+ * 会把"没拍到图"当成功）。
  */
-process.exit(0);
+process.exit(exitCode);

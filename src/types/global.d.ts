@@ -178,7 +178,7 @@ declare global {
         /** 此刻是否可见（= 当前这一屏有返回箭头）。 */
         visible(): boolean;
         /**
-         * 可点区域（含角落的 `Esc` 提示）。
+         * 可点区域（含并排的 `Esc` 提示）。
          *
          * ⚠️ `null` 而不是 `undefined`：要跨 `Runtime.evaluate` 的 JSON 边界
          * （`undefined` 在那里会被丢掉 —— "这一屏没有箭头"与"忘了返回值"
@@ -220,6 +220,19 @@ declare global {
         /** 当前这一屏的齿轮可不可见（四屏都该为真）。 */
         readonly gear: boolean;
         readonly gearBounds: {
+          readonly x: number;
+          readonly y: number;
+          readonly w: number;
+          readonly h: number;
+        } | null;
+        /**
+         * 齿轮的**键位提示**（`F1`）包围盒（画布坐标）。
+         *
+         * ⚠️ "齿轮 + 提示在任何缩放系数下都不出画布"是本轮的硬验收，
+         * 而画布下缘与背景同色 —— 只有这个数能证明它没被裁掉
+         * （与 `back.shortcutBounds` 同一个读数）。
+         */
+        readonly gearShortcutBounds: {
           readonly x: number;
           readonly y: number;
           readonly w: number;
