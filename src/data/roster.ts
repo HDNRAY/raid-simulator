@@ -99,6 +99,35 @@ export function isDeveloping(id: string): boolean {
   return DEVELOPING.has(id);
 }
 
+/**
+ * **能真正打的 Boss** = `BOSS_ROSTER` 里不在 `DEVELOPING` 的那些。
+ *
+ * ==================================================================
+ * 一局肉鸽为什么需要它（设计稿 §2.3）
+ * ==================================================================
+ *
+ * 一局肉鸽的**场数** = `BOSS_POOL.length`（不是写死的 7）。开发期只有 2 个
+ * Boss 能打，所以一局就 2 场 —— 而**强度档仍按 7 档表取子集**
+ * （`core/run/types.ts` 的 `tierForPosition`：`ceil(k * 7 / len)`），
+ * 这样"第一个位置最软、最后一个位置最难"永远成立，补完 Boss 之后
+ * 曲线表一个字都不用改。
+ *
+ * ⚠️ **派生**而不是另抄一份名单：判据只有 `DEVELOPING` 一处，
+ * 做完一个 Boss 只需把它从那张表里删掉，这里自动跟着变
+ * （两句名单会漂，而漂了之后"第 3 场打一个没做完的 Boss"不会报错）。
+ *
+ * ⚠️ **未实现的 Boss 共用傲慢的行为表**（`data/units.ts`）——
+ * 对玩家来说"第 2 场是嫉妒"和"换了个名字的傲慢"没有区别，
+ * 那会让"随机顺序"看起来像 bug。所以池子只放做完的。
+ *
+ * ⚠️ 声明位置**必须在 `DEVELOPING` 之后**：它在模块求值期就调用
+ * `isDeveloping`，而 `const` 的暂时性死区会让"提前声明"直接抛错 ——
+ * 函数声明会提升，但它读的那个 `Set` 不会。
+ */
+export const BOSS_POOL: readonly RosterEntry[] = BOSS_ROSTER.filter(
+  (entry) => !isDeveloping(entry.id),
+);
+
 /** 默认选中的（也是目前唯一开发完成的）。 */
 export const DEFAULT_PLAYER_ID = 'player';
 export const DEFAULT_BOSS_ID = 'meiichiro';

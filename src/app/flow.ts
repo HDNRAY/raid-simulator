@@ -32,11 +32,55 @@
 import type { BattleLoop } from './battleLoop';
 import type { TouchControls } from './touchControls';
 import type { PrepareScreen } from '../ui/PrepareScreen';
+import type { HomeScreen } from '../ui/HomeScreen';
+import type { CharacterSelectScreen } from '../ui/CharacterSelectScreen';
 import type { SettingsButton } from '../ui/settings/SettingsButton';
 import type { KeyBinding } from '../input/keyboard';
 
-/** 当前阶段：备战界面 or 战斗中。 */
-export type Phase = 'prepare' | 'battle';
+/**
+ * 当前阶段（**界面路由**）。
+ *
+ * ==================================================================
+ * 用户 2026-10-12 定的流程（设计稿 §3.1 的旧状态机已作废）
+ * ==================================================================
+ *
+ * ```
+ * 首页（新，默认入口）
+ *   ├─ 「肉鸽模式」 → 选角色屏（新）→ 一局肉鸽
+ *   └─ 「自由模式」 → 现在的备战界面（标题改成「自由模式」）
+ * ```
+ *
+ * ⚠️ **首页是安全的默认入口**（它只是路由，不通向半成品）；
+ * 而"选角色屏直接当正门"**不安全** —— 肉鸽那条路还不完整
+ * （炁机选择是 P3、强度曲线是 P4/P5、7 个 Boss 只有 2 个能打）。
+ *
+ * ⚠️ **不要新增 `'result'`**：结算面板本来就画在 `BattleScene` 里
+ * （设计稿 §3.2 专门写了这条）。把它提升成独立 phase 会让"战斗场景的
+ * 显隐"多一个状态，而"两个界面同时可见"是这个仓库踩过的坑。
+ *
+ * ⚠️ 加值必须**同时**改这些 `phase` 的消费者（设计稿 §3.2 那张表）：
+ *   `game.ts`（显隐的唯一写入点 `applyPhase` / 触屏 `isBattleActive` /
+ *   指针路由的 `phase` / 设置焦点）、`loopWiring.ts`（每帧分发 + 键盘分发）、
+ *   `canvasInput.ts`（指针路由）、`debugApiSetup.ts`（补一次界面摆位）。
+ */
+export type Phase = 'home' | 'characterSelect' | 'prepare' | 'battle';
+
+/**
+ * **设置齿轮按钮该摆在哪**。
+ *
+ * 全屏界面（首页 / 选角色 / 自由模式）没有战斗 HUD，右上角是空的；
+ * 只有**战斗**界面要让它待在日志下方（详见 `SettingsButton` 的锚点注释）。
+ *
+ * ⚠️ 抽成一个函数是为了**只有一处映射**：`game.ts` 与 `debugApiSetup.ts`
+ * 都要把当前 phase 告诉按钮（后者是"补一次摆位"），两处各写一遍
+ * `phase === 'battle' ? 'battle' : 'prepare'` 就是两份会漂的真相。
+ *
+ * ⚠️ 它返回的是**锚点名**（`'prepare'` = 整屏界面右上角），不是 phase ——
+ * `SettingsButton` 在 `ui/`，不该认识 `app/` 的 phase 取值。
+ */
+export function settingsAnchorOf(phase: Phase): 'prepare' | 'battle' {
+  return phase === 'battle' ? 'battle' : 'prepare';
+}
 
 /** 装配期间被填、之后被读的共享状态。 */
 export interface GameState {
@@ -51,10 +95,22 @@ export interface GameState {
    */
   loop: BattleLoop | undefined;
 
-  /** 当前阶段：备战界面 or 战斗中。 */
+  /** 当前阶段：首页 / 选角色 / 自由模式（原备战）/ 战斗中。 */
   phase: Phase;
 
-  /** 备战界面（进战斗时隐藏，回备战时显示）。 */
+  /**
+   * 首页（默认入口）。
+   *
+   * ⚠️ **先声明、后回填**：`applyPhase`（显隐的唯一写入点）定义得比
+   * 这个界面早 —— `?prepare=skip` 会让 `enterBattle` 早于一切界面构造
+   * （见 `game.ts` 文件头"顺序即正确性"）。所有访问点都容忍 `undefined`。
+   */
+  home: HomeScreen | undefined;
+
+  /** 选角色屏（肉鸽模式的第一屏）。同样是先声明、后回填。 */
+  select: CharacterSelectScreen | undefined;
+
+  /** 备战界面（自由模式；进战斗时隐藏，回来时显示）。 */
   prepare: PrepareScreen | undefined;
 
   /**
@@ -126,7 +182,13 @@ export interface GameState {
 export function createGameState(bindings: readonly KeyBinding[]): GameState {
   return {
     loop: undefined,
-    phase: 'prepare',
+    /**
+     * 默认入口 = **首页**（需求："默认入口：首页"）。
+     * 各屏的显隐由 `game.ts` 的 `applyPhase` 统一落实。
+     */
+    phase: 'home',
+    home: undefined,
+    select: undefined,
     prepare: undefined,
     bindings,
     touch: undefined,

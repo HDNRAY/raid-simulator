@@ -24,13 +24,21 @@ import {
   emptyProbe,
   installRaidBattleApi,
 } from './debugProbe';
-import { prepareDebugApi, settingsDebugApi } from './debugApi';
+import {
+  characterSelectDebugApi,
+  homeDebugApi,
+  prepareDebugApi,
+  settingsDebugApi,
+} from './debugApi';
 import { clampUiScale } from '../render/scaling';
+import { settingsAnchorOf } from './flow';
 import type { BattleLoop } from './battleLoop';
 import type { GameState } from './flow';
 import type { SettingsPanel } from '../ui/settings/SettingsPanel';
 import type { SettingsButton } from '../ui/settings/SettingsButton';
 import type { SettingsToggle } from './settingsToggle';
+import type { HomeScreen } from '../ui/HomeScreen';
+import type { CharacterSelectScreen } from '../ui/CharacterSelectScreen';
 import type { PrepareScreen } from '../ui/PrepareScreen';
 import type { TouchControls } from './touchControls';
 
@@ -53,7 +61,11 @@ export interface DebugApiDeps {
   readonly settings: SettingsPanel;
   readonly settingsButton: SettingsButton;
   readonly settingsToggle: SettingsToggle;
-  /** 备战界面调试入口的目标。 */
+  /** 首页调试入口的目标。 */
+  readonly home: HomeScreen;
+  /** 选角色屏调试入口的目标。 */
+  readonly select: CharacterSelectScreen;
+  /** 备战界面（自由模式）调试入口的目标。 */
   readonly prepare: PrepareScreen;
   /** 触屏按钮几何的唯一真相（`touchButtonCenter` 从它反查）。 */
   readonly touch: TouchControls;
@@ -130,6 +142,8 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
       () => d.settingsToggle,
       () => d.settingsButton,
     ),
+    ...homeDebugApi(d.home),
+    ...characterSelectDebugApi(d.select),
     ...prepareDebugApi(d.prepare),
     /** 重开一局（端到端脚本用；见 `global.d.ts` 的说明）。 */
     restart: () => d.restart(),
@@ -151,8 +165,11 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
    * ⚠️ 必须补这次立即调用：`?prepare=skip` 时 `enterBattle` 早就跑过了，
    * 那一次的 `onScreenChange('battle')` 打在一个空函数上（当时还没回填），
    * 不补的话按钮会停在备战界面的右上角，压在战斗 HUD 上。
+   *
+   * ⚠️ 映射与 `game.ts` 走**同一个** `settingsAnchorOf`（`flow.ts`）：
+   * 非战斗界面（首页 / 选角色 / 自由模式）都用右上角那个锚点。
    */
-  state.onScreenChange = (screen) => d.settingsButton.setScreen(screen);
+  state.onScreenChange = (screen) => d.settingsButton.setScreen(settingsAnchorOf(screen));
   state.onScreenChange(state.phase);
 
   return api;

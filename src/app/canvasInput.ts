@@ -11,12 +11,15 @@
  * 也集中在一处、能一眼看完。
  *
  * ==================================================================
- * ⚠️ 顺序即优先级，三条都不能动
+ * ⚠️ 顺序即优先级，四条都不能动
  * ==================================================================
  *
- *   1. **备战界面**优先 —— 它盖住整屏，没消费的点击才往下走
- *   2. **结算中点击 = 回备战** —— 必须早于按钮层与设置判断
- *   3. **触屏按钮** —— 它自己会在"设置打开"时拒绝消费
+ *   1. **齿轮按钮**（首页 / 选角色 / 自由模式）—— 这三个界面盖住整屏，
+ *      而齿轮浮在最上层；没被界面消费的点击只有它这一个去处
+ *   2. **当前那一个全屏界面**（首页 / 选角色 / 自由模式）—— 没消费的
+ *      点击才往下走
+ *   3. **结算中点击 = 离开战斗** —— 必须早于按钮层与设置判断
+ *   4. **触屏按钮** —— 它自己会在"设置打开"时拒绝消费
  *
  * 每条的由来都写在各自的位置上（都是实测踩出来的）。
  */
@@ -25,10 +28,16 @@ import { LOGICAL_H, LOGICAL_W } from '../render/scaling';
 import type { SettingsPanel } from '../ui/settings/SettingsPanel';
 import type { SettingsButton } from '../ui/settings/SettingsButton';
 import type { PrepareScreen } from '../ui/PrepareScreen';
+import type { Phase } from './flow';
 
 /** 指针要路由到的对象。 */
 export interface CanvasInputTargets {
   readonly canvas: HTMLCanvasElement;
+  /** 首页（默认入口）。 */
+  readonly home: { hitTest(px: number, py: number): boolean };
+  /** 选角色屏（肉鸽模式的第一屏）。 */
+  readonly select: { hitTest(px: number, py: number): boolean };
+  /** 自由模式（原备战界面）。 */
   readonly prepare: PrepareScreen;
   readonly settings: SettingsPanel;
   readonly settingsButton: SettingsButton;
@@ -39,15 +48,15 @@ export interface CanvasInputTargets {
     onPointerUp(pointerId: number): void;
     onPointerCancel(pointerId: number): void;
   };
-  /** 当前阶段（'prepare' = 备战界面）。 */
-  phase(): 'prepare' | 'battle';
+  /** 当前阶段。 */
+  phase(): Phase;
   settingsOpen(): boolean;
   /** 打开设置（点齿轮）。 */
   openSettings(): void;
-  /** 战斗已结束（用来判"点屏幕回备战"）。 */
+  /** 战斗已结束（用来判"点屏幕离开战斗"）。 */
   battleEnded(): boolean;
-  /** 回备战界面。 */
-  backToPrepare(): void;
+  /** 离开战斗（按模式分流：肉鸽 → 选角色；自由 → 自由模式界面）。 */
+  backFromBattle(): void;
 }
 
 /**
@@ -78,7 +87,8 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
     const { px, py } = at(event);
 
     /**
-     * ① 备战界面盖住整屏 —— 先让它消费。
+     * ① **三个全屏界面**（首页 / 选角色 / 自由模式）盖住整屏 —— 先让
+     * **当前那一屏**消费，没消费掉的点击才轮到齿轮。
      *
      * ⚠️ **`!t.settingsOpen()` 这个条件是必需的**，不是冗余。
      *
@@ -90,22 +100,43 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
      * 这也违反 AGENTS.md §3b「触屏与键盘功能必须对等」：改键只有
      * `Enter` 一条路，而触屏**根本按不出 Enter**。
      */
-    if (t.phase() === 'prepare' && !t.settingsOpen()) {
-      t.prepare.hitTest(px, py);
+    if (t.phase() !== 'battle' && !t.settingsOpen()) {
+      /**
+       * ⚠️ **齿轮要先判**：它是这些界面上**唯一**浮在界面之上的可点元素
+       * （右上角，见 `SettingsButton` 的锚点）。
+       *
+       * 原先备战那条分支无条件 `return`（不管界面有没有消费这次点击），
+       * 于是**备战界面里点齿轮完全没反应** —— 一个看起来能点、实际是死的
+       * 按钮。首页现在是**默认入口**，同一个 bug 在那里会更显眼
+       * （而且触屏玩家没有 `Esc` / `,`，等于完全进不去设置）。
+       */
+      if (t.settingsButton.hitTest(px, py)) {
+        t.openSettings();
+        return;
+      }
+      if (t.phase() === 'home') t.home.hitTest(px, py);
+      else if (t.phase() === 'characterSelect') t.select.hitTest(px, py);
+      else t.prepare.hitTest(px, py);
       return;
     }
 
     /**
-     * ② **结算中：点屏幕任意处 = 回备战**。
+     * ② **结算中：点屏幕任意处 = 离开战斗**。
      *
      * ⚠️ 必须**先于**按钮层与设置判断，且整体 `return`：
      *   - 放在按钮层之后：按钮会 `return true` 吃掉点击 → 玩家点在按钮弧里
      *     **永远重开不了**（实测点「斩」不重开、点空白才重开）
      *   - 不 `return`：会同时满足 `settingsButton.hitTest` → 一次点击
      *     **既开设置又静默重开**（实测 tick 663 → 43）
+     *
+     * ⚠️ `t.phase() === 'battle'` 这个前置条件是**必需的**：`battleEnded()`
+     * 读的是 `state.loop`，而**非战斗阶段它是 `undefined`** ——
+     * `undefined !== 'running'` 为真，没有这个守卫就会"在首页点一下屏幕
+     * 就被送去选角色 / 备战界面"。原先靠 ① 无条件 `return` 挡住，
+     * 现在**显式写出来**，不再依赖分支顺序这种隐式前提。
      */
-    if (!t.touch.caps.showKeyHints && t.battleEnded()) {
-      t.backToPrepare();
+    if (t.phase() === 'battle' && !t.touch.caps.showKeyHints && t.battleEnded()) {
+      t.backFromBattle();
       return;
     }
 

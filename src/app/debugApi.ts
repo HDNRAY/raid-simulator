@@ -81,6 +81,86 @@ export function prepareDebugApi(prepare: PrepareDebugTarget): {
   };
 }
 
+/** 首页暴露给调试的最小面（`HomeScreen` 满足它）。 */
+export interface HomeDebugTarget {
+  readonly current: { readonly cursor: number };
+  moveFocus(delta: number, wrap?: boolean): void;
+  confirm(): void;
+}
+
+/**
+ * 首页的调试入口。
+ *
+ * 与 `prepareDebugApi` 同源的两条理由：
+ *   1. headless 下模拟点击不可靠（rAF 被降频、CSS 缩放 → 逻辑坐标依赖
+ *      真实布局），截图脚本需要"把界面推到某个状态再拍"
+ *   2. 每个方法都**转调界面自己的方法**（同键盘 / 同点击），不另写一套 ——
+ *      旁路会掩盖真 bug（验证的会是调试入口而不是界面）
+ *
+ * ⚠️ `state()` 返回**拷贝**：调试入口不该有写穿界面的能力。
+ */
+export function homeDebugApi(home: HomeDebugTarget): {
+  readonly home: {
+    state(): { readonly cursor: number };
+    moveFocus(delta: number, wrap?: boolean): void;
+    confirm(): void;
+  };
+} {
+  return {
+    home: {
+      /** 光标停在第几个入口（0 = 肉鸽模式，1 = 自由模式）。 */
+      state: () => ({ cursor: home.current.cursor }),
+      /** 同 ↑ ↓（`wrap` = Tab / Shift+Tab）。 */
+      moveFocus: (delta, wrap = false) => home.moveFocus(delta, wrap),
+      /** 同 Enter：进入光标处的模式（会真的切界面）。 */
+      confirm: () => home.confirm(),
+    },
+  };
+}
+
+/** 选角色屏暴露给调试的最小面（`CharacterSelectScreen` 满足它）。 */
+export interface CharacterSelectDebugTarget {
+  readonly current: PrepareDebugTarget['current'];
+  cycle(delta: number): void;
+  confirm(): void;
+  pick(id: string): void;
+}
+
+/**
+ * 选角色屏的调试入口。
+ *
+ * ⚠️ `state()` 的形状与备战界面**同一个**（`PrepareDebugTarget['current']`）：
+ * 两个界面用的是同一套光标模型，调试脚本因此可以复用同一段读状态的代码。
+ * 选角色屏的 `bossId` 恒为空串（没有对手槽位，见 `characterSelectLogic`）。
+ */
+export function characterSelectDebugApi(select: CharacterSelectDebugTarget): {
+  readonly characterSelect: {
+    state(): PrepareDebugTarget['current'];
+    cycle(delta: number): void;
+    confirm(): void;
+    pick(id: string): void;
+  };
+} {
+  const copy = (): PrepareDebugTarget['current'] => ({
+    playerId: select.current.playerId,
+    bossId: select.current.bossId,
+    focus: select.current.focus,
+    cursor: { ...select.current.cursor },
+  });
+  return {
+    characterSelect: {
+      /** 当前已确定的角色 + 光标（两者分离时能一眼看出差别）。 */
+      state: copy,
+      /** 同 ← →：**只移动光标**，不改已确定的角色。 */
+      cycle: (delta) => select.cycle(delta),
+      /** 同 Enter：确定光标处的角色；能开始就开始一局（会真的进战斗）。 */
+      confirm: () => select.confirm(),
+      /** 同点击卡片：移光标 + 确定 + 开始（一步到位）。 */
+      pick: (id) => select.pick(id),
+    },
+  };
+}
+
 /** 设置面板暴露给调试的最小面（`SettingsPanel` 满足它）。 */
 export interface SettingsDebugTarget {
   readonly capturingSkillId: string | undefined;

@@ -105,6 +105,40 @@ declare global {
         /** 直接把焦点放到某个槽位（截图用，省掉"按几次方向键"）。 */
         focusSlot(slot: 'player' | 'boss' | 'start'): void;
       };
+      /**
+       * **首页**（默认入口；调试用）。
+       *
+       * 与 `prepare` 同源：headless 下模拟点击不可靠，截图脚本需要把界面
+       * 推到某个状态再拍；每个方法都转调界面自己的方法，不是旁路。
+       */
+      home: {
+        /** 光标停在第几个入口（0 = 肉鸽模式，1 = 自由模式）。 */
+        state(): { readonly cursor: number };
+        /** 同 ↑ ↓ / Tab：移动光标（`wrap` 为真时环绕）。 */
+        moveFocus(delta: number, wrap?: boolean): void;
+        /** 同 Enter：进入光标处的模式（**会真的切界面**）。 */
+        confirm(): void;
+      };
+      /**
+       * **选角色屏**（肉鸽模式的第一屏；调试用）。
+       *
+       * ⚠️ `state()` 的形状与 `prepare` 相同（共用同一套光标模型）；
+       * `bossId` 恒为空串 —— 这一屏没有对手槽位。
+       */
+      characterSelect: {
+        state(): {
+          readonly playerId: string;
+          readonly bossId: string;
+          readonly focus: 'player' | 'boss' | 'start';
+          readonly cursor: { readonly playerId: string; readonly bossId: string };
+        };
+        /** 同 ← → / Tab：**只移动光标**，不改已确定的角色。 */
+        cycle(delta: number): void;
+        /** 同 Enter：确定光标处的角色；能开始就开始一局（**会真的进战斗**）。 */
+        confirm(): void;
+        /** 同点击卡片：移光标 + 确定 + 开始（一步到位）。 */
+        pick(id: string): void;
+      };
     };
     /** 渲染侧探针：报告实际写到 Pixi 上的位置 */
     __raidProbe?(): {

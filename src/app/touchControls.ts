@@ -67,13 +67,19 @@ export interface TouchControlsOptions {
   /** 设置面板是否打开（打开时触屏按钮让出输入权）。 */
   readonly isSettingsOpen: () => boolean;
   /**
-   * 是否在**备战界面**（那时战斗场景整块隐藏，触屏按钮也要跟着藏）。
+   * 现在是否**正在战斗**（非战斗时战斗场景整块隐藏，触屏按钮也要跟着藏）。
+   *
+   * ⚠️ 判据从"在备战界面"（原先叫 `isPrepareOpen`）改成"在战斗中"：
+   * 现在有四个 phase（首页 / 选角色 / 自由模式 / 战斗），前三个都是
+   * **整屏界面** —— 双弧按钮浮在上面会与卡片直接重叠（AGENTS.md §3b：
+   * "触屏时整条技能栏都隐藏"是同一个道理）。写成"在战斗中"而不是列举
+   * 那三个界面，是为了以后再加界面时**默认就是隐藏**。
    *
    * ⚠️ 放在这个每帧回调里而不是新开一个 `setVisible`：显隐的**唯一写入点**
    * 已经在这里（见 `frame` 的说明），再加一个写入点就会出现"两处都想控制
    * 可见性"的经典打架。
    */
-  readonly isPrepareOpen: () => boolean;
+  readonly isBattleActive: () => boolean;
   /**
    * 当前生效的派生技（没有则 `undefined`）。
    *
@@ -99,8 +105,15 @@ export interface TouchControls {
   readonly onPointerDown: (pointerId: number, px: number, py: number) => boolean;
   readonly onPointerUp: (pointerId: number) => void;
   readonly onPointerCancel: (pointerId: number) => void;
-  /** 每帧：把布局推给按钮层、按快照更新文本。 */
-  readonly frame: (view: BattleSnapshotView) => void;
+  /**
+   * 每帧：**按当前 phase 决定显隐**；战斗中还要把快照推给按钮层（文本）。
+   *
+   * ⚠️ `view` 是可选参数：**非战斗阶段也会被调用**（那时没有快照），
+   * 而显隐必须在那时也算一次 —— 否则按钮层会停在上一局的状态
+   * （实测：触屏设备上首页 / 选角色屏右下角浮着双弧按钮）。
+   * 见 `frame` 实现里"显隐的唯一写入点"那段说明。
+   */
+  readonly frame: (view?: BattleSnapshotView) => void;
   /** 键位表变了 → 按钮跟着变（这是"监听变化"的落点之一）。 */
   readonly setBindings: (bindings: readonly { readonly key: string; readonly skillId: string }[]) => void;
   /**
@@ -211,19 +224,29 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
     frame(view) {
       if (!caps.touch) return;
       /**
-       * ⚠️ **设置面板打开时隐藏按钮层。**
+       * ⚠️ **非战斗的一切 phase 都隐藏按钮层**（首页 / 选角色 / 自由模式）。
        *
-       * 否则扇形按钮会画在设置面板**上面**（面板在 canvas 里居中，
-       * 高 500，而按钮占 `y 284..508` 那片）—— 实测在设置页能看到
-       * 六个圆按钮穿透出来，既难看又让人以为可以点。
+       * 那三屏都是**整屏界面**，双弧按钮浮在上面会与卡片直接重叠
+       * （AGENTS.md §3b："触屏时整条技能栏都隐藏"是同一个道理；
+       * 设计稿 §8.2 也点名要求按 `isBattleActive` 判）。
        *
-       * 放在这里（每帧判）而不是"打开时隐藏一次"：`settingsOpen`
-       * 是主循环的局部状态，没有变更事件，每帧读一次是最省事且不会
-       * 漏的写法。
+       * ⚠️ 这条判断在**非战斗时也要跑到** —— 所以主循环的非战斗分支同样
+       * 会调 `frame()`（不带快照）。这是实测踩出来的：触屏设备上首页
+       * 右下角一直浮着六个圆按钮，因为原先只有战斗分支调 `frame`，
+       * 而按钮层的初值是 `visible = caps.touch`。
+       *
+       * ⚠️ **设置面板打开时也隐藏**：否则扇形按钮会画在设置面板**上面**
+       * （面板在 canvas 里居中，高 500，而按钮占 `y 284..508` 那片）——
+       * 实测在设置页能看到六个圆按钮穿透出来，既难看又让人以为可以点。
+       *
+       * 放在这里（每帧判）而不是"打开时隐藏一次"：`settingsOpen` 与
+       * `phase` 都没有变更事件，每帧读一次是最省事且不会漏的写法。
        */
-      const hidden = options.isSettingsOpen() || options.isPrepareOpen();
+      const hidden = options.isSettingsOpen() || !options.isBattleActive();
       layer.root.visible = !hidden;
       if (hidden) return;
+      /** 非战斗阶段不会有快照；真发生了就只更新显隐（防一手崩溃）。 */
+      if (view === undefined) return;
       layer.update(view);
     },
 

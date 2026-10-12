@@ -39,12 +39,12 @@ export interface TouchSetupDeps {
   /** Pixi 应用（触屏按钮层挂在它的 stage 上）。 */
   readonly app: Application;
   readonly registry: ContentRegistry;
-  /** 当前战斗循环（备战阶段为 `undefined`）。 */
+  /** 当前战斗循环（非战斗阶段为 `undefined`）。 */
   readonly battle: () => BattleLoop | undefined;
   /** 设置面板是否打开（打开时触屏按钮让出输入权）。 */
   readonly isSettingsOpen: () => boolean;
-  /** 是否在**备战界面**（那时战斗场景整块隐藏，触屏按钮也要跟着藏）。 */
-  readonly isPrepareOpen: () => boolean;
+  /** 是否**正在战斗**（非战斗时战斗场景整块隐藏，触屏按钮也要跟着藏）。 */
+  readonly isBattleActive: () => boolean;
   /** 当前键位表（触屏按钮由它机械派生）。 */
   readonly bindings: () => readonly { readonly key: string; readonly skillId: string }[];
   /** 触屏的能力值变化要通知的部件。 */
@@ -68,8 +68,8 @@ export function createTouchSetup(d: TouchSetupDeps): TouchControls {
     bindings: d.bindings(),
     currentTick: () => d.battle()?.engineState.snapshot.tick ?? 0,
     isSettingsOpen: d.isSettingsOpen,
-    /** 备战中触屏按钮也要藏（战斗场景整块隐藏）。 */
-    isPrepareOpen: d.isPrepareOpen,
+    /** 非战斗阶段（首页 / 选角色 / 自由模式）触屏按钮也要藏。 */
+    isBattleActive: d.isBattleActive,
     /** 派生技从**快照**读（`ViewAdapter` 已经算好，带 `derivedFrom`）。 */
     derivedSkill: () => {
       const l = d.battle();

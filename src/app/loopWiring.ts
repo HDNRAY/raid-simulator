@@ -20,7 +20,19 @@ import type { TouchControls } from './touchControls';
 
 /** 主循环要驱动的界面对象。 */
 export interface CanvasHost {
-  /** 备战界面（`frame()` / 键盘分发用）。 */
+  /** 首页（默认入口）。 */
+  readonly home: {
+    frame(): void;
+    moveFocus(delta: number, wrap?: boolean): void;
+    confirm(): void;
+  };
+  /** 选角色屏（肉鸽模式的第一屏）。 */
+  readonly select: {
+    frame(): void;
+    cycle(delta: number): void;
+    confirm(): void;
+  };
+  /** 自由模式（原备战界面；`frame()` / 键盘分发用）。 */
   readonly prepare: {
     frame(): void;
     cycle(delta: number): void;
@@ -42,9 +54,15 @@ export interface CanvasHost {
   };
   /** 设置开关（键盘分发时读 `isOpen()`）。 */
   readonly settingsToggle: SettingsToggle;
-  /** 回备战（结算后按 Enter / 触屏点屏都走它）。 */
-  readonly backToPrepare: () => void;
-  /** 当前的战斗循环（备战阶段为 `undefined`）。 */
+  /**
+   * 战斗结束后按 Enter / 触屏点屏的去向。
+   *
+   * ⚠️ 名字不再是 `backToPrepare`：现在是**按模式分流**的
+   * （肉鸽 → 选角色；自由 → 备战界面）。分流判据在 `game.ts` 里
+   * （`runSession.active` 是唯一的真相），这里只管"叫它一声"。
+   */
+  readonly backFromBattle: () => void;
+  /** 当前的战斗循环（非战斗阶段为 `undefined`）。 */
   readonly battle: () => BattleLoop | undefined;
 }
 
@@ -81,12 +99,25 @@ export function wireLoop(o: WireOptions): void {
      * 读同一个值，复制一份就会出现"探针里的帧数永远不动"。
      */
     state.frameCount += 1;
-    if (state.phase === 'prepare') {
+    if (state.phase !== 'battle') {
       /**
-       * 备战阶段：**不碰战斗**（`loop` 还没建出来）。场景与触屏按钮整块
-       * 藏起来 —— 否则会从备战界面的透底处露出来。
+       * **非战斗阶段**：**不碰战斗**（`loop` 已经 dispose）。三个整屏界面
+       * 各画各的，战斗场景与触屏按钮整块藏起来 —— 否则会从界面下面露出来。
+       *
+       * ⚠️ 显隐的**唯一写入点**是 `game.ts` 的 `applyPhase`，这里只负责
+       * "让当前那一屏重画"。所以这里的分发**必须**覆盖全部非战斗 phase：
+       * 少一个分支的表现是"那一屏停住不动"（选择变了画面不跟）。
        */
-      host.prepare.frame();
+      if (state.phase === 'home') host.home.frame();
+      else if (state.phase === 'characterSelect') host.select.frame();
+      else host.prepare.frame();
+      /**
+       * ⚠️ **非战斗阶段也要调触屏层的 `frame()`（不带快照）**：
+       * 它是"按钮层显隐"的**唯一写入点**，而按钮层的初值是
+       * `visible = caps.touch` —— 不在这条分支里算一次，触屏设备上首页 /
+       * 选角色 / 自由模式的右下角就会一直浮着双弧按钮（实测踩到）。
+       */
+      host.touch.frame();
       host.settingsButton.update();
       host.settings.update();
       return;
@@ -102,20 +133,28 @@ export function wireLoop(o: WireOptions): void {
   });
 
   /* ---------- 重开 ----------
-   * 战斗结束后：**键盘 Enter** 或 **触屏点屏幕** 都重开。
+   * 战斗结束后：**键盘 Enter** 或 **触屏点屏幕** 都离开战斗。
    *
    * ⚠️ 两条路径**共用这一个函数** —— 否则很容易出现"桌面能重开、
-   * 触屏不行"这种只在一边坏掉的问题。 */
+   * 触屏不行"这种只在一边坏掉的问题。
+   *
+   * ⚠️ 去哪一屏由 `host.backFromBattle` 决定（肉鸽 → 选角色；
+   * 自由 → 备战界面）。这里不判模式，避免三处各判一遍。 */
   window.addEventListener('keydown', (event) => {
     /**
-     * **备战阶段的键盘操作**（需求："记得支持键盘和 移动"）。
+     * **各屏的键盘操作**。
      *
-     * | 键 | 作用 |
-     * |---|---|
-     * | ← → | 在槽位里**移动光标**（不改选择） |
-     * | ↑ ↓ | 换槽位（人物 → 对手 → 开始），两端停住 |
-     * | Tab / Shift+Tab | 同上但**环绕**（Tab 的通用语义） |
-     * | Enter | **确定**光标处的那一项；光标在「开始战斗」上时开战 |
+     * | 屏幕 | 键 | 作用 |
+     * |---|---|---|
+     * | 首页 | ↑ ↓ | 移动光标（两端停住） |
+     * | 首页 | Tab / Shift+Tab | 同上但**环绕** |
+     * | 首页 | Enter | 进入光标处的模式 |
+     * | 选角色 | ← → / Tab | 在卡片间移动光标（不改已确定的角色） |
+     * | 选角色 | Enter | 以光标处的角色开始一局肉鸽 |
+     * | 自由模式 | ← → | 在槽位里**移动光标**（不改选择） |
+     * | 自由模式 | ↑ ↓ | 换槽位（人物 → 对手 → 开始），两端停住 |
+     * | 自由模式 | Tab / Shift+Tab | 同上但**环绕**（Tab 的通用语义） |
+     * | 自由模式 | Enter | **确定**光标处的那一项；在「开始战斗」上时开战 |
      *
      * ⚠️ **移动光标 ≠ 确定选择**（需求原话："用 enter 来确定选择，
      * 而不是靠移动到下一项"）。旧的 `Enter` 直接 `prepare.start()`，
@@ -124,14 +163,62 @@ export function wireLoop(o: WireOptions): void {
      * ⚠️ `Tab` 必须 `preventDefault`：否则浏览器会把焦点移出画布
      * （架构规范 §7 明确要求拦下 Tab）。
      *
-     * ⚠️ 设置面板打开时**不能抢键** —— 那时玩家可能正在改键，方向键是
-     * 移动焦点的。`settingsToggle.isOpen()` 的优先级高于备战。
+     * ⚠️ 设置面板打开 / 齿轮按钮聚焦时**不能抢键** —— 那时玩家可能正在
+     * 改键，方向键是移动焦点的。`settingsToggle.isOpen()` 与
+     * `settingsButtonFocused()` 的优先级高于一切界面。
+     *
+     * ⚠️ 三条分支**互斥**（`phase` 一次只有一个值），但每条都要
+     * `default: return`：不 return 的话未处理的键会掉到下面的战斗分支上，
+     * 而那里判的是 `state.loop`（非战斗阶段是 `undefined`）。
      */
     if (
-      state.phase === 'prepare' &&
       !host.settingsToggle.isOpen() &&
-      !state.settingsButtonFocused()
+      !state.settingsButtonFocused() &&
+      state.phase !== 'battle'
     ) {
+      if (state.phase === 'home') {
+        switch (event.key) {
+          case 'ArrowUp':
+            host.home.moveFocus(-1);
+            return;
+          case 'ArrowDown':
+            host.home.moveFocus(1);
+            return;
+          case 'Tab':
+            /** Shift+Tab 反向；环绕是 Tab 的通用语义。 */
+            host.home.moveFocus(event.shiftKey ? -1 : 1, true);
+            event.preventDefault();
+            return;
+          case 'Enter':
+            host.home.confirm();
+            return;
+          default:
+            return;
+        }
+      }
+      if (state.phase === 'characterSelect') {
+        switch (event.key) {
+          case 'ArrowLeft':
+            host.select.cycle(-1);
+            return;
+          case 'ArrowRight':
+            host.select.cycle(1);
+            return;
+          case 'Tab':
+            /**
+             * ⚠️ 只用一行卡片，没有"下一行"可去 —— 但 Tab 仍然要拦下
+             * （否则焦点跑出画布），所以让它**同 ← →**（到两端停住）。
+             */
+            host.select.cycle(event.shiftKey ? -1 : 1);
+            event.preventDefault();
+            return;
+          case 'Enter':
+            host.select.confirm();
+            return;
+          default:
+            return;
+        }
+      }
       switch (event.key) {
         case 'ArrowLeft':
           host.prepare.cycle(-1);
@@ -166,7 +253,7 @@ export function wireLoop(o: WireOptions): void {
       event.key === 'Enter' &&
       host.battle()?.engineState.snapshot.status !== 'running'
     ) {
-      host.backToPrepare();
+      host.backFromBattle();
     }
   });
 

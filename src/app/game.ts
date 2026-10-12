@@ -28,9 +28,10 @@
  * ⚠️ 顺序即正确性：这些"先后关系"不许整理
  * ==================================================================
  *
- *   1. **先备战界面、后 `?prepare=skip` 的进入战斗** ——
- *      `enterBattle` 会调 `prepare.setVisible` / `scene.setAppearance` /
- *      `startBattle`，`prepare` 早一步调用会撞 TDZ。
+ *   1. **先造三个界面（首页 / 选角色 / 自由模式）、后 `?prepare=skip`
+ *      的进入战斗** —— `enterBattle` 会走 `applyPhase`（它一次性重设
+ *      三个界面与战斗场景的显隐）与 `scene.setAppearance` / `startBattle`，
+ *      界面早一步调用会撞 TDZ。
  *   2. **触屏层必须晚于设置面板** —— 面板要接收 `touch` 的能力值
  *      （是否显示键位提示），所以它拿到的是一份**预览数据源**，
  *      稍后由 `touchSetup` 回填。
@@ -48,13 +49,22 @@
 import { Container, Graphics, Sprite, Text } from 'pixi.js';
 import { BattleScene } from '../render/BattleScene';
 import { PrepareScreen } from '../ui/PrepareScreen';
-import { BOSS_ROSTER, PLAYER_ROSTER, resolveBossId, resolvePlayerId } from '../data/roster';
+import { HomeScreen } from '../ui/HomeScreen';
+import { CharacterSelectScreen } from '../ui/CharacterSelectScreen';
+import {
+  BOSS_POOL,
+  BOSS_ROSTER,
+  PLAYER_ROSTER,
+  resolveBossId,
+  resolvePlayerId,
+} from '../data/roster';
 import { translator } from '../i18n/translator';
 import { observeStage } from '../render/sizes';
 import { UI_SCALE_MAX, UI_SCALE_MIN, type ScalingMode } from '../render/scaling';
 import { parseUiScale } from './settingsStore';
 import { createStartBattle } from './battleSetup';
-import { createGameState } from './flow';
+import { createRunSession } from './runSession';
+import { createGameState, settingsAnchorOf } from './flow';
 import { createSettingsSetup } from './settingsSetup';
 import { createTouchSetup } from './touchSetup';
 import { installDebugApi } from './debugApiSetup';
@@ -64,8 +74,8 @@ import { wireSettingsKeys } from './settingsKeys';
 import { translateSafe } from './translate';
 import type { BattleLoop } from './battleLoop';
 import type { GameDeps } from './deps';
+import type { Phase } from './flow';
 import type { Application } from 'pixi.js';
-
 /** 画布自适应的缩放模式（MVP 固定 `fit`）。 */
 const SCALING_MODE: ScalingMode = 'fit';
 
@@ -185,9 +195,55 @@ export function createGame(o: CreateGameDeps): GameHandle {
   });
 
   /**
-   * 取当前战斗循环（备战阶段为 `undefined`）。
+   * 取当前战斗循环（非战斗阶段为 `undefined`）。
    */
   const battle = (): BattleLoop | undefined => state.loop;
+
+  /**
+   * **一局肉鸽的持有者**（P2 只有一场，见 `runSession.ts` 文件头的桩说明）。
+   *
+   * ⚠️ 它的存在同时回答了"当前战斗是不是肉鸽那一场"—— 所以**没有**
+   * 另设一个 `mode: 'roguelike' | 'free'` 字段（两份真相会漂）。
+   * ⚠️ 种子在这里生成（`Date.now() >>> 0`）：`app/` 层允许非确定性，
+   * `core/` 不许（lint C2）—— 与 `battleSetup.ts` 给战斗种子的做法一致。
+   */
+  const runSession = createRunSession({ bossPool: BOSS_POOL.map((b) => b.id) });
+
+  /**
+   * **界面路由的唯一落实点**：把 `phase` 写进状态，并一次性重设
+   * **三个界面 + 战斗场景**的显隐。
+   *
+   * ==================================================================
+   * 为什么要有这个函数（这个仓库踩过的坑）
+   * ==================================================================
+   *
+   * `phase` 的消费者分布在 4 个文件（`loopWiring` ×2、`canvasInput`、
+   * `game` ×2 …），而"两个界面同时可见"历来是**漏改一处**的结果 ——
+   * 因为每个转移函数都自己手动 `setVisible`，加一个界面就要在每条路径上
+   * 各补一次。
+   *
+   * 所以显隐只在这里写：任何转移路径都**必须**走 `applyPhase`，
+   * 而它把四个开关一次算清（哪个 phase 显示哪一块是**一张表**）。
+   * 于是"加一个新界面"只需要改这一张表，而不是每条路径。
+   *
+   * ⚠️ 触屏层的显隐**不在这里**：它由 `touchControls.frame` 每帧按
+   * `isBattleActive()` 决定（那里的"唯一写入点"不该被绕过 —— 与
+   * `backToPrepare` 时代同一条纪律）。
+   */
+  const applyPhase = (phase: Phase): void => {
+    state.phase = phase;
+    state.home?.setVisible(phase === 'home');
+    state.select?.setVisible(phase === 'characterSelect');
+    state.prepare?.setVisible(phase === 'prepare');
+    scene.root.visible = phase === 'battle';
+    /**
+     * ⚠️ 走 `state.settingsButton`（可能还没回填）：`applyPhase` 的定义早于
+     * 设置面板的构造 —— 这个顺序是 `?prepare=skip` 需要的（见文件头
+     * "顺序即正确性"第 1 条），所以这里必须容忍 `undefined`。
+     */
+    state.settingsButton?.update();
+    state.onScreenChange(phase);
+  };
 
   /**
    * 备战界面的「开始」回调。
@@ -199,10 +255,10 @@ export function createGame(o: CreateGameDeps): GameHandle {
   let onPrepareStart: (playerId: string, bossId: string) => void = () => {};
 
   /**
-   * **进入战斗**：建一局新战斗、藏起备战界面。
+   * **进入战斗**：建一局新战斗，并把界面切到 `battle`。
    *
-   * ⚠️ 与 `backToPrepare` 成对：两者各自负责好**场景 / 触屏层 / 面板**的
-   * 显隐，任何一条路径漏掉一个开关都会出现"两个界面同时可见"。
+   * ⚠️ 显隐全部交给 `applyPhase`：任何一条进入战斗的路径（备战开始、
+   * 选角色开始、`?prepare=skip`、`restart`）都走这里，不会各自漏一个开关。
    */
   const enterBattle = (playerId: string, bossId: string): void => {
     selection.playerId = resolvePlayerId(playerId);
@@ -220,39 +276,104 @@ export function createGame(o: CreateGameDeps): GameHandle {
 
     state.loop?.dispose();
     state.loop = startBattle();
-    state.phase = 'battle';
-    state.prepare?.setVisible(false);
-    scene.root.visible = true;
-    state.onScreenChange('battle');
+    applyPhase('battle');
   };
   onPrepareStart = (playerId: string, bossId: string): void => enterBattle(playerId, bossId);
 
   /**
-   * 回到**备战界面**（而不是直接重开一局）。
+   * 切到某个**全屏界面**，并释放当前这一局的战斗循环（如果有）。
    *
-   * 需求："选人物 和 选boss，然后点开始才开始" —— 那"再来一次"自然也
-   * 该先回备战，让玩家有机会换对手。
+   * 需求（自由模式）："再来一次"先回备战，让玩家有机会换对手。
+   * 需求（肉鸽模式）：一场打完回**选角色**（P2 的桩，见 `runSession.ts`）。
+   *
+   * ⚠️ **释放循环必须在这里**（而不是留给 `applyPhase`）：`BattleLoop`
+   * 每帧被主循环驱动，留着不放会继续跑一场已经看不到的战斗
+   * （而且下一局 `enterBattle` 还会再建一个 —— 两个循环同时推进）。
    */
-  const backToPrepare = (): void => {
+  const switchTo = (target: 'home' | 'characterSelect' | 'prepare'): void => {
     state.loop?.dispose();
     state.loop = undefined;
-    state.phase = 'prepare';
-    state.prepare?.setVisible(true);
-    /**
-     * ⚠️ 战斗场景直接改 `root.visible`；触屏层的显隐由 `touch.frame`
-     * 每帧按 `isPrepareOpen()` 决定 —— 那里的**唯一写入点**不该被绕过。
-     */
-    scene.root.visible = false;
-    /**
-     * ⚠️ 走 `state.settingsButton`（可能还没回填）：`backToPrepare` 的
-     * 定义早于设置面板的构造 —— 这个顺序是 `?prepare=skip` 需要的
-     * （见文件头"顺序即正确性"第 1 条），所以这里必须容忍 `undefined`。
-     */
-    state.settingsButton?.update();
-    state.onScreenChange('prepare');
+    applyPhase(target);
   };
 
-  /* ---------- 备战界面 ---------- */
+  /**
+   * 战斗结束（结算面板按 Enter / 触屏点屏）之后的去向。
+   *
+   * ⚠️ **按模式分流**，而且判据只有一个：`runSession.active`（有没有
+   * 没结束的一局肉鸽）。加一个 `mode` 字段就会多一个可能与它打架的真相源。
+   *
+   * ⚠️ 肉鸽这一支是**临时的桩**：P2 只打一场就 `clear()`（回选角色）；
+   * P3 会在这里改成"推进到下一场 + 进炁机选择"（见 `runSession.ts`）。
+   */
+  const backFromBattle = (): void => {
+    if (runSession.active) {
+      runSession.clear();
+      switchTo('characterSelect');
+      return;
+    }
+    switchTo('prepare');
+  };
+
+  /**
+   * **肉鸽模式：选完角色，开始一局**。
+   *
+   * Boss 由这一局的**种子洗出来**（`runSession.begin`）—— 不是备战界面
+   * 里选的那个对手。这是肉鸽与自由模式的核心差别（设计稿 §3.4：
+   * 备战的核心能力是"玩家直接挑 Boss"，与"顺序随机"语义冲突）。
+   *
+   * ⚠️ 洗牌走 `core/run/` 自己的随机流（§7.1），不碰 `BattleState.rngSeed`。
+   */
+  const startRoguelikeRun = (playerId: string): void => {
+    runSession.begin(playerId, Date.now() >>> 0);
+    const bossId = runSession.bossId();
+    /**
+     * `BOSS_POOL` 为空才会走到这里（现在有 2 个）。**留在选角色屏**，
+     * 而不是开始一场打不存在的 Boss 的假战斗 —— 那种静默失败更难查。
+     */
+    if (bossId === undefined) {
+      runSession.clear();
+      applyPhase('characterSelect');
+      return;
+    }
+    enterBattle(playerId, bossId);
+  };
+
+  /* ---------- 首页（默认入口） ---------- */
+  /**
+   * 需求："有一个**新的首页**，首页可以选进入肉鸽模式，或者自由" +
+   * "默认入口：首页"。
+   *
+   * ⚠️ 首页只是**路由**：它不通向半成品，所以现在就能当默认入口。
+   */
+  const home = new HomeScreen({
+    pixi: { Container, Graphics, Sprite, Text },
+    translate: translateSafe,
+    showKeyHints: () => state.touch?.caps.showKeyHints ?? true,
+    onPick: (action) => {
+      /**
+       * 「自由模式」= 原来的备战界面（标题已改成「自由模式」）；
+       * 「肉鸽模式」= 先选角色（设计稿 §3.1：**进入肉鸽才是选角色**）。
+       */
+      if (action === 'free') switchTo('prepare');
+      else switchTo('characterSelect');
+    },
+  });
+  state.home = home;
+  app.stage.addChild(home.root);
+
+  /* ---------- 选角色屏（肉鸽模式的第一屏） ---------- */
+  const select = new CharacterSelectScreen({
+    pixi: { Container, Graphics, Sprite, Text },
+    translate: translateSafe,
+    players: PLAYER_ROSTER,
+    initialPlayerId: selection.playerId,
+    showKeyHints: () => state.touch?.caps.showKeyHints ?? true,
+    onStart: (playerId: string) => startRoguelikeRun(playerId),
+  });
+  state.select = select;
+  app.stage.addChild(select.root);
+
+  /* ---------- 备战界面（自由模式） ---------- */
   const prepare = new PrepareScreen({
     pixi: { Container, Graphics, Sprite, Text },
     translate: translateSafe,
@@ -264,15 +385,19 @@ export function createGame(o: CreateGameDeps): GameHandle {
   });
   state.prepare = prepare;
   app.stage.addChild(prepare.root);
-  /**
-   * ⚠️ 开局默认在**备战**：战斗场景先藏起来，否则会从备战界面下面露出来。
-   */
-  scene.root.visible = false;
-  prepare.setVisible(true);
 
   /**
-   * ⚠️ 放在 `prepare` 构造**之后**：`enterBattle` 会用到 `prepare.setVisible`，
-   * 早一步调用会碰到 TDZ。
+   * ⚠️ 开局默认在**首页**：一次性把三个界面与战斗场景的显隐摆好
+   * （而不是各写一句 `setVisible` —— 那正是"漏一处就两个界面同时可见"）。
+   */
+  applyPhase('home');
+
+  /**
+   * ⚠️ 放在三个界面构造**之后**：`enterBattle` 走 `applyPhase`（会用到
+   * 三个界面），早一步调用会碰到 TDZ。
+   *
+   * ⚠️ **`?prepare=skip` 照旧直接进战斗**（不经过首页）：截图工具依赖它
+   * （见文件头那段说明）。`?boss=` / `?noai=1` 的行为也一字未变。
    */
   if (skipPrepare) enterBattle(selection.playerId, resolveBossId(bossParam ?? selection.bossId));
 
@@ -298,7 +423,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
     },
   });
   const { settings, settingsButton, settingsToggle, touchPreviewSource } = settingsSetup;
-  /** 回填给 `backToPrepare`（它的定义早于这一句，见 `flow.ts` 的说明）。 */
+  /** 回填给 `applyPhase`（它的定义早于这一句，见 `flow.ts` 的说明）。 */
   state.settingsButton = settingsButton;
 
   /* ---------- 触屏层 ---------- */
@@ -316,7 +441,12 @@ export function createGame(o: CreateGameDeps): GameHandle {
     registry: d.registry,
     battle,
     isSettingsOpen: () => settingsToggle.isOpen(),
-    isPrepareOpen: () => state.phase === 'prepare',
+    /**
+     * ⚠️ 判据是"**在战斗中**"而不是"在备战界面"：首页 / 选角色 / 自由模式
+     * 都是**整屏界面**，双弧按钮浮在上面会与卡片重叠（设计稿 §8.2、
+     * AGENTS.md §3b"触屏时整条技能栏都隐藏"）。
+     */
+    isBattleActive: () => state.phase === 'battle',
     bindings: () => state.bindings,
     scene,
     settingsButton,
@@ -328,17 +458,23 @@ export function createGame(o: CreateGameDeps): GameHandle {
   /**
    * 这里的回填只是"接线"，真正的**补调用一次**在 `installDebugApi` 里 ——
    * 两件事必须在一起看（见那里的说明）。
+   *
+   * ⚠️ 映射走 `settingsAnchorOf`（`flow.ts`）：`debugApiSetup.ts` 也要用
+   * 同一条映射，两处各写一遍三元表达式就是两份会漂的真相。
    */
-  const onScreenChange = (screen: 'prepare' | 'battle'): void => settingsButton.setScreen(screen);
+  const onScreenChange = (screen: Phase): void =>
+    settingsButton.setScreen(settingsAnchorOf(screen));
   state.onScreenChange = onScreenChange;
 
   /* ---------- 画布指针接线 ---------- */
   /**
    * ⚠️ 抽到了 `app/canvasInput.ts` —— 那里集中写着"顺序即优先级"的
-   * 三条规则（都是实测踩出来的），不在这里重复。
+   * 那条清单（都是实测踩出来的），不在这里重复。
    */
   wireCanvasPointer({
     canvas: app.canvas,
+    home,
+    select,
     prepare,
     settings,
     settingsButton,
@@ -347,7 +483,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
     settingsOpen: () => settingsToggle.isOpen(),
     openSettings: () => settingsToggle.open('keys'),
     battleEnded: () => state.loop?.engineState.snapshot.status !== 'running',
-    backToPrepare,
+    backFromBattle,
   });
 
   /* ---------- 设置界面的键盘 ---------- */
@@ -355,9 +491,9 @@ export function createGame(o: CreateGameDeps): GameHandle {
    * ⚠️ 抽到了 `app/settingsKeys.ts` —— 那里写着"必须用捕获阶段"与
    * "弹窗打开时独占键盘"两条由来，不在这里重复。
    *
-   * ⚠️ `acceptsKeyboardFocus` 只在**战斗**为真：备战界面里 `↑↓` 是
-   * 换槽位的，不能被设置按钮抢走（那里 `Esc` / `,` 照样能开设置）。
-   * 由来见 `settingsKeys.ts` 里那个方法的注释。
+   * ⚠️ `acceptsKeyboardFocus` 只在**战斗**为真：备战界面里 `↑↓` 换槽位、
+   * 首页里 `↑↓` 移动光标，都不能被设置按钮抢走（那些界面 `Esc` / `,`
+   * 照样能开设置）。由来见 `settingsKeys.ts` 里那个方法的注释。
    */
   const settingsKeys = wireSettingsKeys({
     settings,
@@ -369,7 +505,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
       state.handlingKeyDown = value;
     },
   });
-  /** 回填给备战界面的键盘处理（见 `flow.ts` 里那个字段的说明）。 */
+  /** 回填给非战斗界面的键盘处理（见 `flow.ts` 里那个字段的说明）。 */
   state.settingsButtonFocused = settingsKeys.isButtonFocused;
 
   return {
@@ -389,13 +525,15 @@ export function createGame(o: CreateGameDeps): GameHandle {
       wireLoop({
         state,
         host: {
+          home,
+          select,
           prepare,
           settings,
           settingsButton,
           touch,
           scene,
           settingsToggle,
-          backToPrepare,
+          backFromBattle,
           battle,
         },
         app,
@@ -415,6 +553,8 @@ export function createGame(o: CreateGameDeps): GameHandle {
         settings,
         settingsButton,
         settingsToggle,
+        home,
+        select,
         prepare,
         touch,
         restart: () => enterBattle(selection.playerId, selection.bossId),
