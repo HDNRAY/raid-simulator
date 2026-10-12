@@ -13,8 +13,7 @@
  * （`pool`）全部**直接继承**，不需要为炁机另起一套数据结构。
  *
  * ⚠️ **内容表 `src/data/qiji.ts` 不在 P0**：本文件只声明形状，
- * 一个炁机实例都还没有。于是"引擎里还没有消费者"这件事在 P0
- * 不会造成静默无效 —— 因为没有内容可以写。
+ * 一个炁机实例都还没有。
  *
  * 与 `EntityKind` / 校验器 / 注册表的关系见下面 `QijiEntity.kind`
  * 的说明（那是 **W8**，属于 P6）。
@@ -25,83 +24,44 @@
  */
 
 import type { GameEntity } from './skills';
+import type { BattleStatQuery as RunStatQuery } from '../run/query';
 
 /* ================================================================== *
- * 1. 一局肉鸽的计数器
- * ================================================================== */
-
-/**
- * 一局肉鸽内可累计的计数器。
- *
- * **封闭联合**，理由是"拼错一个键名会静默失效"：如果这里是
- * `string`，`{ kind: 'counterAtLeast', counter: 'jieInterupts' }`
- * 会编译通过、求值恒为 0（永远差一点解锁），而**没有任何东西会报错**。
- * 做成联合之后，拼错是编译错误。
- *
- * ⚠️ 五个值的语义与"从哪来"（P0 只**累加**它们，不产生它们）：
- *
- * | 值 | 含义 | 谁产生 |
- * |---|---|---|
- * | `jieInterrupts` | 「截」成功打断次数 | 引擎（**W3** 派发 `onInterruptSuccess` + **W1** 写计数器）→ P1 |
- * | `interrupts` | 任何技能成功打断次数 | 同上 |
- * | `dodges` | 成功闪避次数 | 引擎（已有 `avoided` 事件 / 池子）→ P1 |
- * | `battlesWon` | 赢下的战斗数 | `RunState` 自己（`core/run/lifecycle.ts`） |
- * | `flawlessBattles` | 满血赢下的战斗数 | 引擎（终局快照里玩家的 `hp === caps.hp`）→ P1 |
- *
- * ⚠️ **P0 不实现引擎侧的计数器**（那是 W1 / W3）。`core/run/` 在每场战斗
- * 结束时读**终局快照里的计数**并**累加** —— 所以本文件只声明键名，
- * 不声明"怎么数出来"。
- */
-export type RunCounter =
-  /** 「截」成功打断次数（W3 派发 `onInterruptSuccess` 后可得）。 */
-  | 'jieInterrupts'
-  /** 任何技能成功打断次数。 */
-  | 'interrupts'
-  /** 成功闪避次数。 */
-  | 'dodges'
-  /** 赢下的战斗数。 */
-  | 'battlesWon'
-  /** 满血赢下的战斗数。 */
-  | 'flawlessBattles';
-
-/**
- * 全部合法计数器键，**运行期**的一份。
- *
- * 存在的理由：类型在运行期被擦除，而"解析一份外来的存档 / 一份未经验证
- * 的终局快照"必须按**同一份清单**过滤（`isRunCounter`）。若这份清单与
- * `RunCounter` 漂移，坏数据就会被静默当成 0 —— 那正是封闭联合要防的事，
- * 所以两者放在同一个文件、相邻的位置，改一个就会看见另一个。
- */
-export const RUN_COUNTERS: readonly RunCounter[] = [
-  'jieInterrupts',
-  'interrupts',
-  'dodges',
-  'battlesWon',
-  'flawlessBattles',
-];
-
-/** 类型守卫：这个字符串是不是一个合法的 `RunCounter`（用于校验外来数据）。 */
-export function isRunCounter(value: unknown): value is RunCounter {
-  return typeof value === 'string' && RUN_COUNTERS.some((counter) => counter === value);
-}
-
-/**
- * 一份"计数器 → 次数"的映射（**不完整**，缺的键等于 0）。
- *
- * 用 `Partial` 而不是全零对象：`RunState` 要进 JSON、要被 diff，
- * `{ jieInterrupts: 3 }` 比 `{ jieInterrupts: 3, interrupts: 0, dodges: 0, … }`
- * 既短又能一眼看出"这一局真的数到了什么"。读的时候统一走
- * `core/run/lifecycle.ts` 的 `counterValue`（缺键 = 0），
- * 不要在别处写 `?? 0`。
- */
-export type RunCounters = Readonly<Partial<Record<RunCounter, number>>>;
-
-/* ================================================================== *
- * 2. 解锁条件
+ * 1. 解锁条件（一局肉鸽维度）
  * ================================================================== */
 
 /**
  * 一个炁机的解锁条件（**一局肉鸽维度**）。
+ *
+ * ==================================================================
+ * ⚠️ 这里**曾经**是一个封闭的 5 元素计数器联合（已删除）
+ * ==================================================================
+ *
+ * 旧形状（第一版设计）：
+ *
+ * ```ts
+ * type RunCounter = 'jieInterrupts' | 'interrupts' | 'dodges'
+ *                  | 'battlesWon' | 'flawlessBattles';   // ✗ 已删
+ * ```
+ *
+ * 用户否掉了它，原话是嫌它**只能数技能使用次数**。具体三个"做不出来"：
+ *
+ *   1. **分不出是哪个技能**：「截」打断 3 次与「破」打断 3 次在旧形状里
+ *      是**同一个数**（`interrupts`），因为闭集里没有"哪个技能"这一维。
+ *      而用户的「截拳道」/「招架反击流」要的正是这个区分。
+ *   2. **没有伤害维度**：闭集里根本没有 `damage`，所以"某个技能造成
+ *      伤害数"（用户点名的第一条要求）**无法表达** —— 只能回去改
+ *      `core/types/` 的常量表，也就是"加一条炁机要动引擎类型"。
+ *   3. **作用域含糊**：旧形状里 `'battle' | 'run'` 只写在文档里，
+ *      类型上没有位置放它。
+ *
+ * 现在改成**对统计的一次查询 + 组合子**：
+ *   - 叶子 = `{ kind: 'statAtLeast'; stat: RunStatQuery; value }`
+ *     （查询本身声明在 `core/run/stats.ts`，**开放**：加维度不动本文件）
+ *   - 组合子 = `all` / `any` / `not`（与 `Condition` 同构）
+ *
+ * ⚠️ 于是"条件写在**内容数据**里"（`data/qiji.ts` 的每一条 `QijiUnlock`）
+ * 成为可能：新炁机只需要写一条查询，不需要往 `core/` 加一个联合成员。
  *
  * ==================================================================
  * ⚠️ 为什么 `always` 带一个空的 `of`（而不是"没有 `of` 的可选字段"）
@@ -113,10 +73,8 @@ export type RunCounters = Readonly<Partial<Record<RunCounter, number>>>;
  *   - 将来 `data/qiji.ts` 的内容作者
  *
  * `always` 是"零个子条件的 `all`"：写成 `{ kind: 'always', of: [] }` 之后，
- * **组合子那一层只需要处理"有没有 `of`、里面几项"一件事**，而不用为
- * "`of` 不一定存在"再开一条分支。少一条分支就是少一个"两处实现漂开"的
- * 机会 —— 判定与进度文案各自针对 `of === undefined` 做不同的兜底，
- * 正是"卡片说 3/3、点下去却没解锁"这类 bug 的来源。
+ * **组合子那一层只需要处理"里面几项"一件事**，而不用为"`of` 不一定存在"
+ * 再开一条分支。少一条分支就是少一个"两处实现漂开"的机会。
  *
  * ⚠️ 代价是内容作者要写 `of: []`。这比"两个联合成员长得不一样、
  * 每个消费者各自判空"便宜得多。
@@ -127,35 +85,44 @@ export type RunCounters = Readonly<Partial<Record<RunCounter, number>>>;
  *
  *   - `Condition`：一场战斗**之中**，某个技能 / buff / 行为此刻能不能生效
  *   - `QijiUnlock`：一局肉鸽**之间**，某个炁机累积够了没有
- *
- * 刻意不复用同一个联合：两者的求值时机、状态来源、错误后果都不同
- * （战斗内条件错了是这一局打错，解锁条件错了是**整局的成长路线错**）。
+ * 求值时机、状态来源、错误后果都不同，所以不复用同一个联合。
  * 组合子与 `Condition` 同构，是为了让"读一份解锁条件"不用学第二套语法。
- *
- * ⚠️ P0 只实现这一种叶子（`counterAtLeast`），**没有 `counterBelow`**：
- * "解锁"在语义上只有"够不够"，没有"少到某个程度才给"。真要"少挨打才给"
- * 这类条件，用 `not` + `counterAtLeast` 表达，比加一个方向相反的叶子
- * 少一份需要解释的语义（`value` 是"低于它才算满足"听起来就像 bug）。
  */
 export type QijiUnlock =
   /** 开局即可选（"通用炁机"，§5.4 —— 兜底不是特判，只是零子条件的 `all`）。 */
   | { readonly kind: 'always'; readonly of: readonly QijiUnlock[] }
   /**
-   * 一局肉鸽内累计到 `value` 次。
+   * 对**统计**的一次查询 >= `value`。
    *
-   * 比较方向是 `>=`（"成功使用 3 次截"在第 3 次就该解锁，不是第 4 次），
+   * ⚠️ 比较方向是 `>=`（"成功使用 3 次截"在第 3 次就该解锁，不是第 4 次），
    * 求值只在 `core/run/unlock.ts` 的 `evalUnlock` 一处实现。
+   *
+   * ⚠️ 查询对象（`RunStatQuery`）声明在 `core/run/stats.ts`：
+   * 那里才有"统计里有哪些维度"的知识。本文件只负责"条件可以引用一次查询"。
    */
-  | { readonly kind: 'counterAtLeast'; readonly counter: RunCounter; readonly value: number }
+  | { readonly kind: 'statAtLeast'; readonly stat: RunStatQuery; readonly value: number }
   /** 全部满足（**空 = 真**：没有一项被违反）。 */
   | { readonly kind: 'all'; readonly of: readonly QijiUnlock[] }
   /** 任一满足（**空 = 假**：没有一个证人）。 */
   | { readonly kind: 'any'; readonly of: readonly QijiUnlock[] }
-  /** 取反。`of` 是**单个**条件（不是数组）—— 取反多个条件的正确写法是 `not(all([…])`。 */
+  /** 取反。`of` 是**单个**条件；取反多个条件的正确写法是 `not(all([…]))`。 */
   | { readonly kind: 'not'; readonly of: QijiUnlock };
 
+/**
+ * 一次统计查询（转发别名）。
+ *
+ * 真正的定义在 `core/run/query.ts` —— 那里才有"查询能问什么维度"的
+ * 知识（`skillUses` / `skillDamage` / …）。这里转发是为了让
+ * `QijiEntity.unlock` 的读者不必知道"查询住在 run 层"。
+ *
+ * ⚠️ 依赖方向：这是**纯类型**转发（`export type`），编译期即擦除 ——
+ * 不产生"`core/types` → `core/run`"的运行期依赖，也就不可能与
+ * `core/run/stats.ts`（它 `import type` 本文件所在的目录）成环。
+ */
+export type { BattleStatQuery as RunStatQuery } from '../run/query';
+
 /* ================================================================== *
- * 3. QijiEntity
+ * 2. QijiEntity
  * ================================================================== */
 
 /**
@@ -177,14 +144,12 @@ export type QijiCategory = 'offense' | 'defense' | 'tempo' | 'utility' | 'generi
  *
  *   `GameEntity.kind` 的类型是 `EntityKind`（`core/types/skills.ts`），
  *   而 `'qiji'` **还不在**那个联合里。把这里写成 `readonly kind: 'qiji'`
- *   会让 `QijiEntity` **不再满足 `GameEntity`**：`abilities: readonly Ability[]`
- *   都写得进去，但任何 `QijiEntity` 都没法赋给 `GameEntity` 参数 ——
- *   而"继承 `GameEntity`"正是这个设计选它的理由。所以要么真的做 W8
- *   （加值 + 校验器 + 注册表，**P6**），要么就只能在这里如实写
- *   `GameEntity['kind']`。
+ *   会让 `QijiEntity` **不再满足 `GameEntity`** —— 而"继承 `GameEntity`"
+ *   正是这个设计选它的理由。所以要么真的做 W8（加值 + 校验器 + 注册表，
+ *   **P6**），要么就只能在这里如实写 `GameEntity['kind']`。
  *
  *   P0 没有任何炁机内容，`core/run/` 也**不读 `kind`**，所以这个宽化
- *   在 P0 不产生任何静默行为。做 W8 时把 `EntityKind` 加上 `'qiji'`，
+ *   不产生任何静默行为。做 W8 时把 `EntityKind` 加上 `'qiji'`，
  *   然后把这一行收窄成 `readonly kind: 'qiji'` —— 类型系统会**逼着**
  *   那一刻发生，而不是让它悄悄漂。
  */
@@ -212,8 +177,7 @@ export interface QijiEntity extends GameEntity {
  * 的 `kind` 不在 `EntityKind` 里、也没有"为什么这个 kind 不被支持"的
  * 报错路径 —— 所以一份炁机内容**既不会生效、也不会被拦下**。
  *
- * P0 没有内容表，所以不会有这种内容出现。这条常量的作用是：把
- * "引擎还没把它当一等公民"写在**一个可被 import 的名字**上
- * （将来 `data/qiji.ts` 或载荷校验可以断言它），而不是只写在注释里。
+ * 这条常量的作用是：把"引擎还没把它当一等公民"写在**一个可被 import
+ * 的名字**上（将来 `data/qiji.ts` 或载荷校验可以断言它），而不是只写在注释里。
  */
 export const QIJI_ENTITY_VALIDATED = false as const;

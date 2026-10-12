@@ -98,9 +98,9 @@
 
 | # | 缺口 | 现在什么样 | 要做什么 | 层 | 用在哪 | 判定 |
 |---|---|---|---|---|---|---|
-| **W1** | `Combatant.counters` 没有写入者；`Expr {e:'counter'}` 读取恒 0（战斗路径的 `getCounter` 是 `() => 0`） | 死的 | ① 新增一个**写计数器**的能力/效果（`delta` + 池子 + 具名计数器）；② `core/combat/stats.ts` 的 `getCounter` 真正读 `combatant.counters`（`ResourcePoolRef` 的 `combatant` / `entity` / `encounter` 三种） | `core/types` + `core/combat` | **炁机的解锁条件**、Boss 机制 | **实现** |
-| **W2** | `Condition` 没有"计数器比较" | 缺 | 新增 `{kind:'counterAtLeast' \| 'counterBelow'; who?; counter; value}`（与既有 `resourceAbove` 同构） | `core/types/stats.ts` + `core/expr/deps.ts` + 求值 | 战斗内的条件（炁机的 `when`、Boss 换招） | **实现** |
-| **W3** | `Hook:'onInterruptSuccess'` 不派发（引擎只派发 3 个 hook） | 死的 | 派发它，并**带上"打断者用的哪个技能"**（现在事件里的 `skillId` 是**被打断的读条**，`sourceId` 才是打断者） | `core/combat/triggers.ts` + `core/combat/hitResolution.ts` + `core/events.ts` | "成功使用 N 次**截**"这类条件 | **实现** |
+| **W1** | `Combatant.counters` 没有写入者；`Expr {e:'counter'}` 读取恒 0（战斗路径的 `getCounter` 是 `() => 0`） | 死的 | ① 新增一个**写计数器**的能力/效果（`delta` + 池子 + 具名计数器）；② `core/combat/stats.ts` 的 `getCounter` 真正读 `combatant.counters`（`ResourcePoolRef` 的 `combatant` / `entity` / `encounter` 三种） | `core/types` + `core/combat` | **没有已知消费者**（见下：暴怒改用 buff） | **暂不做**（要做须先有一个非它不可的机制） |
+| ~~**W2**~~ | ~~`Condition` 没有"计数器比较"~~ | — | **不需要了** → **删** | — | — | **删**（随 W1 一起；见下） |
+| ~~**W3**~~ | ~~`Hook:'onInterruptSuccess'` 不派发~~ | — | **不需要了** → **删**。真正缺的只有"事件里没有打断者的招式"这一件小事：给 `interruptSuccess` 加一个**可选** `sourceSkillId`（2 处 emit + 1 个字段） | `core/events.ts` + `core/combat/hitResolution.ts` | "成功使用 N 次**截**"这类条件 | ✅ **已做**（**③**；不改确定性语义，版本号不动） |
 | **W4** | `Ability:'grantSkill'` 无执行点 | 死的 | 实现：把技能加入施法者的已知技能（`SkillBook.known` / 技能栏） | `core/combat` + `core/types/loadout.ts` | 炁机给**新技能**（肉鸽的核心之一） | **实现** |
 | **W5** | `Ability:'consume'` 无执行点 | 死的 | 实现：从内容实例的资源池扣（`ResourcePoolRef`） | 同上 | 奇物类炁机（使用次数 / 充能） | **实现**（做活装备路时） |
 | **W6** | `maxHp` 修正**不生效** —— 生命钳制走 `combatant.caps`，而 `caps` 是构造时写死的 | 半死 | 把 `caps.hp` 变成 `maxHp` 的**基底**，并让钳制走"结算出的 maxHp" | `core/combat` + `core/stats` | 通用炁机「+30 最大生命」 | **实现** |
@@ -109,14 +109,38 @@
 | **W9** | `Behavior:'interruptible'` 无消费者 | 死的 | 本设计不需要 → **删** | `core/types/behavior.ts` + `core/content/validate.ts` | — | **删** |
 | **W10** | `Behavior:'timeLimit'` 无消费者（时限其实来自 `CreateBattleOptions.timeLimitMs`） | 半死 | 二选一：把时限收进行为数组（更内聚）或删掉这个变体保留 options | `core/ai` + `core/types/behavior.ts` | — | **删**（现状 options 已在工作，改动收益低） |
 | **W11** | `Hook:'onPhaseChange'` 不派发 | 死的 | 二阶段用 `onHpBelow` + phase buff **已经够**；不引入"阶段"这个一等概念 → **删** | `core/types/triggers.ts` | — | **删** |
-| **W12** | 一局肉鸽的状态 / 流程**不存在** | 缺 | 新增 `src/core/run/`：洗牌、解锁判定、跨场累计、生命周期 | `core/run`（新） | 全部 | **实现** |
+| **W12** | 一局肉鸽的状态 / 流程**不存在** | 缺 | 新增 `src/core/run/`：洗牌、**事件流 → 统计**、解锁判定、跨场累计、生命周期 | `core/run`（新） | 全部 | ✅ **已做（P0）** |
 
-**两条"我们**不**采用**的做法"（写下来是为了记录取舍）：
+**⚠️ 三条"我们**不**采用**的做法"（写下来是为了记录取舍 —— 其中第 1 条
+**原本是本文的首选方案，后来被用户否掉**，理由值得留着）：**
 
 | 被否掉的做法 | 为什么不 |
 |---|---|
-| 用**事件流归约**（`onEvents` 回调 + 逐事件统计）算计数器 | 改成 W1 之后**不需要**了：`BattleState.combatants[].counters` 是**快照的一部分**，一场战斗结束直接读终局快照即可（可序列化、可哈希、天然重放）。事件流只多一层间接 |
+| **在 `BattleState` 里加计数器字段**（= W1 服务于解锁） | ✅ 这**曾经是本文的首选**，现在是结论的反面：它与事件流是**并行的第二份真相**（两处会漂，漂了以后"截数了几次"有两个答案），而且是唯一可能改动确定性语义的改动。用户原话："如果直接从 log 判断，而不是又加一层记录呢"。改用 `core/run/stats.ts` 从 `EventDef[]` 归约 |
+| 用**事件回调**（`onEvents` + 逐事件累加）算 | 也不需要：那要求引擎往外推一个回调、并让"统计"变成有状态的东西。直接拿 `EventDef[]` 做**纯函数归约**更简单，而且能在 Node 里单测（不起引擎） |
 | 把**一局肉鸽**塞进 `BattleState` | `BattleState` 是**一场战斗**、且被黄金重放逐位钉死。跨场数据放进去会让"第 3 场战斗的重放"依赖前两场的输入（见 §2.1） |
+
+**⚠️ W1 / W2 现在的状态（这一条容易再被带偏，写清楚）：**
+
+- **W1 保留，但它已经不服务于解锁了** ✗（那是初稿的错）。它现在**只剩**
+  "战斗内机制要不要按次数/次数型事实做判定"这一个可能的价值。
+- ⚠️ **目前没有任何已知消费者** —— 而且**曾经举的那个例子也没了**：
+  本文初稿写的是"暴怒：按受伤次数减 CD"。**用户已明确暴怒改用 buff 实现**：
+
+  > 暴怒的那个技能 以后靠 buff 实现
+
+  也就是说"按受伤次数减 CD / 增伤"**不打算靠引擎内计数器**，
+  而是做成一个 **buff**（具体形态等做暴怒时再定）。所以 W1 的理由更弱了。
+- **定性：没有已知消费者。** 要做它，必须**先有一个真实的、非它不可的机制**
+  —— 而不是"将来可能会用到"。（仓库纪律："死值先删"；而 W1 甚至还不是
+  死值，它连**设计稿**都没有消费者。）
+- ⚠️ **代价（想让以后的人先掂量一下）**：W1 要往 `BattleState` 加一个
+  **随战斗推进的字段** —— 它是**唯一可能动确定性语义**的地方
+  （§7.2 那张表里唯一标 ⚠️ 的就是这一类）。加了它就必须给
+  `REPLAY_FORMAT_VERSION` 的账（若确实改变了结果 → +1，并重标定
+  黄金基线 `GOLDEN_OUTCOME`）。**为一个"可能用到"的能力动黄金基线不划算。**
+- **W2 随 W1 一起删**：它存在的唯一理由是"给 W1 的计数器写条件"，
+  而"解锁条件"已经改走 §5.2 的统计查询。**没有 W1 就没有 W2 的消费者。**
 
 ---
 
@@ -168,18 +192,25 @@ Boss 组成、越往后越窄的走廊。**
 ### 2.2 生命周期
 
 ```
-startRun(runSeed, playerId)
-   → order = 7 个 Boss 的随机排列（由 runSeed 决定，§7）
-   → position = 1，counters = {}，unlocked = [通用炁机…]，chosen = []
+startRun(runSeed, playerId, order)
+   → order = Boss 的随机排列（由 runSeed 决定，§7）
+   → position = 1，battleStats = 空统计，unlocked = []，chosen = []
 
-每一场战斗结束（读终局快照）：
-   → counters += 玩家这一场战斗的 counters        // §5.2.2
-   → 用 counters 重算 unlocked（§5.2）
+每一场战斗结束（**喂这一场的 EventDef[] + 胜负**）：
+   → battleStats = mergeBattleStats(battleStats, reduceBattleStats(events))   // §5.2.2
+   → 用 battleStats 重算 unlocked（§5.2）——**先累加、后判定**
    胜 → position += 1
-        → position > 7：status = 'victory'（通关）
+        → position > order.length：status = 'victory'（通关）
         → 否则：结算 → 选 1 个炁机生效 → 开下一场战斗
    负 → status = 'defeat'（一局肉鸽结束）
 ```
+
+⚠️ 两处**改过一次**，别照着旧稿改回去：
+
+1. **通关判据是 `order.length`，不是 7**（§2.3 与 §12 决议 #7 的矛盾，
+   以"7 是终点、`len` 是现实"为准）。
+2. **没有 `counters`**：统计是从**事件流**归约出来的（§5.2.2），
+   所以这一场的输入是 `EventDef[]`，不是"读终局快照里的计数"。
 
 ### 2.3 局长 = **固定 7 场**
 
@@ -435,7 +466,7 @@ export interface QijiEntity extends GameEntity {
 |---|---|
 | `id` / `nameKey` / `descKey` / `icon` / `rarity` | 展示信息，零额外字段 |
 | `abilities: readonly Ability[]` | **"解锁后生效什么"**（与既有能力系统同一套） |
-| `requires?: readonly Condition[]` | 战斗内条件（W2 之后能写计数器条件） |
+| `requires?: readonly Condition[]` | 战斗内条件（将来 W2 若做，能写计数器条件；**解锁不走它**——见 §5.2） |
 | `pool?: ResourcePool` | 奇物类炁机的使用次数 / 充能（靠 W5 落地） |
 | 内容校验器 / 注册表 | 加进 `ContentBundle` 即可被校验 |
 
@@ -449,33 +480,72 @@ export interface QijiEntity extends GameEntity {
 
 #### 5.2.1 数据形状
 
+**⚠️ 这一节改过一次。** 初稿是一个**封闭的 5 元素计数器联合**，用户否掉了
+它，原话是嫌它**只能数技能使用次数**。具体三个"做不出来"：
+
+1. **分不出是哪个技能**：「截」打断 3 次与「破」打断 3 次在旧形状里是
+   **同一个数**（`interrupts`）。而「截拳道」/「招架反击流」要的正是区分。
+2. **没有伤害维度**：闭集里根本没有 `damage`，所以"某个技能造成伤害数"
+   （用户点名的第一条）**无法表达** —— 想加一条炁机就得回去改 `core/` 的类型表。
+3. **作用域没有位置放**：`'battle' | 'run'` 只写在文档里。
+
+现在的形状是**对统计的一次查询 + 组合子**：
+
 ```ts
 // core/types/qiji.ts
 export type QijiUnlock =
-  | { readonly kind: 'always' }                       // 开局即可选（"通用炁机"，§5.4）
-  | { readonly kind: 'counterAtLeast'; readonly counter: RunCounter; readonly value: number }
+  | { readonly kind: 'always'; readonly of: readonly QijiUnlock[] }
+  | { readonly kind: 'statAtLeast'; readonly stat: RunStatQuery; readonly value: number }
   | { readonly kind: 'all'; readonly of: readonly QijiUnlock[] }
   | { readonly kind: 'any'; readonly of: readonly QijiUnlock[] }
   | { readonly kind: 'not'; readonly of: QijiUnlock };
 
-/** 一局肉鸽内可累计的计数器（**封闭联合**，防止拼写错误静默失效）。 */
-export type RunCounter =
-  | 'jieInterrupts'      // 「截」成功打断次数（**W3** 派发 onInterruptSuccess 后可得）
-  | 'interrupts'         // 任何技能成功打断次数
-  | 'dodges'             // 成功闪避次数（引擎已有 `avoided` 事件 / 池子）
-  | 'battlesWon'         // 赢下的战斗数
-  | 'flawlessBattles';   // 满血赢下的战斗数
+// core/run/stats.ts —— 查询本身（**开放**：加维度不动 QijiUnlock）
+export type BattleStatQuery =
+  | { readonly s: 'skillUses';       readonly skillId: SkillId; readonly scope: StatScope }
+  | { readonly s: 'skillDamage';     readonly skillId: SkillId; readonly scope: StatScope }
+  | { readonly s: 'skillHits';       readonly skillId: SkillId; readonly scope: StatScope }
+  | { readonly s: 'skillInterrupts'; readonly skillId: SkillId; readonly scope: StatScope }
+  | { readonly s: 'dodges';                                    readonly scope: StatScope }
+  | { readonly s: 'battlesWon';                                readonly scope: StatScope }
+  | { readonly s: 'flawlessBattles';                           readonly scope: StatScope };
+
+export type StatScope = 'battle' | 'run';
 ```
 
-**"成功使用 3 次截"的完整链路（要动的引擎能力已标号）：**
+**关键差别：条件写在内容数据里**（`data/qiji.ts` 的每一条 `QijiUnlock`），
+而不是写死在 `core/types/` 的常量表里。加一个维度 = 在 `BattleStats`
+加一张表 + 在 `BattleStatQuery` 加一个成员，**`QijiUnlock` 一个字都不用动**。
 
-| 步 | 做什么 | 需要的能力 |
+**用户点名的两个例子现在都能直接写出来：**
+
+```ts
+// 例 1「某个技能造成伤害数」→ 求和（不是计数）
+{ kind: 'statAtLeast', stat: { s: 'skillDamage', skillId: 'jie', scope: 'battle' }, value: 300 }
+
+// 例 2「一场战斗同时用了 n 次 a 和 m 次 b」→ all + 两条 skillUses
+{ kind: 'all', of: [
+  { kind: 'statAtLeast', stat: { s: 'skillUses', skillId: 'jie',   scope: 'battle' }, value: 3 },
+  { kind: 'statAtLeast', stat: { s: 'skillUses', skillId: 'break', scope: 'battle' }, value: 2 },
+]}
+```
+
+**"成功使用 3 次截"的完整链路（⚠️ 已**不再**需要 W1/W2，也不需要写计数器）：**
+
+| 步 | 做什么 | 需要什么 |
 |---|---|---|
-| 1 | 内容里给「截」的 `onSuccess` 加一条**写计数器**的效果（`jieInterrupts += 1`）—— 它天然只在"真打断到了"时结算（`data/playerSkills.ts:132-135` 已经有 `onSuccess` 的用法：退 CD + 挂派生窗口） | **W1**（写计数器） |
-| 2 | 也可以改用「挂一个带 `onInterruptSuccess` 触发器的 buff」表达，更通用、对任意技能成立 | **W3**（派发 hook）+ **W1** |
-| 3 | 一场战斗结束时，把玩家快照里的 `counters` 累加进 `RunState.counters` | `core/run/`（**W12**） |
-| 4 | 用 `RunState.counters` 求值 `unlock`，刷新"已解锁"集合 | `core/run/` |
-| 5 | `QijiSelect` 列出已解锁的炁机 | UI |
+| 1 | 引擎结算时 emit `interruptSuccess`，**带上打断者用的招式**（`sourceSkillId`） | **③**（已做：`events.ts` 加可选字段 + `hitResolution.ts` 两处 emit） |
+| 2 | 一场战斗打完，`reduceBattleStats(events, { actorId })` 按 `sourceSkillId` 计数 | `core/run/stats.ts`（纯函数） |
+| 3 | `advanceRun` 把它 `mergeBattleStats` 进 `RunState.battleStats` | `core/run/lifecycle.ts` |
+| 4 | 用 `RunState.battleStats` 求值 `unlock`，刷新"已解锁"集合 | `core/run/unlock.ts` |
+| 5 | `QijiSelect` 列出已解锁的炁机（顺带用它算"截 2/3"的进度） | UI（P3） |
+
+**⚠️ 为什么"用截打断"原本表达不出来（③ 的全部意义）**：
+`interruptSuccess.skillId` 是**被打断的那个读条**（Boss 的招），
+`sourceId` 只是"谁打断的"。所以"用截打断"与"用破打断"在这个事件里
+**长得完全一样** —— 归约器无法区分。加一个可选的 `sourceSkillId`
+（2 处 emit + 1 个字段）就解决了，而它**不参与任何判定**，
+所以**确定性语义不变、`REPLAY_FORMAT_VERSION` 不用 +1**（依据见 §7.2）。
 
 ```ts
 export const QIJI_JIE_DERIVE_STRIKE: QijiEntity = {
@@ -485,33 +555,126 @@ export const QIJI_JIE_DERIVE_STRIKE: QijiEntity = {
   descKey: 'qiji.jieDeriveStrike.desc',
   icon: 'char_break',
   category: 'offense',
-  unlock: { kind: 'counterAtLeast', counter: 'jieInterrupts', value: 3 },
+  unlock: {
+    kind: 'statAtLeast',
+    stat: { s: 'skillInterrupts', skillId: 'jie', scope: 'run' },
+    value: 3,
+  },
   abilities: [ /* 例如：把「截」成功后的派生窗口拉长 / 让派生窗口可叠两层 */ ],
 };
 ```
 
-#### 5.2.2 计数器从哪来：**引擎内计数 + 一局肉鸽累计**
+#### 5.2.2 计数从哪来：**从事件流归约**（⚠️ 不是"引擎内计数器"）
 
-- **引擎内**：`Combatant.counters` 变成活的（W1），于是计数器是
-  `BattleState` 的一部分 —— **可克隆、可哈希、天然可重放**。
-- **一局肉鸽内**：每场战斗结束读**终局快照**的玩家 `counters`，
-  累加进 `RunState.counters`。**不需要事件回调**（§0.3.1 的取舍表）。
-- **时间窗**：**一局肉鸽累计**（不是单场内）。理由：单场可能凑不满
-  （傲慢实际只有轻蔑/呵斥/回补 3 个可打断读条，碾压起手带霸体
-  `bossPride.ts:249-304`；截 CD 10s、一场战斗 ~95s）。
-  数据上加一个 `window` 字段留出将来收紧的余地，先只实现 `'run'`。
+**⚠️ 这一节改过一次，改动的理由比结论更重要。**
 
-#### 5.2.3 计数器放在哪（回答关键约束）
+初稿写的是"在引擎里加计数器（W1/W2/W3），一局肉鸽去读快照里的计数"。
+用户否掉了它，原话是：
+
+> 如果**直接从 log 判断** 而不是又加一层记录呢
+
+那个否定是对的，而且**在这个仓库里格外成立**：
+
+| 做法 | 问题 |
+|---|---|
+| **在 `BattleState` 里加计数器字段** | ① 它是**与事件流并行的第二份真相** —— 两处会漂，而漂了以后"截到底数了几次"有两个不同的答案。② 它是**唯一可能改动确定性语义**的改动（多一个随战斗推进的字段），而 `BattleState` 被黄金重放逐位钉死 |
+| **从事件流归约**（现在） | 事件流本来就是**输出**、本来就带 `sourceId` / `skillId` / `amount` / `reason`。统计只是"读一遍输出、做加法" —— 纯函数、零状态、可在 Node 单测 |
+
+**"第二份真相"是这个仓库一路在清的那个病**（见 `AGENTS.md` §2 的
+"删 / 留 判据"）。所以现在的形状是：
+
+```ts
+// src/core/run/stats.ts —— 纯函数，无副作用
+export function reduceBattleStats(
+  events: readonly EventDef[],
+  scope: { actorId: CombatantId; flawless?: boolean },
+): BattleStats;
+```
+
+三个必须写清的细节：
+
+1. **读 `EventDef[]`，不是 `LogEntry[]`。** 用户说"从 log 判断"，
+   但真正的源头是 `EventDef[]`：`app/logFormat.ts` 是它的**显示层**，
+   它会**丢噪声**（若干 kind 不产生日志行）并且有 `limit`（**截断**）。
+   拿 `LogEntry[]` 统计会静默少算。而且 `app/` 碰 DOM，不能单测。
+
+2. **作用域必须显式：`scope: 'battle' | 'run'`。** 同一句话在两种作用域下
+   是两个答案，而它们是**两套累加**（不是同一个数的两种读法）：
+
+   ```ts
+   // 数值是不同的，两者都必须能问
+   statProgress({ s:'skillUses', skillId:'jie', scope:'battle' }, battleStats, runStats)  // 这一场
+   statProgress({ s:'skillUses', skillId:'jie', scope:'run'    }, battleStats, runStats)  // 整局
+   ```
+
+   `scope` **没有默认值** —— 有默认值就意味着"有人会忘记写，然后拿到
+   另一个作用域的数"，而那个数看起来完全正常（只是偏小）。
+
+   **⚠️ 但在"每场战斗结束、判定解锁"那一刻，两个作用域读到的是同一个值。**
+   这不是 bug，是一个**有意的、但会让人困惑**的设计，所以写清原因与分叉点：
+
+   - **为什么相同**：那一刻这一场的统计**已经被 `mergeBattleStats` 并进
+     整局了**（`core/run/lifecycle.ts` 的 `unlockStatsOf` 两份传的是同一个
+     `state.battleStats`）。而 §5.2 的语义本来就是"这一场**结束后**用累计值
+     判定"。所以"本场用截打断了 ≥1 次"与"本局用截打断了 ≥1 次"在结算时
+     必然同真同假。
+   - **分叉点在哪（`scope` 不是装饰，这两处它是真的）**：
+     1. **P3 的 `QijiSelect` 卡片文案**：显示"本场 2/3"还是"本局 2/3"
+        取决于 `scope` —— 那时调用方会显式传**两份不同的**统计
+        （`battleStats` = 刚打完的那一场，`runStats` = 整局累计），
+        两个数就分开了。
+     2. **将来的战斗内判定**（`requires` / `when` 用统计）：
+        "这一场已经用截打断过"用 `scope: 'battle'`，
+        "这一局累计"用 `scope: 'run'` —— 那时两者真的不同。
+   - ⚠️ **在那两处到来之前**：不要因为"看不出差别"就把 `scope` 删掉，
+     也不要反过来以为它现在就该有差别。这个事实有一条断言钉着
+     （`tests/unit/run/query.test.ts` 的"两份传同一个值时 battle / run
+     读到相同的数"）—— 那条断言失败意味着**语义变了**，
+     该改的是 `unlockStatsOf` 与本文，不是断言。
+
+3. **一局肉鸽的累计 = `mergeBattleStats` 逐字段相加。** 累加器就是整局
+   统计，**不需要在 `RunState` 里再存一份"计数"**（那就是第二份真相）。
+   `RunState.battleStats` 的类型与单场统计**是同一个**
+   （`(BattleStats, BattleStats) => BattleStats`）。
+
+**"赢了几场"也不是计数器**：它是 `BattleStats.battles`
+（**逐场结果数组**）的过滤结果（`battles.filter(b => b.won).length`）。
+存"逐场事实"而不是"结论"的收益：它是**日志**（可审计）、
+长度 = 场数（**可校验** —— `record.ts` 会拿它与 `RunRecord.battles`
+做长度 / 次序 / 胜负 / 满血的**对账**，不一致整条丢弃），
+而且没有两条独立累加路径可以漂。
+
+**闪避的两种 `reason`（`dodged` / `immune`）**：`{ s: 'dodges' }`
+**只数 `dodged`** —— "成功闪避"指的是真的闪开，而 `immune` 是机制免疫
+（不用玩家做任何事），数进去会让"闪避流"的进度在挨某些机制时白涨。
+⚠️ `BattleStats.dodges['immune']` **归约照收，但没有查询能拿到它**
+（符合"死值先删"）。**将来要数免疫时，那是第一个要改的地方**：
+加一个 `{ s: 'immunes' }` 查询即可，**不要**改 `dodges` 的语义
+（那会让已经写好的"闪避流"炁机的数字突然变大）。
+
+**时间窗**：**一局肉鸽累计**（不是单场内）—— 这正是 `scope: 'run'` 的用处。
+理由不变：单场可能凑不满（傲慢实际只有轻蔑/呵斥/回补 3 个可打断读条，
+碾压起手带霸体 `bossPride.ts:249-304`；截 CD 10s、一场战斗 ~95s）。
+单场作用域留给"这一场就够狠"的炁机（例如"这一场用截打断过"）。
+
+#### 5.2.3 统计放在哪（回答关键约束）
 
 | 候选 | 判断 |
 |---|---|
-| `BattleState` / `Combatant.counters` | ✅ **场内的计数**放这里（W1）。它是快照的一部分，可哈希可重放 |
-| **`src/core/run/`（新增）** | ✅ **一局肉鸽的累计**放这里（W12）。零依赖、Node 可跑、满足 C1/C2/C4/C5 |
+| 引擎里的计数器字段 | ❌ **已否决**：与事件流并行的第二份真相，且动确定性语义 |
+| **`src/core/run/stats.ts`（新）** | ✅ **归约**放这里：纯函数、零依赖、Node 可跑、满足 C1/C2/C4/C5 |
+| **`RunState.battleStats`** | ✅ **整局累计**放这里（`mergeBattleStats` 的产物）。它是 plain object，可 JSON 往返、可哈希 |
 | app 层 | ❌ 不能写单测（要 DOM），而"行为式解锁"必须有单测 |
 
-**唯一写入路径**：`RunState.counters` 只由"一场战斗结束时的累加"写。
+**唯一写入路径**：`RunState.battleStats` 只由 `advanceRun` 写
+（它内部调 `battleStatsFor` + `mergeBattleStats`）。
 这与 `input/touchLayout.ts` 的"`TouchLayout` 只有一个写入路径 `set()`"
 是同一条设计纪律（AGENTS.md §3b）。
+
+**⚠️ 顺带删掉的东西**：初稿的 `RunCounter` 封闭联合
+（`jieInterrupts | interrupts | dodges | battlesWon | flawlessBattles`）
+以及 `RunState.counters` **已整个删除**。原因见 §5.2.1：
+它**只能数技能使用次数**，而用户要的是"某个技能造成伤害数"——那是**求和**。
 
 ### 5.3 「每场战斗后选 1 个生效」的语义
 
@@ -686,10 +849,12 @@ export function buildPlayerKit(
 | 新东西 | 加在哪 | 是不是新机制 |
 |---|---|---|
 | **洗牌 + 档位映射 + 解锁判定 + 一局肉鸽生命周期** | `src/core/run/`（**新层**，不碰 `core/combat/`） | ❌ 不是引擎机制，是**元层逻辑** |
+| **事件流 → 统计的归约**（`stats.ts`）与**对统计的查询**（`query.ts`） | `src/core/run/{stats,query,outcome}.ts`（**纯函数**，读 `EventDef[]`） | ❌ 不是引擎机制：它是**输出的只读派生**。⚠️ **不需要** W1/W2/W3。拆成三个文件是"一个文件一句话"那条判据的直接产物（`stats` 造数 / `query` 读数 / `outcome` 叶子） |
 | **档位 → `Behavior[]` / `caps` 的装配** | `src/data/intensity.ts` + `units.ts` 的 `behaviorsFor(id, tier)`（纯数据） | ❌ 不是新机制：`Behavior[]` 本来就是构造战斗时的输入 |
 | **炁机的数据模型与规范化** | `core/types/qiji.ts` + `core/loadout/`（**W7 / W8**） | ⚠️ 新增（但继承 `GameEntity`，不是另起一套） |
-| **计数器 + 计数器条件** | `core/combat`（**W1 / W2**） | ⚠️ 新增（补活已有声明） |
-| **`onInterruptSuccess` 派发** | `core/combat/triggers.ts` + `hitResolution.ts`（**W3**） | ⚠️ 新增（补活已有声明） |
+| **`interruptSuccess.sourceSkillId`**（打断者用的招式） | `core/events.ts` + `core/combat/hitResolution.ts` | ❌ 不是新机制：**已有事件的观测字段**，不参与判定 |
+| ~~计数器 + 计数器条件~~ | ~~`core/combat`（W1 / W2）~~ | ❌ **不需要**（解锁改走事件流归约；W1 等战斗内机制的真实消费者） |
+| ~~`onInterruptSuccess` 派发~~ | ~~`core/combat/triggers.ts`~~ | ❌ **不需要**（归约读已有事件即可，见 §5.2） |
 | **`grantSkill` / `maxHp` / `consume` 真正生效** | `core/combat`（**W4 / W5 / W6**） | ⚠️ 新增（补活已有声明） |
 | **色欲的二阶段 / 霸体 / 控制；5 个未实现 Boss** | `src/data/*.ts` | ❌ 内容工作 |
 
@@ -738,16 +903,17 @@ M1（二阶段）+ M2（霸体）+ M3（控制）三条通道**；至少一条�
 | 层面 | 做法 |
 |---|---|
 | **一场战斗的重放** | **不变**。`RecordedRun`（`core/run.ts:48-62`）仍是 `{version, seed, ticks, input}`。理由：`RunState` 不进 `BattleState`，对引擎而言每一场依旧只是"combatants + seed + input" |
-| **一局肉鸽的重放（新增）** | `{ runFormatVersion, runSeed, playerId, order, choices, battles: RecordedRun[] }`。校验规则照抄 `replayRun`（版本不匹配 → **开发期错误用英文**，i18n 规范 I1 / `run.ts:148-153`） |
+| **一局肉鸽的记录（P0 已实现）** | `RunRecord = { runFormatVersion, state: RunState, battles: RunBattleRecord[] }`（`core/run/record.ts`）。⚠️ **不内嵌**引擎的 `RecordedRun`：那会让一局肉鸽的记录在战斗重放格式变更时被迫一起变。**校验规则与 `replayRun` 刻意不同**：`replayRun` 的入参是开发者给的重放文件（版本不匹配 → **英文抛错**），而这里的入参是**用户的存档**（版本旧了是常态 → **整条丢弃**返回 `undefined`）。同一件事的正确反应天生不同，所以刻意不一致 |
 | **`REPLAY_FORMAT_VERSION` 要不要 +1** | **看具体工作项**（见下表）。判断依据是 `run.ts:37-45` 的原文："改动引擎的**确定性语义**时必须 +1" |
 
 | 工作项 | 是否改变现有战斗的确定性语义 | 要不要 +1 |
 |---|---|---|
-| W1 计数器写入 / W2 计数器条件 | ❌ 现有内容不用它 → 结果逐位不变 | 不必 |
-| W3 `onInterruptSuccess` 派发 | ❌ 现有内容没有该 hook 的触发器 | 不必 |
+| W1 计数器写入 / W2 计数器条件 | ❌ 现有内容不用它 → 结果逐位不变 | 不必（**且已推迟**：等战斗内机制的真实消费者） |
+| ~~W3 `onInterruptSuccess` 派发~~ | — | ❌ **不需要**（已删） |
 | W4 `grantSkill` / W5 `consume` | ❌ 现有内容不用它 | 不必 |
 | **W6 `maxHp` 钳制改走结算值** | ⚠️ **理论上会**（钳制口径变了）。今天没有任何内容加 `maxHp` 修正 → 实际应逐位不变 | **必须由黄金测试证明**；若变了 → **+1**，并改 `tests/golden/replay.test.ts:86` 与 `GOLDEN_OUTCOME` |
 | W12 `core/run/` | ❌ 不碰引擎 | 不必 |
+| **③ `interruptSuccess.sourceSkillId`** | ❌ **不参与任何判定**：`core/` 里唯一消费事件的引擎侧代码是 `buffHookDispatch.ts` 的 `drain`，它只认 `buffApplied` / `buffExpired`；而事件流**不进** `BattleState`（快照里没有事件字段）。黄金重放逐位不变（已实测） | **不必**（仍为 2） |
 
 ⚠️ **"一局肉鸽"的边界不在引擎里**：一个 `BattleEngine` 永远是**一场战斗**。
 一局肉鸽是 `RunState` + 依次构造的 7 个 `BattleEngine`。这正是为什么
@@ -759,7 +925,7 @@ M1（二阶段）+ M2（霸体）+ M3（控制）三条通道**；至少一条�
 
 1. 不许 `Map` / `Set` / 类实例（lint C5，`lintRules.test.ts:107-112`）。
 2. `unlocked` / `chosen` 用**数组**（保序，便于 diff 与哈希）。
-3. `counters` 是 `Record<string, number>`，**键是封闭的 `RunCounter` 联合**。
+3. `battleStats` 是 plain object：每张技能表是 `Record<SkillId, number>`（**键是技能 id，来自内容表**），`battles` 是**数组**（逐场结果）。⚠️ 第一版的 `counters: Record<RunCounter, number>` 已随 §5.2 的方向修正删除。
 
 ---
 
@@ -794,15 +960,21 @@ M1（二阶段）+ M2（霸体）+ M3（控制）三条通道**；至少一条�
 
 ```text
 src/core/run/                     ← 新层：一局肉鸽的纯逻辑（零依赖、Node 可跑）
-  types.ts        RunState / RunCounter / 一局肉鸽的记录形状
+  types.ts        RunState / 一局肉鸽的记录形状 / 位置与档位（tierForPosition）
   shuffle.ts      种子化洗牌（这一层唯一的随机消费者）
+  stats.ts        **造数**：EventDef[] → BattleStats（归约）+ 累加（纯函数）
+  query.ts        **读数**：BattleStatQuery 的联合与求值（作用域在这里生效）
+  outcome.ts      这一场打完了没有 / 谁赢了（两边共用的**叶子**，避免类型环）
   unlock.ts       解锁判定 + 每场战斗后的候选生成（纯函数）
-  lifecycle.ts    场次推进 / 胜负 / 通关 / 累计计数器（状态转移）
-  record.ts       一局肉鸽的重放记录（序列化 + 校验）
+  lifecycle.ts    场次推进 / 胜负 / 通关 / 累计统计（状态转移）
+  record.ts       一局肉鸽的重放记录（序列化 + 校验 + **两份描述的对账**）
   index.ts        转发
 
 src/core/types/
-  qiji.ts         （新）QijiEntity / QijiUnlock / RunCounter
+  qiji.ts         （新）QijiEntity / QijiUnlock / RunStatQuery（转发 stats.ts 的查询类型）
+
+src/core/events.ts                （改）`interruptSuccess` 加可选 `sourceSkillId` ← **③，本轮唯一动引擎的地方**
+src/core/combat/hitResolution.ts  （改）2 处 emit 点带上打断者用的招式
 
 src/core/loadout/                 ← 新：GameEntity → 战斗输入的规范化（W7）
   normalize.ts    GameEntityInstance[] → passiveModifiers / 固有 buff / grantSkill
@@ -839,19 +1011,21 @@ src/ui/
 
 ### 9.2 引擎改动清单（= §0.3.1 的工作项，按依赖排序）
 
+⚠️ **这张表改过一次**：初稿把 **W1 + W2 + W3** 排在最前面（"先做计数器，
+再做解锁"）。§5.2 的方向修正之后，**解锁完全不需要它们** ——
+所以第 1、2 行变成了"不需要"，而真正要做的只剩一行一字段的
+`sourceSkillId`（**③**，已完成）。
+
 | 顺序 | 工作项 | 改动文件 | 验收 |
 |---|---|---|---|
-| 1 | **W1 + W2**：计数器写入 + 计数器条件 | `core/types/{effects,stats}.ts`、`core/expr/deps.ts`、`core/combat/{stats,runAi,hitResolution}.ts` | 单测：某个效果让计数器 +1；`counterAtLeast` 在 `requires` / `when` 里生效；黄金重放不变 |
-| 2 | **W3**：派发 `onInterruptSuccess`（带打断者的 skillId） | `core/combat/{triggers,hitResolution}.ts`、`core/events.ts` | 单测：截成功打断 → 触发器收到事件；黄金重放不变 |
+| **0** | ✅ **已完成（本轮）**：给 `interruptSuccess` 加**可选** `sourceSkillId`（打断者用的招式） | `core/events.ts` + `core/combat/hitResolution.ts`（2 处 emit） | 单测：真引擎跑一场 → 事件带 `sourceSkillId`；**黄金重放全绿**；`REPLAY_FORMAT_VERSION` **仍是 2**（依据见 §7.2） |
+| 1 | ~~**W1 + W2**：计数器写入 + 计数器条件~~ | — | ❌ **暂不做**：解锁不再需要它；而**目前没有任何已知消费者** —— 本文初稿举的"暴怒：按受伤次数减 CD"已被用户否掉（**暴怒改用 buff 实现**）。要做它，必须**先有一个真实的、非它不可的机制**。⚠️ 代价：它要往 `BattleState` 加随战斗推进的字段，是**唯一可能动确定性语义**的一项（→ 可能要 `REPLAY_FORMAT_VERSION + 1` 并重标定黄金基线） |
+| 2 | ~~**W3**：派发 `onInterruptSuccess`~~ | — | ❌ **不需要**：归约读已有事件即可（§5.2） |
 | 3 | **W7 + W8**：`EntityKind:'qiji'` + 实体规范化层 | `core/types/{skills,qiji}.ts`、`core/loadout/normalize.ts`、`core/content/validate.ts` | 单测：一个 `QijiEntity` → `passiveModifiers` + 固有 buff |
 | 4 | **W4 + W5**：`grantSkill` / `consume` | `core/combat/*` | 单测：授予的技能出现在 `SkillBook.known` |
 | 5 | **W6**：`maxHp` 真正影响上限与钳制 | `core/combat/index.ts`、`core/stats/*` | 单测 + **黄金重放必须不变**（否则 `REPLAY_FORMAT_VERSION + 1`） |
 | 6 | **W9 / W10 / W11**：删掉 3 个死变体 | `core/types/{behavior,triggers}.ts`、`core/content/validate.ts` | 类型与校验器一致；全仓无引用 |
-| 7 | **W12**：`core/run/` | 新目录 | 单测：固定 `runSeed` → 固定顺序；喂终局快照 → counters 与解锁按预期 |
-
-⚠️ **删变体（W9–W11）要单独一步**：它们会让"内容里能写但永远不生效"
-变成"写了就编译不过"，这正是仓库要的方向（"死值先删"），但会动
-`validate.ts` 的 `behaviorSkillRefs` 与 `SUPPORTED_HOOKS` 的注释。
+| 7 | ✅ **已完成（P0）**：**W12 `core/run/`** | 新目录 | 单测：固定 `runSeed` → 固定顺序；喂**事件数组** → 统计与解锁按预期；`RunState` JSON 往返 |
 
 ---
 
@@ -859,7 +1033,7 @@ src/ui/
 
 | 阶段 | 交付 | **做完能看到什么** |
 |---|---|---|
-| **P0** | `core/run/`：`RunState`、洗牌、解锁判定、候选生成 + 单测 | `pnpm run test:run`：同一 `runSeed` → 同一顺序；喂终局快照 → counters 与解锁按预期；`RunState` 能 JSON 往返 |
+| **P0** | ✅ **已完成**：`core/run/`：`RunState`、洗牌、**事件流 → 统计**、解锁判定、候选生成 + 单测（**125+ 条**）；外加 **③** `interruptSuccess.sourceSkillId` | `pnpm run test:run` 全绿：同一 `runSeed` → 同一顺序；喂**事件数组** → 统计与解锁按预期；`RunState` 能 JSON 往返；**黄金重放不变**（`REPLAY_FORMAT_VERSION` 仍 2） |
 | **P1** | 引擎能力 **W1+W2+W3**（计数器 + 计数器条件 + hook） | 单测通过；**黄金重放不变**（硬验收） |
 | **P2** | `CharacterSelect` 屏 + `RunState` 接进 app + 一场战斗 → 结算 → 回选角色 | 截图：角色卡（未实现的灰掉）、键盘与触屏各选一次、`?runlen=2` 能跑完一圈 |
 | **P3** | `QijiSelect` 屏 + 通用炁机兜底 + `buildPlayerKit` 真正影响下一场战斗 | 截图：选完炁机后下一场战斗玩家的 maxHp / 属性确实变了 |
@@ -946,3 +1120,6 @@ src/ui/
 |---|---|---|
 | 2026-10-12 | 初稿 | 把"引擎里现在没有的机制"当成**约束**；"一局" = 一场战斗；曲线按"现在只有 2 个能打"设计；炁机不继承 `GameEntity`；12 条开放问题留给用户 |
 | 2026-10-12 | **第一次修订** | ① 术语拆成"**一局肉鸽**"与"**一场战斗**"；② 曲线/流程**按 7 个 Boss 展开**，未实现的"慢慢加"，开发期只用调试参数跑短局；③ 引擎缺口表（§0.3.1）从"约束"改成**工作清单**，并给出"删 / 实现"的逐项判定 + 依赖排序（§9.2）；④ 炁机改为 **`QijiEntity extends GameEntity`**（并列出让那条路"做活"的 W7/W8）；⑤ 角色内容移出范围，只留流程与数据形状；⑥ 兜底改成**一组 `unlock:'always'` 的通用炁机**（不再单押 +30 血），并把"全激活"写成可选模式 B；⑦ 12 条开放问题改成**决议**（肉鸽惯例 + 为什么），只留 4 条口味/数值项 |
+| 2026-10-12 | **第二次修订（P0 落地后的方向修正）** | ① **解锁条件改成"从事件流归约"**（§5.2.2/§5.2.3）：删掉"引擎内计数器（W1/W2/W3）"那条路，理由是它与事件流是**并行的第二份真相**、且是唯一能动确定性语义的地方（用户："如果直接从 log 判断，而不是又加一层记录呢"）；② **`QijiUnlock` 换形状**（§5.2.1）：封闭的 5 元素 `RunCounter` 联合 → **开放的 `BattleStatQuery` 查询 + 组合子**（旧形状"只能数技能使用次数"，表达不了"某个技能造成伤害数"）；③ **W2 / W3 划掉**，W1 **保留但改理由**（不再服务于解锁，只服务**战斗内**机制，等第一个真实消费者，现在不做）；④ 真正动引擎的只剩一件小事：`interruptSuccess` 加可选 **`sourceSkillId`**（**③**），**不参与判定 → `REPLAY_FORMAT_VERSION` 不动**（§7.2）；⑤ §2.2 的生命周期伪码、§6.3 的"要新造的东西"、§9.1 的模块表、§9.2 的依赖排序、§10 的 P0 行、§7.3 的可哈希条目全部跟着改（把所有还写着 `counters` 的地方清掉——**文档比代码更容易被相信**） |
+| 2026-10-12 | **第二次修订的收尾（评审 7 条反馈）** | ① **`Q-a` 拆文件**：`stats.ts`（514 行，混了"归约"与"查询求值"两个职责）拆成 `stats.ts`（造数）+ `query.ts`（读数）+ `outcome.ts`（叶子；避免 `stats ⇄ query` 的类型环）；② **`Q-b` `flawless` 收成必填**（默认值 = 静默失效：忘了传会让某个炁机永远解锁不了）；③ **`Q-e` 加对账**：`parseRecordedRun` 现在校验 `battleStats.battles` 与 `RunRecord.battles` 的**长度 / 次序 / 胜负 / 满血**一致，不一致整条丢弃（`RunBattleRecord` 因此新增可选 `flawless`；⚠️ **P7 写存档时应把它收成必填并 `RUN_FORMAT_VERSION + 1`**——长期留着"缺 = 不参与对账"这个口子等于那半条对账不存在）；④ **`Q-f` 删掉整局汇总的 `flawless` 字段**（逐场的在 `battles` 里，顶层那个没有消费者）；⑤ **`Q-d` / `Q-c` 写进文档**：`scope` 在结算那一刻同值（不是 bug；分叉点在 P3 的卡片文案与将来的战斗内判定）、`dodges` 只数 `dodged` 而 `immune` 没有查询能拿到 |
+| 2026-10-12 | **评审追加（用户对形状的确认 + W1 理由再改）** | ① **把用户确认的形状写成纪律**：`query.ts` 顶部新增"**一次归约，多次查询；加条件不重扫事件**"（用户原话："以后对战斗 log 的处理，最好遍历一次，统计所有需要统计的……方便我们开发进行扩展"）—— 落点：`reduceBattleStats` 是**唯一**读 `EventDef[]` 的地方；查询只读 `BattleStats` 字段；加一条 `QijiUnlock` 不动归约。⚠️ 并写明禁止"把归约塞进查询里"；② **W1 的理由再改**：用户明确"**暴怒的那个技能以后靠 buff 实现**"，于是 §0.3.1 里 W1 唯一举的例子（"按受伤次数减 CD"）**没了** —— 定性从"暂不做，等第一个消费者"改成"**没有已知消费者；要做它必须先有一个真实的、非它不可的机制**"，并把它往 `BattleState` 加状态、可能动 `REPLAY_FORMAT_VERSION` 的**代价**写在同一条里（让想加它的人先掂量） |

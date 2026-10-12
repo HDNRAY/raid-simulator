@@ -1,5 +1,5 @@
 /**
- * 一局肉鸽的生命周期：场次推进 / 胜负 / 通关 / 累计计数器。
+ * 一局肉鸽的生命周期：场次推进 / 胜负 / 通关 / 累计战斗统计。
  *
  * 设计稿：`docs/specs/2026-10-12-roguelike.md` §2.2（生命周期）。
  * 全部是**纯状态转移**：进来一个 `RunState`，出去一个**新的** `RunState`，
@@ -12,12 +12,14 @@
  *
  * 一局肉鸽的边界在引擎之外（§7.2）：`BattleEngine` 永远只处理**一场战斗**。
  * 所以这里**不 import** `BattleState` / `Action` / `RecordedRun` ——
- * 一场战斗打完，app 层把"终局快照里的数字"喂进来，仅此而已。
+ * 一场战斗打完，app 层把**那一场的事件流**（`EventDef[]`）与胜负喂进来，
+ * 由 `stats.ts` 归约成 `BattleStats` 再累加进 `RunState`。
  *
- * 这样切有两个直接好处：
+ * 这样切有三个直接好处：
  *   1. `core/run/` 能零依赖跑在 Node 里（单测覆盖"行为式解锁"全靠它）
- *   2. P0 不产生计数器（那是引擎的 **W1 / W3**，P1 才做）——
- *      **测试直接喂数字**，而不是为了跑通测试自己造一个假的战斗内计数器。
+ *   2. **不需要引擎写计数器**：统计是事件流的**只读派生**，
+ *      它与事件流不可能漂（§5.2 的方向修正）
+ *   3. 测试**喂一个事件数组**就能测，不必起引擎
  *
  * ==================================================================
  * ⚠️ "位置"（position）的两种读法，别混
@@ -53,16 +55,12 @@
  * 以同一件事为准（它读 `order.length`，不读常量）。
  */
 
+import type { EventDef } from '../events';
 import type { EntityId, CombatantId } from '../types/ids';
 import type { QijiEntity } from '../types/qiji';
-import {
-  addCounters,
-  pickKnownCounters,
-  runLengthOf,
-  type RunBattleRecord,
-  type RunState,
-} from './types';
-import { isUnlocked } from './unlock';
+import { EMPTY_BATTLE_STATS, mergeBattleStats, reduceBattleStats, type BattleStats } from './stats';
+import { isUnlocked, type UnlockStats } from './unlock';
+import { runLengthOf, type RunBattleRecord, type RunState } from './types';
 
 /* ================================================================== *
  * 1. 开局
@@ -78,7 +76,7 @@ export interface StartRunInput {
   readonly label?: string;
 }
 
-/** 起一局肉鸽：`position = 1`、`counters = {}`、`unlocked = []`、`chosen = []`。 */
+/** 起一局肉鸽：`position = 1`、统计为空、`unlocked = []`、`chosen = []`。 */
 export function startRun(input: StartRunInput): RunState {
   return {
     runSeed: input.runSeed >>> 0,
@@ -86,7 +84,7 @@ export function startRun(input: StartRunInput): RunState {
     order: [...input.order],
     position: 1,
     status: 'active',
-    counters: {},
+    battleStats: EMPTY_BATTLE_STATS,
     unlocked: [],
     chosen: [],
     // ⚠️ 这里**总是**写 `label` 键（值可能是 `undefined`），不写条件展开：
@@ -101,33 +99,46 @@ export function startRun(input: StartRunInput): RunState {
 }
 
 /* ================================================================== *
- * 2. 计数器（唯一写入路径）
+ * 2. 战斗统计（唯一写入路径）
  * ================================================================== */
 
 /**
- * 把一场战斗终局快照里的计数**累加**进 `RunState`。
+ * 从"这一场的事件流 + 胜负 + 满血标记"装配这一场的统计。
  *
- * ⚠️ **这是 `RunState.counters` 唯一的写入路径**（§5.2.3）。所有累加都
- * 走它，于是"这一局到底数到了什么"只有一个地方可能写错。
+ * ⚠️ **这是 `RunState.battleStats` 的唯一写入路径的入口**（`advanceRun`
+ * 调它）。所有统计都走这里，于是"这一局到底数到了什么"只有一个地方
+ * 可能写错。
  *
- * 语义是**加**，不是**覆盖**：一局肉鸽内的累计是 §5.2.2 的决议
- * （"时间窗 = 一局肉鸽"，理由：单场可能凑不满，"成功使用 3 次截"
- * 在截 CD 10s、一场 ~95s 的现实下必须跨场数）。
+ * 为什么统计**不是**在引擎里数的（§5.2 的方向修正）：
+ * `BattleState` 已经被黄金重放逐位钉死，往它里面加计数器字段等于
+ * ① 造一份**与事件流并行的第二份真相**（会漂）② 动唯一可能改变
+ * 确定性语义的东西。而事件流本来就是输出、本来就带全部信息，
+ * 所以统计是**只读派生**。
  *
- * **不认识的键被忽略**（不抛异常）：这个函数的入参来自"终局快照"，
- * 而快照是引擎产出的、将来会多出新计数器。多一个键就整局崩掉，
- * 比"这一局少认一个计数器"更糟。真正的**外来**数据（存档 / localStorage）
- * 由 `record.ts` 的解析器逐项校验，那里才是"坏数据整条丢弃"该在的地方。
+ * `battles` 这个字段（"逐场结果数组"，`battlesWon` 的骨架）在这里补上：
+ * 归约器只看得见事件与"这一场的视角 / 结果"，看不见"整局里有几场"，
+ * 所以由本函数装成"长度 1 的那一份"。
  *
- * ⚠️ 收窄（哪些键算计数器）与加法都在 `types.ts` 里，本函数只是
- * 把它们串起来 —— 于是"计数器清单"全层只有一处，而 `lifecycle.ts`
- * 这一层读起来只有一句话："把这一场的数加进去"。
+ * ⚠️ `flawless` **必填**（`Q-b`）：不给默认值，所以"忘了传"是编译错误，
+ * 而不是"某个炁机永远解锁不了、没人知道为什么"。
  */
-export function withCounters(
-  state: RunState,
-  delta: Readonly<Record<string, number>>,
-): RunState {
-  return { ...state, counters: addCounters(state.counters, pickKnownCounters(delta)) };
+export function battleStatsFor(
+  events: readonly EventDef[],
+  input: {
+    readonly actorId: CombatantId;
+    readonly outcome: 'victory' | 'defeat';
+    readonly flawless: boolean;
+  },
+): BattleStats {
+  const reduced = reduceBattleStats(events, {
+    actorId: input.actorId,
+    outcome: input.outcome,
+    flawless: input.flawless,
+  });
+  return {
+    ...reduced,
+    battles: [{ won: input.outcome === 'victory', flawless: input.flawless }],
+  };
 }
 
 /* ================================================================== *
@@ -169,9 +180,10 @@ export const GENERIC_QIJI_IDS: readonly EntityId[] = [];
  * `import type`（编译期擦除），所以**运行期没有环**。
  */
 export function withUnlocked(state: RunState, pool: readonly QijiEntity[]): RunState {
+  const stats = unlockStatsOf(state);
   const fresh = pool
     .filter((qiji) => !state.unlocked.includes(qiji.id))
-    .filter((qiji) => isUnlocked(qiji, state.counters))
+    .filter((qiji) => isUnlocked(qiji, stats))
     .map((qiji) => qiji.id);
 
   if (fresh.length === 0) return state;
@@ -183,48 +195,62 @@ export function withUnlocked(state: RunState, pool: readonly QijiEntity[]): RunS
  * ================================================================== */
 
 /**
- * 一场战斗的终局输入。**由外部喂进来**（P0 不产生它）。
+ * 一场战斗打完之后的输入。**由 app 层喂进来**。
  *
- * `counters` 的形状是 `Record<string, number>` 而不是 `RunCounters`：
- * 这个值来自**引擎的终局快照**，在 P1 落地之前它的类型在 core 里
- * 还没有一个真相源。写成宽形状 + `withCounters` 的键过滤，是"外来
- * 未验证数据"的正确处理（AGENTS.md §1 的第三种场景）。
+ * ⚠️ 这里收的是**原始事件流**，不是"已经算好的计数"：
+ * `RunState.battleStats` 的唯一来源就是它。若收算好的数字，
+ * "谁负责统计"就变成了调用方 —— 而那是本层（`stats.ts`）的职责，
+ * 分散到 app 层之后就没法单测了。
+ *
+ * 三个字段都是 app 层**已经拿在手里**的（它刚从引擎拿到这一场的结果）：
+ *   - `events`：这一场的 `EventDef[]`（引擎 `drainEvents()` / 循环里累积）
+ *   - `outcome`：`snapshot.status` 是 `victory` 还是 `defeat`
+ *   - `flawless`：终局快照里玩家 `hp === caps.hp`（且赢了）
+ *     ⚠️ 事件流里**没有**血量上限，所以这个事实推不出来，只能喂。
+ *     **必填**（`Q-b`）—— 给默认值会让"忘了传"变成静默失效。
  */
-export interface BattleOutcomeInput {
+export interface BattleInput {
   readonly outcome: 'victory' | 'defeat';
-  /** 这一场战斗期间玩家侧累积出来的计数（引擎 W1 的产物）。 */
-  readonly counters: Readonly<Record<string, number>>;
+  /** 这一场战斗期间引擎产生的**全部**事件（从开战到结束）。 */
+  readonly events: readonly EventDef[];
+  /**
+   * 这一场是不是满血赢的。**必填**（`Q-b`）。
+   *
+   * ⚠️ 事件流里**没有**血量上限，所以这个事实推不出来，只能喂。
+   * 必填而不是"省略 = false"：默认值会让"忘了传"表现为
+   * "某个炁机永远解锁不了"，而那是**静默失效**。
+   */
+  readonly flawless: boolean;
 }
 
 /**
  * 打完一场战斗之后的一步状态转移。**这是 `core/run/` 的主入口。**
  *
  * 严格按 §2.2 的顺序做四件事：
- *   1. `counters += 这一场的 counters`（**先累加**）
- *   2. 用累加后的 counters 刷新"已解锁"集合（**后判定** —— 顺序反了
- *      就会"这一场刚数够的截，要等下一场才解锁"，而那表现为"最后一场
+ *   1. **先归约 + 累加**这一场的统计（`battleStatsFor` + `mergeBattleStats`）
+ *   2. 用累加后的统计刷新"已解锁"集合（**后判定** —— 顺序反了就会
+ *      "这一场刚数够的截，要等下一场才解锁"，而那表现为"最后一场
  *      打完才解锁的东西永远选不到"）
- *   3. 胜 → `battlesWon += 1`（**赢的场数由这里数**，不由引擎数 ——
- *      引擎不知道"一局肉鸽"这种东西）
- *   4. 胜 → `position += 1`；超出**这一局的长度**则 `status = 'victory'`
+ *   3. 胜 → `position += 1`；超出**这一局的长度**则 `status = 'victory'`
  *      负 → `status = 'defeat'`，**`position` 不动**（= 死在第几场）
+ *   4. `battlesWon` / `flawlessBattles` **不在这里加** —— 它们是
+ *      `battleStats.battles`（逐场结果数组）的**过滤结果**，而这一场的
+ *      结果已经由第 1 步装进去了（"结论"不另存，见 `stats.ts`）
  *
- * ⚠️ 第 4 步的判据是 `runLengthOf(state)`（= `order.length`），
+ * ⚠️ 第 3 步的判据是 `runLengthOf(state)`（= `order.length`），
  * **不是** `MAX_RUN_POSITION` —— 理由见文件头（"2 个 Boss 永远通不了关"
  * 是荒谬的）。
  *
- * ⚠️ **结算不加 `flawlessBattles` / `dodges` / `interrupts`**：那些必须
- * 来自引擎的终局快照（W1），由调用方放进 `counters` 一起喂进来。
- * 本函数只负责它**唯一能自己知道**的那个（`battlesWon`）—— 见 §5.2.3
- * "唯一写入路径"的纪律：能自己数的就别指望别人喂，但别人能数的
- * 绝不在这里猜。
+ * ⚠️ **输的那一场的统计照样累加**：输了不等于白打
+ * （"这一局用了几次截"不该因为最后一场输了就归零，
+ * 而且 `RunOver` 屏要显示"你用了几次截"）。所以第 1 步在胜负分支**之前**。
  *
  * @param pool 全部炁机（用来刷新解锁集合；P0 没有内容表，调用方传 `[]`
  *   或测试构造的假表）
  */
 export function advanceRun(
   state: RunState,
-  battle: BattleOutcomeInput,
+  battle: BattleInput,
   pool: readonly QijiEntity[] = [],
 ): RunState {
   if (state.status !== 'active') {
@@ -240,20 +266,54 @@ export function advanceRun(
     throw new Error('advanceRun called on a run with no boss order (order is empty)');
   }
 
-  const accumulated = withCounters(state, battle.counters);
+  /**
+   * ⚠️ 用 `state.playerId` 作为归约视角：结算永远是"**玩家**这一场做了什么"。
+   * 这不是可选参数 —— 不筛视角会把 Boss 打玩家的 `damage` 也算进玩家的
+   * 招式里（见 `stats.ts` 的 `BattleStatsScope`）。
+   */
+  const battleStats = battleStatsFor(battle.events, {
+    actorId: state.playerId,
+    outcome: battle.outcome,
+    flawless: battle.flawless,
+  });
+  const accumulated: RunState = {
+    ...state,
+    battleStats: mergeBattleStats(state.battleStats, battleStats),
+  };
 
   if (battle.outcome === 'defeat') {
     const unlocked = withUnlocked(accumulated, pool);
     return { ...unlocked, status: 'defeat' };
   }
 
-  const won = withCounters(accumulated, { battlesWon: 1 });
-  const unlocked = withUnlocked(won, pool);
+  const unlocked = withUnlocked(accumulated, pool);
   const position = state.position + 1;
   if (position > runLength) {
     return { ...unlocked, position, status: 'victory' };
   }
   return { ...unlocked, position };
+}
+
+/**
+ * 从 `RunState` 取求值解锁条件用的**两份统计**。
+ *
+ * ⚠️ 两份都是 `state.battleStats`（这是对的，不是偷懒）：
+ * `RunState.battleStats` **就是整局累加**（`scope: 'run'` 读它），
+ * 而"这一场"的统计在 `advanceRun` 里**已经被并进去了** ——
+ * 所以 `scope: 'battle'` 的查询读到的是"包含这一场在内"的累加。
+ *
+ * 这在 `advanceRun` 的语境下**正好是想要的**：解锁判定发生在
+ * "这一场打完、该刷新解锁了"那一刻，而 §5.2 的语义是"这一场**结束后**
+ * 用累计值判定"。把两份都给累加值，等于承认"在这一层，一场战斗的
+ * 统计与整局的统计在结算那一刻是同一份东西"。
+ *
+ * ⚠️ 真正区分 `scope` 的场合在 **UI**（P3 的 `QijiSelect`：卡片要显示
+ * "本场 2/3"还是"本局 2/3"），那时调用方会显式传两份不同的
+ * （`{ battleStats: 这一场, runStats: 整局 }`）。这一层的辅助函数
+ * 只服务"结算判定"，不假装能区分。
+ */
+export function unlockStatsOf(state: RunState): UnlockStats {
+  return { battleStats: state.battleStats, runStats: state.battleStats };
 }
 
 /* ================================================================== *
@@ -263,7 +323,7 @@ export function advanceRun(
 /**
  * 失败之后**丢掉这一局肉鸽**（回"选角色"重开）。
  *
- * 本函数**不保存任何东西**：`counters` / `unlocked` / `chosen` 全部清空，
+ * 本函数**不保存任何东西**：`battleStats` / `unlocked` / `chosen` 全部清空，
  * 只留 `runSeed` 与 `playerId`（调用方要保留什么由它自己决定 ——
  * P2 的 `runSession` 负责这件事，因为"回选角色时记住刚才选的谁"
  * 是**界面**的偏好，不是一局肉鸽的状态）。
@@ -280,7 +340,7 @@ export function dropRunProgress(state: RunState): RunState {
     order: [...state.order],
     position: 1,
     status: 'active',
-    counters: {},
+    battleStats: EMPTY_BATTLE_STATS,
     unlocked: [],
     chosen: [],
     label: state.label,
@@ -311,6 +371,7 @@ export function battleRecordOf(
   state: RunState,
   seed: number,
   outcome: 'victory' | 'defeat',
+  flawless: boolean,
 ): RunBattleRecord {
   const bossId = state.order[state.position - 1];
   if (bossId === undefined) {
@@ -318,5 +379,10 @@ export function battleRecordOf(
       `cannot record battle at position ${state.position}: order has ${state.order.length} entries`,
     );
   }
-  return { position: state.position, bossId, seed, outcome };
+  /**
+   * ⚠️ `flawless` 也是**必填**参数（`Q-b` 的同一条理由）：它要被
+   * `record.ts` 拿去与 `battleStats.battles[].flawless` **对账**（`Q-e`），
+   * 而给默认值会让"忘了传"变成一条永远不成立的对账。
+   */
+  return { position: state.position, bossId, seed, outcome, flawless };
 }

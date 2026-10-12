@@ -4,21 +4,41 @@
  * 设计稿：`docs/specs/2026-10-12-roguelike.md` §5.2 / §5.3 / §5.4。
  *
  * 本文件回答三个问题，一个不多：
- *   1. 某个炁机**解锁了没有**？（`isUnlocked` —— 读计数器求值 `QijiUnlock`）
+ *   1. 某个炁机**解锁了没有**？（`isUnlocked` —— 求值 `QijiUnlock`）
  *   2. 现在还差多少？（`unlockProgress` —— 给 `QijiSelect` 显示"截 2/3"）
  *   3. 这一场结束后，玩家**能选什么**？（`nextCandidates`）
  *
- * ⚠️ **本文件不产生计数器**（那是引擎的 W1 / W3，P1），也**不推进场次**
- * （那是 `lifecycle.ts`）。它只把"已经数好的数字"翻译成"能选什么"。
- * 这个边界是有意的：§5.2.3 规定 `RunState.counters` 只有**一个**写入路径，
- * 如果这里也能写计数器，"解锁"与"计数"就会互相依赖，测试也没法只喂数字。
+ * ⚠️ **本文件不产生统计**（那是 `stats.ts` 从事件流归约出来的），
+ * 也**不推进场次**（那是 `lifecycle.ts`）。它只把"已经算好的数字"
+ * 翻译成"能选什么"。这个边界是有意的：`RunState.battleStats` 只有
+ * **一个**写入路径（`advanceRun`），如果这里也能写，"解锁"与"统计"
+ * 就会互相依赖，测试也没法只喂数字。
  *
  * ⚠️ **本文件不碰 `QijiEntity.abilities`**：解锁是"能不能选"，不是"选了
  * 生效什么"。后者是 `core/loadout/` 的规范化层（**W7**，P6）。
  */
 
 import type { QijiEntity, QijiUnlock } from '../types/qiji';
-import { counterValue, type RunCounterState, type RunState } from './types';
+import type { BattleStats } from './stats';
+import { statProgress } from './query';
+import type { RunState } from './types';
+
+/**
+ * 求值一个解锁条件需要的**两份统计**。
+ *
+ * ⚠️ 为什么是两份而不是一份：`scope` 是**查询的一部分**（见
+ * `stats.ts` 的文件头），而"这一场"与"整局"是**两套累加**。
+ * 把两份一起传进来，责任就清楚地在**调用方**：它必须两样都给，
+ * 而不是让求值器去猜"现在该看哪一份"。
+ *
+ * `battleStats` 可以是 `undefined`（"只看整局"的调用点，例如
+ * `RunOver` 屏的摘要）；但那时任何 `scope: 'battle'` 的查询都会
+ * **抛错**（`statsForScope`），而不是静默拿到整局的数。
+ */
+export interface UnlockStats {
+  readonly battleStats?: BattleStats;
+  readonly runStats: BattleStats;
+}
 
 /* ================================================================== *
  * 1. 判定
@@ -32,7 +52,7 @@ import { counterValue, type RunCounterState, type RunState } from './types';
  * | 条件 | 满足当且仅当 |
  * |---|---|
  * | `always` | 恒真（它带着一个空的 `of`，见 `QijiUnlock` 的说明） |
- * | `counterAtLeast` | `counters[counter] >= value`（**缺键 = 0**，所以 `value: 0` 恒真） |
+ * | `statAtLeast` | 那次统计查询的值 `>= value`（缺键 = 0，所以 `value: 0` 恒真） |
  * | `all` | `of` 里**每一项**都满足（**空数组 = 真**） |
  * | `any` | `of` 里**至少一项**满足（**空数组 = 假**） |
  * | `not` | `of` 不满足 |
@@ -48,24 +68,29 @@ import { counterValue, type RunCounterState, type RunState } from './types';
  * 与将来 UI 的"候选屏"都必须走它，不许各自 switch 一遍 ——
  * 两份判定的漂开表现为"卡片上写着已解锁、点下去不生效"。
  */
-export function evalUnlock(unlock: QijiUnlock, counters: RunCounterState): boolean {
+export function evalUnlock(unlock: QijiUnlock, stats: UnlockStats): boolean {
   switch (unlock.kind) {
     case 'always':
       return true;
-    case 'counterAtLeast':
-      return counterValue(counters, unlock.counter) >= unlock.value;
+    case 'statAtLeast':
+      /**
+       * ⚠️ 查询本身（`unlock.stat`）带着 `scope`，所以这里**只**把两份
+       * 统计原样交给 `readBattleStat`，绝不在这一层判断"该看哪一份" ——
+       * 一旦在这里判，`scope` 就有了第二个解释处，而两处必然漂。
+       */
+      return statProgress(unlock.stat, stats.battleStats, stats.runStats) >= unlock.value;
     case 'all':
-      return unlock.of.every((child) => evalUnlock(child, counters));
+      return unlock.of.every((child) => evalUnlock(child, stats));
     case 'any':
-      return unlock.of.some((child) => evalUnlock(child, counters));
+      return unlock.of.some((child) => evalUnlock(child, stats));
     case 'not':
-      return !evalUnlock(unlock.of, counters);
+      return !evalUnlock(unlock.of, stats);
   }
 }
 
 /** 某个炁机解锁了没有。 */
-export function isUnlocked(qiji: QijiEntity, counters: RunCounterState): boolean {
-  return evalUnlock(qiji.unlock, counters);
+export function isUnlocked(qiji: QijiEntity, stats: UnlockStats): boolean {
+  return evalUnlock(qiji.unlock, stats);
 }
 
 /**
@@ -76,7 +101,7 @@ export function isUnlocked(qiji: QijiEntity, counters: RunCounterState): boolean
  *   - `items` —— 逐个子条件的进度。叶子条件为空数组。
  *   - `current` / `required` —— 两个**数**，文案层想显示"2/3"还是
  *     "还差 1 次"都能从它们推出来（反过来推不出 `current`）。
- *     叶子条件 = 已满足到的值与要求的值（`counterValue` / `unlock.value`）；
+ *     叶子条件 = 查询当前的值 / 要求的值（`statProgress` / `unlock.value`）；
  *     组合条件 = 已满足的**叶子条件个数**与叶子条件总数。
  *   - `complete` —— 整个条件饱和了没有（= `evalUnlock`）。冗余存一份
  *     是为了让调用方**不必**再调一次 `evalUnlock`（两次求值在将来引入
@@ -101,17 +126,17 @@ export interface UnlockProgress {
 }
 
 /** 求一个解锁条件的进度。与 `evalUnlock` 同源（`complete` 就是它的结果）。 */
-export function unlockProgress(unlock: QijiUnlock, counters: RunCounterState): UnlockProgress {
+export function unlockProgress(unlock: QijiUnlock, stats: UnlockStats): UnlockProgress {
   switch (unlock.kind) {
     case 'always':
       return { complete: true, current: 1, required: 1, items: [] };
-    case 'counterAtLeast': {
-      const current = counterValue(counters, unlock.counter);
+    case 'statAtLeast': {
+      const current = statProgress(unlock.stat, stats.battleStats, stats.runStats);
       return { complete: current >= unlock.value, current, required: unlock.value, items: [] };
     }
     case 'all':
     case 'any': {
-      const items = unlock.of.map((child) => unlockProgress(child, counters));
+      const items = unlock.of.map((child) => unlockProgress(child, stats));
       // `items` 上已有 `complete`，直接数它而不是再 `evalUnlock` 一遍：
       // 两个真相源会在嵌套条件下漂开。
       const satisfied = items.filter((item) => item.complete).length;
@@ -124,7 +149,7 @@ export function unlockProgress(unlock: QijiUnlock, counters: RunCounterState): U
       };
     }
     case 'not': {
-      const inner = unlockProgress(unlock.of, counters);
+      const inner = unlockProgress(unlock.of, stats);
       return { complete: !inner.complete, current: inner.complete ? 0 : 1, required: 1, items: [inner] };
     }
   }
@@ -185,17 +210,17 @@ export function stacksOf(
  *   - 其余全出现 —— 包括解锁了但这次不想选的（选 1 个 ≠ 只给 1 个）
  *
  * @param pool 全部炁机（内容表，P0 没有；测试直接构造）
- * @param counters 这一场结束后**累计后**的计数器（先 `advanceRun` 再调它）
+ * @param stats 这一场结束后**已经累加过**的两份统计（先 `advanceRun` 再调它）
  * @param chosen 已经选了生效的（`RunState.chosen`）
  */
 export function nextCandidates(
   pool: readonly QijiEntity[],
-  counters: RunCounterState,
+  stats: UnlockStats,
   chosen: readonly { readonly qijiId: string; readonly stacks: number }[],
 ): Candidate[] {
   const candidates: Candidate[] = [];
   for (const qiji of pool) {
-    if (!isUnlocked(qiji, counters)) continue;
+    if (!isUnlocked(qiji, stats)) continue;
     const remaining = maxStacksOf(qiji) - stacksOf(chosen, qiji.id);
     if (remaining <= 0) continue;
     candidates.push({ qiji, remainingStacks: remaining });
@@ -214,16 +239,16 @@ export function nextCandidates(
  */
 export function unlockedIds(
   pool: readonly QijiEntity[],
-  counters: RunCounterState,
+  stats: UnlockStats,
 ): readonly string[] {
-  return pool.filter((qiji) => isUnlocked(qiji, counters)).map((qiji) => qiji.id);
+  return pool.filter((qiji) => isUnlocked(qiji, stats)).map((qiji) => qiji.id);
 }
 
 /**
  * ⚠️ **开发期对账**：把"这一局现在能选什么"与 `RunState.unlocked` 比一比。
  *
  * 防的是一类**静默漂移**：`RunState.unlocked` 是"曾经解锁过"的累积
- * （只增不减），而候选是由**当前**计数器重算的。若有人不小心按"解锁
+ * （只增不减），而候选是由**当前**统计重算的。若有人不小心按"解锁
  * 条件不再满足"去**回缩** `unlocked`，或者漏了某次累加，两边的差异
  * 只会表现为"这个炁机怎么突然不见了"，很难查。
  *
@@ -237,6 +262,9 @@ export function unlockedIds(
  * 这一层干脆一个都不用，省掉"到底算不算状态"的争论）。
  */
 export function diffUnlocked(pool: readonly QijiEntity[], state: RunState): readonly string[] {
-  const now = unlockedIds(pool, state.counters);
+  const now = unlockedIds(pool, {
+    battleStats: state.battleStats,
+    runStats: state.battleStats,
+  });
   return state.unlocked.filter((id) => !now.includes(id));
 }

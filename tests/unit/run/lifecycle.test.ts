@@ -1,26 +1,65 @@
 import { describe, expect, it } from 'vitest';
 
-import type { QijiEntity, QijiUnlock, RunCounters } from '../../../src/core/types/qiji';
+import type { EventDef } from '../../../src/core/events';
+import type { QijiEntity, QijiUnlock } from '../../../src/core/types/qiji';
 import {
   advanceRun,
   battleRecordOf,
+  battleStatsFor,
   dropRunProgress,
   startRun,
-  withCounters,
   withRunSeed,
   withUnlocked,
 } from '../../../src/core/run/lifecycle';
-import { MAX_RUN_POSITION, counterValue, fillCounters, runLengthOf, tierForPosition } from '../../../src/core/run/types';
+import { readBattleStat } from '../../../src/core/run/query';
+import { EMPTY_BATTLE_STATS } from '../../../src/core/run/stats';
+import { MAX_RUN_POSITION, runLengthOf, tierForPosition } from '../../../src/core/run/types';
 import { battleSeed, shuffle } from '../../../src/core/run/shuffle';
 
-/**
- * 生命周期的单测（P0 验收第二条的**状态转移那一半**）。
- *
- * ⚠️ 每一场战斗都是**直接喂数字**：`advanceRun(state, { outcome, counters })`。
- * 这里没有 `BattleEngine`、没有 `Action`、没有 tick —— P0 的接口就是
- * "接收这些数字"，所以测试也照这个形状写。自己造一个假的战斗内计数器
- * 会让测试**通过**而接口**接不上引擎**。
- */
+const PLAYER = 'player';
+const JIE = 'jie';
+const BREAK = 'break';
+
+/** 造一个玩家用 `skillId` 造成 `amount` 伤害的事件。 */
+function dmg(skillId: string, amount: number, tick = 1): EventDef {
+  return {
+    kind: 'damage',
+    tick,
+    sourceId: PLAYER,
+    targetId: 'meiichiro',
+    amount,
+    crit: false,
+    absorbed: 0,
+    overkill: 0,
+    skillId,
+  };
+}
+
+function used(skillId: string, tick = 1): EventDef {
+  return { kind: 'skillUsed', tick, sourceId: PLAYER, skillId };
+}
+
+/** 用 `sourceSkillId` 成功打断一次。 */
+function interrupted(sourceSkillId: string, tick = 1): EventDef {
+  return {
+    kind: 'interruptSuccess',
+    tick,
+    sourceId: PLAYER,
+    targetId: 'meiichiro',
+    skillId: 'boss-cleave',
+    sourceSkillId,
+  };
+}
+
+/** 读一份统计里的技能级维度（测试里少写点字）。 */
+function skillStat(
+  stats: Parameters<typeof readBattleStat>[1],
+  s: 'skillUses' | 'skillDamage' | 'skillInterrupts',
+  skillId: string,
+  scope: 'battle' | 'run' = 'run',
+): number {
+  return readBattleStat({ s, skillId, scope }, stats, stats);
+}
 
 const BOSSES: readonly string[] = [
   'meiichiro',
@@ -54,11 +93,11 @@ function qiji(id: string, unlock: QijiUnlock, maxStacks?: number): QijiEntity {
 const ALWAYS: QijiUnlock = { kind: 'always', of: [] };
 
 describe('startRun —— 开局', () => {
-  it('position = 1，counters / unlocked / chosen 都是空的', () => {
+  it('position = 1，统计 / unlocked / chosen 都是空的', () => {
     const run = openingRun(1234);
     expect(run.position).toBe(1);
     expect(run.status).toBe('active');
-    expect(run.counters).toEqual({});
+    expect(run.battleStats).toEqual(EMPTY_BATTLE_STATS);
     expect(run.unlocked).toEqual([]);
     expect(run.chosen).toEqual([]);
     expect(run.playerId).toBe('player');
@@ -92,53 +131,74 @@ describe('startRun —— 开局', () => {
   });
 });
 
-describe('withCounters —— 累加（唯一的写入路径）', () => {
-  it('加的不是覆盖', () => {
-    const run = openingRun(1);
-    const once = withCounters(run, { jieInterrupts: 1 });
-    const twice = withCounters(once, { jieInterrupts: 2 });
-    expect(counterValue(twice.counters, 'jieInterrupts')).toBe(3);
-    // 入参没被改（纯函数）
-    expect(run.counters).toEqual({});
-  });
-
-  it('多个计数器互不干扰', () => {
-    const run = withCounters(openingRun(1), { jieInterrupts: 2, dodges: 1 });
-    const next = withCounters(run, { dodges: 4, interrupts: 1 });
-    expect(fillCounters(next.counters)).toEqual({
-      jieInterrupts: 2,
-      interrupts: 1,
-      dodges: 5,
-      battlesWon: 0,
-      flawlessBattles: 0,
+describe('battleStatsFor —— 装配这一场的统计（唯一的写入路径）', () => {
+  it('从事件数组归约出这一场的统计', () => {
+    const stats = battleStatsFor([used(JIE, 1), dmg(JIE, 10, 2)], {
+      actorId: PLAYER,
+      outcome: 'victory',
+        flawless: false,
     });
+    expect(stats.skillUses[JIE]).toBe(1);
+    expect(stats.skillDamage[JIE]).toBe(10);
   });
 
-  it('⚠️ 不认识的键被忽略，而不是抛错（引擎将来会加计数器）', () => {
-    const run = withCounters(openingRun(1), { jieInterrupts: 1, somethingNew: 99 });
-    expect(run.counters).toEqual({ jieInterrupts: 1 });
+  it('⚠️ `battles` 由这里补上（归约器看不见"赢了没有"这种整局维度）', () => {
+    const won = battleStatsFor([], { actorId: PLAYER, outcome: 'victory', flawless: true });
+    expect(won.battles).toEqual([{ won: true, flawless: true }]);
+    const lost = battleStatsFor([], { actorId: PLAYER, outcome: 'defeat', flawless: false });
+    expect(lost.battles).toEqual([{ won: false, flawless: false }]);
   });
 
-  it('0 值与不存在的键不写进结果（状态保持紧凑）', () => {
-    expect(withCounters(openingRun(1), { jieInterrupts: 0 }).counters).toEqual({});
-    expect(withCounters(openingRun(1), {}).counters).toEqual({});
+  it('⚠️ `flawless` 是**必填**参数（`Q-b`）—— 没有"省略 = false"这条路', () => {
+    /**
+     * 这条用例改过一次：原来叫"`flawless` 省略时是不声称满血"，断言的是
+     * **默认值**行为。`Q-b` 之后它没有默认值了 —— 少传一个参数是
+     * **编译错误**（所以这条用例里传什么值是次要的，"必须传"才是被测的）。
+     *
+     * 为什么必须这样：默认 `false` 会让"忘了传"表现为
+     * "某个炁机永远解锁不了"，而没人知道为什么 —— 那是**静默失效**。
+     */
+    const stats = battleStatsFor([], { actorId: PLAYER, outcome: 'victory', flawless: false });
+    expect(stats.battles).toEqual([{ won: true, flawless: false }]);
+    // 顶层**没有** `flawless`（`Q-f`）：逐场的在 `battles` 里
+    expect('flawless' in stats).toBe(false);
+    // 传 true 时它进 `battles[0].flawless`（`flawlessBattles` 的唯一来源）
+    const perfect = battleStatsFor([], { actorId: PLAYER, outcome: 'victory', flawless: true });
+    expect(perfect.battles).toEqual([{ won: true, flawless: true }]);
   });
 
-  it('计数可以是负数（不拦 —— 那是内容或引擎的问题，不该在这一层猜）', () => {
-    const run = withCounters(withCounters(openingRun(1), { dodges: 3 }), { dodges: -1 });
-    expect(counterValue(run.counters, 'dodges')).toBe(2);
+  it('纯函数：入参事件数组没被改', () => {
+    const events: EventDef[] = [used(JIE, 1), dmg(JIE, 5, 2)];
+    const frozen = structuredClone(events);
+    battleStatsFor(events, { actorId: PLAYER, outcome: 'victory', flawless: false });
+    expect(events).toEqual(frozen);
+  });
+
+  it('0 伤害 / 不用技能也给出结构完整的统计（不是 undefined）', () => {
+    const stats = battleStatsFor([], { actorId: PLAYER, outcome: 'defeat', flawless: false });
+    expect(stats.skillUses).toEqual({});
+    expect(stats.skillDamage).toEqual({});
+    expect(stats.ticks).toBe(0);
   });
 });
 
 describe('withUnlocked —— 只增不减', () => {
   const POOL: readonly QijiEntity[] = [
     qiji('vitality', ALWAYS),
-    qiji('jieDeriveStrike', { kind: 'counterAtLeast', counter: 'jieInterrupts', value: 3 }),
+    qiji('jieDeriveStrike', {
+      kind: 'statAtLeast',
+      stat: { s: 'skillInterrupts', skillId: JIE, scope: 'run' },
+      value: 3,
+    }),
   ];
 
   it('按 pool 的顺序追加新解锁的 id', () => {
-    const run = withUnlocked(withCounters(openingRun(1), { jieInterrupts: 3 }), POOL);
-    expect(run.unlocked).toEqual(['vitality', 'jieDeriveStrike']);
+    const fought = advanceRun(openingRun(1), {
+      outcome: 'victory',
+      events: [interrupted(JIE, 1), interrupted(JIE, 2), interrupted(JIE, 3)],
+      flawless: false,
+    });
+    expect(withUnlocked(fought, POOL).unlocked).toEqual(['vitality', 'jieDeriveStrike']);
   });
 
   it('已经解锁的不重复追加', () => {
@@ -149,78 +209,103 @@ describe('withUnlocked —— 只增不减', () => {
     expect(second).toBe(first);
   });
 
-  it('解锁不回缩：计数被清零也留着（"曾经解锁过"）', () => {
-    const unlocked = withUnlocked(withCounters(openingRun(1), { jieInterrupts: 3 }), POOL);
-    // 直接构造一个"计数不够了"的状态
-    const rolledBack = { ...unlocked, counters: {} satisfies RunCounters };
+  it('解锁不回缩：统计被清空也留着（"曾经解锁过"）', () => {
+    const fought = advanceRun(openingRun(1), {
+      outcome: 'victory',
+      events: [interrupted(JIE, 1), interrupted(JIE, 2), interrupted(JIE, 3)],
+      flawless: false,
+    });
+    const unlocked = withUnlocked(fought, POOL);
+    expect(unlocked.unlocked).toEqual(['vitality', 'jieDeriveStrike']);
+    // 直接构造一个"统计被清空"的状态
+    const rolledBack = { ...unlocked, battleStats: EMPTY_BATTLE_STATS };
     expect(withUnlocked(rolledBack, POOL).unlocked).toEqual(['vitality', 'jieDeriveStrike']);
   });
 });
 
 describe('advanceRun —— 一场战斗之后', () => {
-  it('胜：position + 1，battlesWon + 1，状态仍是 active', () => {
-    const next = advanceRun(openingRun(7), { outcome: 'victory', counters: {} });
+  it('胜：position + 1，状态仍是 active', () => {
+    const next = advanceRun(openingRun(7), { outcome: 'victory', events: [], flawless: false });
     expect(next.position).toBe(2);
     expect(next.status).toBe('active');
-    expect(counterValue(next.counters, 'battlesWon')).toBe(1);
   });
 
   it('负：status = defeat，**position 不动**（= 死在第几场）', () => {
-    const run = advanceRun(openingRun(7), { outcome: 'victory', counters: {} });
+    const run = advanceRun(openingRun(7), { outcome: 'victory', events: [], flawless: false });
     expect(run.position).toBe(2);
-    const dead = advanceRun(run, { outcome: 'defeat', counters: {} });
+    const dead = advanceRun(run, { outcome: 'defeat', events: [], flawless: false });
     expect(dead.status).toBe('defeat');
     expect(dead.position).toBe(2); // 死在第二场
-    // 输了不加 battlesWon
-    expect(counterValue(dead.counters, 'battlesWon')).toBe(1);
   });
 
-  it('喂终局快照里的计数被累加（且不认识的键被忽略）', () => {
+  it('喂进来的事件被归约并累加进 `RunState.battleStats`', () => {
     const next = advanceRun(openingRun(7), {
       outcome: 'victory',
-      counters: { jieInterrupts: 2, dodges: 1, notACounter: 5 },
+      events: [used(JIE, 1), dmg(JIE, 10, 2), dmg(JIE, 5, 3), interrupted(JIE, 4)],
+      flawless: false,
     });
-    expect(fillCounters(next.counters)).toEqual({
-      jieInterrupts: 2,
-      interrupts: 0,
-      dodges: 1,
-      battlesWon: 1,
-      flawlessBattles: 0,
-    });
+    expect(skillStat(next.battleStats, 'skillUses', JIE)).toBe(1);
+    expect(skillStat(next.battleStats, 'skillDamage', JIE)).toBe(15);
+    expect(skillStat(next.battleStats, 'skillInterrupts', JIE)).toBe(1);
   });
 
-  it('⚠️ 先累加、后判定解锁（这一场刚数够的截，这一场结束就能选）', () => {
+  it('⚠️ 每场的统计**累加**（不是覆盖）：两个技能的第二个数不会顶掉第一个', () => {
+    // 这正是用户例 2 的整局版本："这一局一共用了 n 次 a 和 m 次 b"
+    // —— 与"一场战斗里用了 n 次 a"是**两套累加**。
+    let run = advanceRun(openingRun(7), {
+      outcome: 'victory',
+      events: [used(JIE, 1), used(JIE, 2)],
+      flawless: false,
+    });
+    run = advanceRun(run, { outcome: 'victory', events: [used(JIE, 3), used(BREAK, 4)], flawless: false });
+    expect(skillStat(run.battleStats, 'skillUses', JIE, 'run')).toBe(3);
+    expect(skillStat(run.battleStats, 'skillUses', BREAK, 'run')).toBe(1);
+  });
+
+  it('⚠️ 先归约、后判定解锁（这一场刚数够的截，这一场结束就能选）', () => {
     const pool = [
-      qiji('jieDeriveStrike', { kind: 'counterAtLeast', counter: 'jieInterrupts', value: 3 }),
+      qiji('jieDeriveStrike', {
+        kind: 'statAtLeast',
+        stat: { s: 'skillInterrupts', skillId: JIE, scope: 'run' },
+        value: 3,
+      }),
     ];
     let run = openingRun(7);
-    run = advanceRun(run, { outcome: 'victory', counters: { jieInterrupts: 2 } }, pool);
+    run = advanceRun(
+      run,
+      { outcome: 'victory', events: [interrupted(JIE, 1), interrupted(JIE, 2)], flawless: false },
+      pool,
+    );
     expect(run.unlocked).toEqual([]);
-    run = advanceRun(run, { outcome: 'victory', counters: { jieInterrupts: 1 } }, pool);
-    // 若顺序反了（先判定后累加），这里会是 []，而且**永远**差一场
+    run = advanceRun(run, { outcome: 'victory', events: [interrupted(JIE, 3)], flawless: false }, pool);
+    // 若顺序反了（先判定后归约），这里会是 []，而且**永远**差一场
     expect(run.unlocked).toEqual(['jieDeriveStrike']);
   });
 
-  it('失败那一场里的计数也会被累加（输了不等于白打）', () => {
+  it('失败那一场的事件**照样累加**（输了不等于白打）', () => {
     const run = advanceRun(openingRun(7), {
       outcome: 'defeat',
-      counters: { dodges: 4, jieInterrupts: 1 },
+      events: [used(JIE, 1), interrupted(JIE, 2)],
+      flawless: false,
     });
-    expect(counterValue(run.counters, 'dodges')).toBe(4);
-    expect(counterValue(run.counters, 'jieInterrupts')).toBe(1);
+    expect(skillStat(run.battleStats, 'skillUses', JIE)).toBe(1);
+    expect(skillStat(run.battleStats, 'skillInterrupts', JIE)).toBe(1);
+    // 而且这一场被记为"没过"
+    expect(run.battleStats.battles).toEqual([{ won: false, flawless: false }]);
   });
 
   it('满编：打赢 `order` 的最后一个（第 7 场）→ status = victory，position 停在 len + 1', () => {
     let run = openingRun(7);
     for (let i = 0; i < MAX_RUN_POSITION - 1; i += 1) {
-      run = advanceRun(run, { outcome: 'victory', counters: {} });
+      run = advanceRun(run, { outcome: 'victory', events: [], flawless: false });
       expect(run.status).toBe('active');
     }
     expect(run.position).toBe(MAX_RUN_POSITION);
-    const finished = advanceRun(run, { outcome: 'victory', counters: {} });
+    const finished = advanceRun(run, { outcome: 'victory', events: [], flawless: false });
     expect(finished.status).toBe('victory');
     expect(finished.position).toBe(MAX_RUN_POSITION + 1);
-    expect(counterValue(finished.counters, 'battlesWon')).toBe(MAX_RUN_POSITION);
+    // `battlesWon` 是**过滤**出来的，不是计数器
+    expect(readBattleStat({ s: 'battlesWon', scope: 'run' }, finished.battleStats, finished.battleStats)).toBe(MAX_RUN_POSITION);
   });
 
   it('⚠️ 开发期短局（order 只有 2 个）：打完第 2 场就通关（不是打到第 7 场）', () => {
@@ -235,20 +320,20 @@ describe('advanceRun —— 一场战斗之后', () => {
      * 这一局必须能打完（§2.3 的"一局肉鸽的场数等于 `BOSS_POOL.length`"）。
      */
     const short = startRun({ runSeed: 5, playerId: 'player', order: BOSSES.slice(0, 2) });
-    const afterFirst = advanceRun(short, { outcome: 'victory', counters: {} });
+    const afterFirst = advanceRun(short, { outcome: 'victory', events: [], flawless: false });
     expect(afterFirst.position).toBe(2);
     expect(afterFirst.status).toBe('active');
-    const afterSecond = advanceRun(afterFirst, { outcome: 'victory', counters: {} });
+    const afterSecond = advanceRun(afterFirst, { outcome: 'victory', events: [], flawless: false });
     // 通关：position = len + 1 = 3（而不是"停在 active 等一个不存在的第 3 场"）
     expect(afterSecond.status).toBe('victory');
     expect(afterSecond.position).toBe(3);
-    expect(counterValue(afterSecond.counters, 'battlesWon')).toBe(2);
+    expect(afterSecond.battleStats.battles).toHaveLength(2);
   });
 
   it('⚠️ 单场的一局（order 只有 1 个）：打完第 1 场就通关', () => {
     // §6.1 的表里 `len = 1` 那一行："单场即终局"（档位 T7）。
     const single = startRun({ runSeed: 5, playerId: 'player', order: ['meiichiro'] });
-    const done = advanceRun(single, { outcome: 'victory', counters: {} });
+    const done = advanceRun(single, { outcome: 'victory', events: [], flawless: false });
     expect(done.status).toBe('victory');
     expect(done.position).toBe(2);
   });
@@ -256,29 +341,48 @@ describe('advanceRun —— 一场战斗之后', () => {
   it('通不了关的那一侧：输了就是输了（短局最后一场输 = defeat，不是 victory）', () => {
     // 防"通关判据写成 `position >= 1`"这种把什么都判成通关的实现。
     const short = startRun({ runSeed: 5, playerId: 'player', order: BOSSES.slice(0, 2) });
-    const afterFirst = advanceRun(short, { outcome: 'victory', counters: {} });
-    const lost = advanceRun(afterFirst, { outcome: 'defeat', counters: {} });
+    const afterFirst = advanceRun(short, { outcome: 'victory', events: [], flawless: false });
+    const lost = advanceRun(afterFirst, { outcome: 'defeat', events: [], flawless: false });
     expect(lost.status).toBe('defeat');
     expect(lost.position).toBe(2);
   });
 
   it('⚠️ 已经结束的一局肉鸽再被推进 → 抛错（不静默忽略）', () => {
-    const dead = advanceRun(openingRun(7), { outcome: 'defeat', counters: {} });
-    expect(() => advanceRun(dead, { outcome: 'victory', counters: {} })).toThrow(/finished run/);
+    const dead = advanceRun(openingRun(7), { outcome: 'defeat', events: [], flawless: false });
+    expect(() => advanceRun(dead, { outcome: 'victory', events: [], flawless: false })).toThrow(/finished run/);
     // 报错信息用英文（i18n 规范 I1：开发者错误不本地化）
-    expect(() => advanceRun(dead, { outcome: 'victory', counters: {} })).toThrow(/status=defeat/);
+    expect(() => advanceRun(dead, { outcome: 'victory', events: [], flawless: false })).toThrow(/status=defeat/);
   });
 
   it('order 为空（还没定顺序）→ 抛错', () => {
     const empty = startRun({ runSeed: 1, playerId: 'player', order: [] });
-    expect(() => advanceRun(empty, { outcome: 'victory', counters: {} })).toThrow(/no boss order/);
+    expect(() => advanceRun(empty, { outcome: 'victory', events: [], flawless: false })).toThrow(/no boss order/);
   });
 
   it('纯函数：入参状态没被改', () => {
     const run = openingRun(7);
     const frozen = structuredClone(run);
-    advanceRun(run, { outcome: 'victory', counters: { jieInterrupts: 1 } });
+    advanceRun(run, { outcome: 'victory', events: [dmg(JIE, 9, 5)], flawless: false });
     expect(run).toEqual(frozen);
+  });
+
+  it('⚠️ 满血赢的场数从逐场结果里**过滤**出来（不是计数器）', () => {
+    let run = openingRun(7);
+    run = advanceRun(run, { outcome: 'victory', events: [], flawless: true });
+    run = advanceRun(run, { outcome: 'victory', events: [], flawless: false });
+    run = advanceRun(run, { outcome: 'victory', events: [], flawless: false });
+    const flawless = readBattleStat(
+      { s: 'flawlessBattles', scope: 'run' },
+      run.battleStats,
+      run.battleStats,
+    );
+    expect(flawless).toBe(1);
+    // 长度 = 场数（可校验：这是"逐场事实"而不是"结论"的收益）
+    expect(run.battleStats.battles).toEqual([
+      { won: true, flawless: true },
+      { won: true, flawless: false },
+      { won: true, flawless: false },
+    ]);
   });
 });
 
@@ -287,10 +391,10 @@ describe('一局肉鸽打完：position 与 order 对得上', () => {
     let run = openingRun(2026);
     for (let i = 0; i < MAX_RUN_POSITION; i += 1) {
       const bossId = run.order[run.position - 1];
-      const record = battleRecordOf(run, battleSeed(run.runSeed, run.position), 'victory');
+      const record = battleRecordOf(run, battleSeed(run.runSeed, run.position), 'victory', false);
       expect(record.bossId).toBe(bossId);
       expect(record.position).toBe(run.position);
-      run = advanceRun(run, { outcome: 'victory', counters: {} });
+      run = advanceRun(run, { outcome: 'victory', events: [], flawless: false });
     }
     expect(run.status).toBe('victory');
   });
@@ -299,30 +403,32 @@ describe('一局肉鸽打完：position 与 order 对得上', () => {
     let run = openingRun(4242);
     const fought: string[] = [];
     for (let i = 0; i < MAX_RUN_POSITION; i += 1) {
-      fought.push(battleRecordOf(run, 1, 'victory').bossId);
-      run = advanceRun(run, { outcome: 'victory', counters: {} });
+      fought.push(battleRecordOf(run, 1, 'victory', false).bossId);
+      run = advanceRun(run, { outcome: 'victory', events: [], flawless: false });
     }
     expect([...fought].sort()).toEqual([...BOSSES].sort());
   });
 
   it('position 超出 order 长度 → battleRecordOf 抛错（而不是记一个 undefined 的 boss）', () => {
     const short = startRun({ runSeed: 5, playerId: 'player', order: ['meiichiro'] });
-    const after = advanceRun(short, { outcome: 'victory', counters: {} });
+    const after = advanceRun(short, { outcome: 'victory', events: [], flawless: false });
     expect(after.position).toBe(2);
-    expect(() => battleRecordOf(after, 1, 'victory')).toThrow(/order has 1 entries/);
+    expect(() => battleRecordOf(after, 1, 'victory', false)).toThrow(/order has 1 entries/);
   });
 });
 
 describe('失败 = 全丢（§2.4 / §12 决议 #1）', () => {
-  it('dropRunProgress 清空 counters / unlocked / chosen，回第 1 场', () => {
-    let run = advanceRun(openingRun(7), { outcome: 'victory', counters: { jieInterrupts: 3 } }, [
-      qiji('vitality', ALWAYS),
-    ]);
+  it('dropRunProgress 清空统计 / unlocked / chosen，回第 1 场', () => {
+    let run = advanceRun(
+      openingRun(7),
+      { outcome: 'victory', events: [interrupted(JIE, 1)], flawless: false },
+      [qiji('vitality', ALWAYS)],
+    );
     run = { ...run, chosen: [{ qijiId: 'vitality', stacks: 1 }] };
     const fresh = dropRunProgress(run);
     expect(fresh.position).toBe(1);
     expect(fresh.status).toBe('active');
-    expect(fresh.counters).toEqual({});
+    expect(fresh.battleStats).toEqual(EMPTY_BATTLE_STATS);
     expect(fresh.unlocked).toEqual([]);
     expect(fresh.chosen).toEqual([]);
     // 种子 / 角色 / 顺序保留（"重开一局"由调用方决定要不要换种子）
@@ -332,7 +438,7 @@ describe('失败 = 全丢（§2.4 / §12 决议 #1）', () => {
   });
 
   it('withRunSeed 换顺序并回到第 1 场', () => {
-    const run = advanceRun(openingRun(7), { outcome: 'victory', counters: {} });
+    const run = advanceRun(openingRun(7), { outcome: 'victory', events: [], flawless: false });
     const next = withRunSeed(run, shuffle(BOSSES, 8));
     expect(next.position).toBe(1);
     expect(next.status).toBe('active');

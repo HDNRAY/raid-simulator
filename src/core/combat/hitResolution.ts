@@ -449,6 +449,16 @@ export function applyHitEffects(
             sourceId: actor.id,
             targetId: who.id,
             skillId: cast.skillId,
+            /**
+             * 打断者（`actor`）用的招式 = 本函数第 5 个参数 `skillId`
+             * （`applyHitEffects` 的"触发这个效果的技能"）。
+             *
+             * ⚠️ 只在**有值**时写这个键（条件展开），因为
+             * `ExactOptionalPropertyTypes` 下 `sourceSkillId: undefined`
+             * 与"没有这个键"是两件事，而"没有招式"才是真的语义。
+             * 触发器产出的眩晕没有 `skillId`，那时这个键就不该出现。
+             */
+            ...(skillId === undefined ? {} : { sourceSkillId: skillId }),
           });
         }
       }
@@ -512,6 +522,8 @@ export function applyHitEffects(
               sourceId: actor.id,
               targetId: target.id,
               skillId: cast.skillId,
+              // 同上面的眩晕分支：打断者用的招式，只在有值时写键
+              ...(skillId === undefined ? {} : { sourceSkillId: skillId }),
             });
           }
           /**

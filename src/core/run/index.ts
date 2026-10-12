@@ -36,6 +36,9 @@
  * `import { startRun, advanceRun } from '…/core/run/index'` 一处拿全。
  *
  * - 状态形状与生命周期：`types`
+ * - **事件流 → 统计**（造数，§5.2 的方向修正）：`stats`
+ * - **对统计的查询**（读数）：`query`
+ * - 这一场的结果（叶子）：`outcome`
  * - 随机（本层唯一的随机消费者）：`shuffle`
  * - 解锁判定与候选：`unlock`
  * - 场次推进：`lifecycle`
@@ -46,23 +49,33 @@
  */
 
 /* ---------- 状态形状 ---------- */
-export {
-  MAX_RUN_POSITION,
-  addCounters,
-  counterValue,
-  fillCounters,
-  pickKnownCounters,
-  runLengthOf,
-  tierForPosition,
-} from './types';
+export { MAX_RUN_POSITION, runLengthOf, tierForPosition } from './types';
 export type {
   RunBattleRecord,
   RunChoice,
-  RunCounterState,
   RunRecord,
   RunState,
   RunStatus,
 } from './types';
+
+/* ---------- 事件流 → 统计（造数） ---------- */
+export { EMPTY_BATTLE_STATS, mergeAllBattleStats, mergeBattleStats, reduceBattleStats } from './stats';
+export type { BattleStats, BattleStatsScope, SkillCounts } from './stats';
+
+/* ---------- 对统计的查询（读数） ---------- */
+export {
+  SKILL_STAT_IDS,
+  isSkillStatId,
+  readBattleStat,
+  skillStatValue,
+  statProgress,
+  sumCounts,
+} from './query';
+export type { BattleStatQuery, SkillStatId, StatScope } from './query';
+
+/* ---------- 这一场的结果（叶子） ---------- */
+export { outcomeOf } from './outcome';
+export type { BattleOutcomeRecord } from './outcome';
 
 /* ---------- 洗牌（唯一的随机消费者） ---------- */
 export { battleSeed, shuffle } from './shuffle';
@@ -78,20 +91,21 @@ export {
   unlockedIds,
   unlockProgress,
 } from './unlock';
-export type { Candidate, UnlockProgress } from './unlock';
+export type { Candidate, UnlockProgress, UnlockStats } from './unlock';
 
 /* ---------- 生命周期 ---------- */
 export {
   GENERIC_QIJI_IDS,
   advanceRun,
   battleRecordOf,
+  battleStatsFor,
   dropRunProgress,
   startRun,
-  withCounters,
+  unlockStatsOf,
   withRunSeed,
   withUnlocked,
 } from './lifecycle';
-export type { BattleOutcomeInput, StartRunInput } from './lifecycle';
+export type { BattleInput, StartRunInput } from './lifecycle';
 
 /* ---------- 记录（序列化 + 校验） ---------- */
 export { RUN_FORMAT_VERSION, parseRecordedRun, parseRunState, serializeRun } from './record';

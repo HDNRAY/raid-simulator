@@ -117,9 +117,40 @@ readonly reason?: 'interrupted' | 'sourceLost' | 'death' | 'replaced';
   | {
       readonly kind: 'interruptSuccess';
       readonly tick: number;
+      /** 打断者（谁把读条打断了）。 */
       readonly sourceId: CombatantId;
       readonly targetId: CombatantId;
+      /**
+       * **被打断的那个读条**的技能。
+       *
+       * ⚠️ 它**不是**打断者用的技能 —— 用「截」打断和用「破」打断，这个
+       * 字段都是被打断的招（例如 Boss 的「轻蔑」）。要区分"用哪一招打断
+       * 的"必须读 `sourceSkillId`。两个都留着：日志要显示"打断了谁的什么"，
+       * 而肉鸽的解锁条件要问"用截打断了几次"。
+       */
       readonly skillId: SkillId;
+      /**
+       * **打断者**（`sourceId`）用的那个技能的 id。
+       *
+       * 为什么必须单独一个字段：`sourceId` 只说"是谁"，而"是什么招式"
+       * 在这一层不可还原 —— 打断由 `Effect: 'interrupt'` 结算，
+       * 同一个 `sourceId` 可能用「截」也可能用「破」，而两者的事件
+       * **长得完全一样**。用户的「截拳道」/「招架反击流」这类炁机
+       * 要的正是这个区分。
+       *
+       * 可选（`?`）：有些打断来源**不是技能**（触发器的产出、
+       * 未来的环境效果），那时没有"招式"可写 —— 写 `''` 会与
+       * "技能 id 恰好是空串"混淆（`damage` 事件的 `skillId` 就用了
+       * `''` 表示非技能，这里不再重复那个约定）。
+       *
+       * ⚠️ **本字段不参与任何判定**：没有任何引擎分支读它
+       * （`buffHookDispatch` 只认 `buffApplied` / `buffExpired`），
+       * 它只被 `EventDef[] → 统计` 的消费者读（`core/run/stats.ts`、
+       * 日志、渲染）。所以**它不改变确定性语义**，
+       * `REPLAY_FORMAT_VERSION` 不必 +1（依据见 `hitResolution.ts` 的
+       * 两处 emit 点注释）。
+       */
+      readonly sourceSkillId?: SkillId;
     }
   | {
       readonly kind: 'resourceChanged';

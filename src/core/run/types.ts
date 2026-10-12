@@ -19,7 +19,7 @@
  */
 
 import type { CombatantId, EntityId } from '../types/ids';
-import { isRunCounter, RUN_COUNTERS, type RunCounter, type RunCounters } from '../types/qiji';
+import type { BattleStats } from './stats';
 
 /**
  * **满编**时一局肉鸽有几场（§12 决议 #7：固定 7 场）。
@@ -106,16 +106,6 @@ export function tierForPosition(k: number, runLength: number = MAX_RUN_POSITION)
 export type RunStatus = 'active' | 'victory' | 'defeat';
 
 /**
- * 一局肉鸽内累计的计数器。
- *
- * ⚠️ **唯一写入路径**是 `core/run/lifecycle.ts` 的 `withCounters`
- * （由 `advanceRun` 调用）。与 `input/touchLayout.ts` 的"`TouchLayout`
- * 只有一个写入路径 `set()`"是同一条设计纪律：一个状态有几个写入者，
- * 就有几处可能忘记同步（§5.2.3）。
- */
-export type RunCounterState = RunCounters;
-
-/**
  * 一场战斗的结果。
  *
  * `outcome: 'victory' | 'defeat'` 而不是 `boolean`：`'victory'` 与
@@ -129,6 +119,22 @@ export interface RunBattleRecord {
   /** 这一场用的战斗种子（由 `shuffle.ts` 的 `battleSeed` 派生，**每场独立**）。 */
   readonly seed: number;
   readonly outcome: 'victory' | 'defeat';
+  /**
+   * 这一场是不是**满血赢的**。
+   *
+   * ⚠️ 它在 `RUN_FORMAT_VERSION` 从 **1 → 2** 时**从可选收成了必填**。
+   *
+   * 中间曾经有过一版是"可选 + 缺 = 不参与对账"，那是为了兼容"不含它的
+   * v1 记录"。**那个理由不成立**：肉鸽存档是 P7 才做的东西，
+   * `RunRecord` 从来没有被真正写出去过 —— **没有任何 v1 记录存在**。
+   * 于是那个口子只换来"一条有洞的检查"（`record.ts` 的对账里
+   * 有半条永远不执行），而**有洞的检查等于没有检查**。
+   *
+   * ⚠️ 这条改动的性质是 ①（见 §7.2）的一个应用：它只动了
+   * **我们自己的记录格式** → `RUN_FORMAT_VERSION + 1`；
+   * 而 `REPLAY_FORMAT_VERSION`（引擎的确定性语义）**不动**。
+   */
+  readonly flawless: boolean;
 }
 
 /** 已选生效的一个炁机（带层数）。 */
@@ -155,8 +161,17 @@ export interface RunState {
   /** 当前在第几场（1-based）。⚠️ 语义见 `lifecycle.ts` 的"位置的两种读法"。 */
   readonly position: number;
   readonly status: RunStatus;
-  /** 一局肉鸽内累计的计数器（唯一的写入路径见上）。 */
-  readonly counters: RunCounterState;
+  /**
+   * 一局肉鸽累计的战斗统计（**唯一写入路径**是 `lifecycle.ts` 的
+   * `advanceRun`，它把这一场的统计 `mergeBattleStats` 进来）。
+   *
+   * ⚠️ 这里**没有** `counters` 字段 —— 第一版有过，已删。删它的理由就是
+   * 本次方向修正的核心：计数器是**第二份真相**（它与事件流会漂），
+   * 而"整局统计"本来就是"把每场的统计加起来"的结果，不需要再存一份。
+   *
+   * `scope: 'run'` 的查询读的就是它。
+   */
+  readonly battleStats: BattleStats;
   /** 这一局曾经解锁过的炁机 id（**只增不减**，保序便于 diff / 哈希）。 */
   readonly unlocked: readonly EntityId[];
   /** 已经选了生效的炁机（**不能换**，§5.3，所以也是只增不减）。 */
@@ -189,76 +204,8 @@ export interface RunState {
  */
 export interface RunRecord {
   readonly runFormatVersion: number;
-  /** 起局的完整状态（`order` / `position` / `counters`… 都在里面）。 */
+  /** 起局的完整状态（`order` / `position` / `battleStats`… 都在里面）。 */
   readonly state: RunState;
   /** 已经打完的每一场，按时间顺序。 */
   readonly battles: readonly RunBattleRecord[];
-}
-
-/**
- * 从计数表里读一个值。**缺键 = 0**。
- *
- * ⚠️ 这个函数是"缺键就是 0"这个约定的**唯一**落点。别在别处写
- * `counters.x ?? 0`：那样"0"这个语义会散落在 N 个地方，而其中任何
- * 一处写成 `|| 0` 都会把合法的 0 与"没有这个键"混起来（现在没差别，
- * 但将来若引入负数计数器就有差别了）。
- */
-export function counterValue(counters: RunCounterState, counter: RunCounter): number {
-  return counters[counter] ?? 0;
-}
-
-/**
- * 一份"完整"的计数表（每个 `RunCounter` 都有值，缺的补 0）。
- *
- * 用途是**断言与展示**（"这一局到底数到了什么"），不是状态本身：
- * 状态保持"只记发生过的"（见 `RunCounters` 的说明）。
- */
-export function fillCounters(counters: RunCounterState): Record<RunCounter, number> {
-  return {
-    jieInterrupts: counterValue(counters, 'jieInterrupts'),
-    interrupts: counterValue(counters, 'interrupts'),
-    dodges: counterValue(counters, 'dodges'),
-    battlesWon: counterValue(counters, 'battlesWon'),
-    flawlessBattles: counterValue(counters, 'flawlessBattles'),
-  };
-}
-
-/**
- * 从一份**外来的**计数表里挑出认识的键（`unknown → RunCounterState` 的收窄）。
- *
- * ⚠️ 这是"哪些键算计数器"这个问题的**唯一**落点。`lifecycle.ts` 的
- * `withCounters` 读的是引擎终局快照里的数字（`Record<string, number>`，
- * 宽形状、引擎将来会加键），必须按同一份清单过滤 —— 如果两处各自写一份，
- * 漂开的表现是"某个计数器怎么数都不涨"，而那种 bug 从现象上完全指不到这里。
- *
- * 判定走 `isRunCounter`（`core/types/qiji.ts` 的**运行期**清单），
- * 而不是在本地另写一个 `Record<RunCounter, …>` 常量：
- * `Object.keys` 给的是 `string[]`，而"这份 Runtime 清单与 `RunCounter`
- * 联合一致"的证据在 `qiji.ts` 里（两者相邻，改一个就会看见另一个）。
- */
-export function pickKnownCounters(raw: Readonly<Record<string, number>>): RunCounterState {
-  const out: Partial<Record<RunCounter, number>> = {};
-  for (const key of Object.keys(raw)) {
-    if (!isRunCounter(key)) continue;
-    const value = raw[key];
-    if (value === undefined || value === 0) continue;
-    out[key] = value;
-  }
-  return out;
-}
-
-/**
- * 累加两份计数表（缺键 = 0）。**不修改**任何一份入参。
- *
- * 与 `pickKnownCounters` 分开是因为两件事的时机不同：`pickKnownCounters`
- * 是**外来数据的收窄**（只在这一层的边界上做一次），`addCounters` 是
- * 纯粹的数学校验（可以在任何已经收窄过的状态上做）。
- */
-export function addCounters(a: RunCounterState, b: RunCounterState): RunCounterState {
-  const out: Partial<Record<RunCounter, number>> = { ...a };
-  for (const counter of RUN_COUNTERS) {
-    const sum = counterValue(a, counter) + counterValue(b, counter);
-    if (sum !== 0) out[counter] = sum;
-  }
-  return out;
 }

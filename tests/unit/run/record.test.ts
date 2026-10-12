@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import type { EventDef } from '../../../src/core/events';
 import type { QijiEntity, QijiUnlock } from '../../../src/core/types/qiji';
 import { advanceRun, battleRecordOf, startRun } from '../../../src/core/run/lifecycle';
 import {
@@ -8,27 +9,42 @@ import {
   parseRunState,
   serializeRun,
 } from '../../../src/core/run/record';
-import type { RunRecord, RunState } from '../../../src/core/run/types';
+import { EMPTY_BATTLE_STATS } from '../../../src/core/run/stats';
+import type { RunBattleRecord, RunRecord, RunState } from '../../../src/core/run/types';
 import { MAX_RUN_POSITION } from '../../../src/core/run/types';
 import { battleSeed, shuffle } from '../../../src/core/run/shuffle';
 
-/**
- * 一局肉鸽记录的序列化与校验（P0 验收第三条：**`RunState` 能 JSON 往返**）。
- *
- * ==================================================================
- * ⚠️ "JSON 往返"要往返的是**两份**，别只测一份
- * ==================================================================
- *
- *   1. `RunState` **裸的**往返：`JSON.parse(JSON.stringify(s))` 与 `s` 相等
- *      —— 这条证明"状态里没有不可序列化的东西"（无 `Map` / 无类实例 /
- *      无循环引用），也就是 §7.3 的可哈希保证。
- *   2. `RunRecord` **带校验的**往返：`serializeRun` → `parseRecordedRun`
- *      —— 这条证明"存档能被读回来**且仍然可信**"（§11 风险 #9 的
- *      "未验证输入"那条路）。
- *
- * 只写第 1 条会漏掉整条校验路径；只写第 2 条则"解析器把坏数据修好了"
- * 也能过 —— 所以两条都要有，且**坏数据的用例**必须真能失败。
- */
+const PLAYER = 'player';
+const JIE = 'jie';
+
+function used(skillId: string, tick = 1): EventDef {
+  return { kind: 'skillUsed', tick, sourceId: PLAYER, skillId };
+}
+
+function dmg(skillId: string, amount: number, tick = 1): EventDef {
+  return {
+    kind: 'damage',
+    tick,
+    sourceId: PLAYER,
+    targetId: 'meiichiro',
+    amount,
+    crit: false,
+    absorbed: 0,
+    overkill: 0,
+    skillId,
+  };
+}
+
+function interrupted(skillId: string, tick = 1): EventDef {
+  return {
+    kind: 'interruptSuccess',
+    tick,
+    sourceId: PLAYER,
+    targetId: 'meiichiro',
+    skillId: 'boss-cleave',
+    sourceSkillId: skillId,
+  };
+}
 
 const BOSSES: readonly string[] = [
   'meiichiro',
@@ -62,24 +78,57 @@ function richState(): RunState {
     order: shuffle(BOSSES, 20261012),
     label: '?runlen=3',
   });
-  run = advanceRun(run, { outcome: 'victory', counters: { jieInterrupts: 2, dodges: 1 } }, [
-    qiji('vitality', ALWAYS),
-  ]);
+  run = advanceRun(
+    run,
+    { outcome: 'victory', events: [used(JIE, 1), dmg(JIE, 12, 2), interrupted(JIE, 3)], flawless: false },
+    [qiji('vitality', ALWAYS)],
+  );
   run = { ...run, chosen: [{ qijiId: 'vitality', stacks: 2 }] };
-  run = advanceRun(run, { outcome: 'defeat', counters: { jieInterrupts: 1 } });
+  run = advanceRun(run, {
+    outcome: 'defeat',
+    events: [used(JIE, 4), interrupted(JIE, 5)],
+    flawless: false,
+  });
   return run;
 }
 
-/** 一份完整的记录（状态 + 两场战斗）。 */
+/**
+ * 造一条重放记录。
+ *
+ * ⚠️ `flawless` 后来加上的（`Q-e` 要它与 `battleStats.battles[].flawless`
+ * 对账），所以这里显式写出来 —— "缺 = 不参与对账"那条兼容口子
+ * 不该被测试默认用上（见 `RunBattleRecord.flawless` 的说明）。
+ */
+function battleRecord(
+  state: RunState,
+  position: number,
+  outcome: 'victory' | 'defeat',
+  flawless = false,
+): RunBattleRecord {
+  return {
+    position,
+    bossId: state.order[position - 1] ?? 'meiichiro',
+    seed: battleSeed(state.runSeed, position),
+    outcome,
+    flawless,
+  };
+}
+
+/** 从重放记录推出统计骨架（对账要求两者一致，测试里就这么造）。 */
+function outcomesOf(
+  records: readonly RunBattleRecord[],
+): readonly { readonly won: boolean; readonly flawless: boolean }[] {
+  return records.map((r) => ({ won: r.outcome === 'victory', flawless: r.flawless === true }));
+}
+
+/** 一份完整的记录（状态 + 两场战斗，且**与 `battleStats.battles` 对得上**）。 */
 function richRecord(): RunRecord {
   const state = richState();
+  const battles = [battleRecord(state, 1, 'victory'), battleRecord(state, 2, 'defeat')];
   return {
     runFormatVersion: RUN_FORMAT_VERSION,
-    state,
-    battles: [
-      { position: 1, bossId: state.order[0] ?? 'meiichiro', seed: battleSeed(state.runSeed, 1), outcome: 'victory' },
-      { position: 2, bossId: state.order[1] ?? 'lust', seed: battleSeed(state.runSeed, 2), outcome: 'defeat' },
-    ],
+    state: { ...state, battleStats: { ...state.battleStats, battles: outcomesOf(battles) } },
+    battles,
   };
 }
 
@@ -87,7 +136,13 @@ describe('RunState —— 裸 JSON 往返（验收 3 的前半）', () => {
   it('JSON.parse(JSON.stringify(state)) 与原状态相等', () => {
     const state = richState();
     // 先证明这份状态**不是**平凡的（否则"往返相等"可能因为两边都空而成立）
-    expect(state.counters).toEqual({ jieInterrupts: 3, dodges: 1, battlesWon: 1 });
+    expect(state.battleStats.skillUses[JIE]).toBe(2);
+    expect(state.battleStats.skillDamage[JIE]).toBe(12);
+    expect(state.battleStats.skillInterrupts[JIE]).toBe(2);
+    expect(state.battleStats.battles).toEqual([
+      { won: true, flawless: false },
+      { won: false, flawless: false },
+    ]);
     expect(state.chosen).toEqual([{ qijiId: 'vitality', stacks: 2 }]);
     expect(state.status).toBe('defeat');
     expect(state.label).toBe('?runlen=3');
@@ -100,7 +155,7 @@ describe('RunState —— 裸 JSON 往返（验收 3 的前半）', () => {
     expect(structuredClone(state)).toEqual(state);
   });
 
-  it('开局状态（空 counters / 空数组 / 没有 label）也能往返', () => {
+  it('开局状态（空统计 / 空数组 / 没有 label）也能往返', () => {
     const run = startRun({ runSeed: 1, playerId: 'player', order: [] });
     expect(JSON.parse(JSON.stringify(run))).toEqual(run);
   });
@@ -108,7 +163,7 @@ describe('RunState —— 裸 JSON 往返（验收 3 的前半）', () => {
   it('通关状态（position = MAX + 1）也能往返', () => {
     let run = startRun({ runSeed: 3, playerId: 'player', order: shuffle(BOSSES, 3) });
     for (let i = 0; i < MAX_RUN_POSITION; i += 1) {
-      run = advanceRun(run, { outcome: 'victory', counters: { dodges: 1 } });
+      run = advanceRun(run, { outcome: 'victory', events: [dmg(JIE, 1, i + 1)], flawless: false });
     }
     expect(run.status).toBe('victory');
     expect(run.position).toBe(MAX_RUN_POSITION + 1);
@@ -200,28 +255,72 @@ describe('parseRecordedRun —— 坏数据整条丢弃（§11 风险 #9）', ()
     expect(parseRecordedRun({ ...good, state: { ...state, chosen: [{ stacks: 1 }] } })).toBeUndefined();
   });
 
-  it('计数器里出现不认识的键 → undefined（不是静默丢掉那个键）', () => {
-    // ⚠️ 与 `withCounters`（**忽略**未知键）**刻意不同**：
-    // `withCounters` 的入参是引擎的终局快照（引擎加键是合法的演进），
-    // 而这里的入参是**存档**（出现未知键说明它不是本版本写的）。
-    // 静默丢掉会让"这一局数到的某样东西"凭空消失而没人知道。
+  it('统计里的**值**不是有限数 → undefined（技能键是开放的，值不是）', () => {
+    /**
+     * ⚠️ 与第一版的"计数器"**刻意不同**：那时键是封闭的
+     * （`RunCounter` 联合），所以"出现不认识的键"要整条丢弃；
+     * 现在键是**技能 id**（开放集合，来自内容表，解析层不认识它），
+     * 所以键不校验，但**值必须是有限数**。
+     */
     const state = good.state;
+    const withStats = (skillUses: unknown) => ({
+      ...good,
+      state: { ...state, battleStats: { ...state.battleStats, skillUses } },
+    });
+    expect(parseRecordedRun(withStats({ [JIE]: '3' }))).toBeUndefined();
+    expect(parseRecordedRun(withStats({ [JIE]: Number.NaN }))).toBeUndefined();
+    expect(parseRecordedRun(withStats({ [JIE]: null }))).toBeUndefined();
+    // 没见过的技能 id 是**合法**的（内容表将来会加技能，解析层不该认识它）
+    expect(parseRecordedRun(withStats({ 'some-new-skill': 2 }))).toBeDefined();
+  });
+
+  it('统计可以缺键 / 是空对象（"还没数到"是合法状态）', () => {
+    const state = good.state;
+    // ⚠️ 换成 `EMPTY_BATTLE_STATS` 之后 `battles` 也变空了，所以
+    // 重放记录那边必须一起空 —— 否则触发的是**对账**失败（另一条校验），
+    // 这条用例就测不到"空统计是合法的"了。
+    const withEmpty = { ...good, state: { ...state, battleStats: EMPTY_BATTLE_STATS }, battles: [] };
+    expect(parseRecordedRun(withEmpty)?.state.battleStats).toEqual(EMPTY_BATTLE_STATS);
+    // 整个 `battleStats` 缺失 → 坏数据（它是必需的，不是可选）
+    const { battleStats: _drop, ...withoutStats } = state;
+    expect(parseRecordedRun({ ...good, state: withoutStats })).toBeUndefined();
+  });
+
+  it('统计缺字段 → undefined（不是默默补零）', () => {
+    const state = good.state;
+    const { skillDamage: _drop, ...withoutDamage } = state.battleStats;
     expect(
-      parseRecordedRun({ ...good, state: { ...state, counters: { typoCounter: 3 } } }),
-    ).toBeUndefined();
-    expect(
-      parseRecordedRun({ ...good, state: { ...state, counters: { jieInterrupts: '3' } } }),
-    ).toBeUndefined();
-    expect(
-      parseRecordedRun({ ...good, state: { ...state, counters: { jieInterrupts: Number.NaN } } }),
+      parseRecordedRun({ ...good, state: { ...state, battleStats: withoutDamage } }),
     ).toBeUndefined();
   });
 
-  it('计数器可以缺键 / 是空对象（"还没数到"是合法状态）', () => {
+  it('⚠️ 逐场结果数组的每一项都要 `{won, flawless}` 两个布尔', () => {
     const state = good.state;
-    expect(parseRecordedRun({ ...good, state: { ...state, counters: {} } })?.state.counters).toEqual({});
-    const { counters: _drop, ...withoutCounters } = state;
-    expect(parseRecordedRun({ ...good, state: withoutCounters })?.state.counters).toEqual({});
+    // ⚠️ 对账会比对**长度**，所以改统计骨架时必须同步改重放记录那一边。
+    // 这条用例只测"数组项的形状"，所以让它保持长度一致（都为空）。
+    const withBattles = (battles: unknown) => ({
+      ...good,
+      state: { ...state, battleStats: { ...state.battleStats, battles } },
+      battles: [],
+    });
+    expect(parseRecordedRun(withBattles([{ won: true, flawless: false }]))).toBeUndefined();
+    expect(parseRecordedRun(withBattles([]))).toBeDefined();
+    expect(parseRecordedRun(withBattles([{ won: true }]))).toBeUndefined();
+    expect(parseRecordedRun(withBattles([{ won: 'yes', flawless: false }]))).toBeUndefined();
+    expect(parseRecordedRun(withBattles('nope'))).toBeUndefined();
+  });
+
+  it('`ticks` 必须是**非负有限数**', () => {
+    const state = good.state;
+    const withTicks = (ticks: unknown) => ({
+      ...good,
+      state: { ...state, battleStats: { ...state.battleStats, ticks } },
+    });
+    expect(parseRecordedRun(withTicks(0))).toBeDefined();
+    expect(parseRecordedRun(withTicks(1234))).toBeDefined();
+    expect(parseRecordedRun(withTicks(-1))).toBeUndefined();
+    expect(parseRecordedRun(withTicks(Number.NaN))).toBeUndefined();
+    expect(parseRecordedRun(withTicks('100'))).toBeUndefined();
   });
 
   it('position 超出**这一局的长度** → undefined', () => {
@@ -239,13 +338,19 @@ describe('parseRecordedRun —— 坏数据整条丢弃（§11 风险 #9）', ()
     // 若拿常量（8）当上限，这份**合法**的通关存档会被当成坏数据丢掉 ——
     // 症状是"短局通关后刷新页面，存档没了"。
     const shortOrder = ['meiichiro', 'lust'];
-    const shortState = {
-      ...good.state,
-      order: shortOrder,
-      position: 3,
-      status: 'victory' as const,
+    const shortRecord = {
+      ...good,
+      state: {} as RunState, // 占位，下一行立刻换成真的
+      battles: [] as RunBattleRecord[],
     };
-    const parsed = parseRecordedRun({ ...good, state: shortState, battles: [] });
+    const shortBase: RunState = { ...good.state, order: shortOrder, position: 3, status: 'victory' };
+    const shortBattles = [battleRecord(shortBase, 1, 'victory'), battleRecord(shortBase, 2, 'victory')];
+    const shortState: RunState = {
+      ...shortBase,
+      // 短局打完了 2 场：统计骨架也必须是 2 条（对账要求）
+      battleStats: { ...shortBase.battleStats, battles: outcomesOf(shortBattles) },
+    };
+    const parsed = parseRecordedRun({ ...shortRecord, state: shortState, battles: shortBattles });
     expect(parsed?.state.position).toBe(3);
     expect(parsed?.state.status).toBe('victory');
     // 同一个 position = 3 在满编的 order 下**不是**通关（那是"刚打完第 2 场"）
@@ -277,28 +382,46 @@ describe('parseRecordedRun —— 坏数据整条丢弃（§11 风险 #9）', ()
     // 走 `parseRunState`（状态的入口）而不是 `parseRecordedRun`：
     // 空 order 下 `battles` 的一致性（`position > order.length`）会是
     // 另一个与本题无关的失败原因，混在一起就分不清是哪一条拒的。
-    const empty = { ...good.state, order: [], position: 1, status: 'active' as const, counters: {} };
+    const empty = {
+      ...good.state,
+      order: [],
+      position: 1,
+      status: 'active' as const,
+      battleStats: EMPTY_BATTLE_STATS,
+    };
     expect(parseRunState(empty)?.position).toBe(1);
     expect(parseRunState({ ...empty, position: 2 })).toBeUndefined();
   });
 
   it('战斗记录里一项坏 → **整条** undefined（不是跳过那一项）', () => {
-    expect(parseRecordedRun({ ...good, battles: [{ position: 0, bossId: 'x', seed: 1, outcome: 'victory' }] })).toBeUndefined();
-    expect(parseRecordedRun({ ...good, battles: [{ position: 1, bossId: '', seed: 1, outcome: 'victory' }] })).toBeUndefined();
-    expect(parseRecordedRun({ ...good, battles: [{ position: 1, bossId: 'x', seed: Number.NaN, outcome: 'victory' }] })).toBeUndefined();
-    expect(parseRecordedRun({ ...good, battles: [{ position: 1, bossId: 'x', seed: 1, outcome: 'win' }] })).toBeUndefined();
-    expect(parseRecordedRun({ ...good, battles: [{ position: 1, bossId: 'x', seed: 1, outcome: 'victory' }, null] })).toBeUndefined();
-    // 好数据在最后一项也照常通过（证明上面的失败不是"battles 非空就失败"）
+    // ⚠️ 对账要求"统计骨架的条数 = 重放记录的条数"，所以这些坏数据用例
+    // 必须把两边同时写成"1 条"，否则它们会因为**对账**失败而通过 ——
+    // 那样测的就不是"战斗记录项的形状"了。
+    const oneBad = (record: unknown) => ({
+      ...good,
+      state: {
+        ...good.state,
+        battleStats: { ...good.state.battleStats, battles: [{ won: true, flawless: false }] },
+      },
+      battles: [record],
+    });
+    expect(parseRecordedRun(oneBad({ position: 0, bossId: 'x', seed: 1, outcome: 'victory' }))).toBeUndefined();
+    expect(parseRecordedRun(oneBad({ position: 1, bossId: '', seed: 1, outcome: 'victory' }))).toBeUndefined();
+    expect(parseRecordedRun(oneBad({ position: 1, bossId: 'x', seed: Number.NaN, outcome: 'victory' }))).toBeUndefined();
+    expect(parseRecordedRun(oneBad({ position: 1, bossId: 'x', seed: 1, outcome: 'win' }))).toBeUndefined();
+    expect(parseRecordedRun(oneBad(null))).toBeUndefined();
+    // `flawless` 有值就必须是布尔
+    expect(parseRecordedRun(oneBad({ position: 1, bossId: 'x', seed: 1, outcome: 'victory', flawless: 'yes' }))).toBeUndefined();
+    // 好数据（含合法的 `flawless`）照常通过 —— 证明上面的失败不是"有 battles 就失败"
     expect(
-      parseRecordedRun({
-        ...good,
-        battles: [{ position: 1, bossId: 'x', seed: 1, outcome: 'victory' }],
-      }),
+      parseRecordedRun(oneBad({ position: 1, bossId: 'x', seed: 1, outcome: 'victory', flawless: false })),
     ).toBeDefined();
   });
 
   it('battles 为空数组是合法的（刚开局，一场没打）', () => {
-    expect(parseRecordedRun({ ...good, battles: [] })?.battles).toEqual([]);
+    // ⚠️ 统计骨架也得是空的，否则失败原因会是**对账**而不是这条用例要测的
+    const state = { ...good.state, battleStats: { ...good.state.battleStats, battles: [] } };
+    expect(parseRecordedRun({ ...good, state, battles: [] })?.battles).toEqual([]);
   });
 
   it('解析出来的记录**能直接喂给 advanceRun**（证明校验后的形状真的可用）', () => {
@@ -318,20 +441,113 @@ describe('parseRecordedRun —— 坏数据整条丢弃（§11 风险 #9）', ()
     const roundTripped = parseRecordedRun(JSON.parse(serializeRun(activeRecord)));
     expect(roundTripped).toBeDefined();
     if (roundTripped === undefined) return;
-    const next = advanceRun(roundTripped.state, { outcome: 'victory', counters: { dodges: 2 } });
+    const next = advanceRun(roundTripped.state, {
+      outcome: 'victory',
+      events: [used(JIE, 1), dmg(JIE, 7, 2)],
+      flawless: false,
+    });
     expect(next.position).toBe(2);
-    expect(next.counters).toEqual({ dodges: 2, battlesWon: 1 });
+    expect(next.battleStats.skillUses[JIE]).toBe(1);
+    expect(next.battleStats.skillDamage[JIE]).toBe(7);
+    expect(next.battleStats.battles).toEqual([{ won: true, flawless: false }]);
   });
 
   it('战斗记录里的 seed/position 由 battleRecordOf 记、能往返（不重新推导）', () => {
     const state = startRun({ runSeed: 31, playerId: 'player', order: shuffle(BOSSES, 31) });
-    const record = battleRecordOf(state, battleSeed(state.runSeed, state.position), 'victory');
+    const record = battleRecordOf(state, battleSeed(state.runSeed, state.position), 'victory', false);
+    const withSkeleton = {
+      ...state,
+      battleStats: { ...state.battleStats, battles: outcomesOf([record]) },
+    };
     const roundTripped = parseRecordedRun({
       runFormatVersion: RUN_FORMAT_VERSION,
-      state,
+      state: withSkeleton,
       battles: [record],
     });
     expect(roundTripped?.battles[0]).toEqual(record);
     expect(roundTripped?.battles[0]?.seed).toBe(battleSeed(31, 1));
+  });
+
+  /* ---------------------------------------------------------------- *
+   * `Q-e` 对账（统计骨架 ⇔ 重放记录）
+   * ---------------------------------------------------------------- */
+
+  it('⚠️ 统计骨架与重放记录**长度**不一致 → 整条 undefined（`Q-e`）', () => {
+    // 这一条是 `Q-e` 的核心：两份描述同一件事的数据分叉时**必须报错**，
+    // 否则表现是"结算屏说赢了 3 场、回放里只有 2 条"，且没人知道。
+    const twoStats = {
+      ...good.state,
+      battleStats: {
+        ...good.state.battleStats,
+        battles: [
+          { won: true, flawless: false },
+          { won: true, flawless: false },
+        ],
+      },
+    };
+    // 记录只有 1 条，骨架有 2 条
+    expect(parseRecordedRun({ ...good, state: twoStats, battles: [battleRecord(twoStats, 1, 'victory')] })).toBeUndefined();
+    // 反过来：骨架 1 条、记录 2 条（`good` 的骨架是 2 条，这里换 1 条）
+    const oneStat = {
+      ...good.state,
+      battleStats: { ...good.state.battleStats, battles: [{ won: true, flawless: false }] },
+    };
+    expect(
+      parseRecordedRun({
+        ...good,
+        state: oneStat,
+        battles: [battleRecord(oneStat, 1, 'victory'), battleRecord(oneStat, 2, 'victory')],
+      }),
+    ).toBeUndefined();
+  });
+
+  it('⚠️ 长度对但**胜负**不一致 → 整条 undefined（`Q-e`）', () => {
+    const state = {
+      ...good.state,
+      battleStats: { ...good.state.battleStats, battles: [{ won: true, flawless: false }] },
+    };
+    // 骨架说赢了，记录说输了
+    expect(
+      parseRecordedRun({ ...good, state, battles: [battleRecord(state, 1, 'defeat')] }),
+    ).toBeUndefined();
+    // 一致 → 通过
+    expect(
+      parseRecordedRun({ ...good, state, battles: [battleRecord(state, 1, 'victory')] }),
+    ).toBeDefined();
+  });
+
+  it('⚠️ 长度与胜负都对但**满血**不一致 → 整条 undefined（`Q-e` 顺手加的那条）', () => {
+    const state = {
+      ...good.state,
+      battleStats: { ...good.state.battleStats, battles: [{ won: true, flawless: true }] },
+    };
+    expect(
+      parseRecordedRun({ ...good, state, battles: [battleRecord(state, 1, 'victory', false)] }),
+    ).toBeUndefined();
+    expect(
+      parseRecordedRun({ ...good, state, battles: [battleRecord(state, 1, 'victory', true)] }),
+    ).toBeDefined();
+  });
+
+  it('⚠️ 记录**缺** `flawless` 时那半条对账不生效（兼容不含它的 v1 记录）', () => {
+    /**
+     * ⚠️ 这个"口子"是刻意留的：`flawless` 是 `RUN_FORMAT_VERSION: 1`
+     * **之后**加上的字段，收成必填会让"不含它的旧记录"读不回来。
+     *
+     * 所以缺 = 不参与对账（长度与胜负那两条**仍然**在查）。
+     * ⚠️ **P7 真正写存档时必须把它收成必填并 +1** —— 长期留着这个口子
+     * 等于那半条对账不存在（见 `RunBattleRecord.flawless` 的说明）。
+     */
+    const state = {
+      ...good.state,
+      battleStats: { ...good.state.battleStats, battles: [{ won: true, flawless: true }] },
+    };
+    const noFlawless = { position: 1, bossId: state.order[0] ?? 'x', seed: 1, outcome: 'victory' as const };
+    expect(parseRecordedRun({ ...good, state, battles: [noFlawless] })).toBeDefined();
+    // 但长度与胜负照查
+    expect(
+      parseRecordedRun({ ...good, state, battles: [{ ...noFlawless, outcome: 'defeat' }] }),
+    ).toBeUndefined();
+    expect(parseRecordedRun({ ...good, state, battles: [] })).toBeUndefined();
   });
 });

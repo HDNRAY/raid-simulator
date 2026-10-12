@@ -32,7 +32,7 @@
  */
 
 import type { EntityId } from '../types/ids';
-import { isRunCounter, type RunCounter, type RunCounters } from '../types/qiji';
+import type { BattleStats, SkillCounts } from './stats';
 import type { RunBattleRecord, RunChoice, RunRecord, RunState, RunStatus } from './types';
 
 /**
@@ -45,7 +45,7 @@ import type { RunBattleRecord, RunChoice, RunRecord, RunState, RunStatus } from 
  *
  * 1 = P0 的初版。
  */
-export const RUN_FORMAT_VERSION = 1 as const;
+export const RUN_FORMAT_VERSION = 2 as const;
 
 /* ================================================================== *
  * 1. 序列化
@@ -100,7 +100,56 @@ export function parseRecordedRun(raw: unknown): RunRecord | undefined {
     battles.push(battle);
   }
 
+  /**
+   * ⚠️ **对账（`Q-e`）**：`state.battleStats.battles`（统计的骨架）与
+   * `battles`（重放记录）是**同一个事实的两种描述**，必须一致。
+   *
+   * 为什么必须校验而不是"反正两条都有消费者"：两份描述同一件事的数据
+   * **迟早会分叉**，而这类分叉是**静默**的 —— 表现为
+   * "结算屏说赢了 3 场，而回放里只有 2 条记录"，且没有任何东西报错。
+   *
+   * 一致性有四条，逐条检查：
+   *   1. **长度**（打过的场数）
+   *   2. **次序**（第 i 条对第 i 条 —— 顺序即时间顺序）
+   *   3. **胜负**（`battles[i].outcome === 'victory'` ⇔ `battleStats[i].won`）
+   *   4. **满血**（`battleStats[i].flawless`，顺手加上的：它也是逐场事实）
+   *
+   * 为什么不一致就整条丢弃（`undefined`）：这**不是**"用户手改存档"能
+   * 造出来的形状（那更可能是某次写入写了一半），所以按 §11 风险 #9 的
+   * 同一条纪律处理 —— 半个存档比没有存档更危险。
+   */
+  if (!battlesAgreeWithStats(state, battles)) return undefined;
+
   return { runFormatVersion: RUN_FORMAT_VERSION, state, battles };
+}
+
+/**
+ * 统计骨架与重放记录**描述的是不是同一串结果**（见 `parseRecordedRun`
+ * 的"对账"注释）。
+ *
+ * ⚠️ `state.battleStats.battles` 是**可选**字段（单场归约不装它，
+ * 见 `stats.ts` 的 `BattleStats.battles`）。这里按"缺失 = 空"处理：
+ * 一份 `active` 记录的骨架缺失是允许的（那种形状由别处的 `position`
+ * 校验兜住），而"骨架里有 N 场、记录里有 M ≠ N 场"一律判为坏数据。
+ */
+function battlesAgreeWithStats(
+  state: RunState,
+  battles: readonly RunBattleRecord[],
+): boolean {
+  const outcomes = state.battleStats.battles ?? [];
+  if (outcomes.length !== battles.length) return false;
+
+  for (let i = 0; i < battles.length; i += 1) {
+    const record = battles[i];
+    const outcome = outcomes[i];
+    if (record === undefined || outcome === undefined) return false;
+    if (outcome.won !== (record.outcome === 'victory')) return false;
+    // ⚠️ **无条件**比对（`RUN_FORMAT_VERSION: 2` 起 `flawless` 是必填）——
+    // v1 那版曾用"缺 = 不参与对账"兼容旧记录，但**没有任何 v1 记录存在**
+    // （存档是 P7），所以那只是"一条有洞的检查"。
+    if (outcome.flawless !== record.flawless) return false;
+  }
+  return true;
 }
 
 /**
@@ -123,7 +172,7 @@ export function parseRunState(raw: unknown): RunState | undefined {
   const order = parseIdArray(source['order']);
   const position = source['position'];
   const status = parseStatus(source['status']);
-  const counters = parseCounters(source['counters']);
+  const battleStats = parseBattleStats(source['battleStats']);
   const unlocked = parseIdArray(source['unlocked']);
   const chosen = parseChoices(source['chosen']);
   const label = parseLabel(source['label']);
@@ -133,7 +182,7 @@ export function parseRunState(raw: unknown): RunState | undefined {
   if (order === undefined) return undefined;
   if (typeof position !== 'number' || !Number.isInteger(position)) return undefined;
   if (status === undefined) return undefined;
-  if (counters === undefined) return undefined;
+  if (battleStats === undefined) return undefined;
   if (unlocked === undefined) return undefined;
   if (chosen === undefined) return undefined;
 
@@ -176,7 +225,7 @@ export function parseRunState(raw: unknown): RunState | undefined {
     order,
     position,
     status,
-    counters,
+    battleStats,
     unlocked,
     chosen,
     label,
@@ -199,13 +248,18 @@ function parseBattleRecord(raw: unknown, runLength: number): RunBattleRecord | u
   const seed = source['seed'];
   const outcome = source['outcome'];
 
+  const flawless = source['flawless'];
+
   if (typeof position !== 'number' || !Number.isInteger(position)) return undefined;
   if (position < 1 || position > runLength) return undefined;
   if (typeof bossId !== 'string' || bossId.length === 0) return undefined;
   if (typeof seed !== 'number' || !Number.isFinite(seed)) return undefined;
   if (outcome !== 'victory' && outcome !== 'defeat') return undefined;
+  // ⚠️ **必填**（`RUN_FORMAT_VERSION: 2`）：缺它就整条丢弃 ——
+  // 见 `RunBattleRecord.flawless` 的说明（没有 v1 记录要兼容）
+  if (typeof flawless !== 'boolean') return undefined;
 
-  return { position, bossId, seed: seed >>> 0, outcome };
+  return { position, bossId, seed: seed >>> 0, outcome, flawless };
 }
 
 /* ================================================================== *
@@ -250,17 +304,95 @@ function parseStatus(raw: unknown): RunStatus | undefined {
   return raw === 'active' || raw === 'victory' || raw === 'defeat' ? raw : undefined;
 }
 
-/** 只保留**已知**的计数器键；值必须是有限数。未知键**整条丢弃**。 */
-function parseCounters(raw: unknown): RunCounters | undefined {
-  if (raw === undefined || raw === null) return {};
+/**
+ * 解析一份**累加过的战斗统计**。
+ *
+ * 形状：每张技能表是 `Record<SkillId, number>`（**键是技能 id，开放集合**，
+ * 所以不校验键名 —— 技能 id 来自内容表，解析层不认识它），
+ * 但**值必须是有限数**（`NaN` / `"3"` / `null` 一律整条丢弃）。
+ *
+ * `dodges` 的键是 `reason`（`'dodged' | 'immune'`）：同样是开放集合，
+ * 只校验值。
+ *
+ * `battles` 是**逐场结果数组**（`battlesWon` 的骨架）：
+ * 每一项都必须是 `{ won: boolean, flawless: boolean }`。
+ * ⚠️ 这里**不校验**"长度是否等于 `RunRecord.battles.length`" ——
+ * 那需要两份数据（本函数只看得到其中一份），交给调用方
+ * （`parseRecordedRun` 能看到两者，将来要加就在那里加）。
+ */
+function parseBattleStats(raw: unknown): BattleStats | undefined {
+  if (raw === undefined || raw === null) return undefined;
   const source = asRecord(raw);
   if (source === undefined) return undefined;
 
-  const out: Partial<Record<RunCounter, number>> = {};
+  const skillUses = parseSkillCounts(source['skillUses'], true);
+  const skillDamage = parseSkillCounts(source['skillDamage'], true);
+  const skillHits = parseSkillCounts(source['skillHits'], true);
+  const skillInterrupts = parseSkillCounts(source['skillInterrupts'], true);
+  // ⚠️ `dodges` 是**可选**的（`required = false`）：它是"同一批事件里顺手
+  // 拿到的一个桶"，缺了补 `{}`；而上面四张是**结构必需**的技能表 ——
+  // 缺一张说明这份数据不是本版本写的，整条丢弃。
+  const dodges = parseSkillCounts(source['dodges'], false);
+  const ticks = source['ticks'];
+  const battles = parseBattleOutcomeRecords(source['battles']);
+
+  if (skillUses === undefined) return undefined;
+  if (skillDamage === undefined) return undefined;
+  if (skillHits === undefined) return undefined;
+  if (skillInterrupts === undefined) return undefined;
+  if (dodges === undefined) return undefined;
+  if (typeof ticks !== 'number' || !Number.isFinite(ticks) || ticks < 0) return undefined;
+  if (battles === undefined) return undefined;
+
+  const flawless = source['flawless'];
+  if (flawless !== undefined && typeof flawless !== 'boolean') return undefined;
+
+  return {
+    skillUses,
+    skillDamage,
+    skillHits,
+    skillInterrupts,
+    dodges,
+    ticks,
+    battles,
+    ...(flawless === undefined ? {} : { flawless }),
+  };
+}
+
+/**
+ * `Record<SkillId, number>`：键是开放集合（不校验），值必须是有限数。
+ *
+ * `required = true` 时**键必须存在**（缺了返回 `undefined` → 整条丢弃）。
+ * 第一版这里对四张技能表也"缺了就补 `{}`"，于是"统计缺字段"这种坏数据
+ * 被静默补零、一路进到 UI —— 由 `record.test.ts` 的
+ * "统计缺字段 → undefined（不是默默补零）"抓住。
+ */
+function parseSkillCounts(raw: unknown, required: boolean): SkillCounts | undefined {
+  if (raw === undefined || raw === null) return required ? undefined : {};
+  const source = asRecord(raw);
+  if (source === undefined) return undefined;
+
+  const out: Record<string, number> = {};
   for (const [key, value] of Object.entries(source)) {
-    if (!isRunCounter(key)) return undefined;
     if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
     out[key] = value;
+  }
+  return out;
+}
+
+/** 逐场结果数组（`battlesWon` / `flawlessBattles` 的骨架）。 */
+function parseBattleOutcomeRecords(
+  raw: unknown,
+): readonly { readonly won: boolean; readonly flawless: boolean }[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: { won: boolean; flawless: boolean }[] = [];
+  for (const entry of raw) {
+    const source = asRecord(entry);
+    if (source === undefined) return undefined;
+    const won = source['won'];
+    const flawless = source['flawless'];
+    if (typeof won !== 'boolean' || typeof flawless !== 'boolean') return undefined;
+    out.push({ won, flawless });
   }
   return out;
 }

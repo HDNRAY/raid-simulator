@@ -2,15 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Combatant } from '../../../src/core/types';
 import type { GameEntity } from '../../../src/core/types/skills';
-import {
-  RUN_COUNTERS,
-  isRunCounter,
-  type QijiCategory,
-  type QijiEntity,
-  type QijiUnlock,
-  type RunCounter,
-  type RunCounters,
-} from '../../../src/core/types/qiji';
+import type { QijiCategory, QijiEntity, QijiUnlock } from '../../../src/core/types/qiji';
 
 /**
  * `core/types/qiji.ts` 的形状测试。
@@ -19,100 +11,26 @@ import {
  * 这个文件在测什么（不是"再抄一遍类型"）
  * ==================================================================
  *
- * 类型本身在编译期就检查过了，但有三件事**只有运行期能测**，而且它们
- * 各自都对应一个具体的失败模式：
+ * 类型本身在编译期就检查过了，但有两件事**只有运行期能测**，
+ * 各自对应一个具体的失败模式：
  *
- *   1. **`RunCounter` 的封闭联合与运行期清单必须一致**
- *      （`RUN_COUNTERS` / `isRunCounter`）。类型擦除之后，"哪些键算计数器"
- *      只剩这一份清单，而它是"解析外来终局快照 / 存档"的唯一依据。
- *      两者漂开 = 某个计数器**怎么数都不涨**，或者坏数据被静默当成 0。
- *   2. **`QijiEntity` 真的满足 `GameEntity`**。这是 §5.1 选"继承"而不是
+ *   1. **`QijiEntity` 真的满足 `GameEntity`**。这是 §5.1 选"继承"而不是
  *      "另起一套"的全部理由；而 `kind` 那个字段恰好是这条继承关系里
  *      唯一有陷阱的地方（见 `QijiEntity.kind` 的说明）。
- *   3. **`RunCounters` 的形状能进 JSON**（`Partial` + 数字），
- *      以及"缺键 = 0"这个约定在类型上是**允许**的。
+ *   2. **`QijiUnlock` 的形状能进 JSON**（它将来要写进 `data/qiji.ts`
+ *      的内容表、要被校验器读、要能作为存档的一部分）。
  *
- * ⚠️ 本文件不重复 `unlock.test.ts` / `lifecycle.test.ts` 的判定与状态转移：
+ * ⚠️ 本文件不重复 `unlock.test.ts` / `stats.test.ts` 的判定与统计：
  * 那些是 `core/run/` 的关注点，这里只管**类型这一层**。
+ *
+ * ⚠️ 这里**曾经**有 6 条测"`RunCounter` 封闭联合与 `RUN_COUNTERS`
+ * 运行期清单一致"的用例 —— 那个联合已随 §5.2 的方向修正删除
+ * （原因见 `QijiUnlock` 的注释："只能数技能使用次数"）。取而代之的是
+ * **开放的** `BattleStatQuery`，它的运行期清单（`SKILL_STAT_IDS` /
+ * `isSkillStatId`）在自己的模块里，由 `stats.test.ts` 覆盖。
+ * 那 6 条用例**不是白写的**：它们测的正是"闭集与运行期清单会漂"这个病，
+ * 所以那个病是真的 —— 只是现在用"开放查询 + 内容数据"规避掉了它。
  */
-
-describe('RunCounter —— 封闭联合与运行期清单一致', () => {
-  it('RUN_COUNTERS 恰好是这 5 个键（加一个就会让这条测试变红，逼着一起改）', () => {
-    // ⚠️ 写成显式列表而不是 `new Set(RUN_COUNTERS).size === 5`：
-    // 数量对不上能发现"少了一个"，但对不上"换了一个"。这份列表是
-    // §5.2.1 里那 5 个计数器的原文，改它必须是有意的。
-    expect([...RUN_COUNTERS].sort()).toEqual([
-      'battlesWon',
-      'dodges',
-      'flawlessBattles',
-      'interrupts',
-      'jieInterrupts',
-    ]);
-  });
-
-  it('每个合法的 RunCounter 都能被类型守卫认出来', () => {
-    const all: readonly RunCounter[] = [
-      'jieInterrupts',
-      'interrupts',
-      'dodges',
-      'battlesWon',
-      'flawlessBattles',
-    ] as const;
-    for (const counter of all) {
-      expect(isRunCounter(counter)).toBe(true);
-    }
-    // `all` 的长度必须等于 RUN_COUNTERS 的长度：如果将来往联合里加了
-    // 一个键而忘了往这个数组里加，这条会失败（而不是"两个都少一个、正好相等"）。
-    expect(all).toHaveLength(RUN_COUNTERS.length);
-  });
-
-  it('拼错的键被拦住（这正是做成封闭联合的理由）', () => {
-    // §5.2.1 的原话："封闭联合，防止拼写错误静默失效"。
-    // `jieInterupts`（少一个 r）在 `counter: string` 的世界里会编译通过、
-    // 求值恒为 0 —— 玩家永远差一点解锁，而没有任何东西报错。
-    expect(isRunCounter('jieInterupts')).toBe(false);
-    expect(isRunCounter('jie_interrupts')).toBe(false);
-    expect(isRunCounter('JieInterrupts')).toBe(false);
-    expect(isRunCounter('')).toBe(false);
-  });
-
-  it('非字符串一律为假（外来数据可以是任何东西）', () => {
-    expect(isRunCounter(undefined)).toBe(false);
-    expect(isRunCounter(null)).toBe(false);
-    expect(isRunCounter(3)).toBe(false);
-    expect(isRunCounter({ counter: 'dodges' })).toBe(false);
-    expect(isRunCounter(['dodges'])).toBe(false);
-  });
-
-  it('RUN_COUNTERS 里没有重复项', () => {
-    expect(RUN_COUNTERS.length).toBe(new Set(RUN_COUNTERS).size);
-  });
-
-  it('RUN_COUNTERS 可 JSON 往返（它会被序列化进调试面板 / 存档校验表）', () => {
-    expect(JSON.parse(JSON.stringify(RUN_COUNTERS))).toEqual([...RUN_COUNTERS]);
-  });
-});
-
-describe('RunCounters —— 缺键即 0 的合法形状', () => {
-  it('空对象、部分键、全键都是合法值', () => {
-    const empty: RunCounters = {};
-    const partial: RunCounters = { dodges: 3 };
-    const full: RunCounters = {
-      jieInterrupts: 1,
-      interrupts: 2,
-      dodges: 3,
-      battlesWon: 4,
-      flawlessBattles: 5,
-    };
-    expect(JSON.parse(JSON.stringify([empty, partial, full]))).toEqual([empty, partial, full]);
-  });
-
-  it('读取缺键得到 undefined（"0"由 counterValue 补，不在这里假装有值）', () => {
-    const counters: RunCounters = { dodges: 1 };
-    expect(counters.jieInterrupts).toBeUndefined();
-    expect(counters.dodges).toBe(1);
-  });
-});
 
 describe('QijiEntity —— 真的满足 GameEntity（§5.1 选继承的全部理由）', () => {
   /**
@@ -169,13 +87,33 @@ describe('QijiEntity —— 真的满足 GameEntity（§5.1 选继承的全部�
   it('unlock 的五种变体都能构造出来（联合没被写窄）', () => {
     const all: readonly QijiUnlock[] = [
       { kind: 'always', of: [] },
-      { kind: 'counterAtLeast', counter: 'jieInterrupts', value: 3 },
+      { kind: 'statAtLeast', stat: { s: 'skillInterrupts', skillId: 'jie', scope: 'run' }, value: 3 },
       { kind: 'all', of: [{ kind: 'always', of: [] }] },
       { kind: 'any', of: [{ kind: 'always', of: [] }] },
-      { kind: 'not', of: { kind: 'counterAtLeast', counter: 'dodges', value: 2 } },
+      { kind: 'not', of: { kind: 'statAtLeast', stat: { s: 'dodges', scope: 'run' }, value: 2 } },
     ];
     expect(all).toHaveLength(5);
     expect(JSON.parse(JSON.stringify(all))).toEqual(all);
+  });
+
+  it('⚠️ 用户点名的两个例子都能写成一条**内容数据**（不进 core 的类型表）', () => {
+    // 这是"条件写在内容数据里"的可执行证据：
+    //   例 1「某个技能造成伤害数」→ skillDamage
+    //   例 2「同时用了 n 次 a 和 m 次 b」→ all + 两条 skillUses
+    // 两者都只需要拼现有成员，**没有往 core 加任何东西**。
+    const damageBased: QijiUnlock = {
+      kind: 'statAtLeast',
+      stat: { s: 'skillDamage', skillId: 'jie', scope: 'battle' },
+      value: 300,
+    };
+    const combo: QijiUnlock = {
+      kind: 'all',
+      of: [
+        { kind: 'statAtLeast', stat: { s: 'skillUses', skillId: 'jie', scope: 'battle' }, value: 3 },
+        { kind: 'statAtLeast', stat: { s: 'skillUses', skillId: 'break', scope: 'battle' }, value: 2 },
+      ],
+    };
+    expect(JSON.parse(JSON.stringify([damageBased, combo]))).toEqual([damageBased, combo]);
   });
 
   it('maxStacks 是可选的（缺省 = 1 的语义在 unlock.ts 里）', () => {
@@ -223,22 +161,24 @@ describe('EntityKind 的现状（P0 的一条**有意**的缺口，写成断言�
 });
 
 describe('core/types/index.ts 转发了 qiji（import 那条路可用）', () => {
-  it('`RunCounter` 等类型能从 `core/types` 整体导入拿到', async () => {
-    // ⚠️ 只能**运行期**验证值（`RUN_COUNTERS` / `isRunCounter`）；
-    // 类型是通过下面这些 import 的**存在**来验证的 —— 若 `index.ts`
-    // 忘了转发 `./qiji`，`tsc` 会在这一行的 import 上报错。
+  it('`QIJI_ENTITY_VALIDATED` 能从 `core/types` 整体导入拿到', async () => {
+    // ⚠️ 运行期只能验证**值**（类型是编译期的，若 `index.ts` 忘了转发
+    // `./qiji`，`tsc` 会在上面那条 `import type { QijiEntity }` 上报错）。
     const types = await import('../../../src/core/types');
-    expect(typeof types.isRunCounter).toBe('function');
-    expect(types.RUN_COUNTERS).toEqual([...RUN_COUNTERS]);
-    // 类型层的转发：这些标注若不能解析，`tsc --noEmit` 会失败
-    const counter: RunCounter = 'dodges';
-    const counters: RunCounters = { [counter]: 1 };
-    expect(counters.dodges).toBe(1);
+    expect(types.QIJI_ENTITY_VALIDATED).toBe(false);
   });
 
-  it('`Combatant`（core/types 的既有导出）与炁机类型可以同时导入（没有名字冲突）', () => {
-    // `RunCounter` 这个名字很通用；它进 `core/types` 的转发面之后，
-    // 不能与已有的导出撞名（TS 会报 "Module has already exported a member"）。
+  it('`Combatant.counters`（引擎的离散计数器，仍在）与炁机类型可以同时导入', () => {
+    /**
+     * ⚠️ 这里刻意把两个**不同**的 "counter" 概念放在一起：
+     *   - `Combatant.counters`：引擎里 `ResourcePool.counters` 的
+     *     离散资源（使用次数 / 充能），**仍在**（它属于战斗内状态）
+     *   - 一局肉鸽的解锁条件：**已经不是**计数器了，而是对事件流
+     *     统计的查询（`QijiUnlock` + `BattleStatQuery`）
+     *
+     * 这个用例证明"删掉 `RunCounter` 之后没有把引擎那份一起删掉"，
+     * 也证明两者不会在 `core/types` 的转发面撞名。
+     */
     const combatantShape = (c: Pick<Combatant, 'id' | 'counters'>): string => c.id;
     expect(combatantShape({ id: 'player', counters: {} })).toBe('player');
   });
