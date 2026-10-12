@@ -6,6 +6,8 @@ import {
   ALL_SKILLS,
   GUARD,
   GUARD_THRESHOLD_BUFF,
+  PENDING_SKILLS,
+  PLAYER_KITS,
   PLAYER_SKILL_IDS,
   PLAYER_SKILLS,
   playerSkillIdsFor,
@@ -28,7 +30,7 @@ import { makeBuffDef, makeCombatant, makeSkillDef } from './helpers';
  *   1. **两套技能表的构成** —— 谁带哪 5 个、谁不带哪些。
  *      它防的是"顺手把某个技能删掉/加回来"（比如把「避」给凯丽、
  *      或者因为「击」用不出来就把它删了）。
- *   2. **「格」的阈值规则** —— `≤N` 整击作废（连效果）、`>N` 平减 N、
+ *   2. **「卸」的阈值规则** —— `≤N` 整击作废（连效果）、`>N` 平减 N、
  *      多段各减一次。这是本次唯一的新机制。
  *   3. **「击」暂时没有产出者**（P3 由炁机接回）—— 它是**预期**状态，
  *      免得下一个人把它当 bug"修好"或删掉。
@@ -196,7 +198,7 @@ describe('两套角色技能：按角色装配（定稿见 docs/specs/2026-10-12
     expect(punch?.cost.map((c) => c.resource)).toEqual(['energy']);
   });
 
-  it('没有「格」以外的技能带 `damageThreshold`（阈值是本作唯一一处平减）', () => {
+  it('没有「卸」以外的技能带 `damageThreshold`（阈值是本作唯一一处平减）', () => {
     for (const buff of ALL_BUFFS) {
       if (buff.id === 'guard') continue;
       expect(buff.flags?.damageThreshold, `${buff.id} 不该有阈值抵消`).toBeUndefined();
@@ -215,10 +217,10 @@ describe('两套角色技能：按角色装配（定稿见 docs/specs/2026-10-12
 });
 
 /* ------------------------------------------------------------------ *
- * 2. 「格」的阈值规则
+ * 2. 「卸」的阈值规则
  * ------------------------------------------------------------------ */
 
-describe('「格」：阈值抵消（≤N 整击作废 / >N 平减 N）', () => {
+describe('「卸」：阈值抵消（≤N 整击作废 / >N 平减 N）', () => {
   it('`伤害 ≤ N` → 完全抵消（0 伤害）', () => {
     const r = bossHits([GUARD_THRESHOLD_BUFF], GUARD_THRESHOLD - 1);
     expect(r.dealt).toBe(0);
@@ -284,7 +286,7 @@ describe('「格」：阈值抵消（≤N 整击作废 / >N 平减 N）', () => 
     expect(10_000 - (player?.resources.hp ?? 10_000)).toBe(2 * (20 - GUARD_THRESHOLD));
   });
 
-  it('没有「格」时这一击照常结算（阈值不是全局减速带）', () => {
+  it('没有「卸」时这一击照常结算（阈值不是全局减速带）', () => {
     const r = bossHits([], 30);
     expect(r.dealt).toBe(30);
   });
@@ -344,6 +346,52 @@ describe('「击」（派生技）：保留，但今天没有产出者（P3 由�
   it('「击」仍然在玩家技能**全集**里（引擎要能按 id 解析它）', () => {
     expect(PLAYER_SKILL_IDS.has(STRIKE.id)).toBe(true);
     expect(PLAYER_SKILLS.some((s) => s.id === STRIKE.id)).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * 3b. 「破」：黛玄的待接线技能（保留 + 标注，但不属于任何角色）
+ * ------------------------------------------------------------------ */
+
+/**
+ * ⚠️ 这一节的**由来**：上一版把「破」留在 `PLAYER_SKILLS`（玩家技能全集）
+ * 里，理由是"黄金重放的参考策略要用它"—— 结果是**黄金重放测了一个游戏里
+ * 不可能发生的场景**（没有任何角色带「破」）。用户看到那个取舍后选了
+ * "重标定一次"，于是「破」改成 `PENDING_SKILLS` 桶：
+ * 定义保留、注册表认得、但**不属于任何角色、不可绑键、不进设置页**。
+ *
+ * 判据与三分法见 `data/kits/reserved.ts` 的文件头；
+ * 规程写在 `docs/specs/2026-10-12-player-kits.md` §6。
+ */
+describe('「破」：黛玄的待接线技能（保留 + 标注，但不属于任何角色）', () => {
+  const pending = PENDING_SKILLS.find((p) => p.skill.id === 'break');
+
+  it('在 `PENDING_SKILLS` 里，且标注了归属与原因', () => {
+    expect(pending).toBeDefined();
+    expect(pending?.pendingFor).toBe('daixuan');
+    expect(pending?.blockedBy).toBe('owner-not-implemented');
+    /** 归属的角色是真实存在的，而且确实**还没做完**（`DEVELOPING`）。 */
+    expect(PLAYER_ROSTER.some((e) => e.id === pending?.pendingFor)).toBe(true);
+    expect(isDeveloping(pending?.pendingFor ?? '')).toBe(true);
+  });
+
+  it('不属于任何角色 —— 两个已完成角色的技能表里都没有它', () => {
+    for (const id of ['player', 'kaili']) {
+      expect(playerSkillIdsFor(id).has('break'), `${id} 不该带「破」`).toBe(false);
+    }
+    /** 也不在"某个角色带哪一套"的定义表里。 */
+    for (const kit of Object.values(PLAYER_KITS)) {
+      expect(kit.some((s) => s.id === 'break')).toBe(false);
+    }
+  });
+
+  it('不在玩家技能**全集**里（设置页/可绑的判据就是它）', () => {
+    expect(PLAYER_SKILL_IDS.has('break')).toBe(false);
+    expect(PLAYER_SKILLS.some((s) => s.id === 'break')).toBe(false);
+  });
+
+  it('定义仍在注册表里 —— 引擎按 id 解析得到，接线时不用重建', () => {
+    expect(ALL_SKILLS.some((s) => s.id === 'break')).toBe(true);
   });
 });
 

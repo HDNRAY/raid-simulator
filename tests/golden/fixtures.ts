@@ -1,18 +1,56 @@
 import { BattleEngine, type CreateBattleOptions } from '../../src/core/combat/battleState';
 import { PRIDE_BEHAVIORS } from '../../src/data/bossPride';
 import { createRegistry } from '../../src/core/content/registry';
-import { ALL_BUFFS, ALL_SKILLS, DOUQI_MAX, ENERGY_MAX, HP_MAX } from '../../src/data/content';
+import { ALL_BUFFS, ALL_SKILLS, DOUQI_MAX, ENERGY_MAX } from '../../src/data/content';
+import { GUARD_THRESHOLD } from '../../src/data/balance';
 import { BOSS_HP_DISPLAY } from '../../src/data/entities/bossHp';
+import { LIN_WANFENG_HP } from '../../src/data/kits/linwanfeng';
 import { flattenCatalog } from '../../src/i18n/translator';
 import { zhCN } from '../../src/i18n/locales/zh-CN';
 import { roughlyUsable, type EngineOptions, type RunOutcome } from '../../src/core/run';
-import type { Action, BattleState, Combatant, StatKey } from '../../src/core/types';
+import type { Action, BattleState, Combatant, SkillDef, StatKey } from '../../src/core/types';
 
 /**
  * 黄金重放与集成测试**共用**的夹具。
  *
  * 抽出来的理由：这些数值（种子、血量、基础属性）是"黄金"的一部分 ——
  * 如果两处各写一份，它们会各自漂移，而重放的价值就在于唯一性。
+ *
+ * ==================================================================
+ * ⚠️ 2026-10-12 第二次重标定：夹具的玩家就是**林晚风**
+ * ==================================================================
+ *
+ * 上一版的参考策略用「破」（`interruptSkillId: 'break'`）打断 Boss，
+ * 而「破」是**黛玄的** —— 两个已完成的角色都没有它。也就是说：
+ * **黄金重放测的是一个游戏里不可能发生的场景**，绿色的测试因此给出
+ * 虚假的安全感（用户看到这个取舍后选了"重标定一次"，见
+ * `docs/specs/2026-10-12-player-kits.md` §6）。
+ *
+ * 现在夹具按**林晚风的真实数据**建模：
+ *
+ *   | 项 | 值 | 来源 |
+ *   |---|---|---|
+ *   | 技能 | **斩 / 劈 / 凝 / 格 / 避** | 她的 kit（`kits/linwanfeng.ts`） |
+ *   | 血上限 | **150** | 同上（`LIN_WANFENG_HP`） |
+ *   | 打断技 | **没有** | 她没有「截」也没有「破」 |
+ *
+ * ⚠️ 这里**没有** import `makePlayer('player')`：夹具仍然自己造单位
+ * （理由见下一条"它不读 `data/units.ts`"）。但**技能与血上限**必须与
+ * 她的 kit 同源，否则这次改动的全部理由（"测真实场景"）就不成立。
+ * `tests/golden/replay.test.ts` 有一条断言钉住"参考策略用的每个技能
+ * 都属于她"。
+ *
+ * ⚠️ 参考策略是**攒炁 + 闪避 + 用格**（用户给的形状）—— 而且它**用上了
+ * 她全部 5 个技能**，「卸」的阈值机制也在这一场里被真正走了一遍：
+ *   - 会打穿阈值的大招（> `GUARD_THRESHOLD × 2`）→ 「避」（15 炁整击免伤）
+ *   - 小招 → 命中前按住「卸」（阈值抵消；只要命中那一刻在就行，
+ *     按住整条读条是白烧炁）
+ *
+ * ⚠️ 但「卸」的 `holdDrain` **单位口径是坏的**：引擎按"每逻辑步 3 点"
+ * 扣（= **30 炁/秒**），而设置页把它显示成 "3 炁/秒" —— 详见
+ * `data/balance.ts` 的 `GUARD_HOLD_DRAIN_PER_LOGIC_TICK`。
+ * 夹具里的「卸」用法**刻意把按住窗口压到 300ms**，正是为了不被这个
+ * 放大 10 倍的口径吃掉（这是绕开，不是修好；修它要单独重标定一次）。
  */
 
 /** 固定种子。改它等于让所有黄金断言失效，所以只在这里出现一次。 */
@@ -21,11 +59,15 @@ export const FIXED_SEED = 20261009;
 /**
  * 上限（**展示刻度**：100 制）。
  *
- * 内容的伤害值本身就是展示刻度（攻 10 / 轰 30），所以这里同刻度 ——
+ * 内容的伤害值本身就是展示刻度（斩 10 / 劈 45），所以这里同刻度 ——
  * 早期把血量乘了 `DISPLAY_SCALE` 而伤害没乘，10 点伤害只打掉 1 点血。
+ *
+ * ⚠️ **血量是林晚风的 150**（`LIN_WANFENG_HP`），不是全局兜底的
+ * `HP_MAX = 100` —— 夹具既然按她建模，血量也要跟着她走，否则"玩家剩
+ * 多少血"这个黄金数字仍然是一个她身上不可能出现的场景。
  */
 export const PLAYER_CAPS = {
-  hp: HP_MAX,
+  hp: LIN_WANFENG_HP,
   energy: ENERGY_MAX,
   douqi: DOUQI_MAX,
 } as const;
@@ -124,7 +166,10 @@ export function makeEngine(seed = FIXED_SEED): BattleEngine {
  */
 export const GOLDEN_OUTCOME = {
   /**
-   * 当前平衡下"会闪避"的玩家获胜。
+   * 林晚风（攒炁 + 闪避）对「傲慢」：**险胜**。
+   *
+   * ⚠️ 数值的逐版来历都留在下面 —— 它们记录的是"哪一次改动把它推到了
+   * 哪里"，而不是"必须守住的平衡目标"（需求方说过数值后面还会大改）。
    *
    * ⚠️ **2026-10-11 改造「傲慢」后重新标定**（快慢刀 + 霸体合并 +
    * 随机选招，见 `docs/specs/2026-10-11-pride-boss.md` §9.3）：
@@ -152,33 +197,19 @@ export const GOLDEN_OUTCOME = {
    *   | 有倒地 | 926 | 25 | 19 | 5 | **1** | **35** | **2** |
    *   | 无倒地 | 746 | 25 | 19 | 4 | **2** | **78** | 1 |
    *
-   * ⚠️ **别用"造成伤害"来比较** —— Boss 血量固定 210，打完就是 0，
-   * 所以那个数字在两场里都等于 210，**不含任何信息**。（我一度用它
-   * 来论证"倒地不影响输出"，那是**无效论证**。）
+   * ⚠️ **别用"造成伤害"来比较** —— Boss 血量固定，打完就是 0，
+   * 所以那个数字在两场里都等于血量，**不含任何信息**。
    *
-   * 有效的度量是**出手/命中次数**：玩家出手在两场里**完全相同（25 次）**
-   * —— 倒地 2 秒的封锁**没有让玩家少出手**（战斗长了 180 tick，
-   * 而那 2 秒本来就在读条/等 CD）。
-   *
-   * 差异全在 **boss 命中次数：2 → 1** —— 玩家**多闪掉一次**，
-   * 承受伤害因此从 78 掉到 35。这是「倒地」的**副作用**，不是设计意图。
+   * 有效的度量是**出手/命中次数** —— 倒地 2 秒的封锁**没有让玩家少出手**
+   * （战斗长了 180 tick，而那 2 秒本来就在读条/等 CD）。
    *
    * ⚠️ 「倒地就不能攻」这条**机制本身是对的**（用户已确认），
    * 实测倒地窗口内「斩」被拒 94 次、成功 0 次。要不要削弱那个副作用
    * （例如给「避」加冷却）是产品决策。
    *
-   * Boss 数值（2026-10-09 末次）：
-   *   重斩 前摇 1.8s / 伤害 28 / 冷却 6s / 轮转间隔 2.2s
-   *   横扫 前摇 2.2s / 伤害 36 / 冷却 10s / 轮转间隔 6.4s
-   *   血量 210
-   *
-   * ⚠️ **Boss 血量随"读条结算时机"的修复上调过**：
-   * 修好"读条没走完就结算伤害"之后，玩家伤害要等读条走完才生效
-   * （晚 500ms），整体输出变低，于是纯进攻反而能险胜。
-   * 血量 160 → 210 把这条差值补回来。
-   *
-   * ⚠️ 两个增伤是**叠乘**的：`boss-empowered`(+30%) × `boss-frenzy`(+25%)，
-   * 所以纸面 28/36 实际能打到 40+。
+   * ⚠️ **2026-10-11 → 2026-10-12 的第二次重标定**（本文开头那次）：
+   *   夹具从"通用玩家 + 「轰」+ 「破」"换成**林晚风**，
+   *   所以 5696 tick / 剩 20 血是**旧夹具**的数字，保留它才有"改了多少"。
    */
   status: 'victory' as const,
   endReason: 'hpZero' as const,
@@ -193,10 +224,21 @@ export const GOLDEN_OUTCOME = {
    * 15.4 秒 → **94.9 秒**。变长的原因是炁：斩 15 炁 + 每秒回 10
    * ⇒ 持续输出约 6.7/s，而这一场要打穿 420 + 126（回补）= 546 点。
    *
-   * ⚠️ 需求方已确认"100 秒左右没问题"，**且这些数值后面还会大改** ——
-   * 所以别把这几个数字当成需要守住的平衡目标。
+   * ⚠️ **5696 → 1436**（2026-10-12 第二次重标定，约 **23.9 秒**）。
+   * 同时变了三件事，方向都是"更快"：
+   *   1. **「轰」→「劈」**：50 缠换 45 伤（轰是 30 + 易伤），
+   *      而林晚风的缠只出口这一处
+   *   2. **参考策略不再白烧炁**：旧策略带着「破」，每次读条都朝它按一遍
+   *      （10 炁一次，多数被霸体挡下）—— 那些炁本来能变成输出
+   *   3. **「凝」不再白抢缠**：旧优先级是 凝 → 轰 → 斩，而两者都花 50 缠、
+   *      「凝」没有冷却 —— 只按优先级挑，"凝"会一直排在"轰"前面。
+   *      现在给参考策略加了 `onlyRefreshesActiveBuff`（增益还挂着就跳过），
+   *      两个技能才都真的用上
+   *
+   * ⚠️ **别把这个数字当平衡目标**：需求方说过"这些数值后面还会大改"。
+   * 它的职责是"哪次改动动了整场战斗"能被立刻发现。
    */
-  ticks: 5696,
+  ticks: 1436,
   /**
    * 当前内容没有暴击判定，所以随机数一次都不被消耗 —— **玩家侧**的
    * 随机流确实一次没用（抽招走的是 `BattleState.aiRngSeed`，
@@ -204,15 +246,74 @@ export const GOLDEN_OUTCOME = {
    */
   finalRngSeed: 20261009,
   /**
-   * ⚠️ 玩家剩 **20 血**（上一版 40）。数字会跟着上面那批改动一起变，
-   * 这里只记"当前实测"，不承担"必须落在某个区间"的职责 ——
-   * 那件事由 `prideBoss.test.ts` 的性质断言负责（赢 / 输，而不是具体血量）。
+   * ⚠️ 玩家剩 **140 血**（林晚风上限 150）。
+   *
+   * 打法：大招（40 / 60）用「避」整击免掉，小招（20）按住「卸」抵消 15
+   * → 全程只吃了两次 5 点。这个数字只记"当前实测"，不承担"必须落在某个
+   * 区间"的职责 —— 那件事由 `prideBoss.test.ts` 的性质断言负责
+   * （赢 / 不是满血，而不是具体血量）。
    */
   combatants: {
-    player: { alive: true, hp: 20, energy: 5, douqi: 34, damageDealt: 0, damageTaken: 0 },
+    player: { alive: true, hp: 140, energy: 100, douqi: 94, damageDealt: 0, damageTaken: 0 },
     meiichiro: { alive: false, hp: 0, energy: 0, douqi: 0, damageDealt: 0, damageTaken: 0 },
   },
 } satisfies Omit<RunOutcome, 'ticks'> & { readonly ticks: number };
+
+/**
+ * 参考策略用的**防御技**（林晚风的「避」= 闪）。
+ *
+ * 单独导出、而不是在 `planPriority` 里写字面量，是为了让
+ * `tests/golden/replay.test.ts` 能断言"它真的属于林晚风" ——
+ * 这次重标定的全部理由就是这一条。
+ */
+export const DODGE_SKILL_ID = 'dodge';
+
+/**
+ * 参考策略用的**按住防御**（林晚风的「卸」）。
+ *
+ * 策略里「避」管大招、「卸」管小招（判据见 `planPriority` 的
+ * `GUARD_THRESHOLD * 2`）—— 这条线同时用上了她全部 5 个技能，
+ * 也就同时覆盖了她的新机制（阈值抵消）。
+ */
+export const GUARD_SKILL_ID = 'guard';
+
+/** 一个技能"打在身上最重的那一击"的伤害（展示刻度；不是伤害技能返回 0）。 */
+function incomingDamage(skill: SkillDef | undefined): number {
+  if (skill === undefined) return 0;
+  let worst = 0;
+  for (const hit of skill.hits) {
+    for (const effect of hit.effects) {
+      if (effect.kind !== 'damage' || effect.damage === undefined) continue;
+      const base = effect.damage.base;
+      /**
+       * ⚠️ 今天的内容全部是字面量（`S(20)` 这种）。如果将来有人把伤害
+       * 写成 `Expr`，这里**读不出静态值** —— 那就当成"威胁未知"（正无穷）
+       * 让策略保守地「避」，而不是静默按 0 伤害放着不管（后者会漏防）。
+       */
+      if (typeof base !== 'number') return Number.POSITIVE_INFINITY;
+      worst = Math.max(worst, base);
+    }
+  }
+  return worst;
+}
+
+/**
+ * 这个技能是不是"**只在给自己挂一个已经挂着的 buff**"。
+ *
+ * 用途：`priority` 里的「凝」是增益技。如果只是"缠够了就再放一次"，
+ * 它会**永远抢在「劈」前面**（两者都是 50 缠）—— 于是参考策略里
+ * 「劈」一次都用不出来，而"参考策略用上了她全部技能"就不成立了。
+ * 真人对一个还挂着的增益不会重放（那只是白花资源）。
+ */
+function onlyRefreshesActiveBuff(skill: SkillDef | undefined, player: Combatant | undefined): boolean {
+  if (skill === undefined || player === undefined) return false;
+  return skill.abilities.some(
+    (ability) =>
+      ability.kind === 'grant' &&
+      ability.target.mode === 'self' &&
+      player.buffs.some((b) => b.defId === ability.buff.id),
+  );
+}
 
 /**
  * 一个可以被重放复用的玩家策略：**每 tick 按优先级尝试**。
@@ -221,37 +322,38 @@ export const GOLDEN_OUTCOME = {
  * 让重放因为"技能被拒"而失败，掩盖真正想检测的行为变化。
  *
  * ==================================================================
- * ⚠️ **2026-10-11 升级：它现在"会攒炁"了**
+ * ⚠️ 2026-10-12：它现在按**林晚风**的真实技能建模，且**没有打断**
  * ==================================================================
  *
- * 旧版的行为是"**一有炁就打输出**，只有炁够『闪避 + 再打一次』时才闪"。
- * 那在"斩 10 炁 / 避 30 炁"时勉强能用，但 `斩` 与 `避` 都改成 **15 炁**
- * 之后它就**永远闪不出来**了 —— 因为它的炁全变成了斩，
- * 而闪一次需要 `15 + 15 = 30`。实测：**6.7 秒被打死，一次没闪**。
+ * 上一版这里有一个 `interruptSkillId`（黄金夹具传的是「破」）。那是
+ * **一个没有角色带的技能** —— 见文件头。现在去掉了：她既不认识
+ * 「破」也不认识「截」，一个"会打断的参考玩家"不是她。
  *
- * ⚠️ 那不是游戏打不过，是**这个策略在炁需要管理的游戏里是个坏参考**。
- * 一个有炁必打的玩家，等于"从不给闪避留预算"。
- *
- * 所以现在它按**真人打法**做取舍：
- *   1. Boss 在读条、且那一招**会造成伤害** → 这一 tick **不做输出，攒炁**
- *   2. 读条还长（> 400ms）→ 先试「破」（它才是设计给"长读条"的答案）
- *   3. 快到命中了（≤ `dodgeLeadMs`）且没在无敌里 → 闪
- *   4. 没有读条 → 才按优先级输出
+ * 策略的行为（真人打法）：
+ *   1. Boss 在读条、且那一招**会造成伤害**：
+ *        · 大招（`> GUARD_THRESHOLD × 2`，即会打穿「卸」的那两刀）
+ *          → 快到命中时「避」（15 炁换整击免伤）
+ *        · 小招 → 命中前按住「卸」（阈值抵消），命中后松开
+ *        · 两种都**不做输出** —— 输出与防御抢同一个炁池
+ *   2. Boss 在放**不造成伤害**的招（「回补」）→ 不理它，也不输出
+ *   3. 没有读条 → 才按优先级输出（还挂着的增益不重放）
  *
  * ⚠️ **"攒炁"只在配了 `dodgeSkillId` 时生效**：不配 = 这个策略压根不防御，
  * 那时"停手攒炁"没有意义，会把它从"纯进攻"变成"纯站桩"，
  * 毁掉 `pureAttackPlan` 想测的那件事。
  *
- * @param priority 技能 id，顺序即优先级
+ * ⚠️ 「卸」的按住窗口（`guardLeadMs`）刻意**短于**「避」的窗口：
+ * 它的代价按时间扣（`holdDrain`），按住整个读条会白烧炁；
+ * 只要命中那一刻 buff 在就行。
+ *
+ * @param priority 技能 id，顺序即优先级（必须全是林晚风有的技能）
  * @param dodgeSkillId 看到 Boss 读条时要插的防御技（不给则不躲、也不攒炁）
- * @param interruptSkillId 长读条时用来打断的技能（不给则不打断）
+ * @param dodgeLeadMs 在命中前多少毫秒闪避。默认 500。
  */
 export function planPriority(
   priority: readonly string[],
   options: {
     readonly dodgeSkillId?: string;
-    /** 用来打断长读条的技能（「破」）。不给则不打断。 */
-    readonly interruptSkillId?: string;
     /**
      * 在命中前多少毫秒闪避。默认 500。
      *
@@ -265,15 +367,31 @@ export function planPriority(
      *   lead=400ms → 剩 90 血      lead= 800ms → 剩  88 血（又挨打了）
      */
     readonly dodgeLeadMs?: number;
+    /** 命中前多少毫秒开始按住「卸」。默认 300（= 3 个逻辑步的扣费）。 */
+    readonly guardLeadMs?: number;
+    /**
+     * **伤害超过多少就用「避」而不是「卸」**。默认 `GUARD_THRESHOLD × 2`。
+     *
+     * 传 `0` 就变成"一律用避、从不格" —— `replay.test.ts` 用它来单独测
+     * 「避」的完全免伤（那是引擎机制的性质，不该被「卸」的减伤盖住）。
+     */
+    readonly dodgeAboveDamage?: number;
   } = {},
 ): (tick: number, state: BattleState) => readonly Action[] {
   const leadMs = options.dodgeLeadMs ?? 500;
-  /** 打断的提前量：读条剩这么多以上才值得用「破」。 */
-  const breakLeadMs = 400;
+  const guardLeadMs = options.guardLeadMs ?? 300;
+  const dodgeAbove = options.dodgeAboveDamage ?? GUARD_THRESHOLD * 2;
+  /** 「卸」是按住型，所以策略必须记住"我现在按着吗"。 */
+  let holdingGuard = false;
 
   return (tick, state) => {
+    const player = state.combatants.find((c) => c.side === 'ally');
     const boss = state.combatants.find((c) => c.side === 'enemy');
     const cast = boss?.casts[0];
+    const releaseGuard = (): readonly Action[] => {
+      holdingGuard = false;
+      return [{ type: 'releaseSkill', skillId: GUARD_SKILL_ID, atTick: tick }];
+    };
 
     if (cast !== undefined && options.dodgeSkillId !== undefined) {
       const skillDef = registry.skills.get(cast.skillId);
@@ -281,48 +399,57 @@ export function planPriority(
        * **只对"会造成伤害"的招式反应。**
        *
        * 踩过的坑：早期只看"Boss 在读条"就闪 → 连不造成伤害的招式也闪，
-       * 白花 30 炁（= 3 次「斩」）。表现为"会闪反而输得更惨"，让人误以为
+       * 白花炁（= 2 次「斩」）。表现为"会闪反而输得更惨"，让人误以为
        * 闪避机制没用，其实是**策略在乱闪**。真人对纯增益招式不会闪。
+       *
+       * ⚠️ 这一条在"没有打断"之后更重要了：Boss 的「回补」现在**没人
+       * 打断**，而它不造成伤害 —— 策略必须不去理它。
        */
-      const dealsDamage = (skillDef?.hits ?? []).some((h) =>
-        h.effects.some((e) => e.kind === 'damage'),
-      );
+      const threat = incomingDamage(skillDef);
       const remainingMs = cast.castTimeMs - (tick - cast.startedAtTick) * (1000 / 60);
 
-      if (dealsDamage && remainingMs > 0) {
-        /** ① 长读条：打断（霸体会拒，那也没关系 —— 拒绝不花炁）。 */
-        const breaker = options.interruptSkillId;
-        if (
-          breaker !== undefined &&
-          remainingMs > breakLeadMs &&
-          roughlyUsable(breaker, state, registry.skills.get(breaker))
-        ) {
-          return [{ type: 'useSkill', skillId: breaker, atTick: tick }];
+      if (threat > 0 && remainingMs > 0) {
+        /**
+         * **大招一律「避」**：判据是 `dodgeAbove`（默认 `GUARD_THRESHOLD × 2`）。
+         * 会打穿阈值的那两刀（40 / 60）用「卸」只能各减 15，太亏；
+         * 而「避」花 15 炁整击免掉。小招（20）则相反：一次「避」要 15 炁，
+         * 用「卸」只要按住 3 个逻辑步。
+         */
+        if (threat > dodgeAbove) {
+          const alreadyImmune = (player?.buffs ?? []).some((b) => b.defId === 'dodge-iframe');
+          const dodger = options.dodgeSkillId;
+          const canDodge =
+            remainingMs <= leadMs &&
+            !alreadyImmune &&
+            roughlyUsable(dodger, state, registry.skills.get(dodger));
+          if (canDodge) {
+            const dodge: Action = { type: 'useSkill', skillId: dodger, atTick: tick };
+            /** 先松开「卸」再闪（同一个 tick 里两个动作）—— 否则格的 buff 会留着。 */
+            return holdingGuard ? [...releaseGuard(), dodge] : [dodge];
+          }
+          return holdingGuard ? releaseGuard() : [];
         }
-        /** ② 快命中了：闪（已经无敌就别再闪，否则一次读条烧掉好几次）。 */
-        const alreadyImmune = (state.combatants.find((c) => c.side === 'ally')?.buffs ?? []).some(
-          (b) => b.defId === 'dodge-iframe',
-        );
-        const dodger = options.dodgeSkillId;
-        if (
-          remainingMs <= leadMs &&
-          !alreadyImmune &&
-          roughlyUsable(dodger, state, registry.skills.get(dodger))
-        ) {
-          return [{ type: 'useSkill', skillId: dodger, atTick: tick }];
+        /** 小招：命中前按住「卸」，命中后松开。 */
+        if (remainingMs <= guardLeadMs) {
+          if (!holdingGuard) {
+            holdingGuard = true;
+            return [{ type: 'hold', skillId: GUARD_SKILL_ID, atTick: tick }];
+          }
+          /** 已经按着 —— 引擎的 `startHold` 会忽略重复，这里就不重复发。 */
+          return [];
         }
+        return holdingGuard ? releaseGuard() : [];
       }
-      /**
-       * ③ **攒炁**：读条期间不做输出。
-       *
-       * 这是本次升级的**核心**：输出与闪避抢同一个炁池，
-       * "有炁就花掉"等于永远给闪避留不下预算。
-       */
-      return [];
+      /** 不造成伤害的招（「回补」）：不防御、不输出，只攒炁。 */
+      return holdingGuard ? releaseGuard() : [];
     }
+
+    /** 没有读条 → 收起「卸」，正常输出。 */
+    if (holdingGuard) return releaseGuard();
 
     for (const skillId of priority) {
       const skill = registry.skills.get(skillId);
+      if (onlyRefreshesActiveBuff(skill, player)) continue;
       if (roughlyUsable(skillId, state, skill)) {
         return [{ type: 'useSkill', skillId, atTick: tick }];
       }
@@ -331,11 +458,17 @@ export function planPriority(
   };
 }
 
-
 /**
- * 输出优先级（黄金重放用）。
+ * 输出优先级（黄金重放用）—— **全是林晚风的技能**。
  *
- * 顺序即"玩家会优先按哪个键"：凝（增伤）→ 轰（炁爆发）→ 攻（填充）。
- * 破与防不在优先级里 —— 它们要在看到 Boss 读条时才用（见 `planPriority`）。
+ * 顺序即"玩家会优先按哪个键"：凝（增伤）→ 劈（炁爆发）→ 斩（填充）。
+ *
+ * ⚠️ 上一版这里是 `['focus', 'blast', 'attack']` —— 「轰」是**凯丽的**，
+ * 林晚风按不出来。换成她自己的「劈」（45 伤 / 50 缠 / 1.2s 读条）。
+ * 这次重标定之后，"夹具用的技能属于她"由
+ * `tests/golden/replay.test.ts` 的断言钉住。
+ *
+ * ⚠️ 「卸」「避」不在这个优先级里 —— 它们只在看到 Boss 读条时才用
+ * （见 `planPriority`）。
  */
-export const OUTPUT_PRIORITY = ['focus', 'blast', 'attack'] as const;
+export const OUTPUT_PRIORITY = ['focus', 'pi', 'attack'] as const;

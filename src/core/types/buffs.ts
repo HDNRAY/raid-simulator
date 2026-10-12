@@ -26,7 +26,7 @@ export type StackingRule =
   | { readonly mode: 'extend'; readonly maxDurationMs: number };
 
 /**
- * 判定旗标。闪避/格挡/限制/派生**全部落在数据上**，零新引擎机制：
+ * 判定旗标。闪避/卸力/限制/派生**全部落在数据上**，零新引擎机制：
  * `invulnerable` · `damageReduce` · `damageThreshold` · `restrictToTags` ·
  * `comboWindow`。
  */
@@ -34,7 +34,7 @@ export interface BuffFlags {
   readonly invulnerable?: boolean;
   readonly damageReduce?: number;
   /**
-   * **阈值抵消**（林晚风「格」）。
+   * **阈值抵消**（林晚风「卸」）。
    *
    * ==================================================================
    * 这是"判定层"的第三种形态，前两种都已在引擎里

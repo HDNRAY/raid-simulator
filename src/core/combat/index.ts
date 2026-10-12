@@ -7,7 +7,7 @@
  * 判定层是 M2 的核心，但它天然属于这里
  * ------------------------------------------------------------------
  *
- * Boss 技能在 **hit frame** 一次性判定，玩家靠施放闪避/格挡给自己挂
+ * Boss 技能在 **hit frame** 一次性判定，玩家靠施放闪避/卸力给自己挂
  * 短时 buff 来规避。所以"躲避"的完整链路是：
  *
  *   hit frame 到达
@@ -377,7 +377,7 @@ export function evaluateCondition(
  * ------------------------------------------------------------------ *
  *
  * ⚠️ 公式（`computeDamage` / `computeHeal`）、落地（`applyDamage` /
- * `applyHeal`）与「格」的阈值判定入口（`preBlockDamage` /
+ * `applyHeal`）与「卸」的阈值判定入口（`preBlockDamage` /
  * `flatBlocked`）都在那边。搬走的理由见 `damage.ts` 的文件头
  * （`combat/index.ts` 到了 765 行，AGENTS.md §3）。
  *

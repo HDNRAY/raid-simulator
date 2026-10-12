@@ -236,7 +236,7 @@ export function resolveSkillHits(
    * 两种形态都要处理，**不能只处理 trigger**：
    *
    *   1. **直接 grant**：`{ kind:'grant', buff: dodgeBuff }`
-   *      —— 闪避 / 格挡这类"用了就给自己挂 buff"的技能走这条。
+   *      —— 闪避 / 卸力这类"用了就给自己挂 buff"的技能走这条。
    *      （踩过的坑：一开始只实现了 trigger 形态，于是 dodge 施放成功
    *        但 buff 从未挂上，表现为"闪避没效果"。）
    *   2. **trigger onCastFinish**：派生窗口走这条。

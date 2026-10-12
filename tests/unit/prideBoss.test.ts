@@ -12,7 +12,7 @@ import {
   PRIDE_SKILLS,
 } from '../../src/data/bossPride';
 import { makeCombatant } from './helpers';
-import { OUTPUT_PRIORITY, makeGoldenEngineOptions, planPriority } from '../golden/fixtures';
+import { OUTPUT_PRIORITY, PLAYER_CAPS, makeGoldenEngineOptions, planPriority } from '../golden/fixtures';
 import type { Action, BattleState, Behavior, BuffDef, SkillDef } from '../../src/core/types';
 import { BOSS_HP_DISPLAY } from '../../src/data/entities/bossHp';
 
@@ -243,7 +243,7 @@ describe('「傲慢」的三把刀：内容数值就是设计表', () => {
     expect(grantsKnockdown(BOSS_SCORN)).toBe(false);
   });
 
-  it('霸体只在慢刀上，且不带任何"格挡无效"的新 flag（设计 §5.2 明确不封格挡）', () => {
+  it('霸体只在慢刀上，且不带任何"卸力无效"的新 flag（设计 §5.2 明确不封卸力）', () => {
     const grantsArmor = (s: SkillDef): boolean =>
       s.abilities.some((a) => a.kind === 'grant' && a.buff.id === 'boss-heavy-armor');
     expect(grantsArmor(BOSS_HEAVY)).toBe(true);
@@ -406,7 +406,7 @@ describe('「傲慢」的平衡硬判据（设计 §9.3）', () => {
    * 它们回答"这个 Boss 还能不能玩"，而不是"这一局是不是 926 tick"。
    * 所以它们能在数值微调后存活，而黄金值不行。
    */
-  const playerPlan = planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge', interruptSkillId: 'break' });
+  const playerPlan = planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge' });
   const pureAttackPlan = planPriority(['attack'], {});
 
   function runPlan(plan: (t: number, s: BattleState) => readonly Action[]) {
@@ -442,15 +442,22 @@ describe('「傲慢」的平衡硬判据（设计 §9.3）', () => {
    * 钉死区间只会让它每改一次数值就红一次，然后被顺手放宽
    * （那比不写还糟：它会给"放宽断言"这个动作培养习惯）。
    *
-   * ⚠️ 当前实测剩 **20**，低于设计文档 §9.3 写的 30–70。
-   * 那是"当前数值还没调到设计目标"，**不是**这条断言要拦的东西 ——
-   * 真要守那个窗口，请等数值稳定后单独加一条并写清它的来历。
+   * ⚠️ 当前实测剩 **140**（林晚风上限 150）：她的打法是大招「避」、
+   * 小招「卸」，全程只被 20 伤的小招蹭到两次 5 点。这比设计文档 §9.3
+   * 写的 30–70 宽松得多，但**那是数值还没调到设计目标**，不是这条断言
+   * 要拦的东西 —— 真要守那个窗口，请等数值稳定后单独加一条并写清来历。
    */
   it('会闪避的玩家必须赢，且不是满血通关（性质，不卡具体血量）', () => {
     const r = runPlan(playerPlan);
     expect(r.status).toBe('victory');
     expect(r.playerHp).toBeGreaterThan(0);
-    expect(r.playerHp).toBeLessThan(100);
+    /**
+     * ⚠️ 上界跟着**夹具的血上限**走（`PLAYER_CAPS.hp` = 林晚风的 150）。
+     * 这里曾经写死 `100`（旧的全局 `HP_MAX`）—— 夹具换成林晚风之后
+     * 那个数字就变成"她的血条永远超不过 100"式的错误断言。
+     * 判据是"**不是满血**"（否则 Boss 就是个木桩），不是某个具体数字。
+     */
+    expect(r.playerHp).toBeLessThan(PLAYER_CAPS.hp);
   });
 
   it('整场时长 < 120s（狂暴线）—— 「回补」不会把战斗推过狂暴', () => {

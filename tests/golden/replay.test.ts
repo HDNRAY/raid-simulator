@@ -8,13 +8,16 @@ import {
 } from '../../src/core/run';
 import type { StatKey, StatModifier } from '../../src/core/types';
 import {
+  DODGE_SKILL_ID,
   FIXED_SEED,
   GOLDEN_OUTCOME,
+  GUARD_SKILL_ID,
   OUTPUT_PRIORITY,
   PLAYER_CAPS,
   makeGoldenEngineOptions,
   planPriority,
 } from './fixtures';
+import { LIN_WANFENG_HP, LIN_WANFENG_SKILLS } from '../../src/data/kits/linwanfeng';
 
 /**
  * 黄金重放（架构规范 §7.5）。
@@ -40,15 +43,44 @@ function runGolden(seed?: number) {
 
 function runWith(options: EngineOptions) {
   const recorder = new RunRecorder(options);
-  recorder.runUntilEnd(planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge', interruptSkillId: 'break' }), 60 * 200);
+  recorder.runUntilEnd(planPriority(OUTPUT_PRIORITY, { dodgeSkillId: DODGE_SKILL_ID }), 60 * 200);
   return recorder.outcome();
 }
 
 function recordGolden(seed?: number): RecordedRun {
   const recorder = new RunRecorder(makeGoldenEngineOptions(seed));
-  recorder.runUntilEnd(planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge', interruptSkillId: 'break' }), 60 * 200);
+  recorder.runUntilEnd(planPriority(OUTPUT_PRIORITY, { dodgeSkillId: DODGE_SKILL_ID }), 60 * 200);
   return recorder.toRecordedRun();
 }
+
+/**
+ * ==================================================================
+ * ⚠️ 夹具建模的是**林晚风**（这是本次重标定的全部理由）
+ * ==================================================================
+ *
+ * 上一版的黄金夹具用「破」打断 Boss，而「破」是黛玄的、**没有任何角色带**
+ * —— 于是重放测的是一个游戏里不可能发生的场景。这一组断言把"夹具用的
+ * 技能属于林晚风"钉成机器可检查的事实，否则下次换人又会静默漂回去。
+ */
+describe('夹具建模的是林晚风：技能与血量都来自她的 kit', () => {
+  it('参考策略用到的技能恰好是她的 5 招', () => {
+    /** 优先级（凝/劈/斩）+ 两个防御技（避/格）。 */
+    const planIds = [...OUTPUT_PRIORITY, DODGE_SKILL_ID, GUARD_SKILL_ID].sort();
+    expect(planIds).toEqual(LIN_WANFENG_SKILLS.map((s) => s.id).sort());
+  });
+
+  it('她没有打断技 —— 所以参考策略里也没有打断', () => {
+    const lin = new Set(LIN_WANFENG_SKILLS.map((s) => s.id));
+    /** 「截」是凯丽的、「破」是黛玄的 —— 两个都不该出现在这一场里。 */
+    expect(lin.has('jie')).toBe(false);
+    expect(lin.has('break')).toBe(false);
+  });
+
+  it('夹具玩家的血上限就是她的 150（不是全局兜底的 100）', () => {
+    expect(PLAYER_CAPS.hp).toBe(LIN_WANFENG_HP);
+    expect(makeGoldenEngineOptions().combatants[0]!.resources.hp).toBe(LIN_WANFENG_HP);
+  });
+});
 
 describe('黄金重放：固定种子 + 固定策略 → 固定结果', () => {
   it('重放两次得到完全相同的结果（逐位确定）', () => {
@@ -141,10 +173,12 @@ describe('对内容改动的敏感度（回归保护）', () => {
     /**
      * 注意方向：当前平衡下**不闪反而更快赢**（用时更短）。
      *
-     * 因为闪一次要 30 炁 = 3 次「斩」的代价，而 Boss 一次重击
-     * 只造成 18 伤害 —— "用闪换输出"在数值上不划算。
-     * 这是**内容数值**的结论，不是引擎 bug：引擎的闪避判定有独立测试
-     * （能量充足时能做到零承伤）。
+     * ⚠️ 2026-10-12 实测（林晚风夹具）：会防 **1436** tick / 剩 140 血；
+     * 完全不防 **824** tick / **剩 10 血**。也就是说"不防"赢得快得多，
+     * 但那是**贴着血皮**赢的 —— 方向没变，只是现在的账清楚：
+     * 防御要花炁（「避」15 炁 = 1 次「斩」；「卸」按住也扣炁），
+     * 而炁就是输出。这是**内容数值**的结论，不是引擎 bug：引擎的闪避
+     * 判定有独立测试（能量充足时能做到零承伤）。
      *
      * 写下来是为了让"以后这个关系反过来了"能被注意到 ——
      * 那说明有人调过平衡，应该是有意为之。
@@ -171,23 +205,30 @@ describe('对内容改动的敏感度（回归保护）', () => {
     expect(silentBoss.status).toBe('victory');
     expect(silentBoss.combatants['player']!.hp).toBe(PLAYER_CAPS.hp);
     /**
-     * 而正常一场里，**会闪避**的玩家剩 60 血（约六成）。
+     * 而正常一场里，**会防的玩家剩 140 血**（上限 150）。
      *
-     * 早期这里断言的是"玩家只剩三成血"（险胜）。现在的平衡里
-     * 闪避的收益很大（8 血 → 60 血），所以会玩的玩家并不险 ——
-     * 险的是**不会闪避**的那条路径（见 encounter 测试）。
+     * ⚠️ 2026-10-12 换夹具后重新实测。旧记录（"剩 60 血 / 约六成"、
+     * 更早的"只剩三成血"）是**别的夹具**的数字，刻意留在这里当"改了多少"
+     * 的对照。现在会玩的玩家更不险了：她的大招用「避」、小招用「卸」，
+     * 只有两次 20 伤的小招漏了 5 点进来。
+     * 险的是**不会防御**的那条路径（见 encounter 测试）。
      */
     expect(base.status).toBe('victory');
     expect(base.combatants['player']!.hp).toBeLessThan(PLAYER_CAPS.hp);
   });
 
-  it('只按「斩」不放「轰」会打得更慢 —— 炁爆发确实是主要伤害来源', () => {
+  it('只按「斩」不放「劈」（缠的唯一出口）会打得更慢', () => {
     const auto = runGolden();
     const attackOnly = runWithPriority(['attack']);
-    // 少了 60 伤害的轰，Boss 剩余血量应该更多（或者玩家更早死）
-    expect(attackOnly.combatants['meiichiro']!.hp).toBeGreaterThanOrEqual(
-      auto.combatants['meiichiro']!.hp,
-    );
+    /**
+     * ⚠️ 2026-10-12 实测：主策略 **1436** tick；只按斩（仍在闪避）
+     * **6518** tick。少了「劈」的 45 伤，输出只剩 10 伤的「斩」，
+     * 于是慢得多 —— 缠的出口确实值得留。
+     *
+     * ⚠️ 若**完全不闪**、只按斩，那是**输**的（883 tick、Boss 剩 260）——
+     * 那条由 `encounter.test.ts` 的"不防御就是输"守。
+     */
+    expect(attackOnly.ticks).toBeGreaterThan(auto.ticks);
   });
 });
 
@@ -207,7 +248,18 @@ describe('玩家防御技能的选择会改变结果', () => {
       resources: { ...p0.resources, energy: 100_000 },
     };
     const rec = new RunRecorder({ ...options, combatants: [rich, options.combatants[1]!] });
-    rec.runUntilEnd(planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge', interruptSkillId: 'break' }), 60 * 250);
+    rec.runUntilEnd(
+      planPriority(OUTPUT_PRIORITY, {
+        dodgeSkillId: DODGE_SKILL_ID,
+        /**
+         * ⚠️ `dodgeAboveDamage: 0` = "一律用避、从不格"。
+         * 默认策略会用「卸」抵消小招（那也会挨 5 点），而这条测试要测的
+         * 是**「避」本身能完全免伤** —— 别让「卸」的减伤把它盖住。
+         */
+        dodgeAboveDamage: 0,
+      }),
+      60 * 250,
+    );
     const o = rec.outcome();
     expect(o.status).toBe('victory');
     // 一次伤害都没挨到
@@ -246,7 +298,7 @@ describe('随机源：新内容不含暴击，所以不消耗随机数', () => {
       })),
     });
     const rec = new RunRecorder(withPlayerStats({ ...options, skills }, { critChance: 0.5 }));
-    rec.runUntilEnd(planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge', interruptSkillId: 'break' }), 60 * 250);
+    rec.runUntilEnd(planPriority(OUTPUT_PRIORITY, { dodgeSkillId: DODGE_SKILL_ID }), 60 * 250);
     expect(rec.outcome().finalRngSeed).not.toBe(FIXED_SEED);
   });
 });

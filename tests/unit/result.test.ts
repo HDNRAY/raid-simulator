@@ -32,7 +32,7 @@ describe('战斗结算', () => {
   it('战斗结束后有结算信息，且胜负与 status 一致', () => {
     const a = adapter();
     const engine2 = new BattleEngine(makeGoldenEngineOptions());
-    const plan = planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge', interruptSkillId: 'break' });
+    const plan = planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge' });
     for (let i = 0; i < 60 * 200; i += 1) {
       if (engine2.snapshot.status !== 'running') break;
       engine2.tick(plan(engine2.snapshot.tick, engine2.snapshot));
@@ -50,7 +50,7 @@ describe('战斗结算', () => {
   it('累计伤害与 Boss 掉的血量一致（无护盾/治疗时）', () => {
     const engine = new BattleEngine(makeGoldenEngineOptions());
     const a = adapter();
-    const plan = planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge', interruptSkillId: 'break' });
+    const plan = planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge' });
     const cap = engine.snapshot.combatants.find((c) => c.side === 'enemy')!.caps.hp;
     for (let i = 0; i < 60 * 200; i += 1) {
       if (engine.snapshot.status !== 'running') break;
@@ -68,7 +68,7 @@ describe('战斗结算', () => {
   it('DPS 与用时/总伤害自洽', () => {
     const engine = new BattleEngine(makeGoldenEngineOptions());
     const a = adapter();
-    const plan = planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge', interruptSkillId: 'break' });
+    const plan = planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge' });
     for (let i = 0; i < 60 * 200; i += 1) {
       if (engine.snapshot.status !== 'running') break;
       engine.tick(plan(engine.snapshot.tick, engine.snapshot));
@@ -151,7 +151,7 @@ describe('结算文案：Boss 名字走参数，不写死', () => {
        */
       (key: string) => createTranslator('zh-CN', { catalog: zhCN }).t(key as MessageKey),
     );
-    const plan = planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge', interruptSkillId: 'break' });
+    const plan = planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge' });
     let guard = 0;
     while (engine.snapshot.status === 'running' && guard < 60 * 300) {
       engine.tick(plan(engine.snapshot.tick, engine.snapshot));

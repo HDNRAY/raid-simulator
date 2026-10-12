@@ -120,7 +120,7 @@ export function resolveHit(
     const victimFlags = aggregateFlags(target);
 
     /**
-     * 这一击里的全部伤害效果 —— 「格」的阈值判定需要**看完整一击**。
+     * 这一击里的全部伤害效果 —— 「卸」的阈值判定需要**看完整一击**。
      *
      * ⚠️ 取出来不是为了遍历（下面的 switch 仍然按顺序结算），
      * 而是因为判据属于"整次命中"：见下面 `guardBlocked` 的说明。
@@ -131,7 +131,7 @@ export function resolveHit(
       .filter((d): d is NonNullable<typeof d> => d !== undefined);
 
     /**
-     * **这一击是不是被「格」的阈值完全挡下了**（`伤害 ≤ N`）。
+     * **这一击是不是被「卸」的阈值完全挡下了**（`伤害 ≤ N`）。
      *
      * ==================================================================
      * 为什么是"整次命中一个判据"
@@ -156,7 +156,7 @@ export function resolveHit(
      * ⚠️ 判据用 `crit: false`：这里问的是"**基础伤害**够不够低"，
      * 而当前内容全部 `canCrit: false`，所以两者本来就相等。
      * 更重要的是**不在这里调 `rollCrit`** —— 那会消耗随机数，
-     * 而"这次格挡判没判"不该影响后面的暴击结果（重放会因此变得
+     * 而"这次卸力判没判"不该影响后面的暴击结果（重放会因此变得
      * 极难推理，与 `rollCrit` 自己的短路理由同源）。
      */
     const guardBlocked =
@@ -170,7 +170,7 @@ export function resolveHit(
      * 判据属于"整次命中"，与效果的顺序、种类都无关（见 `applyHitEffects`
      * 里那段"我闪躲了还是倒地了"的说明）。
      *
-     * ⚠️ 两个来源：无敌（`invulnerable`）与「格」的阈值（`guardBlocked`）。
+     * ⚠️ 两个来源：无敌（`invulnerable`）与「卸」的阈值（`guardBlocked`）。
      * 后者也算"没碰到人"，所以它带的效果同样被免掉 —— 这正是需求。
      */
     const avoided = victimFlags.invulnerable === true || guardBlocked;
@@ -184,14 +184,14 @@ export function resolveHit(
           if (!effect.damage) break;
           /**
            * ============================================================
-           * **「格」挡下整击**：发 `avoided` 事件，不走进伤害公式。
+           * **「卸」挡下整击**：发 `avoided` 事件，不走进伤害公式。
            * ============================================================
            *
            * ⚠️ 为什么必须在这里分叉，而不是"让 `computeDamage` 把伤害减到 0"：
            *
            *   - `≤N` 的语义是**整击作废**（连效果一起免），而"减到 0"的
            *     那一击仍会发出 `damage` 事件 —— 飘字会显示「-0」，
-           *     玩家看不出自己挡住了，而**闪避与格挡的反馈就分不清了**
+           *     玩家看不出自己挡住了，而**闪避与卸力的反馈就分不清了**
            *   - `>N` 才是"减伤"（`computeDamage` 的平减），它会正常发
            *     `damage` 事件并带上 `thinned`
            *
@@ -558,7 +558,7 @@ export function applyHitEffects(
       /**
        * **霸体（`interruptImmune`）拦截一切打断，包括「破」的强制打断。**
        *
-       * 需求：所有 Boss 招式默认都能被打断 / 闪避 / 格挡，
+       * 需求：所有 Boss 招式默认都能被打断 / 闪避 / 卸力，
        * 除非 Boss 处于霸体状态 —— 霸体由一个有 CD 的招式给自己挂上。
        *
        * 这里刻意**不看 `effect.force`**：`force` 的语义是"无视技能的

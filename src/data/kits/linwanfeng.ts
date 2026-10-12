@@ -10,7 +10,7 @@
  * | 斩 | `attack` | 炁 15 | 500ms | — | 伤害 10 |
  * | 劈 | `pi` | 缠 50 | 1200ms | — | 伤害 45 |
  * | 凝 | `focus` | 缠 50 | 0 | — | 增伤 +20% |
- * | 格 | `guard` | 免费·按住 3 炁/秒 | 0 | — | **阈值抵消**（见 `GUARD_THRESHOLD`） |
+ * | 卸 | `guard` | 免费·按住 3 炁/秒 | 0 | — | **阈值抵消**（见 `GUARD_THRESHOLD`） |
  * | 避 | `dodge` | 炁 15 | 0 | 1s | 无敌 0.5s |
  *
  * ⚠️ **她没有「截」、「闪」**（「截」「闪」都归凯丽）—— 这是用户逐条定过的，
@@ -26,7 +26,7 @@
 
 import { logicMs } from '../../core/loopConstants';
 import type { BuffDef, SkillDef } from '../../core/types';
-import { GUARD_THRESHOLD } from '../balance';
+import { GUARD_HOLD_DRAIN_PER_LOGIC_TICK, GUARD_THRESHOLD } from '../balance';
 import { C, S } from '../scale';
 import { FOCUS } from './shared';
 
@@ -48,7 +48,7 @@ export const DODGE_IFRAME: BuffDef = {
 };
 
 /**
- * **格**：阈值抵消（`≤N` 整击作废 / `>N` 平减 N）。
+ * **卸**：阈值抵消（`≤N` 整击作废 / `>N` 平减 N）。
  *
  * ==================================================================
  * 它是"按住型"，所以**刻意不给持续时间**
@@ -56,7 +56,7 @@ export const DODGE_IFRAME: BuffDef = {
  *
  * `Number.POSITIVE_INFINITY` 与旧的「防」同一条理由：生命周期完全由
  * "按住 / 松开"驱动 —— 按下时挂上，松开时由 `endHold` 移除。给一个有限
- * duration 会造出错误语义（玩家一直按着，buff 却自己掉了 → "格挡莫名失效"）。
+ * duration 会造出错误语义（玩家一直按着，buff 却自己掉了 → "卸力莫名失效"）。
  *
  * 唯一的结束条件是**炁耗尽**（引擎在 `tickHolds` 里检查并自动松开）。
  *
@@ -187,13 +187,36 @@ export const PI: SkillDef = {
 };
 
 /**
- * 格 🆕：按住持续"阈值抵消"，松开取消。
+ * 卸 🆕：按住持续"阈值抵消"，松开取消。
+ *
+ * ==================================================================
+ * ⚠️ 显示名是「卸」，但 id 与常量名仍是 `guard` / `GUARD_*`
+ * ==================================================================
+ *
+ * 用户 2026-10-12 晚定的显示名是**「卸」**（原「格」）：
+ * "格"更像**盾牌**的动作，而她是剑士；「招 / 架」又都是**一次性**动作，
+ * 与"按住不放"矛盾 —— 只有「卸」同时说得通那两半规则
+ * （`≤N` "卸掉了" / `>N` "卸掉 N 点"），也说得通"按住卸"。
+ *
+ * ⚠️ **id 与常量名刻意不改**，因为 `skillId` 是**持久化键**：
+ * 键位表（`app/settingsStore.ts` 的 localStorage）按 skillId 存，
+ * 改名会让老玩家给这一招改过的键**静默丢失**（回落到默认 `G`）。
+ * 而且技能 id 也是 `RunRecord` 里 `battleStats` 的键（那是另一套版本号）。
+ *
+ * 本仓库已有同样的先例：`douqi` / `energy` 的中文名在 2026-10-09 对调过，
+ * 标识符出于历史原因保留（见 `data/balance.ts` 文件头）。
+ * 所以规矩是：**改中文名只动 i18n**；`guard` 这个名字不准确是**已知的**，
+ * 写在这里，而不是让下一个人重新怀疑一遍。完整判断见
+ * `docs/specs/2026-10-12-player-kits.md` §3.0。
  *
  * `holdDrain` 是引擎里"按住"机制的表达：每个逻辑步扣一次资源，
  * 资源耗尽或松手就自动取消。这样"一直按着"会有明确代价。
  *
- * ⚠️ 代价 **3 炁/秒**（旧的「防」是 2）—— 定稿数字，不是笔误：
- * 格能整击免掉小招（连效果一起），比 55% 减伤强，所以它更贵。
+ * ⚠️ 代价取自 `GUARD_HOLD_DRAIN_PER_LOGIC_TICK`（**3**，旧的「防」是 2）
+ * —— 定稿数字，不是笔误：卸能整击免掉小招（连效果一起），比 55% 减伤强，
+ * 所以它更贵。它和阈值一样是**具名常量**（用户的调参杠杆，"太强 → 5"），
+ * 所以**不要**把 3 写死回这里。⚠️ 单位口径（设置页的 "3 炁/秒" vs
+ * 引擎的 3 炁/逻辑步）写在那个常量的注释里。
  */
 export const GUARD: SkillDef = {
   id: 'guard',
@@ -205,8 +228,8 @@ export const GUARD: SkillDef = {
   castTime: 0,
   cooldown: 0,
   cost: [],
-  /** 按住期间每 0.1 秒扣 3 点缠。 */
-  holdDrain: { resource: 'energy', perLogicTick: 3 },
+  /** 按住期间每 0.1 秒扣 `GUARD_HOLD_DRAIN_PER_LOGIC_TICK` 点炁。 */
+  holdDrain: { resource: 'energy', perLogicTick: GUARD_HOLD_DRAIN_PER_LOGIC_TICK },
   targeting: { mode: 'self' },
   /**
    * ⚠️ **没有 hit** —— 它不是一个"打出去"的技能，只是给自己挂 buff。
@@ -214,7 +237,7 @@ export const GUARD: SkillDef = {
    */
   hits: [],
   /**
-   * ⚠️ **不带 `dodge` tag**：「格」不是位移，倒地时按它不合理
+   * ⚠️ **不带 `dodge` tag**：「卸」不是位移，倒地时按它不合理
    * （你正躺着）。倒地期间的出路是「避」—— 它带 `dodge`。
    * 凯丽那边同理，她的出路是「闪」。
    */

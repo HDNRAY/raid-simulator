@@ -190,7 +190,7 @@ describe('aggregateFlags —— 判定层的输入', () => {
     expect(aggregateFlags(c).invulnerable).toBe(true);
   });
 
-  it('格挡 buff：damageReduce', () => {
+  it('卸力 buff：damageReduce', () => {
     const guard = def({
       id: 'guard',
       stacking: { mode: 'refresh' },

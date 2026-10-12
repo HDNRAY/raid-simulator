@@ -51,7 +51,7 @@ export type EventDef =
       readonly crit: boolean;
       readonly absorbed: number;
       /**
-       * 被**阈值抵消**磨掉的量（林晚风「格」的 `>N → 伤害 − N`）。
+       * 被**阈值抵消**磨掉的量（林晚风「卸」的 `>N → 伤害 − N`）。
        *
        * ⚠️ 与 `absorbed` 是两个量：`absorbed` 是比例减免
        * （`damageReduce`，如 Boss 的霸体），这一条是平减

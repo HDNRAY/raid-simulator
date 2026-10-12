@@ -19,7 +19,7 @@
  * 这类 bug 不会自己暴露，只会静默多出几行 UI。
  */
 import { describe, expect, it } from 'vitest';
-import { ALL_BUFFS, ALL_SKILLS, PLAYER_SKILL_IDS, PLAYER_SKILLS } from '../../src/data/content';
+import { ALL_BUFFS, ALL_SKILLS, PENDING_SKILLS, PLAYER_SKILL_IDS, PLAYER_SKILLS } from '../../src/data/content';
 import { LUST_SKILLS } from '../../src/data/lustBoss';
 import { PRIDE_SKILLS } from '../../src/data/bossPride';
 import { buildKeyRows, isBindablePlayerSkill } from '../../src/app/keyRows';
@@ -77,14 +77,22 @@ describe('按键设置只列玩家技能', () => {
 
   /**
    * 判据的**完备性**：`ALL_SKILLS` 里"不在 `PLAYER_SKILL_IDS` 里"的那些，
-   * 必须**正好**是两个 Boss 的技能，不多不少。
+   * 必须**正好**是两个 Boss 的技能 + **待接线技能**（「破」），不多不少。
    *
    * 多出来 → 有技能漏登记（会被误当成玩家技能列出来）；
    * 少 → 玩家技能被误判成 Boss 技能，从设置里消失。
+   *
+   * ⚠️ 2026-10-12：`!PLAYER_SKILL_IDS` 不再等于"Boss 技能"了 —— 拆角色
+   * 之后多出第三个桶（`PENDING_SKILLS`：「破」，黛玄的、还没接线）。
+   * 所以期望值显式列出它，而不是把它当成"多出来的那个"忽略掉。
    */
-  it('ALL_SKILLS 减去玩家技能 = 两个 Boss 的技能', () => {
+  it('ALL_SKILLS 减去玩家技能 = 两个 Boss 的技能 + 待接线技能', () => {
     const nonPlayer = ALL_SKILLS.filter((s) => !PLAYER_SKILL_IDS.has(s.id)).map((s) => s.id);
-    const expected = [...LUST_SKILLS, ...PRIDE_SKILLS].map((s) => s.id);
+    const expected = [
+      ...LUST_SKILLS,
+      ...PRIDE_SKILLS,
+      ...PENDING_SKILLS.map((p) => p.skill),
+    ].map((s) => s.id);
 
     expect([...nonPlayer].sort()).toEqual([...expected].sort());
   });
@@ -167,19 +175,47 @@ describe('行的内容：没有战斗快照时也要有结构化信息', () => {
     const rows = rowsWithoutSnapshot();
     const guard = rows.find((r) => r.skillId === 'guard');
     /**
-     * ⚠️ 「格」（原「防」）的 `cost: []` 是空的，代价在 `holdDrain` 里。
+     * ⚠️ 「卸」（原「防」）的 `cost: []` 是空的，代价在 `holdDrain` 里。
      * 只读 `cost` 会让它显示"没有代价"。
      *
-     * ⚠️ 2026-10-12：2 → **3 炁/秒**（用户定稿）。它是「格」的代价，
+     * ⚠️ 2026-10-12：2 → **3 炁/秒**（用户定稿）。它是「卸」的代价，
      * 不是笔误 —— 阈值抵消比原来的 55% 减伤强，所以更贵。
      */
-    expect(guard?.costText, '「格」必须显示 3 炁/秒').toBe('3 炁/秒');
+    expect(guard?.costText, '「卸」必须显示 3 炁/秒').toBe('3 炁/秒');
+  });
+
+  /**
+   * ================================================================
+   * ⚠️ 「破」：待接线 → **不在设置页**（AGENTS.md §2 的"保留 + 标注"）
+   * ================================================================
+   *
+   * 它**曾经**在设置页里（`DEFAULT_BINDINGS` 有一条 `{key:'', skillId:'break'}`：
+   * 默认不绑键、但列得出来、绑得上）。那正是"一个没有角色的技能也能绑键"
+   * 的来源 —— 引擎按 id 解析得了它，于是那个绑定看起来是有效的。
+   *
+   * 现在的机制（`data/kits/reserved.ts`）：定义还在 `ALL_SKILLS` 里
+   * （`registry` 能解析），但它**不在** `PLAYER_SKILLS` —— 而设置页的行
+   * 来自 `PLAYER_SKILL_IDS`，所以它是**结构性**消失的，不是特判。
+   */
+  it('⚠️ 「破」不在行里 —— 它是黛玄的待接线技能，不可绑', () => {
+    const rows = rowsWithoutSnapshot();
+    expect(rows.some((r) => r.skillId === 'break'), '「破」不该出现在设置页').toBe(false);
+    /** 但它**还在定义里**（注册表能解析）—— 删除会丢设计，见 reserved.ts。 */
+    expect(ALL_SKILLS.some((s) => s.id === 'break')).toBe(true);
+    expect(isBindablePlayerSkill(ALL_SKILLS.find((s) => s.id === 'break')!)).toBe(false);
+    /** 也不在默认键位表里 —— 否则 `bindingsForPlayer` 之外还会漏出它。 */
+    expect(DEFAULT_BINDINGS.some((b) => b.skillId === 'break')).toBe(false);
   });
 
   it('有冷却的技能要显示冷却', () => {
     const rows = rowsWithoutSnapshot();
-    const brk = rows.find((r) => r.skillId === 'break');
-    expect(brk?.cdText).toBe('冷却 5 秒');
+    /**
+     * ⚠️ 这里原来断言的是「破」（`冷却 5 秒`）—— 它现在**不是玩家技能**，
+     * 所以不在设置页的行里（见文件末尾那组「破」的回归）。换成凯丽的
+     * 「截」（真的属于一个角色、而且真的可绑）。
+     */
+    const jie = rows.find((r) => r.skillId === 'jie');
+    expect(jie?.cdText).toBe('冷却 10 秒');
   });
 
   it('⚠️ 文案里的占位符必须被插值，不能把 `{seconds}` 原样显示出来', () => {

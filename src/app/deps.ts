@@ -15,8 +15,8 @@ import { createRegistry } from '../core/content/registry';
 import {
   ALL_BUFFS,
   ALL_SKILLS,
+  BOSS_SKILL_IDS,
   DERIVED_SKILL_IDS,
-  PLAYER_SKILL_IDS,
   skillsForPlayer,
 } from '../data/content';
 import { DEFAULT_PLAYER_ID } from '../data/roster';
@@ -107,14 +107,17 @@ export function createGameDeps(): GameDeps {
      *     （注册表会把它们塞进 Map，重复对象无所谓，但身份一致更好推理）
      *   - 派生技（「击」）：它不在任何角色的技能表里，必须显式补进来，
      *     否则 P3 的炁机一开窗口就是"技能未注册"
-     *   - Boss 技能：按 `!PLAYER_SKILL_IDS` 判（**不是** id 前缀 —— 见那里的说明）
+     *   - Boss 技能：按 `BOSS_SKILL_IDS` 判（**不是** id 前缀 —— 见那里的
+     *     说明）。⚠️ 也**不是** `!PLAYER_SKILL_IDS`：那个反集还会把
+     *     待接线的「破」算进来，于是每一局的引擎都会"认识"一个没人带的
+     *     技能（`kits/reserved.ts` 的文件头）
      */
     const bundle: ContentBundle = {
       entities: [],
       skills: [
         ...ALL_SKILLS.filter((s) => loadoutIds.has(s.id)),
         ...ALL_SKILLS.filter((s) => DERIVED_SKILL_IDS.has(s.id)),
-        ...ALL_SKILLS.filter((s) => !PLAYER_SKILL_IDS.has(s.id)),
+        ...ALL_SKILLS.filter((s) => BOSS_SKILL_IDS.has(s.id)),
       ],
       buffs: [...ALL_BUFFS],
     };

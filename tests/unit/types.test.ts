@@ -21,7 +21,7 @@ import type {
  * `tsc` 通过只说明类型"内部自洽"，不说明它"能表达真实内容"。
  * 所以这里用类型标注构造数据模型规范里承诺的那些东西：
  *   - 熵之钟的三个效果（被动属性 / 派生增伤 / 暴击触发）
- *   - 判定窗口（闪避 / 格挡）与派生窗口
+ *   - 判定窗口（闪避 / 卸力）与派生窗口
  *   - 不占 GCD 的技能
  *   - 一个完整的 BattleState（必须可结构化克隆）
  *
@@ -138,7 +138,7 @@ const dodgeBuff: BuffDef = {
   flags: { invulnerable: true },
 };
 
-/** 格挡：1.5 秒减伤 60% */
+/** 卸力：1.5 秒减伤 60% */
 const guardBuff: BuffDef = {
   id: 'guard',
   nameKey: 'hud.immune',

@@ -56,14 +56,16 @@ import {
   GUARD_THRESHOLD_BUFF,
   LIN_WANFENG_SKILLS,
 } from './kits/linwanfeng';
-import { BREAK } from './kits/reserved';
+import { PENDING_SKILLS } from './kits/reserved';
 import { FOCUS_BUFF } from './kits/shared';
 export {
   /**
-   * **已实现但当前没有角色带**的那个（「破」，黛玄的）——
-   * 它为什么还在内容里，见 `kits/reserved.ts` 的文件头。
+   * **待接线**的那个（「破」，黛玄的）—— 它为什么还在内容里、为什么
+   * **不在** `PLAYER_SKILLS` 里，见 `kits/reserved.ts` 的文件头。
+   * 一句话：定义保留（用户说黛玄会用它），但今天没有角色带它。
    */
   BREAK,
+  PENDING_SKILLS,
 } from './kits/reserved';
 export {
   /**
@@ -162,7 +164,7 @@ export const DOUQI_PER_DAMAGE = 1;
  * Boss 技能
  * ================================================================== *
  *
- * 设计约束（来自需求）：**Boss 的所有招式都默认可以被打断 / 闪避 / 格挡**。
+ * 设计约束（来自需求）：**Boss 的所有招式都默认可以被打断 / 闪避 / 卸力**。
  * 所以每个招式都是 `interruptible: true`，且伤害都走正常判定路径。
  */
 
@@ -171,7 +173,7 @@ export const DOUQI_PER_DAMAGE = 1;
  * ================================================================== */
 
 /**
- * **玩家技能的全集** = 两个角色技能表的并集。
+ * **玩家技能的全集** = 两个角色技能表的并集（+ 派生技「击」）。
  *
  * ==================================================================
  * ⚠️ 它是"内容全集"，不是"这一局带什么"
@@ -193,13 +195,6 @@ export const DOUQI_PER_DAMAGE = 1;
 export const PLAYER_SKILLS: readonly SkillDef[] = [
   ...LIN_WANFENG_SKILLS,
   ...dedupeSkills(KAILI_SKILLS),
-  /**
-   * ⚠️ **「破」在这里，但不在任何角色的技能表里** —— 它是黛玄的
-   * （她还没做）。保留它的理由见 `kits/reserved.ts` 的文件头。
-   * 一句话：去掉它会让**黄金重放**的参考策略少一个打断技，
-   * 从而改动黄金基线 —— 而那是用户的硬验收红线。
-   */
-  BREAK,
   /**
    * ⚠️ 「击」在这里（技能全集），但**不在任何角色的技能表里** ——
    * 它是派生技，靠 `combo-window` 出现。放在合集里是为了让
@@ -255,12 +250,33 @@ function dedupeSkills(skills: readonly SkillDef[]): readonly SkillDef[] {
  * ⚠️ **所以不要再用 id 前缀判断技能归属。** 7 宗罪各有一套前缀，
  * 前缀约定每加一个 Boss 就要记得维护一次，而漏掉时**不会报错**。
  *
- * `ALL_SKILLS` 是由 `PLAYER_SKILLS` + 各 Boss 的技能表拼出来的，
- * 所以"在不在这个集合里"是**结构性的** —— 新加 Boss 时自动生效，
+ * `ALL_SKILLS` 是由 `PLAYER_SKILLS` + `PENDING_SKILLS` + 各 Boss 的技能表
+ * 拼出来的，所以"在不在这个集合里"是**结构性的** —— 新加 Boss 时自动生效，
  * 不需要任何人记得改哪里。
+ *
+ * ⚠️ 反过来说：**不在这个集合里 ≠ 是 Boss 技能**。今天还有第三个桶
+ * （`PENDING_SKILLS`：「破」）。想"只要 Boss 技能"请用 `BOSS_SKILL_IDS`，
+ * 不要用 `!PLAYER_SKILL_IDS`（那会把待接线技能一起算进去）。
  */
 export const PLAYER_SKILL_IDS: ReadonlySet<string> = new Set(
   PLAYER_SKILLS.map((s) => s.id),
+);
+
+/**
+ * **Boss 技能 id 集合** —— 与 `PLAYER_SKILL_IDS` 同一条理由（结构，不是前缀）。
+ *
+ * ==================================================================
+ * 为什么要有它（`!PLAYER_SKILL_IDS` 不再等价于"Boss 技能"）
+ * ==================================================================
+ *
+ * 在 `PENDING_SKILLS` 出现之前，"不是玩家技能"就等于"Boss 技能"，所以
+ * `app/deps.ts` 的装配用 `!PLAYER_SKILL_IDS.has(s.id)` 取 Boss 招是**对的**。
+ * 加入待接线的「破」之后那个反集就不再成立 —— 它会把「破」注册进
+ * **每一局的引擎**（症状很轻：界面按不出来，但"引擎认识它"本身是
+ * 一个不该存在的事实）。所以那一处改成读本集合。
+ */
+export const BOSS_SKILL_IDS: ReadonlySet<string> = new Set(
+  [...PRIDE_SKILLS, ...LUST_SKILLS].map((s) => s.id),
 );
 
 /**
@@ -287,11 +303,18 @@ export const DERIVED_SKILL_IDS: ReadonlySet<string> = new Set(['strike']);
  * 放哪些（见 `LUST_BEHAVIORS` vs `PRIDE_BEHAVIORS`）。所以"注册"不等于
  * "会用"—— 这也是为什么加 Boss 只需要加它的轮转。
  *
- * ⚠️ 注意 `ALL_SKILLS` 里**混着 Boss 技能**，所以想"只要玩家技能"时
- * 不要按 id 前缀过滤，用 `PLAYER_SKILL_IDS`（见那里的说明）。
+ * ⚠️ **待接线技能（`PENDING_SKILLS`：「破」）也在这里** —— 定义必须留在
+ * 注册表里（引擎按 id 解析），但它**不属于 `PLAYER_SKILLS`**，所以
+ * 不进设置页、不可绑键、不属于任何角色。这条三分法见
+ * `kits/reserved.ts` 的文件头。
+ *
+ * ⚠️ `ALL_SKILLS` 里混着 Boss 技能与待接线技能，所以想"只要玩家技能"时
+ * 不要按 id 前缀过滤、也不要用反集，用 `PLAYER_SKILL_IDS` / `BOSS_SKILL_IDS`
+ * （见那里的说明）。
  */
 export const ALL_SKILLS: readonly SkillDef[] = [
   ...PLAYER_SKILLS,
+  ...PENDING_SKILLS.map((p) => p.skill),
   ...PRIDE_SKILLS,
   ...LUST_SKILLS,
 ];

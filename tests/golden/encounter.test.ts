@@ -101,12 +101,12 @@ describe('真实内容：Boss 的机制都接线了', () => {
 
   it('玩家能打死 Boss（战斗是双向可行的）', () => {
     /**
-     * 用"贪心优先级"而不是单个技能：只按「斩」在当前平衡下打不死 Boss
-     * （Boss 的承伤节奏刚好压过玩家的基础输出）。这也是一条
-     * 有价值的结论 —— **必须用上「轰」**才能赢。
+     * 用"贪心优先级"而不是单个技能：只按「斩」在当前平衡下打不过 Boss。
+     * 必须用上「劈」（缠的出口）才能赢 —— 夹具的玩家现在是**林晚风**，
+     * 见 `tests/golden/fixtures.ts` 的文件头。
      */
     const engine = makeEngine();
-    const plan = planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge', interruptSkillId: 'break' });
+    const plan = planPriority(OUTPUT_PRIORITY, { dodgeSkillId: 'dodge' });
     let sawEnd: string | undefined;
     for (let t = 0; t < 60 * 250; t += 1) {
       if (engine.snapshot.status !== 'running') break;
@@ -124,7 +124,7 @@ describe('真实内容：Boss 的机制都接线了', () => {
      * 但加一点容错。"
      *
      * 实测：纯「斩」（读条一结束就按下一个，最理想的输出手法）**败**；
-     * 用上闪避/格挡才能赢（见黄金重放）。
+     * 用上闪避/卸力才能赢（见黄金重放）。
      */
     const engine = makeEngine();
     let attacks = 0;
@@ -172,9 +172,13 @@ describe('真实内容：Boss 的机制都接线了', () => {
      *
      * ⚠️ 上界 340 = 实测 330 + 10 点余量。核心判据（`status` /
      * `player.alive` / `attacks > 5`）一条没动，放宽的只是"输得多接近"。
+     *
+     * ⚠️ **2026-10-12 第三次标定：上界 340 → 270。**
+     * 夹具换成林晚风（150 血）之后纯进攻能多扛一会儿：新实测
+     * **883 tick / Boss 剩 260**。数字来历见 `fixtures.ts` 的 `GOLDEN_OUTCOME`。
      */
     expect(boss.resources.hp).toBeGreaterThan(0);
-    expect(boss.resources.hp).toBeLessThanOrEqual(340);
+    expect(boss.resources.hp).toBeLessThanOrEqual(270);
   });
 
   it('3 分钟超时判负', () => {
@@ -362,12 +366,12 @@ describe('真实内容：玩家招式都接线了', () => {
 
   /**
    * ⚠️ 2026-10-12：「防」（按比例减伤 55%）**已经不在了** —— 用户定稿把
-   * 林晚风的防御换成了「格」（阈值抵消），见
+   * 林晚风的防御换成了「卸」（阈值抵消），见
    * `docs/specs/2026-10-12-player-kits.md`。
    *
    * 所以这条从"减伤"改成了**按住机制本身**（挂上 → 松开 → 摘掉）：
    * 它测的是 `startHold` / `endHold` 的语义，与那个 buff 是减伤还是
-   * 阈值抵消无关。「格」的**抵消规则**在
+   * 阈值抵消无关。「卸」的**抵消规则**在
    * `tests/unit/playerKits.test.ts` 里单独测（那边能精确构造伤害值）。
    */
   it('格：按住期间挂上 buff，松开即取消', () => {
@@ -398,7 +402,7 @@ describe('真实内容：玩家招式都接线了', () => {
     /**
      * 只给 30 点炁 —— 净支出 `3 − 1 = 2`/逻辑步，所以 10 步左右就见了底。
      *
-     * ⚠️ 「格」的 `holdDrain` 是 **3 点/逻辑步**（旧的「防」是 2）——
+     * ⚠️ 「卸」的 `holdDrain` 是 **3 点/逻辑步**（旧的「防」是 2）——
      * 定稿数字，见 `kits/linwanfeng.ts` 的 `GUARD`。
      * ⚠️ 步数必须**留出耗尽的时间**：`3 − 1 = 2` 的净支出意味着
      * "20 个 tick"这种短窗口根本耗不完，那时松开是**不会**发生的。

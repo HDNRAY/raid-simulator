@@ -191,7 +191,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
    * 真正的 `touch` 在下面才装配（见文件头"顺序即正确性"第 3 条）。
    *
    * ⚠️ 传的是 **`registryFor`（按角色取注册表）**，不是一张固定的：
-   * 注册表里装着技能表，而两个角色的技能不一样（林晚风有「格」、
+   * 注册表里装着技能表，而两个角色的技能不一样（林晚风有「卸」、
    * 凯丽有「截」与「闪」）。固定一张会让"换角色"只在界面上生效。
    */
   const startBattle = createStartBattle({

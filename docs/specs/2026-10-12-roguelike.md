@@ -75,7 +75,7 @@
 | 角色名单 | 3 个：`player`(林晚风) / `kaili` / `daixuan` | `src/data/roster.ts:48-52` |
 | 已实现玩法的角色 | 1 个（林晚风）；`kaili` / `daixuan` 在 `DEVELOPING` 里 | `src/data/roster.ts:87-95` |
 | 3 个角色机制上完全相同 | `makePlayer(id)` **只用 id 取显示名**；属性/上限/技能全是全局常量 | `src/data/units.ts:62-79`、`35-52` |
-| 玩家技能全集 | 9 个：`attack` / `blast` / `focus` / `break` / `dodge` / `guard` / `flash` / `jie` / `strike`(派生) | `src/data/content.ts:545-557` |
+| 玩家技能全集 | 9 个：`attack` / `blast` / `focus` / `break` / `dodge` / `guard` / `flash` / `jie` / `strike`(派生) | `src/data/content.ts:545-557`。⚠️ **2026-10-12 第二次重标定后**：「破」移出玩家技能全集、进 `PENDING_SKILLS`（无人带、不可绑），全集变成 **8 个**；判据见 `2026-10-12-player-kits.md` §6 |
 | "哪些技能是玩家的" | 全局唯一真相 `PLAYER_SKILL_IDS`，**没有 per-character 概念** | `src/data/content.ts:585-587` |
 | **引擎的边界 = 一场战斗** | `BattleEngine` 是一个 encounter 的状态机；当前"重开"是**重建一个 `BattleLoop`**，不是引擎里的第二场 | `src/core/combat/battleState.ts:74-83`、`src/app/battleSetup.ts:59-117` |
 | 种子从哪来（现状） | app 层 `seed: Date.now() >>> 0`（`core/` 禁 `Date.now`） | `src/app/battleSetup.ts:89-90` |

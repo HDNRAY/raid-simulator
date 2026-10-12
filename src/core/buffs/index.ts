@@ -11,7 +11,7 @@
  *
  * **已实现**（全部落在这里，零新引擎机制）：
  *   闪避   duration:300  + flags.invulnerable
- *   格挡   duration:1500 + flags.damageReduce:0.6
+ *   卸力   duration:1500 + flags.damageReduce:0.6
  *   限制   倒地用 flags.restrictToTags（只能闪避）
  *
  * ⚠️ **下面两条是设计意图，目前没做**，别把它们当成已有能力：
