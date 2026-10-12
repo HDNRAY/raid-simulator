@@ -43,6 +43,49 @@ export const TICKS_PER_SECOND = 60;
 export type BattleStatus = BattleSnapshotView['status'];
 
 /**
+ * 结算数据（胜负、用时、剩余生命、伤害、DPS）。
+ *
+ * ⚠️ 需求："一局结束**也**显示完整log" —— "也"字是关键：复盘**不该把结算
+ * 盖掉**。最初的实现是"复盘全屏压在结算之上"，于是结算的用时/伤害那几行
+ * 只能从面板底下透出来（截图里能看到）。现在这几项**并进复盘头部**：
+ *   - 数据**只从 `view.result` 拿**，渲染层不自己算（算出来的和结算面板
+ *     对不上就是两个真相）
+ *   - 文案**全部复用**结算面板已有的 `screen.stat*` key —— `zh-CN.ts`
+ *     已经贴着 700 行上限，一条新 key 都不能加
+ */
+export type ResultSummary = NonNullable<BattleSnapshotView['result']>;
+
+/**
+ * 结算摘要的四个格子（顺序 = 显示顺序）。
+ *
+ * ⚠️ 这四个 key 与 `render/resultPanel.ts` 用的是**同一批**：
+ * 结算面板与复盘头部说同一件事，措辞当然也该是同一份文案。
+ */
+export const RESULT_STAT_KEYS = [
+  'screen.statTime',
+  'screen.statRemainingHp',
+  'screen.statTotalDamage',
+  'screen.statDps',
+] as const;
+
+/**
+ * 结算 → 「标签 key + 值」四格。
+ *
+ * 值里的 `s` / ` / ` 是**单位与分隔符**，不是文案（结算面板里也是这么拼的，
+ * 见 `render/resultPanel.ts`）；可显示的文字一律走 key。
+ */
+export function resultStatCells(
+  result: ResultSummary,
+): ReadonlyArray<{ readonly key: string; readonly value: string }> {
+  return [
+    { key: RESULT_STAT_KEYS[0], value: `${result.seconds}s` },
+    { key: RESULT_STAT_KEYS[1], value: `${result.remainingHp}/${result.remainingHpCap}` },
+    { key: RESULT_STAT_KEYS[2], value: `${result.totalDamage}` },
+    { key: RESULT_STAT_KEYS[3], value: `${result.dps}` },
+  ];
+}
+
+/**
  * 一局是否**已经结束**（结算中）。
  *
  * ⚠️ 只有 `victory` / `defeat` 算结束：`idle` 是"还没开打/已复位"，
@@ -72,8 +115,14 @@ export function secondsAt(tick: number): number {
  * 四周各留 12~16px：既留出呼吸空间，也保证不压到画布边缘（描边不会被裁）。
  */
 export const REVIEW_RECT = { x: 16, y: 12, w: 928, h: 516 } as const;
-/** 头部（标题 + 结局 + 条数）。 */
-export const REVIEW_HEADER_H = 32;
+/**
+ * 头部高度。
+ *
+ * ⚠️ **两行**：第 1 行是标题 + 胜负/原因，第 2 行是结算摘要（用时/剩余生命/
+ * 伤害/DPS）+ 条数。原来只有一行 32px —— 需求"结算摘要并进复盘头部"要的
+ * 就是这多出来的一行（行数由 `REVIEW_ROWS` 自动跟着变，不用手调）。
+ */
+export const REVIEW_HEADER_H = 48;
 /** 页脚（滚动提示 + 当前窗口）。 */
 export const REVIEW_FOOTER_H = 24;
 /** 每行高度。⚠️ 行高**固定**：行高不一的列表算不清"一屏几条"，也无法用等距滚动。 */

@@ -534,7 +534,7 @@ export class BattleScene {
     this.registry.add(new FlashPart(this.flashOverlay));
     this.registry.add({
       name: 'logPanel',
-      render: (ctx) => this.logPanel.update(ctx.logEntries),
+      render: (ctx) => this.logPanel.update(ctx.logEntries, ctx.view),
     });
     // Boss 形象自己就是帧部件（读哪些字段见 `BossSprite.render`）
     this.registry.add(this.boss);

@@ -15,14 +15,28 @@
  *   3. 把最近 N 条画成一列，旧的往上淡出
  *
  * ==================================================================
- * 为什么不做成可滚动的完整列表
+ * 两个模式（同一个组件，`view.status` 决定用哪个）
  * ==================================================================
  *
- * 这是**战斗中的实时面板**，不是复盘工具。玩家在打的时候只有余光，
- * 能读的只有最近 3-4 行。做滚动/翻页会引入焦点、键盘占用、
- * 与战斗输入冲突等一堆问题，而收益（战斗中翻日志）几乎为零。
- * 复盘应该由"把日志导出成文本"来做 —— 那是格式化层的另一个消费者，
- * 不需要动渲染层（这正是分层的价值）。
+ *   战斗中   → 左边那条**实时短列**：只画最近几条 `level === 'major'` 的。
+ *              玩家在打的时候只有余光，能读的只有最近几行；`minor`
+ *              进来会把面板刷爆。
+ *   一局结束 → **全屏复盘**（`LogReviewPanel`）：画**全部**条目（含
+ *              `minor`）、有时间轴、能滚。需求："一局结束 也显示完整log，
+ *              玩家好复盘。"
+ *
+ * 判断"结束了"只用 `view.status`（`victory` / `defeat`）—— 见
+ * `logReview.isFinished`。这里不额外记状态机，也不看时间。
+ *
+ * ==================================================================
+ * 复盘时为什么要动节点层级（`syncLayer`）
+ * ==================================================================
+ *
+ * 结算面板（`render/BattleScene.ts` 的 `resultLayer`）是场景 root 的
+ * **最后一个子节点**，所以它画在整个 HUD 之上；本面板平时挂在 `hud` 里。
+ * 复盘不提到最上层的话，会被结算那一层半透明黑幕压暗 —— 一屏 28 行
+ * 的正文直接读不了。所以进入复盘时把 `root` 提到结算层之上，
+ * 退出时放回原处。**只动节点，不动数据流。**
  */
 
 import type { Container } from 'pixi.js';
@@ -30,6 +44,10 @@ import type { LogEntry } from '../app/logFormat';
 import { FONT, LAYOUT, LOGICAL } from './layout';
 import { Label, PANEL_STYLE, Panel, type PixiCtor } from './primitives';
 import { PALETTE } from '../render/theme';
+import type { BattleSnapshotView } from '../render/viewModel';
+import { LogReviewPanel } from './LogReviewPanel';
+import { CATEGORY_COLORS, majorEntries, resolveLogParams } from './logReview';
+import { FEED_PAD_X, layoutFeed, type FeedBlock } from './logFeed';
 
 export interface LogPanelOptions {
   readonly pixi: PixiCtor;
@@ -42,28 +60,23 @@ export interface LogPanelOptions {
  * 需求："行间距小一点"。16 → **13**，行间空隙 2 → **1**。
  * 每行占高从 18 降到 14，10 行省下 40px —— 面板也跟着变矮。
  * 13px 的行高配 `FONT.tiny`(11) 仍然放得下，不会挤。
+ *
+ * ⚠️ 现在它是**折行后每一行**的高度，不再等于"一条的高度"：
+ * 一条最多折 2 行（见 `logFeed.ts` 的文件头）。
  */
 const LINE_H = 13;
-/** 最多显示几行 —— 再多战斗中就来不及读了（见文件头说明）。 */
-const VISIBLE_LINES = 10;
-/** 行与行之间的间距 */
-const LINE_GAP = 1;
-
 /**
- * 类别 → 颜色。
+ * 标签池大小（= 最多同时显示几条）。
  *
- * 与其它 UI 用的是**同一套色**（红=伤害、青=闪避、金=打断），
- * 于是日志和画面上的飘字/读条是同一个语言。
+ * ⚠️ 名字仍是"可见行数"：单行条目最多就是这么多条，而每条 2 行时
+ * 实际条数由高度预算决定（`logFeed.layoutFeed`）—— 少于这个数。
  */
-const CATEGORY_COLORS: Readonly<Record<LogEntry['category'], number>> = {
-  deal: 0xffd08a,
-  take: PALETTE.danger.bright,
-  avoid: PALETTE.iframe.bright,
-  interrupt: PALETTE.douqi.bright,
-  cast: PALETTE.textDim,
-  resource: PALETTE.buff.bright,
-  system: PALETTE.text,
-};
+const VISIBLE_LINES = 10;
+/** 条与条之间的间距 */
+const LINE_GAP = 1;
+/** 文字区距面板底 / 顶（标题那一条）的内边距。 */
+const FEED_PAD_BOTTOM = 8;
+const FEED_PAD_TOP = 22;
 
 export class LogPanel {
   readonly root: Container;
@@ -71,8 +84,25 @@ export class LogPanel {
   private readonly panel: Panel;
   private readonly title: Label;
   private readonly lines: Label[] = [];
-  /** 上一次画的文本，用来跳过无变化的 set（Label.set 内部也有缓存） */
+  /** 复盘（一局结束后的全屏模式）。 */
+  private readonly review: LogReviewPanel;
+  /** 上一次画的内容指纹，用来跳过无变化的重排（每帧都会调进来）。 */
   private lastSignature = '';
+
+  /**
+   * 本面板在**节点树里的原位置**（`hud`）。
+   *
+   * ⚠️ 构造时还拿不到：`BattleScene` 是先 `new LogPanel` 再
+   * `hud.addChild(...)`。所以第一次需要提层时再记下来（见 `syncLayer`）。
+   */
+  private homeParent: Container | null = null;
+
+  /* ---- 当前几何（缩放后）。初始值 = 未缩放的基础布局 ---- */
+  private rect: { readonly x: number; readonly y: number; readonly w: number; readonly h: number } = LAYOUT.log;
+  private scale = 1;
+  private lineH = LINE_H;
+  private lineGap = LINE_GAP;
+  private lineSize: number = FONT.tiny;
 
   constructor(private readonly options: LogPanelOptions) {
     const { pixi } = options;
@@ -103,70 +133,115 @@ export class LogPanel {
      *
      * 不用"按需创建/销毁"：日志每几帧就变一次，反复 new Text
      * 会产生大量纹理垃圾（Pixi 的 Text 是每次改字都重新光栅化的）。
+     *
+     * ⚠️ `y` 不再一次算死：一条可能折成 1~2 行（见 `logFeed.ts`），
+     * 每帧由 `layoutFeed` 从下往上重新排。
      */
     for (let i = 0; i < VISIBLE_LINES; i += 1) {
       const label = new Label(pixi, {
-        x: r.x + 8,
-        // 从下往上排：最新的一条在最下面（贴近"正在发生"的位置感）
-        y: r.y + r.h - 8 - (i + 1) * (LINE_H + LINE_GAP) + LINE_GAP,
+        // 左缘与"可用宽度"用**同一个**常量，见 `logFeed.FEED_PAD_X`
+        x: r.x + FEED_PAD_X,
+        y: 0,
         size: FONT.tiny,
         color: PALETTE.textDim,
       });
+      /**
+       * ⚠️ 多行文本的行高必须**显式**设成排版用的 `LINE_H`：Pixi 默认
+       * 用字体度量（约 1.25×字号），与 `layoutFeed` 算的 13 对不上 ——
+       * 那样每折一行就往下漂一点，几行之后两行文本会重叠。
+       */
+      label.root.style.lineHeight = LINE_H;
       this.lines.push(label);
       this.root.addChild(label.root);
     }
+
+    /** 复盘面板放在**最后**：它在 `root` 内部也要盖住上面那几条。 */
+    this.review = new LogReviewPanel({ pixi, translate: options.translate });
+    this.root.addChild(this.review.root);
   }
 
   /**
-   * 重画。
+   * 每帧重画。
    *
-   * `entries` 是格式化层的全部条目（可能很长）；这里只取**最后
-   * `VISIBLE_LINES` 条**，并让**越旧越暗** —— 不用动画，靠透明度
-   * 表达"这条正在变旧"，既便宜又不会让画面动个不停。
+   * `view.status` 决定用哪个模式（见文件头）：`victory` / `defeat` = 一局结束。
+   *
+   * ⚠️ 传的是**整份 view**（不只是 `status`）：复盘头部第 2 行要显示结算摘要
+   * （用时 / 剩余生命 / 伤害 / DPS），而那几项只能来自 `view.result` ——
+   * 需求要"一局结束**也**显示完整 log"，也就是**结算不能消失**。
+   *
+   * 战斗中这一列**只吃 `major`**（需求："`minor` 不要放进战斗中那个
+   * 小面板"）；全部条目交给复盘面板。
    */
-  /**
-   * 把参数里**值为 i18n key** 的那些先翻译掉。
-   *
-   * ⚠️ 为什么需要：日志的 `params` 允许"值是另一个 key"（例如
-   * `skill: 'boss.cleave.name'`，见 `logFormat` 的 `damageSource`），
-   * 而 `translate` **不会递归**它自己的 params —— 不处理的话屏幕上会
-   * 直接出现 `boss.cleave.name` 这串 key（同 `hud.stunned` 那个坑）。
-   *
-   * ⚠️ 只翻**字符串**：数字（`amount`）必须原样留着当插值。
-   */
-  private resolveParams(
-    params: Readonly<Record<string, string | number>> | undefined,
-  ): Readonly<Record<string, string | number>> | undefined {
-    if (params === undefined) return undefined;
-    return Object.fromEntries(
-      Object.entries(params).map(([k, v]) => [
-        k,
-        typeof v === 'string' ? this.options.translate(v) : v,
-      ]),
-    );
-  }
+  update(entries: readonly LogEntry[], view: BattleSnapshotView): void {
+    this.review.update(entries, view);
+    this.syncLayer(this.review.root.visible);
 
-  update(entries: readonly LogEntry[]): void {
-    const visible = entries.slice(-VISIBLE_LINES);
+    const visible = majorEntries(entries).slice(-VISIBLE_LINES);
     // 内容没变就整段跳过（每帧调用的东西，能省则省）
-    const signature = visible.map((e) => `${e.id}:${e.category}`).join(',');
+    const signature = `${view.status}:${visible.map((e) => `${e.id}:${e.category}`).join(',')}`;
     if (signature === this.lastSignature) return;
     this.lastSignature = signature;
 
+    const translate = this.options.translate;
+    /** ⚠️ 取词只在"真的变了"之后做：`translate` 是热路径（见 `primitives`）。 */
+    const texts = visible.map((entry) => translate(entry.key, resolveLogParams(entry.params, translate)));
+    this.paint(layoutFeed(texts, this.feedOptions()), visible);
+  }
+
+  /** 排版参数（全部由当前几何推出，不写死 —— UI 缩放后仍然成立）。 */
+  private feedOptions() {
+    const { rect, scale } = this;
+    return {
+      bottomY: rect.y + rect.h - Math.round(FEED_PAD_BOTTOM * scale),
+      topY: rect.y + Math.round(FEED_PAD_TOP * scale),
+      maxPx: rect.w - Math.round(FEED_PAD_X * scale) * 2,
+      size: this.lineSize,
+      lineH: this.lineH,
+      rowGap: this.lineGap,
+      maxBlocks: this.lines.length,
+    };
+  }
+
+  /**
+   * 把排好的文本块画到标签上。
+   *
+   * `blocks[0]` = 最新的一条 = **最下面**那一行；`lines[0]` 也是底部。
+   * 越旧越暗（不用动画，靠透明度表达"这条正在变旧"）。
+   */
+  private paint(blocks: readonly FeedBlock[], entries: readonly LogEntry[]): void {
     for (let i = 0; i < this.lines.length; i += 1) {
       const label = this.lines[i];
-      if (!label) continue;
-      // lines[0] 是**最下面**那一行 → 对应最新的一条
-      const entry = visible[visible.length - 1 - i];
-      if (!entry) {
+      if (label === undefined) continue;
+      const block = blocks[i];
+      const entry = entries[entries.length - 1 - i];
+      if (block === undefined || entry === undefined) {
         label.set('');
         continue;
       }
-      label.set(this.options.translate(entry.key, this.resolveParams(entry.params)));
+      label.set(block.lines.join('\n'));
       label.setColor(CATEGORY_COLORS[entry.category]);
-      // 越旧越暗：最旧的一行约 0.45
-      label.root.alpha = 1 - (i / Math.max(1, visible.length - 1)) * 0.55;
+      label.root.y = block.y;
+      // 越旧越暗：最旧的一条约 0.45
+      label.root.alpha = 1 - (i / Math.max(1, blocks.length - 1)) * 0.55;
     }
+  }
+
+  /**
+   * 复盘时把整块日志**提到结算层之上**，退出时放回原处。
+   *
+   * ⚠️ 为什么只要这一处：结算面板是场景 root 的最后一个子节点，
+   * 复盘留在 `hud` 里会被它那层半透明黑幕压暗（见文件头）。
+   * 这里**只重排节点**，不碰任何数据。
+   */
+  private syncLayer(wantTop: boolean): void {
+    const parent = this.root.parent;
+    if (wantTop) {
+      if (this.homeParent === null && parent !== null) this.homeParent = parent;
+      const top = this.homeParent?.parent;
+      if (top !== null && top !== undefined && parent !== top) top.addChild(this.root);
+      return;
+    }
+    if (this.homeParent !== null && parent !== this.homeParent) this.homeParent.addChild(this.root);
   }
 
   /**
@@ -174,22 +249,25 @@ export class LogPanel {
    *
    * 行标签是**一次性建满**的（避免反复 new Text），所以缩放时不能
    * 重建，只能改它们的坐标、字号与面板矩形。行距同样按系数走 ——
-   * 只放大框不放大行距，十行会挤在面板顶部。
+   * 只放大框不放大行距，十条会挤在面板顶部。
+   *
+   * ⚠️ 缩放的只是**位置与字号**：文本块的分行由 `layoutFeed` 每帧重算
+   * （所以这里把指纹清空，强制下一帧重排一次）。
    */
   setUiScale(scale: number, rect: { readonly x: number; readonly y: number; readonly w: number; readonly h: number }): void {
+    this.rect = rect;
+    this.scale = scale;
     this.panel.set({ x: rect.x, y: rect.y, w: rect.w, h: rect.h });
     this.title.root.x = rect.x + Math.round(8 * scale);
     this.title.root.y = rect.y + Math.round(5 * scale);
     this.title.setSize(Math.max(1, Math.round(FONT.tiny * scale)));
-    const lineH = Math.max(1, Math.round(LINE_H * scale));
-    const lineGap = Math.max(1, Math.round(LINE_GAP * scale));
-    const lineSize = Math.max(1, Math.round(FONT.tiny * scale));
-    for (let i = 0; i < this.lines.length; i += 1) {
-      const label = this.lines[i];
-      if (!label) continue;
-      label.root.x = rect.x + Math.round(8 * scale);
-      label.root.y = rect.y + rect.h - Math.round(8 * scale) - (i + 1) * (lineH + lineGap) + lineGap;
-      label.setSize(lineSize);
+    this.lineH = Math.max(1, Math.round(LINE_H * scale));
+    this.lineGap = Math.max(1, Math.round(LINE_GAP * scale));
+    this.lineSize = Math.max(1, Math.round(FONT.tiny * scale));
+    for (const label of this.lines) {
+      label.root.x = rect.x + Math.round(FEED_PAD_X * scale);
+      label.setSize(this.lineSize);
+      if (label.root.style.lineHeight !== this.lineH) label.root.style.lineHeight = this.lineH;
     }
     // 内容没变，但坐标变了 —— 强制下一帧重排一次
     this.lastSignature = '';
