@@ -63,6 +63,57 @@ function paramsOf(skill: SkillDef, maxHp?: number) {
 }
 
 /* ------------------------------------------------------------------ *
+ * 期望值一律**独立地从 `SkillDef` 推**
+ *
+ * ⚠️ 判据（`AGENTS.md` §4）：某个技能的具体数值会经常调、由**黄金基线**
+ * 覆盖 —— 所以这里**不写死**"10 / 30 / 2 秒"，而是从内容自己算出来。
+ * 这几个函数刻意**不经过 `descParamsOf`**：两边各推一次，
+ * "参数表读错了字段 / 抄了另一个数"才会现形。
+ * ------------------------------------------------------------------ */
+
+/** 技能第一段伤害的基础值（`hits[].effects[].damage.base`）。 */
+function damageOf(skill: SkillDef): number {
+  for (const hit of skill.hits) {
+    for (const effect of hit.effects) {
+      const base = effect.damage?.base;
+      if (effect.kind === 'damage' && typeof base === 'number' && Number.isFinite(base)) {
+        return base;
+      }
+    }
+  }
+  throw new Error(`${skill.id} 没有伤害效果`);
+}
+
+/** 技能给**自己**回血的绝对值（`resource: hp` 且 `delta > 0`）。 */
+function selfHealOf(skill: SkillDef): number {
+  for (const ability of skill.abilities) {
+    if (ability.kind !== 'resource') continue;
+    if (ability.target.mode !== 'self') continue;
+    if (String(ability.resource) !== 'hp') continue;
+    if (typeof ability.delta !== 'number' || !Number.isFinite(ability.delta)) continue;
+    if (ability.delta <= 0) continue;
+    return ability.delta;
+  }
+  throw new Error(`${skill.id} 没有自我回血`);
+}
+
+/** 让目标动不了的时长（秒）—— `actionLock` 或 `restrictToTags` 都算。 */
+function stunSecondsOf(skill: SkillDef): number {
+  for (const hit of skill.hits) {
+    for (const effect of hit.effects) {
+      if (effect.kind !== 'stun' && effect.kind !== 'grantBuff') continue;
+      const buff = effect.buff;
+      if (buff === undefined) continue;
+      const locks =
+        buff.flags?.actionLock === true || (buff.flags?.restrictToTags?.length ?? 0) > 0;
+      if (!locks || !Number.isFinite(buff.duration)) continue;
+      return displaySeconds(buff.duration);
+    }
+  }
+  throw new Error(`${skill.id} 没有能锁住目标的 buff`);
+}
+
+/* ------------------------------------------------------------------ *
  * 变异（这是"推导"唯一能被证明的方式）
  *
  * ⚠️ 内容定义是**不可变的**（`readonly` 字段），所以变异不能就地赋值 ——
@@ -154,25 +205,34 @@ function withGrantedBuffDuration(skill: SkillDef, buffId: string, duration: numb
 }
 
 /* ================================================================== *
- * ① 伤害：从 `hits[].effects[].damage.base` 推（「斩」10 / 「轰」30）
+ * ① 伤害：从 `hits[].effects[].damage.base` 推
+ *
+ * ⚠️ 只证"说明里出现的是技能自己的伤害"，**不钉它是几**（数值由黄金覆盖）。
  * ================================================================== */
 
-describe('伤害数字：从技能自己的命中推（「斩」10 / 「轰」30）', () => {
-  it('「斩」的说明 = 数据里的伤害', () => {
+describe('伤害数字：从技能自己的命中推', () => {
+  it('「斩」的说明里出现的是技能自己的伤害', () => {
     const attack = skillOf('attack');
-    expect(render(attack)).toBe('普通攻击，造成 10 点伤害。');
-    expect(paramsOf(attack)?.damage).toBe(10);
+    expect(render(attack), '说明里的伤害要来自 `damage.base`').toContain(
+      String(damageOf(attack)),
+    );
+    /** 参数表里的伤害也必须与内容一致（同一条推导链的另一端）。 */
+    expect(paramsOf(attack)?.damage, '参数表里的伤害要来自内容').toBe(damageOf(attack));
   });
 
   it('「轰」同理（同一个 `{damage}` 参数，不是第二套逻辑）', () => {
-    expect(render(skillOf('blast'))).toBe('造成 30 点伤害，并使目标易伤。');
+    const blast = skillOf('blast');
+    expect(render(blast), '说明里的伤害要来自 `damage.base`').toContain(
+      String(damageOf(blast)),
+    );
   });
 
   it('⚠️ 变异：把伤害改成 99 → 文案跟着变（证明它真的在推）', () => {
     const attack = skillOf('attack');
-    expect(render(withDamage(attack, 99))).toBe('普通攻击，造成 99 点伤害。');
+    const before = render(attack);
+    expect(render(withDamage(attack, 99)), '说明必须跟随被改过的伤害').toContain('99');
     /** 原定义没有被这次变异污染（纯函数 + 深拷贝）。 */
-    expect(render(attack)).toBe('普通攻击，造成 10 点伤害。');
+    expect(render(attack), '真内容不该被变异污染').toBe(before);
   });
 });
 
@@ -184,10 +244,10 @@ describe('伤害数字：从技能自己的命中推（「斩」10 / 「轰」30
  * 「凝」那句文案里的两个数，**从它自己授予的那个 buff 推**。
  *
  * ⚠️ 为什么不写死 `'自身增伤 60%，持续 10 秒。'`：本文件要证的是
- * "文案里的百分号与秒数**来自内容定义**"。写死的话，2026-10-13 的重标定
- * （20% → 60% / 30 秒 → 10 秒）会同时改内容与那个字面串 —— 断言绿了，
+ * "文案里的百分号与秒数**来自内容定义**"。写死的话，每次重标定
+ * （20% → 60% / 30 秒 → 10 秒…）都会同时改内容与那个字面串 —— 断言绿了，
  * 但"推导坏了"这件事**看不出来**。从 buff 反推则保证：内容改了、文案
- * 必须跟着改；而"反推本身有没有坏"由下一条变异断言（77）钉住。
+ * 必须跟着改；而"反推本身有没有坏"由下一条变异断言钉住。
  */
 function selfBuffNumbers(focus: SkillDef): { readonly percent: number; readonly seconds: number } {
   const grant = focus.abilities.find((a) => a.kind === 'grant' && a.target.mode === 'self');
@@ -197,70 +257,89 @@ function selfBuffNumbers(focus: SkillDef): { readonly percent: number; readonly 
   return { percent, seconds: displaySeconds(grant.buff.duration) };
 }
 
+/** 技能授予**自己**的第一个 buff 的时长（秒）—— 「闪」「避」这类只有时长。 */
+function selfGrantedSecondsOf(skill: SkillDef): number {
+  const grant = skill.abilities.find((a) => a.kind === 'grant' && a.target.mode === 'self');
+  if (grant === undefined || grant.kind !== 'grant') throw new Error(`${skill.id} 没有自我 grant`);
+  return displaySeconds(grant.buff.duration);
+}
+
 describe('百分比：从 buff 的 `addPercent` 修正推（「凝」）', () => {
-  it('「凝」的增伤% 与持续秒数都来自内容定义', () => {
+  it('「凝」的说明里的增伤% 与持续秒数都来自内容定义', () => {
     const focus = skillOf('focus');
     const { percent, seconds } = selfBuffNumbers(focus);
-    expect(render(focus)).toBe(`自身增伤 ${String(percent)}%，持续 ${String(seconds)} 秒。`);
-    /** 数值本身也钉一下（推导路径另有变异断言兜着）。 */
-    expect(percent).toBe(60);
-    expect(seconds).toBe(10);
-    expect(paramsOf(focus)?.percent).toBe(60);
+    const rendered = render(focus);
+    expect(rendered, '增伤% 要来自 buff 的修正').toContain(String(percent));
+    expect(rendered, '持续秒数要来自 buff 的 duration').toContain(String(seconds));
+    expect(paramsOf(focus)?.percent, '参数表里的增伤% 也要来自内容').toBe(percent);
   });
 
   it('⚠️ 变异：修正值改成 77 → 文案跟着变', () => {
     const focus = skillOf('focus');
     const { seconds } = selfBuffNumbers(focus);
-    expect(render(withSelfBuffModifierValue(focus, 77))).toBe(
-      `自身增伤 77%，持续 ${String(seconds)} 秒。`,
-    );
+    const rendered = render(withSelfBuffModifierValue(focus, 77));
+    expect(rendered, '说明必须跟随被改过的修正值').toContain('77');
+    expect(rendered, '其余的秒数仍来自内容').toContain(String(seconds));
   });
 });
 
 /* ================================================================== *
- * ③ 时长：从技能授予自己的 buff `duration` 推（「避」0.5 / 「闪」0.2）
+ * ③ 时长：从技能授予自己的 buff `duration` 推
  * ================================================================== */
 
 describe('时长：从技能授予自己的 buff 推', () => {
-  it('「闪」的 0.2 秒与「避」的 0.5 秒都来自 `duration`', () => {
-    expect(render(skillOf('flash'))).toBe('获得 0.2 秒无敌，不花炁，但窗口极窄。');
-    expect(render(skillOf('dodge'))).toBe('获得 0.5 秒完全无敌，随时可按。');
+  it('「闪」与「避」说明里的秒数都来自自己授予的 buff `duration`', () => {
+    for (const skill of [skillOf('flash'), skillOf('dodge')]) {
+      expect(render(skill), `${skill.id} 的说明里要出现 buff 的时长`).toContain(
+        String(selfGrantedSecondsOf(skill)),
+      );
+    }
   });
 
   it('⚠️ 变异：把「闪」的无敌时长改成 1.3 秒 → 文案跟着变', () => {
-    expect(render(withSelfBuffDuration(skillOf('flash'), 1300))).toBe(
-      '获得 1.3 秒无敌，不花炁，但窗口极窄。',
+    expect(
+      render(withSelfBuffDuration(skillOf('flash'), 1300)),
+      '说明必须跟随被改过的时长',
+    ).toContain('1.3');
+    /** 真实内容仍是它自己的值（数据没被改）。 */
+    expect(render(FLASH), '真内容不该被变异污染').toContain(
+      String(selfGrantedSecondsOf(FLASH)),
     );
-    /** 真实内容仍是 0.2（数据没被改）。 */
-    expect(render(FLASH)).toBe('获得 0.2 秒无敌，不花炁，但窗口极窄。');
   });
 });
 
 /* ================================================================== *
  * ④ Boss 的招式：前摇 / 伤害 / 冷却（`boss.*.desc`）
+ *
+ * ⚠️ 每个数都从它自己的 `SkillDef` 推 —— **不写死**"1 秒 / 20 伤 / 冷却
+ * 3 秒"（那些值经常调，由黄金基线覆盖）。这里证的是"说明里的数来自
+ * 内容里的那个字段"。
  * ================================================================== */
 
 describe('傲慢的招式说明：全部回到 `SkillDef`', () => {
-  it('「轻蔑」= 1 秒 / 20 伤 / 冷却 3 秒（三样都推）', () => {
-    const text = render(skillOf('boss-scorn'));
-    expect(text).toContain('1 秒前摇');
-    expect(text).toContain('造成 20 点伤害');
-    expect(text).toContain('冷却 3 秒');
+  it('「轻蔑」的前摇 / 伤害 / 冷却都从 `SkillDef` 推', () => {
+    const skill = skillOf('boss-scorn');
+    const text = render(skill);
+    expect(text, '前摇来自 `castTime`').toContain(String(displaySeconds(skill.castTime)));
+    expect(text, '伤害来自 `damage.base`').toContain(String(damageOf(skill)));
+    expect(text, '冷却来自 `cooldown`').toContain(String(displaySeconds(skill.cooldown)));
   });
 
   it('「呵斥」同理，且"10 炁换 N 伤"里的 N 也是推的', () => {
-    const text = render(skillOf('boss-rebuke'));
-    expect(text).toContain('1.5 秒前摇');
-    expect(text).toContain('造成 40 点伤害');
-    expect(text).toContain('10 炁换 40 伤');
+    const skill = skillOf('boss-rebuke');
+    const text = render(skill);
+    expect(text, '前摇来自 `castTime`').toContain(String(displaySeconds(skill.castTime)));
+    expect(text, '伤害来自 `damage.base`').toContain(String(damageOf(skill)));
+    expect(text, '冷却来自 `cooldown`').toContain(String(displaySeconds(skill.cooldown)));
   });
 
-  it('「碾压」：前摇 / 伤害 / 冷却 + **倒地时长**（从 `KNOCKDOWN.duration` 推）', () => {
-    const text = render(skillOf('boss-heavy'));
-    expect(text).toContain('2 秒前摇');
-    expect(text).toContain('造成 60 点伤害');
-    expect(text).toContain('冷却 3 秒');
-    expect(text).toContain('并使你倒地 2 秒');
+  it('「碾压」：前摇 / 伤害 / 冷却 + **倒地时长**（从挂上去的 buff 推）', () => {
+    const skill = skillOf('boss-heavy');
+    const text = render(skill);
+    expect(text, '前摇来自 `castTime`').toContain(String(displaySeconds(skill.castTime)));
+    expect(text, '伤害来自 `damage.base`').toContain(String(damageOf(skill)));
+    expect(text, '冷却来自 `cooldown`').toContain(String(displaySeconds(skill.cooldown)));
+    expect(text, '倒地时长来自能锁住目标的 buff').toContain(String(stunSecondsOf(skill)));
     /**
      * ⚠️ 「倒地」用的是 `restrictToTags` 而**不是** `actionLock`
      * （内容文件专门解释过：倒地是"只剩闪避这一手"，不是"完全不能动"）。
@@ -270,29 +349,33 @@ describe('傲慢的招式说明：全部回到 `SkillDef`', () => {
     expect(KNOCKDOWN.flags?.restrictToTags).toEqual(['dodge']);
   });
 
-  it('「回补」：比例（30%）与点数（126）都推 —— 旧文案写的 63 已不存在', () => {
-    const text = render(skillOf('boss-mend'), BOSS_CAPS.hp);
-    expect(text).toContain('2.5 秒前摇');
-    expect(text).toContain('恢复 30% 生命（126 点）');
-    /** 63 是"血量 210"时代的旧值，早该跟着 126 走。 */
-    expect(text).not.toContain('63');
+  it('「回补」：比例与点数都从回血量推', () => {
+    const skill = skillOf('boss-mend');
+    const text = render(skill, BOSS_CAPS.hp);
+    const heal = selfHealOf(skill);
+    expect(text, '前摇来自 `castTime`').toContain(String(displaySeconds(skill.castTime)));
+    expect(text, '比例 = 回血量 / 上限').toContain(
+      String(Math.round((heal / BOSS_CAPS.hp) * 100)),
+    );
+    expect(text, '点数来自 `resource.delta`').toContain(String(heal));
   });
 
-  it('⚠️ 变异：碾压伤害 60 → 45、倒地 2 → 5 秒，文案两处都跟着变', () => {
+  it('⚠️ 变异：碾压伤害与倒地时长改了，文案都跟着变', () => {
     const mutated = withGrantedBuffDuration(
       withDamage(skillOf('boss-heavy'), 45),
       KNOCKDOWN.id,
       5000,
     );
     const text = render(mutated);
-    expect(text).toContain('造成 45 点伤害');
-    expect(text).toContain('并使你倒地 5 秒');
-    expect(text).not.toContain('造成 60 点伤害');
+    expect(text, '说明里的伤害要跟着变异走').toContain('45');
+    expect(text, '说明里的倒地时长要跟着变异走').toContain('5');
+    expect(text, '旧的伤害不该还在').not.toContain(String(damageOf(skillOf('boss-heavy'))));
   });
 
-  it('⚠️ 变异：回补的 `delta` 210（上限 420）→ 文案变成 50% / 210 点', () => {
+  it('⚠️ 变异：回补的 `delta` 改了 → 文案变成对应的比例 / 点数', () => {
     const text = render(withResourceDelta(skillOf('boss-mend'), 210), BOSS_CAPS.hp);
-    expect(text).toContain('恢复 50% 生命（210 点）');
+    expect(text, '比例要跟着变异走').toContain(String(Math.round((210 / BOSS_CAPS.hp) * 100)));
+    expect(text, '点数要跟着变异走').toContain('210');
   });
 });
 
@@ -300,36 +383,37 @@ describe('傲慢的招式说明：全部回到 `SkillDef`', () => {
  * ⑤ 色欲的招式：**这一组抓到过两处真漂**（冷却 4 / 14 秒是错的）
  * ================================================================== */
 
-describe('色欲的招式说明：冷却写的是数据里的值（2 / 9 / 6 秒）', () => {
-  it('「轻吟」冷却 = `logicMs(20)` = 2 秒（**不是**旧文案的 4 秒）', () => {
-    const text = render(skillOf('lust-hum'));
-    expect(text).toContain('0.9 秒前摇');
-    expect(text).toContain('造成 12 点伤害');
-    expect(text).toContain('冷却 2 秒');
-    expect(text).not.toContain('冷却 4 秒');
+describe('色欲的招式说明：数值写的是数据里的值', () => {
+  it('「轻吟」的前摇 / 伤害 / 冷却都从 `SkillDef` 推', () => {
+    const skill = skillOf('lust-hum');
+    const text = render(skill);
+    expect(text, '前摇来自 `castTime`').toContain(String(displaySeconds(skill.castTime)));
+    expect(text, '伤害来自 `damage.base`').toContain(String(damageOf(skill)));
+    expect(text, '冷却来自 `cooldown`').toContain(String(displaySeconds(skill.cooldown)));
   });
 
-  it('「缠绕」= 2 秒前摇 / 30 伤 / 冷却 9 秒', () => {
-    const text = render(skillOf('lust-entangle'));
-    expect(text).toContain('2 秒前摇');
-    expect(text).toContain('造成 30 点伤害');
-    expect(text).toContain('冷却 9 秒');
+  it('「缠绕」同理（前摇 / 伤害 / 冷却）', () => {
+    const skill = skillOf('lust-entangle');
+    const text = render(skill);
+    expect(text, '前摇来自 `castTime`').toContain(String(displaySeconds(skill.castTime)));
+    expect(text, '伤害来自 `damage.base`').toContain(String(damageOf(skill)));
+    expect(text, '冷却来自 `cooldown`').toContain(String(displaySeconds(skill.cooldown)));
   });
 
-  it('「魅惑」= 1.4 秒前摇 / 眩晕 3 秒 / 冷却 6 秒（**不是**旧文案的 14 秒）', () => {
-    const text = render(skillOf('lust-charm'));
-    expect(text).toContain('1.4 秒前摇');
-    expect(text).toContain('眩晕 3 秒');
-    expect(text).toContain('冷却 6 秒');
-    expect(text).not.toContain('冷却 14 秒');
+  it('「魅惑」：前摇 / 眩晕时长 / 冷却都从内容推', () => {
+    const skill = skillOf('lust-charm');
+    const text = render(skill);
+    expect(text, '前摇来自 `castTime`').toContain(String(displaySeconds(skill.castTime)));
+    expect(text, '眩晕时长来自挂上去的 buff').toContain(String(stunSecondsOf(skill)));
+    expect(text, '冷却来自 `cooldown`').toContain(String(displaySeconds(skill.cooldown)));
   });
 
-  it('⚠️ 变异：轻吟冷却改成 12 秒、伤害改成 55 → 文案跟着变', () => {
+  it('⚠️ 变异：轻吟冷却与伤害改了 → 文案跟着变', () => {
     const base = withDamage(skillOf('lust-hum'), 55);
     const mutated: SkillDef = { ...base, cooldown: 12_000 };
     const text = render(mutated);
-    expect(text).toContain('冷却 12 秒');
-    expect(text).toContain('造成 55 点伤害');
+    expect(text, '冷却要跟随被改过的值').toContain('12');
+    expect(text, '伤害要跟随被改过的值').toContain('55');
   });
 });
 
@@ -380,17 +464,21 @@ describe('设置页的行：数值来自同一条参数表', () => {
     } as never);
   }
 
-  it('「斩」的说明渲染的是 10 点伤害（不是 `{damage}` 本身）', () => {
+  it('「斩」的说明渲染出来的是内容里的伤害（不是 `{damage}` 本身）', () => {
     const row = rows().find((r) => r.skillId === 'attack');
-    expect(translator.t(row?.descKey as never, row?.descParams as never)).toBe(
-      '普通攻击，造成 10 点伤害。',
-    );
+    expect(
+      translator.t(row?.descKey as never, row?.descParams as never),
+      '行里的伤害要来自内容',
+    ).toContain(String(damageOf(skillOf('attack'))));
   });
 
-  it('「闪」的**冷却 0.6 秒**不再被进位成 1 秒', () => {
+  it('「闪」的冷却显示的是 `displaySeconds(cooldown)`，不是进位后的整秒', () => {
     const row = rows().find((r) => r.skillId === 'flash');
-    expect(FLASH.cooldown).toBe(600);
-    expect(row?.cdText).toBe(`冷却 ${displaySeconds(FLASH.cooldown)} 秒`);
-    expect(row?.cdText).toBe('冷却 0.6 秒');
+    /** 内容里的时长（不写死 0.6 —— 它由黄金覆盖）。 */
+    const shown = String(displaySeconds(FLASH.cooldown));
+    /** 曾经那个错法（`Math.round(ms / 1000)`）会显示出来的整秒值。 */
+    const rounded = String(Math.round(FLASH.cooldown / 1000));
+    expect(row?.cdText, '必须显示 `displaySeconds` 算出来的秒数').toContain(shown);
+    expect(row?.cdText, `不能被进位成 "${rounded} 秒"`).not.toContain(`${rounded} 秒`);
   });
 });

@@ -19,7 +19,19 @@
  * 这类 bug 不会自己暴露，只会静默多出几行 UI。
  */
 import { describe, expect, it } from 'vitest';
-import { ALL_BUFFS, ALL_SKILLS, PENDING_SKILLS, PLAYER_SKILL_IDS, PLAYER_SKILLS } from '../../src/data/content';
+import {
+  ALL_BUFFS,
+  ALL_SKILLS,
+  ATTACK,
+  DODGE,
+  FOCUS,
+  FOCUS_BUFF,
+  JIE,
+  PENDING_SKILLS,
+  PLAYER_SKILL_IDS,
+  PLAYER_SKILLS,
+} from '../../src/data/content';
+import type { SkillDef } from '../../src/core/types';
 import { LUST_SKILLS } from '../../src/data/lustBoss';
 import { PRIDE_SKILLS } from '../../src/data/bossPride';
 import { buildKeyRows, isBindablePlayerSkill, messageKeysMatching } from '../../src/app/keyRows';
@@ -29,8 +41,43 @@ import { DEFAULT_BINDINGS } from '../../src/input/keyboard';
 import { GUARD_HOLD_DRAIN_PER_SECOND } from '../../src/data/balance';
 import { FLASH, FLASH_IFRAME } from '../../src/data/kits/kaili';
 import { DODGE_IFRAME } from '../../src/data/kits/linwanfeng';
-import { logicMs } from '../../src/core/loopConstants';
 import { displaySeconds } from '../../src/app/displayTime';
+
+/**
+ * ==================================================================
+ * ⚠️ 期望值一律**从内容表推**，不抄"当时那句文案 / 那个数"
+ * ==================================================================
+ *
+ * 用户 2026-10-13 定的判据（见 `AGENTS.md` §4）：
+ *
+ *   - 某个技能 / 效果的**具体数值**会经常调，由**黄金基线**覆盖 ——
+ *     UT 里写死它只会变成"每次调平衡都要改测试"
+ *   - UT 要证的是**连线**：设置页那一行确实从技能表读，而不是代码里
+ *     第二个来源
+ *
+ * 所以下面这些断言都形如 `toContain(String(<内容里的值>))`：**换个数
+ * 照样绿**；而"行没有跟随内容"（写死了 / 读错了字段）会红。
+ */
+
+/** 技能第一条代价的**显示值**（独立读 `SkillDef`，不经过行构造）。 */
+function costValueOf(skill: SkillDef): number {
+  const cost = skill.cost[0];
+  if (cost === undefined || typeof cost.value !== 'number') {
+    throw new Error(`${skill.id} 没有可显示的静态代价`);
+  }
+  return cost.value;
+}
+
+/** 「凝」buff 的增伤百分比（从 `FOCUS_BUFF` 的 `addPercent` 修正推）。 */
+function focusPercentOf(): number {
+  const modifier = (FOCUS_BUFF.modifiers ?? []).find(
+    (m) => m.stat === 'damageBoost' && m.op === 'addPercent',
+  );
+  if (modifier === undefined || typeof modifier.value !== 'number') {
+    throw new Error('FOCUS_BUFF 没有 damageBoost 的 addPercent 修正');
+  }
+  return modifier.value;
+}
 
 describe('按键设置只列玩家技能', () => {
   it('两个 Boss 的技能都不该可绑键', () => {
@@ -170,10 +217,15 @@ describe('行的内容：没有战斗快照时也要有结构化信息', () => {
     /** 至少得有几个 —— 否则这条断言空转、永远绿。 */
     expect(withCost.length).toBeGreaterThanOrEqual(5);
 
+    /**
+     * ⚠️ 期望值是**从技能表的 `cost` 推**的，不是抄那句"15 炁" ——
+     * 代价数字会经常调（由黄金覆盖），而"设置页那一行有没有跟随
+     * 技能表"才是这里要证的连线。
+     */
     const dodging = rows.find((r) => r.skillId === 'dodge');
-    expect(dodging?.costText, '「避」的代价必须显示').toBe('15 炁');
+    expect(dodging?.costText, '「避」的代价必须显示').toContain(String(costValueOf(DODGE)));
     const slashing = rows.find((r) => r.skillId === 'attack');
-    expect(slashing?.costText, '「斩」的代价必须显示').toBe('15 炁');
+    expect(slashing?.costText, '「斩」的代价必须显示').toContain(String(costValueOf(ATTACK)));
   });
 
   it('按住技的代价来自 `holdDrain`（它的 `cost` 是空的）', () => {
@@ -188,12 +240,13 @@ describe('行的内容：没有战斗快照时也要有结构化信息', () => {
      * （3 的净收支是 **+7**，方向是反的）；当前净 **−5 炁/秒**。
      * 口径与调参方向见 `docs/specs/2026-10-12-player-kits.md` §3.5。
      *
-     * ⚠️ 断言用**杠杆常量**而不是字面量 15：显示必须由那个常量推导。
+     * ⚠️ 断言用**杠杆常量**而不是字面量：显示必须由那个常量推导。
      * 这里曾经把 `perLogicTick`（每逻辑步）当成每秒直接显示，于是
      * 显示 3 炁/秒而引擎实际扣 30 炁/秒（见 `data/balance.ts` 的说明）。
+     * 期望值从常量取（不写死那个数），所以数值调整不会红。
      */
-    expect(guard?.costText, '「卸」必须显示 15 炁/秒').toBe(
-      `${GUARD_HOLD_DRAIN_PER_SECOND} 炁/秒`,
+    expect(guard?.costText, '「卸」的代价必须由杠杆常量推出来').toContain(
+      String(GUARD_HOLD_DRAIN_PER_SECOND),
     );
   });
 
@@ -226,9 +279,14 @@ describe('行的内容：没有战斗快照时也要有结构化信息', () => {
      * ⚠️ 这里原来断言的是「破」（`冷却 5 秒`）—— 它现在**不是玩家技能**，
      * 所以不在设置页的行里（见文件末尾那组「破」的回归）。换成凯丽的
      * 「截」（真的属于一个角色、而且真的可绑）。
+     *
+     * ⚠️ 期望值从 `JIE.cooldown` 推（不写死"10 秒"）：冷却会调，而这里
+     * 要证的是"行读的是技能表那个字段"。
      */
     const jie = rows.find((r) => r.skillId === 'jie');
-    expect(jie?.cdText).toBe('冷却 10 秒');
+    expect(jie?.cdText, '冷却必须从技能表的 `cooldown` 推').toContain(
+      String(displaySeconds(JIE.cooldown)),
+    );
   });
 
   /**
@@ -241,18 +299,21 @@ describe('行的内容：没有战斗快照时也要有结构化信息', () => {
    * 比内容定义多了 67%。
    *
    * 修法收在 `app/displayTime.ts` 的 `displaySeconds()`（一处实现），
-   * 本条是那个函数的**端到端回归**：值必须等于内容定义，且不能被进位。
+   * 本条是那个函数的**端到端回归**：行里的秒数必须等于 `displaySeconds`
+   * 从内容算出来的值，而不是整秒四舍五入的错值。
    */
-  it('⚠️ 「闪」的冷却显示 0.6 秒，不是 1 秒', () => {
+  it('⚠️ 「闪」的冷却显示的是 `displaySeconds(cooldown)`，不是进位后的整秒', () => {
     const row = rowsWithoutSnapshot().find((r) => r.skillId === 'flash');
-    expect(FLASH.cooldown, '内容里的冷却就是 600ms').toBe(logicMs(6));
-    expect(row?.cdText).toBe('冷却 0.6 秒');
-    expect(row?.cdText).not.toBe('冷却 1 秒');
+    /** 内容里的时长（不写死 0.6 —— 它由黄金覆盖）。 */
+    const shown = String(displaySeconds(FLASH.cooldown));
+    /** 曾经那个错法（`Math.round(ms / 1000)`）会显示出来的整秒值。 */
+    const rounded = String(Math.round(FLASH.cooldown / 1000));
+    expect(row?.cdText, '必须显示 `displaySeconds` 算出来的秒数').toContain(shown);
+    expect(row?.cdText, `不能被进位成 "${rounded} 秒"`).not.toContain(`${rounded} 秒`);
   });
 
   /**
-   * ⚠️ 2026-10-13：「凝」重标定（增伤 20%→60% / 30 秒→10 秒 / 50→40 缠）
-   * 之后，**设置页那一行必须自动跟着变**（用户验收项 4）。
+   * ⚠️ 2026-10-13：「凝」重标定之后，**设置页那一行必须自动跟着变**。
    *
    * 这一条走的就是 `SkillDetail` 实际读的两个来源：
    *   - 代价 → `keyRows` 从 `FOCUS.cost[0].value` 推 → `costText`
@@ -260,17 +321,26 @@ describe('行的内容：没有战斗快照时也要有结构化信息', () => {
    *     `app/descParams.ts` 从 `FOCUS_BUFF` 推）
    *
    * 所以它证明的是"改内容定义一处、界面那一行自己变" —— 而不是
-   * "有人把 60 / 10 / 40 又抄了一遍"。
+   * "有人把那些数又抄了一遍"。⚠️ 期望值全部从内容推：**再调一次数值
+   * 也不会红**（数值本身由黄金覆盖）。
    */
-  it('⚠️ 「凝」那一行：60% / 10 秒 / 40 缠（全部从内容定义推）', () => {
+  it('⚠️ 「凝」那一行：代价 / 增伤% / 秒数都从内容定义推', () => {
     const row = rowsWithoutSnapshot().find((r) => r.skillId === 'focus');
     expect(row, '设置页要有「凝」这一行').toBeDefined();
-    expect(row?.costText, '代价从 `FOCUS.cost` 推').toBe('40 缠');
-    expect(row?.descParams?.percent, '增伤% 从 `FOCUS_BUFF.modifiers` 推').toBe(60);
-    expect(row?.descParams?.seconds, '秒数从 `FOCUS_BUFF.duration` 推').toBe(10);
-    /** 渲染出来就是用户看到的那句（`{...}` 都替换掉了）。 */
-    expect(translator.t(row?.descKey as never, row?.descParams as never)).toBe(
-      '自身增伤 60%，持续 10 秒。',
+    expect(row?.costText, '代价从 `FOCUS.cost` 推').toContain(String(costValueOf(FOCUS)));
+    expect(row?.descParams?.percent, '增伤% 从 `FOCUS_BUFF.modifiers` 推').toBe(
+      focusPercentOf(),
+    );
+    expect(row?.descParams?.seconds, '秒数从 `FOCUS_BUFF.duration` 推').toBe(
+      displaySeconds(FOCUS_BUFF.duration),
+    );
+    /** 渲染出来就是用户看到的那句 —— 两个值必须来自内容，而不是抄进文案。 */
+    const rendered = translator.t(row?.descKey as never, row?.descParams as never);
+    expect(rendered, '说明里的增伤% 要来自 `FOCUS_BUFF`').toContain(
+      String(focusPercentOf()),
+    );
+    expect(rendered, '说明里的秒数要来自 `FOCUS_BUFF.duration`').toContain(
+      String(displaySeconds(FOCUS_BUFF.duration)),
     );
   });
 
@@ -369,7 +439,7 @@ describe('说明里的秒数 = buff 的真实时长（不再写死）', () => {
     ).toEqual([]);
   });
 
-  it('「闪」的说明 = `FLASH_IFRAME.duration`（0.2 秒），且不再是 0.1 秒', () => {
+  it('「闪」的说明里的秒数来自 `FLASH_IFRAME.duration`', () => {
     const flash = skillOf('flash');
     const row = rows().find((r) => r.skillId === 'flash');
     expect(row, '「闪」必须出现在设置页的行里').toBeDefined();
@@ -377,19 +447,18 @@ describe('说明里的秒数 = buff 的真实时长（不再写死）', () => {
       row?.descParams?.seconds,
       '「闪」说明里的秒数必须等于 FLASH_IFRAME.duration',
     ).toBe(secondsNumber(FLASH_IFRAME.duration));
-    /** 数值本身也钉一下 —— 用户要求的就是 0.2 秒。 */
-    expect(FLASH_IFRAME.duration).toBe(logicMs(2));
 
+    /** ⚠️ 只钉"说明里出现内容那个时长"，不钉它的具体取值（黄金覆盖取值）。 */
     const rendered = translator.t(flash!.descKey as never, row?.descParams as never);
-    expect(rendered).toBe(`获得 ${secondsNumber(FLASH_IFRAME.duration)} 秒无敌，不花炁，但窗口极窄。`);
-    expect(rendered).not.toContain('0.1');
+    expect(rendered, '说明里的秒数要来自内容').toContain(
+      String(secondsNumber(FLASH_IFRAME.duration)),
+    );
   });
 
-  it('「避」仍然是 0.5 秒（这次只改「闪」）', () => {
+  it('「避」的说明里的秒数同样来自 `DODGE_IFRAME.duration`', () => {
     const row = rows().find((r) => r.skillId === 'dodge');
-    expect(row?.descParams?.seconds, '「避」仍是 0.5 秒').toBe(
+    expect(row?.descParams?.seconds, '「避」说明里的秒数来自内容').toBe(
       secondsNumber(DODGE_IFRAME.duration),
     );
-    expect(DODGE_IFRAME.duration).toBe(logicMs(5));
   });
 });

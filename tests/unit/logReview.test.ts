@@ -247,6 +247,24 @@ describe('logFeed：战斗中那一列的折行（父 agent 实测的裁切问�
   const MAX_PX = LAYOUT.log.w - FEED_PAD_X * 2;
   const SIZE = FONT.tiny;
 
+  /**
+   * 折行的**结构性**不变量（与那句话具体用了什么字无关）：
+   *   - 不丢字：所有行拼回去、去掉空格后与原文一致
+   *   - 不重排：每一行都是原文里**连续**的一段
+   *
+   * ⚠️ 不去断言"第一行等于哪几个字" —— 那是当时的文案（改词就红），
+   * 而这里要守的是"折行不丢字、不在不该断的地方造字"。
+   */
+  function expectFoldLosesNothing(text: string, lines: readonly string[]): void {
+    expect(lines.join('').replace(/ /g, ''), '折行不许丢字').toBe(text.replace(/ /g, ''));
+    let cursor = 0;
+    for (const line of lines) {
+      const at = text.indexOf(line, cursor);
+      expect(at, `这一行不是原文里连续的一段：${line}`).toBeGreaterThanOrEqual(0);
+      cursor = at + line.length;
+    }
+  }
+
   it('【关键】长句折成两行，**每一行都在面板里**（不再被裁掉）', () => {
     const text = '傲慢用「轻蔑」击中林晚风，造成 20 点伤害';
     const lines = wrapToWidth(text, MAX_PX, SIZE);
@@ -262,13 +280,24 @@ describe('logFeed：战斗中那一列的折行（父 agent 实测的裁切问�
     expect(wrapToWidth('战斗结束', MAX_PX, SIZE)).toEqual(['战斗结束']);
   });
 
-  it('断点选在空格处（"造成" 与数字之间），不在名字/词中间切开', () => {
-    const lines = wrapToWidth('傲慢用「轻蔑」击中林晚风，造成 20 点伤害', MAX_PX, SIZE);
-    expect(lines[1]).toBe('造成 20 点伤害');
+  it('折行不丢字，且该断在空格的地方就断在空格上', () => {
+    const text = '傲慢用「轻蔑」击中林晚风，造成 20 点伤害';
+    expectFoldLosesNothing(text, wrapToWidth(text, MAX_PX, SIZE));
+
     // 这一条更紧：多 6px 的宽容正是为了让「造成」不被劈成"造 / 成"
-    const tight = wrapToWidth('林晚风用「轰」击中傲慢，造成 10 点伤害', MAX_PX, SIZE);
-    expect(tight[0]).toBe('林晚风用「轰」击中傲慢，造成');
-    expect(tight[1]).toBe('10 点伤害');
+    const tightText = '林晚风用「轰」击中傲慢，造成 10 点伤害';
+    const tight = wrapToWidth(tightText, MAX_PX, SIZE);
+    expectFoldLosesNothing(tightText, tight);
+
+    /** 断点落在**空格**上（不是词的中间）—— 与具体是哪个词无关。 */
+    const head = tight[0] ?? '';
+    expect(tightText.startsWith(head), `第一行要是原文前缀：${head}`).toBe(true);
+    expect(tightText[head.length], '断点必须落在空格上').toBe(' ');
+
+    /** 而且确实用掉了 `FEED_BREAK_SLACK`：第一行比可用宽度宽，但仍在宽容内。 */
+    const headWidth = estimateWidth(head, SIZE);
+    expect(headWidth, '这一条应当用掉宽容（否则测不到那条路径）').toBeGreaterThan(MAX_PX);
+    expect(headWidth).toBeLessThanOrEqual(MAX_PX + FEED_BREAK_SLACK);
   });
 
   it('真的放不下时**省略而不是静默丢**（复盘里那句话是完整的）', () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BattleEngine } from '../../src/core/combat/battleState';
 import { applyBuff } from '../../src/core/buffs';
-import { ENTROPY_CLOCK } from '../../src/data/entities/entropyClock';
+import { ENTROPY_CLOCK, POTENTIAL_PER_INTELLIGENCE } from '../../src/data/entities/entropyClock';
 import { ALL_BUFFS, ALL_SKILLS, FOCUS_BUFF } from '../../src/data/content';
 import type { Combatant, StatModifier } from '../../src/core/types';
 
@@ -100,19 +100,35 @@ describe('属性溯源', () => {
     const engine = makeEngine(clockModifiers());
     const bd = engine.statsBreakdownOf('player')!;
     expect(bd.intelligence?.base).toBe(100);
-    expect(bd.intelligence?.add).toBe(2); // 熵之钟 +2 智力
-    expect(bd.intelligence?.flat.some((f) => f.sourceKey === 'entity.entropyClock.name')).toBe(true);
-    expect(bd.intelligence?.final).toBe(102);
+    /**
+     * ⚠️ 只证"这条修正**进了 add 层、并带着来源 key**" —— **不钉 +2**：
+     * 那是熵之钟当前调出来的数值，会经常调，由黄金基线覆盖
+     * （`AGENTS.md` §4）。写死它只会变成"每次调平衡都要改测试"。
+     */
+    expect(bd.intelligence?.add, '加法修正要进 add 层').toBeGreaterThan(0);
+    expect(
+      bd.intelligence?.flat.some((f) => f.sourceKey === 'entity.entropyClock.name'),
+      '加法修正要带来源 key',
+    ).toBe(true);
   });
 
   it('派生修正进 derived 层，且注明是派生来源', () => {
     const engine = makeEngine(clockModifiers());
     const bd = engine.statsBreakdownOf('player')!;
-    // 势能 = 0.1 × 智力 = 0.1 × 102 = 10.2
     const derived = bd.damageBoost?.derived ?? [];
     expect(derived.length).toBeGreaterThan(0);
     expect(derived.some((d) => d.sourceKey === 'entity.entropyClock.name')).toBe(true);
-    expect(bd.damageBoost?.percentSum).toBeCloseTo(10.2, 5);
+    /**
+     * **势能 = `POTENTIAL_PER_INTELLIGENCE` × 智力**（动态、跟着属性走）。
+     *
+     * ⚠️ 期望值从**内容常量 + 引擎算出来的智力**推，不写死 10.2 ——
+     * 那只是"智力 102"这一组取值下的结果，调一次就变。
+     */
+    const intelligence = engine.statsOf('player').intelligence;
+    expect(bd.damageBoost?.percentSum, '势能要按那个表达式算').toBeCloseTo(
+      POTENTIAL_PER_INTELLIGENCE * intelligence,
+      5,
+    );
   });
 
   it('溯源与真实计算一致（同一次求值）', () => {
@@ -173,12 +189,23 @@ describe('属性溯源', () => {
   });
 
   it('基础智力更高时，派生的增伤也更高（动态重算的连锁）', () => {
-    // 势能 = 0.1 × (智力 + 2)
     const low = makeEngine(clockModifiers(), { intelligence: 50 });
     const high = makeEngine(clockModifiers(), { intelligence: 150 });
-    expect(low.statsOf('player').damageBoost).toBeCloseTo(5.2, 5);
-    expect(high.statsOf('player').damageBoost).toBeCloseTo(15.2, 5);
-    expect(high.statsOf('player').damageBoost).toBeGreaterThan(low.statsOf('player').damageBoost);
+    const lowBoost = low.statsOf('player').damageBoost;
+    const highBoost = high.statsOf('player').damageBoost;
+    /**
+     * ⚠️ 只证**单调**（智力高 → 增伤高）与"按 `0.1 × 智力` 这条表达式
+     * 算"，不写死 5.2 / 15.2 —— 那是当前这一组取值下的结果。
+     */
+    expect(lowBoost, '势能要跟着智力走').toBeCloseTo(
+      POTENTIAL_PER_INTELLIGENCE * low.statsOf('player').intelligence,
+      5,
+    );
+    expect(highBoost, '势能要跟着智力走').toBeCloseTo(
+      POTENTIAL_PER_INTELLIGENCE * high.statsOf('player').intelligence,
+      5,
+    );
+    expect(highBoost).toBeGreaterThan(lowBoost);
   });
 
   void localeKeysUnused;

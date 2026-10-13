@@ -51,6 +51,57 @@
  *    `{"code":-32000,"message":"Not attached to an active page"}`）。
  * 3. **socket 关闭/出错 → 所有在途调用立刻失败**：不留下永远不会
  *    settle 的 Promise。页面重载、Chrome 崩溃、调试端口被人抢走都走这条。
+ *
+ * ==================================================================
+ * ⚠️⚠️ 第四条（2026-10-13 实测）：连上就开**焦点模拟**，否则按键会把
+ *     页面打成 `hidden`，rAF 全停 = 游戏主循环**永久死掉**
+ * ==================================================================
+ *
+ * **症状**：headless 下按一次键，`frameCount` 冻住、战斗 `tick` 停在 0，
+ * 而且**再也回不来**（`Page.bringToFront` / `setWebLifecycleState('active')`
+ * 都救不回）。
+ *
+ * **量出来的根因**（Chrome 154.0.8037.98 / `--headless=new`）：
+ * 用 `Input.dispatchKeyEvent` 派发**不带 `text` 载荷**的按键时，页面会收到
+ * `visibilitychange` → `document.visibilityState === 'hidden'`，Chrome 随即
+ * **停止投递 `requestAnimationFrame`**。Pixi 的 `Ticker` 正是靠 rAF 驱动
+ * （`Ticker._tick` 里 `update()` **返回之后**才
+ * `requestAnimationFrame(this._tick)` —— 见 `pixi.js/lib/ticker/Ticker.js`），
+ * 所以不是"降频"，是**整条链断掉**：一帧都不再进来，主循环永远不会被调用。
+ *
+ * 实测对照（每个 case 起一个全新 Chrome，按键后隔 2.2~2.5 秒读读数）：
+ *
+ * | 派发形状 | `document.visibilityState` | 独立 rAF 计数（2.2s） |
+ * |---|---|---|
+ * | `rawKeyDown`（无 `text`） | **hidden** | **2**（冻死） |
+ * | `keyDown`（无 `text`） | **hidden** | **3** |
+ * | `rawKeyDown` + `text: ' '`（非空即可） | visible | 134 |
+ * | `keyDown` + `text: 'a'` | visible | 133 |
+ * | `keyUp` / `char` / 鼠标移动 | visible | 151 |
+ * | `keyDown` Tab（无 `text`） | visible | ⚠️ **例外**（原因未查，只采到 visibility） |
+ *
+ * 也就是说：**触发条件与 `rawKeyDown` / `keyDown` 无关，只与"这次按键有没有
+ * `text` 载荷"有关**（目前只观察到 `Tab` 一个例外）—— 而方向键
+ * （`ArrowUp` 之类）**天然没有 text**，所以"给所有键补一个假 text" 这条修法
+ * 对方向键无效（`text: ''` 也不管用，实测仍 hidden）。
+ *
+ * ⚠️ 它与"肉鸽路径"**毫无关系**：在**首页**按一个游戏根本不处理的键
+ * （`a`）一样会冻；`?prepare=skip` 直接进战斗也一样会冻（只要按了键）。
+ * 那条"肉鸽冻、skip 不冻"的观察是**混淆**：skip 那条路是在按键之前读的
+ * 采样点。真正的判据只有一条 —— 按键事件带不带 `text`。
+ *
+ * **修法**：`Emulation.setFocusEmulationEnabled({ enabled: true })`。
+ * 开了之后**任何形状**的按键都不再隐藏页面（实测 `rawKeyDown` 无 `text`：
+ * visible，rAF 121~135/2.2s，`frameCount` / `tick` 持续增长）。
+ * 它同时让 `document.hasFocus()` 变成 `true` —— 与"真人在看的浏览器"
+ * 更接近，而不是更远。
+ *
+ * ⚠️ 放在 `connectCdp` 里**自动开**（而不是让每个调用方自己开）是**故意**的：
+ *   - 起 Chrome 的脚本不止一个，而 `tools/shot.mjs` 已经**正好 700 行**
+ *     （AGENTS.md §3），不该再为这件事动它；
+ *   - 这是"这个 headless 会话能不能活着"的属性，属于**连接**这一层，
+ *     不是每个脚本各自的业务。
+ * `focusEmulation: false` 可以关掉（唯一的理由是目标根本不是 page target）。
  */
 
 /** 单次 CDP 调用超时（`reject` 用的错误类型，便于调用方分辨）。 */
@@ -84,9 +135,11 @@ export class CdpError extends Error {
  * 同样可能永远不来（旧代码在这里也是无限等）。
  *
  * @param {string} wsUrl `http://…/json/list` 里那条 `webSocketDebuggerUrl`
- * @param {{ defaultTimeoutMs?: number, openTimeoutMs?: number, log?: (msg: string) => void }} opts
+ * @param {{ defaultTimeoutMs?: number, openTimeoutMs?: number, focusEmulation?: boolean, log?: (msg: string) => void }} opts
+ *   `focusEmulation` 默认 `true`（见文件头第四条：不开的话，**按键会
+ *   把页面打成 `hidden`、rAF 全停、游戏主循环永久死掉**）。
  */
-export async function connectCdp(wsUrl, { defaultTimeoutMs = 10_000, openTimeoutMs = 10_000, log } = {}) {
+export async function connectCdp(wsUrl, { defaultTimeoutMs = 10_000, openTimeoutMs = 10_000, focusEmulation = true, log } = {}) {
   const ws = new WebSocket(wsUrl);
   /** id → { resolve, reject, method, timer, startedAt } */
   const pending = new Map();
@@ -172,6 +225,28 @@ export async function connectCdp(wsUrl, { defaultTimeoutMs = 10_000, openTimeout
       /* 已经关了 */
     }
   }
+
+  /**
+   * **开焦点模拟**（第四条防线，见文件头）。
+   *
+   * ⚠️ 必须在 `message` 监听器**已经挂上之后**发（否则收不到回包），
+   * 也必须在调用方 `Page.navigate` **之前**发 —— 它是 target 级设置，
+   * 导航到游戏页面之后照样生效（实测）。
+   *
+   * ⚠️ **best-effort**：目标不是 page target（worker / browser_ui）时这条
+   * 命令会失败，而那种目标本来也不需要它。所以失败只记一行日志，**不**让
+   * 连接失败 —— 但一定要记，否则"按键又把页面打死了"会变成无法归因的谜。
+   */
+  async function enableFocusEmulation() {
+    try {
+      await call('Emulation.setFocusEmulationEnabled', { enabled: true }, 5000);
+      log?.('Emulation.setFocusEmulationEnabled <- 好（按键不会再让页面 hidden）');
+    } catch (err) {
+      log?.(`⚠️ Emulation.setFocusEmulationEnabled 失败（${err.message}）—— 按键可能把页面打成 hidden、rAF 全停`);
+    }
+  }
+
+  if (focusEmulation) await enableFocusEmulation();
 
   return { call, close, get pendingCount() { return pending.size; } };
 }
