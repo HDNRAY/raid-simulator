@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { BattleEngine } from '../../src/core/combat/battleState';
 import { buildPlayerKit, type PlayerKit } from '../../src/data/kit';
 import { applySkillTweaks } from '../../src/data/skillTweak';
+import { applyBuff } from '../../src/core/buffs';
+import { COMBO_WINDOW } from '../../src/data/kits/combo';
 import { ALL_QIJI } from '../../src/data/qiji';
 import { DODGE_CHARGE } from '../../src/data/kits/dodgeCharge';
 import { LIN_WANFENG_SKILLS } from '../../src/data/kits/linwanfeng';
@@ -357,51 +359,127 @@ describe('「避实击虚」：避 → 蓄势 → **下一次攻击伤害翻倍*
   });
 });
 
-describe('⚠️ 蓄势的**消耗契约**：每个能造成伤害的技能都要写那一条 `removeBuff`', () => {
+describe('⚠️ 蓄势的**消费契约**：已迁移到引擎级的 `consume`（不再手写 `removeBuff`）', () => {
   /**
    * ==================================================================
-   * 这条测试在防什么
+   * 这条测试在防什么（以及它**从哪一条改过来**）
    * ==================================================================
    *
-   * "用掉就消耗"在引擎里只能由**消耗方**的命中写 `removeBuff` 表达
-   * （先例是「击」消耗 `combo-window`，见 `kits/dodgeCharge.ts` 的文件头）。
-   * 于是它是一份**跨文件的契约**：将来加一个攻击技能却忘了写那一条，
-   * 蓄势会**穿过**那次攻击活下来（下一击继续翻倍）—— 静默，而且只在
-   * "选了这条炁机"时才发生。
+   * 旧版（2026-10-13 之前）的机制是**契约式耦合**：每个会造成伤害的技能
+   * 都要在自己的 `hits[].effects` 里手写一条
+   * `{ kind: 'removeBuff', target: { mode: 'self' }, buffId: DODGE_CHARGE.id }`。
+   * 于是那条测试要**从技能表推导**"每一条带 damage 的技能都写了它" ——
+   * 漏写一条就是静默失效（下一击还能再翻倍），而且只在"选了这条炁机"时
+   * 才发生。
    *
-   * 所以判据**从技能表推导**（不是手写一份 id 清单）：林晚风能用的、
-   * 带 `damage` 的技能，每一条的 `hits[].effects` 里都必须有它。
+   * 现在真相只有一处：`DODGE_CHARGE.consume.on = ['onAttack']`，由引擎在
+   * 每 tick 的消费结算里跑（`core/buffs/consume.ts`）。所以这一组改成
+   * 断言**机制本身**与"手写那条已经删干净"：
+   *
+   *   ① 声明在 buff 上（且只有 `onAttack` 一条 —— 别顺手多写）
+   *   ② 数据层**一处 `removeBuff` 都没有**（"别造第二份真相"）
+   *   ③ 真引擎实测「斩」20 / 「劈」90 且用掉就没（迁移后行为不变）——
+   *      从**技能表推导**，新增攻击技能**自动**被覆盖（它天然会消费）
    */
   const usableByLin = [...LIN_WANFENG_SKILLS, STRIKE];
+  const damaging = usableByLin.filter((skill) =>
+    skill.hits.some((hit) => hit.effects.some((e) => e.kind === 'damage')),
+  );
 
-  it('三条攻击（斩 / 劈 / 击）都写了，且都作用在**自己**身上', () => {
-    const damaging = usableByLin.filter((skill) =>
-      skill.hits.some((hit) => hit.effects.some((e) => e.kind === 'damage')),
-    );
-    /** 至少要有这几条 —— 否则下面的循环可能空转（"测了个寂寞"）。 */
-    expect(damaging.map((s) => s.id).sort()).toEqual(['attack', 'pi', 'strike']);
+  it('① 蓄势声明了 `consume.on = [onAttack]`，且**只有**这一条', () => {
+    expect(DODGE_CHARGE.consume?.on).toEqual(['onAttack']);
+    /** 不写 `stacks`：整条消失（用户要的是"下一次攻击翻倍"）。 */
+    expect(DODGE_CHARGE.consume?.stacks).toBeUndefined();
+  });
 
-    for (const skill of damaging) {
-      const consumes = skill.hits
+  it('② 数据层没有任何手写的 `removeBuff`（假的第二份真相已删干净）', () => {
+    for (const skill of usableByLin) {
+      const removes = skill.hits
         .flatMap((hit) => hit.effects)
-        .filter((e) => e.kind === 'removeBuff' && e.buffId === DODGE_CHARGE.id);
-      expect(consumes, `${skill.id} 没有消耗蓄势（漏了 removeBuff）`).toHaveLength(1);
-      expect(consumes[0]?.target?.mode, `${skill.id} 的消耗不是作用在自己身上`).toBe('self');
+        .filter((e) => e.kind === 'removeBuff');
+      expect(removes, `${skill.id} 还留着 removeBuff`).toEqual([]);
     }
   });
 
-  it('⚠️ 顺序：消耗写在 `damage` **之后**（先吃到翻倍，再用掉它）', () => {
-    for (const skill of usableByLin) {
-      for (const hit of skill.hits) {
-        const kinds = hit.effects.map((e) => e.kind);
-        const damageAt = kinds.indexOf('damage');
-        const consumeAt = hit.effects.findIndex(
-          (e) => e.kind === 'removeBuff' && e.buffId === DODGE_CHARGE.id,
-        );
-        if (damageAt < 0 || consumeAt < 0) continue;
-        expect(damageAt, `${skill.id} 的消耗写在伤害之前`).toBeLessThan(consumeAt);
-      }
+  it('③ 能造成伤害的技能恰好是这三条（否则下面的推导会空转）', () => {
+    expect(damaging.map((s) => s.id).sort()).toEqual(['attack', 'pi', 'strike']);
+  });
+
+  it('⚠️ 每一条攻击技能都**真的**消耗蓄势（真引擎，从技能表推导）', () => {
+    /**
+     * ⚠️ 判据不能只读静态内容（"buff 声明了 onAttack"）—— 那样测的是
+     * 声明，不是行为。所以这里对**每一条**会造成伤害的技能各打一轮：
+     * 挂上蓄势 → 用它打一刀 → 层数必须归零。
+     *
+     * "它会造成伤害"这个前提由上一组（伤害事件）实测：
+     * `hitDamage` 返回的值必须 > 0，否则这一轮要么打空、要么这条技能
+     * 根本不该在这个集合里 —— 两种情况都该红。
+     */
+    for (const skill of damaging) {
+      /** 「击」是派生技（`requires` 窗口），它的那条在下面单独测。 */
+      if (skill.id === STRIKE.id) continue;
+      const engine = quietEngineWith(KIT_DODGE);
+      hitDamage(engine, 'dodge');
+      expect(chargeStacks(engine), `${skill.id} 起点没有蓄势`).toBe(1);
+
+      const dealt = hitDamage(engine, skill.id);
+      expect(dealt, `${skill.id} 没有造成伤害（这一轮测不出消耗）`).toBeGreaterThan(0);
+      expect(chargeStacks(engine), `${skill.id} 打完之后蓄势还在`).toBe(0);
     }
+  });
+
+  it('⚠️ 派生技「击」同样走**引擎机制**：一次攻击把窗口与蓄势一起消费掉', () => {
+    /**
+     * ⚠️ 这条测的是"**同一个引擎机制**（`onAttack`）能同时服务两个 buff"：
+     * `STRIKE` 的 `requires` 认 `combo-window`（派生开关），而它同时也是
+     * 一次攻击 —— 所以一次「击」命中应该把**窗口**和**蓄势**都消费掉。
+     *
+     * 为什么手工挂窗口：这里要验的是**消费**，不是"窗口怎么开"
+     * （开窗那条链由 `settleComboWindows` 自己的测试覆盖）。而真去打
+     * Boss 来开窗会把 Boss 的血打下去，与"闸门取反"的测试目的混在一起。
+     */
+    const options = quietOptions();
+    const player = options.combatants[0]!;
+    /** 先挂蓄势（KIT_DODGE 那条炁机给的），再挂派生窗口。 */
+    const charged = applyBuff({ ...player, buffs: [] }, DODGE_CHARGE, player.id, 0).buffs;
+    const withWindow = applyBuff(
+      { ...player, buffs: charged },
+      COMBO_WINDOW,
+      player.id,
+      0,
+    ).buffs;
+
+    const engine = new BattleEngine(
+      optionsWithKit(
+        {
+          ...options,
+          combatants: [
+            { ...player, buffs: withWindow },
+            options.combatants[1]!,
+          ],
+        },
+        KIT_DODGE,
+      ),
+    );
+
+    const allyBuffs = (): readonly string[] =>
+      engine.snapshot.combatants.find((c) => c.side === 'ally')!.buffs.map((b) => b.defId);
+    expect(allyBuffs()).toContain('combo-window');
+    expect(chargeStacks(engine)).toBe(1);
+
+    const dealt = hitDamage(engine, STRIKE.id);
+    /** 先证明这一击真的打出去了、而且**吃到了翻倍**（5 → 10）。 */
+    expect(dealt).toBe(10);
+    /** 两个 buff 各自按**自己的** `consume` 声明消失（同一个 `onAttack`）。 */
+    expect(chargeStacks(engine)).toBe(0);
+    expect(allyBuffs()).not.toContain('combo-window');
+  });
+
+  it('⚠️ 反面：没打出去（没有任何攻击）就不会消耗 —— 时长无限', () => {
+    const engine = quietEngineWith(KIT_DODGE);
+    hitDamage(engine, 'dodge');
+    for (let i = 0; i < 600; i += 1) engine.tick([]);
+    expect(chargeStacks(engine)).toBe(1);
   });
 });
 

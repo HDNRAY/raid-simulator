@@ -9,7 +9,7 @@ import {
   cycleCharacter,
   pickCharacter,
 } from '../../src/ui/characterSelectLogic';
-import { prepareHitAreas, type PrepareOption } from '../../src/ui/prepareLogic';
+import { NO_SCROLL, prepareHitAreas, type PrepareOption } from '../../src/ui/prepareLogic';
 import { PLAYER_ROSTER, isDeveloping } from '../../src/data/roster';
 
 /**
@@ -33,9 +33,18 @@ describe('命中区域：复用备战界面的几何，但没有「开始」槽�
 
   it('几何与 `prepareHitAreas(players, [])` 的人物那部分**逐字相同**', () => {
     const select = characterSelectHitAreas(players);
-    const prepare = prepareHitAreas(players, [], [], 'player', CHARACTER_SELECT_LAYOUT).filter(
-      (a) => a.kind === 'player',
-    );
+    /**
+     * ⚠️ 第五个参数是 `scroll`（这一屏不滚，给 `NO_SCROLL`）、**第六个**才是
+     * 布局表 —— 滚动参数插在 `expanded` 与 `L` 之间（见 `prepareHitAreas`）。
+     */
+    const prepare = prepareHitAreas(
+      players,
+      [],
+      [],
+      'player',
+      NO_SCROLL,
+      CHARACTER_SELECT_LAYOUT,
+    ).filter((a) => a.kind === 'player');
     expect(select).toEqual(prepare);
   });
 

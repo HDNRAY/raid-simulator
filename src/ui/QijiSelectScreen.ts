@@ -42,12 +42,14 @@ import { PALETTE } from '../render/theme';
 import { CARD_RADIUS, CARD_STROKE, CURSOR_RING_GAP, cardSkin } from './prepareRender';
 import {
   QIJI_SELECT_LAYOUT,
+  QIJI_SELECT_SLOTS,
   canConfirm,
   confirmQiji,
   moveQijiCursor,
   pickQiji,
   qijiCursorTarget,
   qijiHitAreas,
+  qijiHintY,
   type QijiCandidate,
 } from './qijiSelectLogic';
 import type { TranslateFn } from '../i18n/translator';
@@ -133,7 +135,12 @@ export class QijiSelectScreen {
 
     this.hint = new Label(pixi, {
       x: LOGICAL.width / 2,
-      y: QIJI_SELECT_LAYOUT.hintY,
+      /**
+       * ⚠️ 提示行的 y **算出来**（`qijiHintY`：排满时卡片块的底边 + 间隔）。
+       * 旧版是布局表里一个手调的 `470`，而它正落在**第二行卡片里面**
+       * （用户报的重叠 bug，坐标证明见 `qijiHintY` 的说明）。
+       */
+      y: qijiHintY(QIJI_SELECT_LAYOUT),
       size: FONT.small,
       color: PALETTE.textDim,
       anchorX: 0.5,
@@ -144,12 +151,12 @@ export class QijiSelectScreen {
     /**
      * ⚠️ **卡片 Label 一次建到一个上限**（不是每帧新建 / 销毁）。
      *
-     * 上限取 6：今天的池子有 5 条炁机、一张卡最多两行 —— 6 是个"再多也不会
-     * 挤爆画布"的数（`qijiRows` 会按宽度分行）。超过的部分不画（也不会崩）。
+     * 上限是 `QIJI_SELECT_SLOTS`（布局那一份）：它同时决定"提示行放在哪"
+     * —— 两处各写一个 6 的话，"池子能画几张"与"卡片块多高"会漂，
+     * 而漂的表现就是这次那个重叠 bug。超过的部分不画（也不会崩）。
      * 每帧新建 Label 会让 Pixi 反复重建纹理（`PrepareScreen` 记着这条）。
      */
-    const CARD_SLOTS = 6;
-    for (let i = 0; i < CARD_SLOTS; i += 1) {
+    for (let i = 0; i < QIJI_SELECT_SLOTS; i += 1) {
       this.cards.push(this.makeCardLabels(pixi));
     }
 

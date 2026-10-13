@@ -378,6 +378,7 @@ describe('网格函数本身：张数任意都不能少画', () => {
         colW: PREPARE_LAYOUT.bossColW,
         columns: PREPARE_LAYOUT.bossColumns,
         h: PREPARE_LAYOUT.cardH,
+        minW: PREPARE_LAYOUT.cardMinW,
       });
       expect(rects).toHaveLength(n);
     }
@@ -388,6 +389,7 @@ describe('网格函数本身：张数任意都不能少画', () => {
       colW: PREPARE_LAYOUT.playerColW,
       columns: PREPARE_LAYOUT.playerColumns,
       h: PREPARE_LAYOUT.cardH,
+      minW: PREPARE_LAYOUT.cardMinW,
     });
     expect(rects).toHaveLength(2);
     expect(rects[1]!.y).toBe(rects[0]!.y);

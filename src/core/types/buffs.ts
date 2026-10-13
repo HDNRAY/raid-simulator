@@ -90,6 +90,101 @@ export interface BuffFlags {
   readonly restrictToTags?: readonly SkillTag[];
 }
 
+/* ------------------------------------------------------------------ *
+ * 消费机制：buff "什么时候消失" 是**数据**，不是每条技能的命中里
+ * 手写一条 `removeBuff`
+ * ------------------------------------------------------------------ */
+
+/**
+ * **buff 的生命周期由谁结束**（`BuffDef.consumeOn`）。
+ *
+ * ==================================================================
+ * 为什么要有这一层
+ * ==================================================================
+ *
+ * 在它之前，"用掉就消耗"只能由**消耗方**自己记住：每个会造成伤害的
+ * 攻击技能都要在 `hits[].effects` 里手写一条
+ * `{ kind: 'removeBuff', target: { mode: 'self' }, buffId: '…' }`。
+ *
+ * 那是**契约式耦合**：真相分散在 N 条技能里，而漏写一条的症状是
+ * **静默的**（那个技能只是不消耗 buff，下一击还能再吃一次），
+ * 而且往往只在"玩家选了某条炁机"时才发生（见
+ * `data/kits/dodgeCharge.ts` 的文件头）。加一个攻击技能忘记同步 →
+ * 没有任何报错。
+ *
+ * 现在改成：**buff 自己声明"什么时候该消失"**，引擎在事件发生的那一
+ * tick 统一结算（`core/buffs/consume.ts`）。于是新增攻击技能**天然**正确 ——
+ * 它不需要知道任何 buff 的存在。
+ *
+ * ==================================================================
+ * 四个触发（逐条对应需求里的四种消费）
+ * ==================================================================
+ *
+ * | 触发 | 需求原话 | 判据（引擎怎么知道它发生了） |
+ * |---|---|---|
+ * | `onAttack` | 被攻击消费 | 持有者**打出了**一次伤害（`damage` 事件的 `sourceId` 是它，且这一下真的掉血） |
+ * | `onDamaged` | 被受击消费 | 持有者**挨了**一次伤害（同样的判据，看 `targetId`） |
+ * | `onDodge` | 被闪避消费 | 持有者**闪掉**了一击（`avoided` 事件，判据同"闪避"：`invulnerable`） |
+ * | `onBlock` | 被格挡消费 | 持有者**挡下**了一击（`avoided` 事件，判据同"阈值卸力"：`damageThreshold`） |
+ *
+ * ⚠️ **`onAttack` / `onDamaged` 用"同一个 `damage` 事件的两面"**，不是
+ * 两种事件：一次成功的攻击，攻方那一侧是 `onAttack`、守方那一侧是
+ * `onDamaged`。所以"我打人"**不会**触发我身上的 `onDamaged`（反面测试
+ * 在 `tests/unit/buffConsume.test.ts`）。
+ *
+ * ⚠️ **被闪掉 / 被挡下的那一击不会触发 `onAttack` / `onDamaged`** ——
+ * 因为那两种判据都要求 `damage` 事件（真的掉血）。这正好与
+ * `onHitTaken` 触发器同一条口径（"没碰到人就不算受击"，见
+ * `hitResolution.ts` 的 `taken > 0`）。
+ *
+ * ⚠️ **`onAttack` 只认技能打出来的伤害**（`damage.skillId !== ''`）：
+ * 触发器产出的**反伤**（`reflect: true`）不算"你攻击了一次"，
+ * 否则"挂着反伤的 Boss 打你一下"会顺手消耗掉它自己的攻击 buff。
+ *
+ * ==================================================================
+ * 为什么是"名字的数组"而不是四个布尔字段
+ * ==================================================================
+ *
+ * 名字数组可以直接与"这一 tick 真的发生了什么"求交（见
+ * `matchedConsumeTriggers`），而且**加一种触发时运行期表会自动跟上** ——
+ * 反过来若把它写成 `{ onAttack?: boolean; … }`，每加一种都要在
+ * `applyConsume` 里手抄一遍字段名，抄漏一处就是静默无效。这正是
+ * `buffHookDispatch.ts` 选择"扫事件"而不是"逐个调用点插一行"的同一条理由。
+ */
+export type BuffConsumeTrigger =
+  /** 持有者**打出去**了一击（造成伤害）→ 消耗。 */
+  | 'onAttack'
+  /** 持有者**挨了**一击（受到伤害）→ 消耗。 */
+  | 'onDamaged'
+  /** 持有者**闪掉**了一击（无敌判定）→ 消耗。 */
+  | 'onDodge'
+  /** 持有者**挡下**了一击（阈值卸力判定）→ 消耗。 */
+  | 'onBlock';
+
+/**
+ * **消费规则**（`BuffDef.consume`）。
+ *
+ * 不写这个字段 = 这个 buff 的生命周期**只由时间 / 驱散 / 主动移除**决定
+ * （即"永久存在"与"持续时间"两种情况，它们已经由 `duration` 表达）。
+ */
+export interface BuffConsumeRule {
+  /** 满足**任意一条**就消费（不是全部满足）。 */
+  readonly on: readonly BuffConsumeTrigger[];
+  /**
+   * **一次消费掉几层**（默认 = 全部）。
+   *
+   * - 不写：整条 buff 消失。适合"一次性的蓄势 / 一次性的窗口"
+   *   （用户：「用掉就消耗」）
+   * - `1`：只掉一层，层数归零才消失。适合"N 层护盾，挨一下碎一层"
+   *
+   * ⚠️ 语义上**一个触发 tick 每个 buff 只消费一次**（即使这一 tick 既
+   * 命中了又挨打了）—— "多段攻击每段都扣一层"会让层数的消耗速度取决于
+   * 段数，而玩家看到的是一次技能。这条判据在 `consume.ts` 的
+   * `matchedConsumeTriggers` 里只返回一次。
+   */
+  readonly stacks?: number;
+}
+
 /** buff 的视觉提示，渲染层据此播特效。 */
 export interface BuffVfx {
   readonly aura?: string;
@@ -122,6 +217,16 @@ export interface BuffDef {
   readonly duration: number;
   readonly maxStacks: number;
   readonly stacking: StackingRule;
+  /**
+   * **消费机制**：这个 buff 被哪些"发生在持有者身上的事"消耗掉。
+   *
+   * 不写 = 只能靠时间过期 / 驱散 / `removeBuff` 结束（含"永久存在"）。
+   * 写了 = 引擎在那一 tick 自动消费（见 `BuffConsumeTrigger` 的文件注释）。
+   *
+   * ⚠️ 这是**引擎级**机制：消耗方（技能内容）**不需要**写任何
+   * `removeBuff` —— 那正是本字段要取代的东西（"别造第二份真相"）。
+   */
+  readonly consume?: BuffConsumeRule;
   readonly modifiers?: readonly StatModifier[];
   readonly flags?: BuffFlags;
   /**

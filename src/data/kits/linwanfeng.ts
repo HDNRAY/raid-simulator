@@ -28,7 +28,6 @@ import { LOGIC_TICKS_PER_SECOND, logicMs } from '../../core/loopConstants';
 import type { BuffDef, SkillDef } from '../../core/types';
 import { GUARD_HOLD_DRAIN_PER_SECOND, GUARD_THRESHOLD } from '../balance';
 import { C, S } from '../scale';
-import { DODGE_CHARGE } from './dodgeCharge';
 import { FOCUS } from './shared';
 
 /* ================================================================== *
@@ -133,17 +132,16 @@ export const ATTACK: SkillDef = {
           },
         },
         /**
-         * **用掉「避实击虚」的蓄势**（`target: self`）。
+         * ⚠️ 这里**曾经**有一条手写的
+         * `{ kind: 'removeBuff', target: { mode: 'self' }, buffId: DODGE_CHARGE.id }`，
+         * 用来"用掉「避实击虚」的蓄势"。
          *
-         * ⚠️ 顺序必须在 `damage` **之后**：这一击吃到翻倍，然后蓄势消失
-         * （`resolveHit` 按数组顺序结算效果）。契约、先例与"为什么不能用
-         * `Ability: 'consume'`"写在 `kits/dodgeCharge.ts` 的文件头。
-         *
-         * ⚠️ 没有选那条炁机时它是个**空操作**（身上没有这个 buff →
-         * `applyHitEffects` 什么都不做、也不发事件），所以单场 / 自由模式 /
-         * 黄金重放的行为逐字不变。
+         * 它已经**删掉**：蓄势现在由**它自己**声明什么时候被消费
+         * （`DODGE_CHARGE.consume.on = ['onAttack']`，见
+         * `kits/dodgeCharge.ts` 的文件头）。于是这条技能不需要知道任何
+         * buff 存在，"新增一个攻击技能忘记写消耗"这个静默失效的形状
+         * 结构上不可能再发生。
          */
-        { kind: 'removeBuff', target: { mode: 'self' }, buffId: DODGE_CHARGE.id },
       ],
     },
   ],
@@ -192,13 +190,9 @@ export const PI: SkillDef = {
           },
         },
         /**
-         * 同「斩」：消耗「避实击虚」的蓄势（见 `kits/dodgeCharge.ts`）。
-         *
-         * ⚠️ **每个会造成伤害的技能都要有这一条** —— 漏了就只是"这一招
-         * 不消耗蓄势"，静默且只在选了那条炁机时发生。所以
-         * `tests/unit/qijiWiring.test.ts` 从技能表推导着钉住了它。
+         * ⚠️ 同「斩」：这里**曾经**有一条消耗蓄势的 `removeBuff` 手写契约，
+         * 已删 —— 现在由 `DODGE_CHARGE.consume` 声明（见 `kits/dodgeCharge.ts`）。
          */
-        { kind: 'removeBuff', target: { mode: 'self' }, buffId: DODGE_CHARGE.id },
       ],
     },
   ],

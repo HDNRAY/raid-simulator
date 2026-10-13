@@ -46,7 +46,7 @@ import {
   toMutable,
   type MutableCombatant,
 } from './battleStateTypes';
-import { endHold, gainDouqiFromDamage, startHold, tickHolds, type HoldsContext } from './holds';
+import { endHold, gainDouqiFromDamage, startHold, type HoldsContext } from './holds';
 import {
   runAi,
   type AbilitiesContext,
@@ -68,14 +68,10 @@ import { nextRandom, type RngState } from '../rng';
 import { triggerContextFor } from './triggerContext';
 import { runTriggers } from './triggers';
 import { settleComboWindows } from './comboWindowHandler';
+import { settleConsumableBuffs } from './consumeHandler';
 import { BuffHookDispatch } from './buffHookDispatch';
-import {
-  checkDeaths,
-  checkTimeLimit,
-  expireBuffs,
-  regenerateResources,
-  type UpkeepContext,
-} from './encounterLifecycle';
+import { checkDeaths, checkTimeLimit } from './encounterLifecycle';
+import { runUpkeep, type RunUpkeepContext } from './upkeep';
 import type {
   Action,
   BattleState,
@@ -517,16 +513,26 @@ export class BattleEngine {
     // ⚠️ 原 `tickOverTimeEffects()`（"DoT 到点触发"）循环体是**空的**，只看名字会
     // 以为 DoT 已支持。DoT 应由 `onTick` 触发器表达（见 `triggers.ts`），别恢复空壳。
 
-    // 3. buff 过期
-    this.expireBuffs();
-    // 4. 资源回复
-    this.regenerateResources();
+    /**
+     * 2c. **buff 消费机制**：这一 tick 打出来 / 挨到 / 闪掉 / 挡下的事，
+     * 消费掉声明了对应 `consume.on` 的 buff。
+     *
+     * ⚠️ 位置是刻意的（命中结算之后、自然过期之前）—— 判定、空操作保证
+     * 与"读工作副本"的理由全在 `./consumeHandler.ts`。
+     */
+    settleConsumableBuffs({
+      combatants: this.mutableAll(),
+      tick: this.state.tick,
+      events: this.events,
+      buffs: this.options.buffs,
+      replaceCombatant: (updated) => this.replaceCombatant(updated),
+    });
 
-    // 5b. 按住型技能的持续消耗（按逻辑步）
-    tickHolds(this.holds());
-
-    // 5c. buff 钩子（在 `commitWork` 之前，触发器的改动才能随工作副本提交）
-    this.dispatchBuffHooks();
+    /**
+     * 3-5c. **收尾**：过期 → 回复 → 按住消耗 → buff 钩子。
+     * 顺序是不变量，入口与逐条理由在 `./upkeep.ts`。
+     */
+    runUpkeep(this.upkeepContext(), this.events);
 
     // 6. 时间限制
     this.checkTimeLimit();
@@ -554,39 +560,16 @@ export class BattleEngine {
    * ---------------------------------------------------------------- */
 
   /**
-   * 每个 tick 的四步收尾 —— 实现全部搬到 `./encounterLifecycle.ts`。
+   * 收尾流程需要的引擎能力（`./upkeep.ts` 的 `RunUpkeepContext`）。
    *
-   * ⚠️ **顺序是不变量**（见本文件顶部的 tick 管线）：过期 → 回复 →
-   * 时限 → 死亡。四步不拆到不同文件，就是为了让这个顺序只有一个读者。
-   *
-   * ⚠️ 它们要改 `this.state`，而 `state` 是**主文件私有的**，所以这里把
+   * ⚠️ 它要改 `this.state`，而 `state` 是**本文件私有的**，所以这里把
    * "改成什么"以回调（`end`）借出去，而不是把 state 交出去 ——
    * 状态永远只有一个写入者。
+   *
+   * ⚠️ `mutableAll` 交的是函数而不是数组：工作副本是**每 tick 重建**的
+   * （见 `work` 的注释），钉住一份数组会让第二次收尾读到上一 tick 的。
    */
-  private expireBuffs(): void {
-    expireBuffs(this.upkeepContext());
-  }
-
-  /** 把本 tick 新产生的 buff 事件派发成触发器（理由见 `./buffHookDispatch.ts`）。 */
-  private dispatchBuffHooks(): void {
-    this.buffHooks.drain(this.events, (ownerId, hook, payload) => {
-      runTriggers(this.hitContext(), ownerId, hook, payload);
-    });
-  }
-
-  private regenerateResources(): void {
-    regenerateResources(this.upkeepContext());
-  }
-
-  private checkTimeLimit(): void {
-    checkTimeLimit(this.upkeepContext());
-  }
-
-  private checkDeaths(): void {
-    checkDeaths(this.upkeepContext());
-  }
-
-  private upkeepContext(): UpkeepContext {
+  private upkeepContext(): RunUpkeepContext {
     return {
       tick: this.state.tick,
       startedAtTick: this.state.startedAtTick,
@@ -599,7 +582,25 @@ export class BattleEngine {
       end: (result, reason) => {
         this.state = { ...this.state, status: result, endReason: reason };
       },
+      holds: this.holds(),
+      buffHooks: this.buffHooks,
+      /**
+       * ⚠️ 每次现取一份 `hitContext()`：它里面有 `current` /
+       * `replaceCombatant` 这些**工作副本感知**的转发，而工作副本每 tick
+       * 重建 —— 持有它会把上一 tick 的副本钉住。
+       */
+      onBuffHook: (ownerId, hook, payload) => {
+        runTriggers(this.hitContext(), ownerId, hook, payload);
+      },
     };
+  }
+
+  private checkTimeLimit(): void {
+    checkTimeLimit(this.upkeepContext());
+  }
+
+  private checkDeaths(): void {
+    checkDeaths(this.upkeepContext());
   }
 
   /* ---------------------------------------------------------------- *

@@ -71,10 +71,15 @@ export class PrepareCards {
     keys: readonly { readonly kind: PrepareSectionKind; readonly id: string }[],
   ) {
     for (const key of keys) {
+      /**
+       * ⚠️ 字号**按块给**（炁机 15、人物 / 对手 17，见 `prepareLayout`）：
+       * 同一个 `Label` 的字号在构造期定死（`Label` 的契约是"只改文本 /
+       * 颜色 / 坐标"），所以每张卡在造的时候就要知道自己那一块的字号。
+       */
       const name = new Label(pixi, {
         x: 0,
         y: 0,
-        size: PREPARE_LAYOUT.nameSize,
+        size: key.kind === 'qiji' ? PREPARE_LAYOUT.qijiNameSize : PREPARE_LAYOUT.nameSize,
         color: PALETTE.text,
         kai: true,
       });

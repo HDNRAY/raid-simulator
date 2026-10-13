@@ -80,7 +80,8 @@
 import type { Container } from 'pixi.js';
 import { isDeveloping } from '../data/roster';
 import type { PrepareHitArea } from './prepareLayout';
-import { prepareHitAreas } from './prepareGeometry';
+import { NO_SCROLL, prepareHitAreas, type SectionScroll } from './prepareGeometry';
+import { followedCursor, sectionAtPoint, scrolledBy, type ScrollLists } from './prepareScroll';
 import {
   canStartBattle,
   confirmCursor,
@@ -98,6 +99,7 @@ import {
   pickQiji,
   stackCapOf,
   stacksIn,
+  stepCursor,
   unstackQiji,
   type FreeQiji,
   type PrepareSelection,
@@ -148,6 +150,14 @@ export class PrepareScreen {
 
   private selection: PrepareSelection;
   private free: FreeQiji;
+  /**
+   * 三块各自的**滚动偏移**（逻辑像素，`0` = 顶部）。
+   *
+   * ⚠️ 只有本类能写它（渲染 / 命中只读）：三条改它的路 —— 滚轮 / 拖拽 /
+   * **光标跟随**（见 `followCursor`）—— 都收在这里的方法里，所以
+   * "画面滚到哪"与"点中的是哪张卡"不可能各说各话。
+   */
+  private scroll: SectionScroll = NO_SCROLL;
 
   constructor(options: PrepareScreenOptions) {
     this.options = options;
@@ -242,7 +252,13 @@ export class PrepareScreen {
 
   /** 当前布局的可点区域（探针 / 单测读它与渲染对账）。 */
   hitAreas(): readonly PrepareHitArea[] {
-    return prepareHitAreas(this.players, this.bosses, this.qiji, this.selection.expanded);
+    return prepareHitAreas(
+      this.players,
+      this.bosses,
+      this.qiji,
+      this.selection.expanded,
+      this.scroll,
+    );
   }
 
   /* ---------------------------------------------------------------- *
@@ -250,17 +266,28 @@ export class PrepareScreen {
    * ---------------------------------------------------------------- */
 
   /**
-   * 键盘：在同槽位里**移动光标**（`delta` = ±1），到边界**不环绕**。
-   * ⚠️ **不改选择**。要它变成选择得按 Enter（`commit`）。
+   * 键盘 ← →：在**当前这一块内部**移动光标（`delta` = ±1），到边界**不环绕**。
+   * ⚠️ **不改选择**。要它变成选择得按 Enter（`confirm`）。
    */
   cycle(delta: number): void {
-    this.apply(cycleCursor(this.selection, this.players, this.bosses, delta, this.qiji));
+    this.apply(this.followCursor(cycleCursor(this.selection, this.players, this.bosses, delta, this.qiji)));
   }
 
   /**
-   * 键盘：上下换槽位（人物 ↔ 炁机 ↔ 对手 ↔ 开始）。
+   * 键盘 ↑ ↓：**在块内**换行（炁机那一块是 2 行；人物 / 对手只有 1 行）。
    *
-   * `wrap` 给 Tab / Shift+Tab 用（环绕），方向键不环绕。
+   * ⚠️⚠️ 它与 `moveFocus`（Tab）**不是同一件事**：这一条**永不跨块**
+   * （到边界停住）。见 `prepareLogic.stepCursor` 的说明 —— 用户报的
+   * "炁机内部无法用方向键选择"就是这两件事曾经共用一个键造成的。
+   */
+  stepVertical(dir: 'up' | 'down'): void {
+    this.apply(this.followCursor(stepCursor(this.selection, this.players, this.bosses, dir, this.qiji)));
+  }
+
+  /**
+   * **Tab / Shift+Tab**：块与块之间换焦点（人物 ↔ 炁机 ↔ 对手 ↔ 开始）。
+   *
+   * `wrap` 给 Tab / Shift+Tab 用（环绕）—— 方向键**不再**走这条路。
    */
   moveFocus(delta: number, wrap = false): void {
     this.apply(
@@ -271,6 +298,12 @@ export class PrepareScreen {
         qiji: this.qiji,
       }),
     );
+  }
+
+  /** 光标推到看得见的地方（三块共用一套：爆出视口的行才滚，见 `scrollToShowCursor`）。 */
+  private followCursor(next: PrepareSelection): PrepareSelection {
+    this.scrollToShowCursor(next);
+    return next;
   }
 
   /**
@@ -309,11 +342,13 @@ export class PrepareScreen {
    */
   focusSlot(slot: 'player' | 'qiji' | 'boss' | 'start'): void {
     this.apply(
-      focusTarget(this.selection, slot, {
-        players: this.players,
-        bosses: this.bosses,
-        qiji: this.qiji,
-      }),
+      this.followCursor(
+        focusTarget(this.selection, slot, {
+          players: this.players,
+          bosses: this.bosses,
+          qiji: this.qiji,
+        }),
+      ),
     );
   }
 
@@ -322,7 +357,7 @@ export class PrepareScreen {
    */
   pick(kind: 'player' | 'boss', id: string): void {
     const next = pickOption(this.selection, this.players, this.bosses, kind, id);
-    if (next !== this.selection) this.apply(next, true);
+    if (next !== this.selection) this.apply(this.followCursor(next), true);
   }
 
   /**
@@ -333,7 +368,7 @@ export class PrepareScreen {
    * 用它（截图脚本要能一步摆出"炁机块展开"的画面）。
    */
   expand(slot: PrepareSectionKind): void {
-    this.apply(expandSection(this.selection, slot));
+    this.apply(this.followCursor(expandSection(this.selection, slot)));
   }
 
   /**
@@ -367,6 +402,7 @@ export class PrepareScreen {
       this.bosses,
       this.qiji,
       this.selection.expanded,
+      this.scroll,
     );
     /** ⚠️「开始战斗」与「块头」都不是"一张卡"，悬停它们不该把详情区切走。 */
     const next =
@@ -382,13 +418,39 @@ export class PrepareScreen {
     if (this.detailPanel.clearHover()) this.draw();
   }
 
-  /** 这个点是不是落在详情区的**可滚视口**里（输入层的拖拽判据）。 */
+  /**
+   * 这个点是不是落在**可以拖拽滚动的区域**里（输入层的拖拽判据）。
+   *
+   * ⚠️ 两块：展开那一块的**卡片视口**（排不下时能滚）与**详情区**
+   * （Boss 招式说明装不下时能滚）。判据收在这一个方法里，于是
+   * `canvasInput` 只问一次"这次手势该不该开始拖"。
+   */
+  isOnScrollable(px: number, py: number): boolean {
+    return this.sectionAt(px, py) !== undefined || this.detailPanel.isOnDetail(px, py);
+  }
+
+  /**
+   * 这个点是不是落在详情区的**可滚视口**里。
+   *
+   * ⚠️ 保留它（而不是只留 `isOnScrollable`）：`wheelDetail` 要分别问
+   * "卡片区吃不吃"与"详情区吃不吃"两件事，合成一个布尔就分不出来了。
+   */
   isOnDetail(px: number, py: number): boolean {
     return this.detailPanel.isOnDetail(px, py);
   }
 
   /**
-   * **滚轮**滚详情区（桌面）。
+   * 这个点是不是落在**某一块卡片区的视口**里（滚轮 / 拖拽的命中判据）。
+   *
+   * ⚠️ 规则在 `prepareScroll.sectionAtPoint`（纯函数，可在 node 里测）——
+   * 这里只把"这一帧的三块张数 / 展开块 / 偏移"喂进去。
+   */
+  sectionAt(px: number, py: number): PrepareSectionKind | undefined {
+    return sectionAtPoint(px, py, this.selection.expanded, this.counts(), this.scroll);
+  }
+
+  /**
+   * **滚轮**：先问卡片区（排不下时能滚），再问详情区（Boss 招式说明装不下时能滚）。
    *
    * ⚠️ 与设置页的技能详情同一条分工：入口在 `canvasInput`（输入归属只有
    * 一处），本屏只回答"滚不滚得动"。
@@ -396,23 +458,55 @@ export class PrepareScreen {
    * @returns 有没有消费这次滚轮（没消费就让页面自己滚）。
    */
   wheelDetail(px: number, py: number, deltaY: number): boolean {
-    if (!this.detailPanel.isOnDetail(px, py)) return false;
     /**
      * ⚠️ 像素 → 逻辑像素：`deltaMode === 1` 时 `deltaY` 的单位是**行**
      * （Firefox 常见），直接当像素用会滚得几乎看不出来。
      */
     const step = deltaY * 3;
+    const section = this.sectionAt(px, py);
+    if (section !== undefined && this.scrollSection(section, step)) return true;
+    if (!this.detailPanel.isOnDetail(px, py)) return false;
     return this.detailPanel.scrollBy(step);
   }
 
   /**
-   * **拖拽**滚详情区（触屏：没有滚轮，AGENTS.md §3b 要求这条路必须存在）。
+   * **拖拽**：卡片区优先，其次详情区（触屏：没有滚轮，AGENTS.md §3b 要求
+   * 这条路必须存在）。
    *
    * @param deltaY 这一帧相对上一帧的位移（像素，向上为负）。
    */
   dragDetail(px: number, py: number, deltaY: number): boolean {
+    const section = this.sectionAt(px, py);
+    if (section !== undefined && this.scrollSection(section, -deltaY)) return true;
+    if (section !== undefined) return true;
     if (!this.detailPanel.isOnDetail(px, py)) return false;
     return this.detailPanel.scrollBy(-deltaY);
+  }
+
+  /**
+   * 把某一块**滚动 `delta` 像素**（正数 = 往下看更多）。
+   *
+   * ⚠️ 钳位在 `scrollWindow.clampOffset`（**复用**那一份边界规则，
+   * 不在这写第二遍）：滚到尽头 / 内容不足一屏 / 空内容三种边界只有
+   * 一处实现。
+   */
+  private scrollSection(kind: PrepareSectionKind, delta: number): boolean {
+    const next = scrolledBy(kind, delta, this.counts(), this.scroll);
+    if (next === undefined) return false;
+    this.scroll = next;
+    this.draw();
+    return true;
+  }
+
+  /**
+   * **光标跟随**：光标换行时，若它落在视口外就把视角推过去。
+   *
+   * ⚠️ 规则在 `prepareScroll.followedCursor`（纯函数）—— 这里只负责
+   * "算出新偏移就换上去"（`undefined` = 光标本来就看得见，不动）。
+   */
+  private scrollToShowCursor(sel: PrepareSelection): void {
+    const next = followedCursor(sel, this.lists(), this.counts(), this.scroll);
+    if (next !== undefined) this.scroll = next;
   }
 
   /**
@@ -430,6 +524,7 @@ export class PrepareScreen {
       this.bosses,
       this.qiji,
       this.selection.expanded,
+      this.scroll,
     );
     if (at === undefined) return false;
     if (at.kind === 'start') {
@@ -509,6 +604,11 @@ export class PrepareScreen {
     return { players: this.players.length, bosses: this.bosses.length, qiji: this.qiji.length };
   }
 
+  /** 三块各自的选项表（滚动那一撮纯函数要它 —— 见 `prepareScroll`）。 */
+  private lists(): ScrollLists {
+    return { players: this.players, bosses: this.bosses, qiji: this.qiji };
+  }
+
   /**
    * 写**已经确定**的选择（Enter / 点击）。
    *
@@ -537,7 +637,8 @@ export class PrepareScreen {
   private applyQiji(id: string, back: boolean): void {
     const def = this.qijiById(id);
     if (def === undefined) return;
-    this.selection = pickQiji(this.selection, this.qiji, id);
+    /** ⚠️ 光标跟着走，**并且**把它推到看得见的地方（触屏点的是可见的卡）。 */
+    this.selection = this.followCursor(pickQiji(this.selection, this.qiji, id));
     const next = back
       ? unstackQiji(this.free, id)
       : cycleQijiStack(this.free, id, def.maxStacks);
@@ -567,6 +668,7 @@ export class PrepareScreen {
       selection: this.selection,
       cursor: this.cursor(),
       free: this.free,
+      scroll: this.scroll,
       translate: this.options.translate,
       developing: isDeveloping,
     });

@@ -60,87 +60,18 @@ import { detailRect } from './prepareGeometry';
 import type { DetailModel, DetailRow } from './prepareDetail';
 import { PORTRAITS, portraitFor } from '../render/portraitAssets';
 import { PortraitSprite } from '../render/portraitSprite';
+import { pixelViewport, scrollThumbRatio, visibleWindow } from './scrollWindow';
+import {
+  DETAIL_ROW_POOL,
+  METRICS,
+  bodyTopOf,
+  headerBandOf,
+  inlineSpan,
+  portraitBoxOf,
+  textSpanOf,
+} from './prepareDetailMetrics';
+import type { TextSpan } from './prepareDetailMetrics';
 import type { TranslateFn } from '../i18n/translator';
-
-/* ------------------------------------------------------------------ *
- * 度量
- * ------------------------------------------------------------------ */
-
-/**
- * 行池大小。
- *
- * ⚠️ **不是一个"够用就好"的魔法数**，而是"这一屏最多会有几行"的上界：
- * Boss 详情是 `1 行标题 + 4 条招式 = 5`，炁机是 `3 行`，人物是
- * `1 + 技能数`（今天最多 5 招 → 6）。取 **12** 留一倍余量。
- * ⚠️ 超过它的模型会被**截断**（多出来的行不画）—— 那是有意的降级
- * （宁可少显示，也不每帧新建 Label）。
- */
-const DETAIL_ROW_POOL = 12;
-
-/** 详情区的行距 / 内边距（逻辑像素）。 */
-const METRICS = {
-  /** 标题字号（比正文大一号）。 */
-  titleSize: 20,
-  /**
-   * **顶部那一行"关键数值"的字号**（人物 / Boss = 生命上限，炁机 = 层数）。
-   *
-   * ⚠️ 从 `FONT.small`(13) 提到 `FONT.title`(17) —— 用户原话"**血量要
-   * 显眼**（那是玩家最想看的）"。它只比标题小一号，并且用亮色（见 `update`）。
-   */
-  valueSize: FONT.title,
-  /** 说明字号。 */
-  bodySize: FONT.small,
-  /** 名字 / 标签字号。 */
-  nameSize: FONT.body,
-  /** 一行标题的行高。 */
-  titleLine: 26,
-  /** 关键数值那一行的行高。 */
-  valueLine: 22,
-  /** 一条技能：名字行 + 说明行。 */
-  nameLine: 19,
-  bodyLine: 17,
-  /** 行与行之间的空。 */
-  rowGap: 6,
-  /** 标题下、正文上的分隔线离标题底的距离。 */
-  ruleGap: 6,
-} as const;
-
-/**
- * 详情区里那张脸的显示边长（比卡片上的 `portraitBox` 大得多）。
- *
- * ⚠️ 只由**详情区的宽度**决定（与 `x` 无关）：`w` 是面板的内宽，
- * 而"脸多大"是那一块自己的比例。把 `x` 也拉进来算过一次，结果是
- * 面板一挪位、脸就跟着变大变小。
- */
-function portraitBoxOf(innerW: number): number {
-  return Math.max(48, Math.min(88, Math.floor(innerW * 0.42)));
-}
-
-/**
- * 顶部那一条的度量（**三类共用**）。
- *
- * ```
- *   ┌──────────────────────┐
- *   │ 名字（20 金）        │  ┌────┐
- *   │ 生命上限 420（17 亮）│  │ 脸 │  ← 方框贴右边（`box` 见方）
- *   └──────────────────────┘  └────┘
- * ```
- *
- * ⚠️ 条高取 `max(方框, 两行文字)`：人物（有 88 方框）时是方框说了算，
- * 而三类**都走这一条**，所以"炁机 / Boss 没有头像"也不会少一截高度 ——
- * 它们的方框是程序化占位（同一个位置、同一个尺寸）。
- */
-function headerBandOf(rect: { readonly y: number; readonly w: number }): {
-  readonly top: number;
-  readonly h: number;
-  readonly box: number;
-  readonly textH: number;
-} {
-  const innerW = rect.w - PREPARE_LAYOUT.detailPad * 2;
-  const box = portraitBoxOf(innerW);
-  const textH = METRICS.titleLine + METRICS.valueLine;
-  return { top: rect.y + PREPARE_LAYOUT.detailPad, h: Math.max(box, textH), box, textH };
-}
 
 /* ------------------------------------------------------------------ *
  * 组件
@@ -156,16 +87,20 @@ export class PrepareDetailPanel {
   readonly root: Container;
 
   private readonly gfx: Graphics;
-  /** 可整体位移的内容层（见文件头"溢出"那段）。 */
-  private readonly content: Container;
+  /**
+   * **正文行**那一层（只有它跟着滚动走）。
+   *
+   * ⚠️ 顶栏（标题 + 关键数值）**不在这里** —— 用户 2026-10-13 报过
+   * "详情区顶栏随内容滚动会滚出面板"，修法就是把顶栏**钉在面板顶部**、
+   * 只让正文滚（见 `update` 里那段说明）。
+   */
+  private readonly rowsLayer: Container;
 
   private readonly title: Label;
   private readonly subtitle: Label;
   private readonly placeholder: Label;
-  /** 大头像（人物 / Boss）。炁机没有素材，用图标占位块。 */
+  /** 大头像（人物 / Boss）。 */
   private readonly portrait: PortraitSprite | undefined;
-  private readonly iconBox: Graphics;
-  private readonly iconGlyph: Label;
 
   private readonly rows: RowLabels[] = [];
 
@@ -186,6 +121,18 @@ export class PrepareDetailPanel {
   private scroll = 0;
   /** 可滚动的最大值（内容底边 − 视口底边；0 = 不用滚）。 */
   private maxScroll = 0;
+  /**
+   * **正文视口**的顶边与该滚多少 —— 它从**顶栏下缘**开始（顶栏钉在面板
+   * 顶部，不参与滚动，见 `update`）。
+   *
+   * ⚠️ 这几个数由 `update` 每帧写一次（顶栏高度取决于当前这一项的方框
+   * 大小，所以必须每帧算，不能在构造时定死）。
+   */
+  private bodyTop = 0;
+  /** 正文视口的高。 */
+  private bodyViewH = 0;
+  /** 正文的**行距上界**（估算用：一条 `skill` 最多名 19 + 说明 17 + 空 6）。 */
+  private readonly rowStep = METRICS.nameLine + METRICS.bodyLine + METRICS.rowGap;
   /** 右侧那条滚动条（只有真能滚时才画）。 */
   private readonly scrollBar: Graphics;
 
@@ -194,26 +141,34 @@ export class PrepareDetailPanel {
     this.root = new pixi.Container();
 
     this.gfx = new pixi.Graphics();
-    this.content = new pixi.Container();
+    this.rowsLayer = new pixi.Container();
     this.scrollBar = new pixi.Graphics();
-    this.root.addChild(this.gfx, this.content, this.scrollBar);
+    this.root.addChild(this.gfx, this.rowsLayer, this.scrollBar);
 
     const innerX = rect.x + PREPARE_LAYOUT.detailPad;
     const innerW = rect.w - PREPARE_LAYOUT.detailPad * 2;
-    const band = headerBandOf(rect);
-
+    /**
+     * ⚠️ 顶栏的标签按**最宽的那一类**建（人物 / Boss 要给方框让位），
+     * 而"这一帧要不要占那么宽"由 `textSpanOf` 每帧给 —— 所以 `wrap`
+     * 的宽度取**不让位**的那一份（整条内宽）。
+     *
+     * ⚠️ 为什么不让位的那一份也能用于"让位"的情形：让位只影响**折行
+     * 位置**，而顶栏的名字 / 数值都是**短句**（「林晚风」「生命上限
+     * 420」「固本培元」「层数 2 / 3」）—— 它们一行就完，折行宽度取宽
+     * 的那一份不会把让位那一类的标题挤到方框上（≤ 8 个字 × 20px = 160
+     * < 内宽 − 方框 − 间距）。
+     */
     this.title = new Label(pixi, {
       x: innerX,
-      /** ⚠️ 文字块在顶栏里**垂直居中**（见 `headerBandOf`）。 */
-      y: band.top + (band.h - band.textH) / 2,
+      y: 0,
       size: METRICS.titleSize,
       color: PALETTE.text,
       kai: true,
-      wrap: { width: innerW - band.box - METRICS.rowGap },
+      wrap: { width: innerW },
     });
     this.subtitle = new Label(pixi, {
       x: innerX,
-      y: band.top + (band.h - band.textH) / 2 + METRICS.titleLine,
+      y: 0,
       size: METRICS.valueSize,
       color: PALETTE.text,
       /**
@@ -221,7 +176,7 @@ export class PrepareDetailPanel {
        * 字号已经比正文大一档，再加粗与正文拉开层级。
        */
       bold: true,
-      wrap: { width: innerW - band.box - METRICS.rowGap },
+      wrap: { width: innerW },
     });
     this.placeholder = new Label(pixi, {
       x: innerX,
@@ -236,23 +191,7 @@ export class PrepareDetailPanel {
     this.portrait =
       firstPlayer === undefined
         ? undefined
-        : new PortraitSprite(pixi, this.content, firstPlayer, band.box);
-
-    this.iconBox = new pixi.Graphics();
-    this.iconGlyph = new Label(pixi, {
-      x: 0,
-      y: 0,
-      /**
-       * ⚠️ 占位方框里那个字（名字首字）随方框大小定：固定的 20px 在一个
-       * 88px 的方框里会显得像"图挂了"，而它**就是**没有素材时的样子。
-       */
-      size: Math.max(METRICS.titleSize, Math.round(band.box * 0.36)),
-      color: PALETTE.text,
-      anchorX: 0.5,
-      anchorY: 0.5,
-      kai: true,
-    });
-    this.content.addChild(this.iconBox, this.iconGlyph.root);
+        : new PortraitSprite(pixi, this.rowsLayer, firstPlayer, portraitBoxOf(innerW));
 
     for (let i = 0; i < DETAIL_ROW_POOL; i += 1) {
       const name = new Label(pixi, {
@@ -270,23 +209,21 @@ export class PrepareDetailPanel {
         wrap: { width: innerW },
       });
       this.rows.push({ name, body });
-      this.content.addChild(name.root, body.root);
+      this.rowsLayer.addChild(name.root, body.root);
     }
 
     /**
-     * ⚠️ **标题与副标题挂在 `content` 上**（它们跟着滚动条一起上移）；
-     * 而占位那句挂在 `root` 上 —— "把光标移到卡片上"这句提示**不该跟着
-     * 内容滚**。
+     * ⚠️⚠️ **顶栏挂在 `root` 上、正文挂在 `rowsLayer` 上** —— 这是
+     * "顶栏固定在面板顶部，只让内容滚"那个修法的全部内容。
      *
-     * ⚠️⚠️ 这一句**曾经被我漏掉**（改占位那段时把 `addChild` 一起删了），
+     * 这一句**曾经被漏掉过一次**（改占位那段时把 `addChild` 一起删了），
      * 而症状是**最难查的那一类**：画面照常出、招式列表照常出，
      * **只有标题与「生命上限 150」两行不见了** —— 因为没进显示列表的
      * `Label` 既不报错、也不占位。靠 `detailModel()` 探针比对"模型里有
      * 副标题"与"画面上没有"才把它揪出来（截图只看得出"少了一行"，
      * 看不出是数据没了还是没挂上去）。
      */
-    this.content.addChild(this.title.root, this.subtitle.root);
-    this.root.addChild(this.placeholder.root);
+    this.root.addChild(this.title.root, this.subtitle.root, this.placeholder.root);
   }
 
   get visible(): boolean {
@@ -295,7 +232,7 @@ export class PrepareDetailPanel {
 
   setVisible(visible: boolean): void {
     this.root.visible = visible;
-    this.content.visible = visible;
+    this.rowsLayer.visible = visible;
   }
 
   /**
@@ -332,8 +269,6 @@ export class PrepareDetailPanel {
       this.title.root.visible = false;
       this.subtitle.root.visible = false;
       this.portrait?.setVisible(false);
-      this.iconBox.visible = false;
-      this.iconGlyph.root.visible = false;
       for (const row of this.rows) {
         row.name.root.visible = false;
         row.body.root.visible = false;
@@ -348,17 +283,24 @@ export class PrepareDetailPanel {
     this.title.set(this.translate(model.titleKey));
     this.title.setColor(PREPARE_SKIN.selectionText);
     /**
-     * ⚠️ 标题 / 关键数值 / 头像位**都摆在顶栏那一条里**（三个类共用，
-     * 见 `headerBandOf`）：文字块垂直居中、方框贴右端。
+     * ⚠️ 标题 / 关键数值 / 头像位**都摆在顶栏那一条里**（三类共用这一条，
+     * 但**有没有右边的方框**按类分，见 `headerBoxOf`）：文字块垂直居中、
+     * 方框贴右端。
+     *
+     * ⚠️⚠️ 它们**钉在 `rect` 上**（不跟着 `scroll` 走）：修的就是用户报的
+     * "详情区顶栏随内容滚动会滚出面板"—— 旧版把标题 / 副标题塞进那个会
+     * 整体上移的内容层里，于是招式一多，"生命上限"这一行就被顶出去了。
      */
-    const band = headerBandOf(rect);
-    this.title.root.x = innerX;
+    const span = textSpanOf(model.kind, rect);
+    const band = headerBandOf(model.kind, rect);
+    this.title.root.x = span.x;
     this.title.root.y = Math.round(band.top + (band.h - band.textH) / 2);
-    this.subtitle.root.x = innerX;
+    this.subtitle.root.x = span.x;
     this.subtitle.root.y = this.title.root.y + METRICS.titleLine;
-    this.placeImage(model, innerX, innerW, band);
+    this.placeImage(model, span, band);
 
-    let y = band.top + band.h + METRICS.rowGap * 2;
+    /** 正文从**顶栏下缘**开始 —— 分隔线画在那条分界上（见 `bodyTopOf`）。 */
+    const bodyTop = bodyTopOf(model.kind, rect);
 
     if (model.subtitle === undefined) {
       this.subtitle.root.visible = false;
@@ -372,15 +314,15 @@ export class PrepareDetailPanel {
       this.subtitle.setColor(PALETTE.text);
     }
 
-    /** 分隔线：标题区与正文之间的那道（画在 gfx 上，不新开对象）。 */
+    /** 分隔线：顶栏与正文之间的那道（画在 gfx 上，不新开对象）。 */
     this.gfx
-      .moveTo(innerX, y - METRICS.rowGap / 2)
-      .lineTo(innerX + innerW, y - METRICS.rowGap / 2)
+      .moveTo(innerX, bodyTop - METRICS.rowGap / 2)
+      .lineTo(innerX + innerW, bodyTop - METRICS.rowGap / 2)
       .stroke({ color: PALETTE.panelLine, width: 1, alpha: 0.6 });
 
-    y = this.drawRows(model.rows, y, innerX, innerW);
-    this.shiftContent(rect, y);
-    this.drawScrollBar(rect);
+    const contentBottom = this.drawRows(model.rows, bodyTop, inlineSpan(innerX, innerW));
+    this.shiftContent(rect, bodyTop, contentBottom);
+    this.drawScrollBar(rect, bodyTop);
   }
 
   /* ---------------------------------------------------------------- *
@@ -408,77 +350,86 @@ export class PrepareDetailPanel {
    * ---------------------------------------------------------------- */
 
   /**
-   * 把头像（或炁机的图标占位）摆到**顶栏的右端**。
+   * 把**头像**摆到顶栏的右端（只有人物 / Boss 有素材）。
    *
    * ⚠️ 人物的头像素材来自 `render/portraitAssets.ts`；**没配对的人**
-   * （将来新加的角色）与**所有炁机 / Boss** 都走程序化占位 —— 炁机的
-   * `icon` 名（`char_dodge` 那些）今天**不在 `render/icons.ts` 的 SVG
-   * 表里**，所以不能假装画得出来（那会静默显示成空）。
+   * （将来新加的角色）与**所有炁机 / Boss** 没有素材。
    *
-   * ⚠️ 占位与真头像**同位置、同尺寸**：三类顶栏因此长得一样，而
-   * "这一格没有素材"与"素材还没加载完"也仍然是两件事（方框里那个字是
-   * 名字首字，加载完就换成脸）。
+   * ==================================================================
+   * ⚠️ 2026-10-13 第三轮：炁机的**图标占位块整块删掉**
+   * ==================================================================
+   *
+   * 用户原话："**炁机暂时不要 icon**"。
+   *
+   * 旧版给"没有素材"的那两类画一块 88×88 的描边方块 + 名字首字 —— 那
+   * **就是**一个图标槽（`headerBoxOf` 现在让它等于 0，所以 `box === 0`
+   * 这一条分支同时覆盖"炁机"与"**任何宽度为 0 的方框**"）。
+   *
+   * ⚠️ 为什么连 Boss 的占位块也一起收掉了：用户要的是"不要 icon"，
+   * 而 Boss 今天**同样没有素材** —— 于是它也走这一条。Boss 那 88px 的
+   * 空洞（一个孤零零的"傲"字）换成了整条宽度的标题 + 关键数值，
+   * 这正是"收掉 icon 槽、别留空洞"。
+   *
+   * 🚧 将来给某个 Boss 配了头像素材，它会自动走上面的"真头像"分支
+   * （`portraitFor(portraitId)` 有值）。
    */
   private placeImage(
     model: DetailModel | undefined,
-    innerX: number,
-    innerW: number,
+    span: TextSpan,
     band: { readonly top: number; readonly h: number; readonly box: number },
   ): void {
     const box = band.box;
-    /** 方框**贴右端**（`innerX + innerW` 是面板内区的右边界）。 */
-    const boxX = innerX + innerW - box;
-    const centerY = band.top + band.h / 2;
-    /** 占位方块：与头像同尺寸的一圈描边（画在 `content` 里）。 */
-    this.iconBox.clear();
-
-    if (model === undefined) {
+    const asset =
+      model === undefined || model.portraitId === undefined
+        ? undefined
+        : portraitFor(model.portraitId);
+    if (box <= 0 || asset === undefined || this.portrait === undefined) {
       this.portrait?.setVisible(false);
-      this.iconGlyph.root.visible = false;
-      this.iconBox.visible = false;
       return;
     }
-
-    const asset = model.portraitId === undefined ? undefined : portraitFor(model.portraitId);
-    if (asset !== undefined && this.portrait !== undefined) {
-      /**
-       * ⚠️ **换脸**（光标从一个人移到另一个人）：`setAsset` 自己会判"同一张
-       * 就不重载"，所以这里无条件调它 —— 让"该不该重载"只留一处判据。
-       */
-      this.portrait.setAsset(asset);
-      this.portrait.setVisible(true);
-      this.portrait.root.x = boxX + box / 2;
-      this.portrait.root.y = centerY;
-      this.iconBox.visible = false;
-      this.iconGlyph.root.visible = false;
-      return;
-    }
-
-    this.portrait?.setVisible(false);
     /**
-     * 炁机 / 无名角色的图标位：一块描边方块 + **名字的第一个字**。
-     * ⚠️ 用名字首字而不是空方块：空方块读起来像"图片挂了"。
+     * ⚠️ 方框**贴内区右端**：`span.x + span.w` 是**文字**的右边界，
+     * 而文字在"有方框"的那一类里已经缩到 `内宽 − 方框 − 间距`，
+     * 所以右端 = `span.x + span.w + 间距 + 方框`（见 `textSpanOf`）。
      */
-    this.iconBox.visible = true;
-    this.iconBox
-      .roundRect(boxX, band.top, box, box, 4)
-      .fill({ color: PALETTE.bgTop, alpha: 0.6 });
-    this.iconBox
-      .roundRect(boxX, band.top, box, box, 4)
-      .stroke({ color: PALETTE.panelLine, width: 1, alpha: 0.9 });
-    this.iconGlyph.root.visible = true;
-    this.iconGlyph.set(this.translate(model.titleKey).slice(0, 1));
-    this.iconGlyph.root.x = boxX + box / 2;
-    this.iconGlyph.root.y = centerY;
+    const boxX = span.x + span.w + METRICS.rowGap;
+    const centerY = band.top + band.h / 2;
+    /**
+     * ⚠️ **换脸**（光标从一个人移到另一个人）：`setAsset` 自己会判"同一张
+     * 就不重载"，所以这里无条件调它 —— 让"该不该重载"只留一处判据。
+     */
+    this.portrait.setAsset(asset);
+    this.portrait.setVisible(true);
+    this.portrait.root.x = boxX + box / 2;
+    this.portrait.root.y = centerY;
   }
 
   /* ---------------------------------------------------------------- *
    * 内部：正文行
    * ---------------------------------------------------------------- */
 
-  /** 画正文行，返回内容底边的 y。 */
-  private drawRows(rows: readonly DetailRow[], startY: number, innerX: number, _innerW: number): number {
+  /**
+   * 画正文行，返回**摊开来**的内容底边 y（不含 `rowGap`）。
+   *
+   * ==================================================================
+   * ⚠️ 分两步：先算"每一行在内容坐标里的位置"，再**只摆可见的那些**
+   * ==================================================================
+   *
+   * 第一步与滚动无关（行的位置由内容决定），第二步读 `scroll` —— 于是
+   * "内容有多高"与"现在看得见哪一段"是两件事，不会互相污染（这正是
+   * `scrollWindow` 把 `count` 与 `offset` 分开的理由）。
+   *
+   * ⚠️ 只有**落在视口里**的行会被摆出来：第一行只在 `scroll === 0` 时
+   * 显示，而最后一行只在滚到底时显示 —— 与复盘 / 设置页技能详情**同一份
+   * 边界规则**（`scrollWindow.visibleWindow`）。
+   */
+  private drawRows(rows: readonly DetailRow[], startY: number, span: TextSpan): number {
     let y = startY;
+    const placed: {
+      readonly slot: RowLabels;
+      readonly nameTop: number;
+      readonly bodyTop: number;
+    }[] = [];
     this.rows.forEach((slot, i) => {
       const row = rows[i];
       if (row === undefined) {
@@ -486,6 +437,9 @@ export class PrepareDetailPanel {
         slot.body.root.visible = false;
         return;
       }
+      /** ⚠️ 这一行**在内容坐标里**的 y（`placeRows` 之后就不能再读了）。 */
+      const nameTop = y;
+      let bodyContentTop = y;
       if (row.kind === 'skill') {
         /**
          * ⚠️ **名字与面板标题重复时不画名字**（炁机的说明就是这种情况：
@@ -497,7 +451,7 @@ export class PrepareDetailPanel {
         if (!repeated) {
           slot.name.set(this.translate(row.nameKey));
           slot.name.setColor(PALETTE.text);
-          slot.name.root.x = innerX;
+          slot.name.root.x = span.x;
           slot.name.root.y = y;
           y += METRICS.nameLine;
         }
@@ -512,7 +466,8 @@ export class PrepareDetailPanel {
           slot.body.root.visible = true;
           slot.body.set(this.translate(row.descKey, row.descParams));
           slot.body.setColor(PALETTE.textDim);
-          slot.body.root.x = innerX;
+          slot.body.root.x = span.x;
+          bodyContentTop = y;
           slot.body.root.y = y;
           y += this.estimateLines(slot.body) * METRICS.bodyLine;
         }
@@ -520,26 +475,69 @@ export class PrepareDetailPanel {
         slot.name.root.visible = true;
         slot.name.set(this.translate(row.labelKey));
         slot.name.setColor(PALETTE.textDim);
-        slot.name.root.x = innerX;
+        slot.name.root.x = span.x;
         slot.name.root.y = y;
         slot.body.root.visible = true;
         slot.body.set(row.value);
         slot.body.setColor(PALETTE.text);
-        slot.body.root.x = innerX;
-        slot.body.root.y = y + METRICS.nameLine;
+        slot.body.root.x = span.x;
+        bodyContentTop = y + METRICS.nameLine;
+        slot.body.root.y = bodyContentTop;
         y += METRICS.nameLine + METRICS.bodyLine;
       } else {
         slot.name.root.visible = true;
         slot.name.set(this.textOf(row));
         slot.name.setColor(row.dim === true ? PALETTE.textDim : PALETTE.text);
-        slot.name.root.x = innerX;
+        slot.name.root.x = span.x;
         slot.name.root.y = y;
         slot.body.root.visible = false;
         y += this.estimateLines(slot.name) * METRICS.bodyLine;
       }
       y += METRICS.rowGap;
+      placed.push({ slot, nameTop, bodyTop: bodyContentTop });
     });
-    return y;
+    this.placeRows(placed);
+    return y - METRICS.rowGap;
+  }
+
+  /**
+   * 按 `scroll` 把**可见的那些行**摆到面板上（顶栏那一条**不动**）。
+   *
+   * ⚠️ 行是**按绝对内容坐标算好**再平移的（`top − scroll + 视口顶`）：
+   * 于是"滚到一半"时某一行停在半途，而不是跳一整行 —— 手指 / 滚轮给的是
+   * 连续位移，跳行会让它看起来卡顿。
+   *
+   * ⚠️ 每个槽位的**显隐**由"内容说它该不该画"（`visible`，见上）与
+   * "它在不在视口里"两个条件**一起**决定：只看后者的话，被裁掉的那几行
+   * （`rows` 数组短于槽位数）会带着上一帧的字重新出现。
+   */
+  private placeRows(
+    placed: readonly {
+      readonly slot: RowLabels;
+      /** 内容坐标：名字那一行的 y。 */
+      readonly nameTop: number;
+      /** 内容坐标：说明 / 值那一行的 y（没有第二行时 = `nameTop`）。 */
+      readonly bodyTop: number;
+    }[],
+  ): void {
+    const viewRows = Math.max(1, Math.ceil(this.bodyViewH / this.rowStep));
+    const shown = new Set(visibleWindow(placed, this.scroll, viewRows));
+    /**
+     * ⚠️ **绝对赋值**（`= 内容 y − scroll + 视口顶`）而不是 `+= dy`：
+     * `drawRows` 每帧都会把内容 y 重新算进 `root.y`，再累加就会每帧漂
+     * 一个 `dy`（画面上的表现是"越滚越快"）。
+     */
+    const dy = this.bodyTop - this.scroll;
+    for (const line of placed) {
+      const on = shown.has(line);
+      /** ⚠️ 两个条件**一起**成立才画：内容说该画 + 这一行在视口里。 */
+      line.slot.name.root.visible = on && line.slot.name.root.visible;
+      line.slot.body.root.visible = on && line.slot.body.root.visible;
+      if (on) {
+        line.slot.name.root.y = line.nameTop + dy;
+        line.slot.body.root.y = line.bodyTop + dy;
+      }
+    }
   }
 
   private textOf(row: DetailRow): string {
@@ -566,55 +564,66 @@ export class PrepareDetailPanel {
   }
 
   /* ---------------------------------------------------------------- *
-   * 内部：溢出
-   * ---------------------------------------------------------------- */
-
-  /* ---------------------------------------------------------------- *
    * 内部：滚动
    * ---------------------------------------------------------------- */
 
   /**
-   * 滚轮 / 拖拽滚 **delta 像素**（触屏没有滚轮，拖拽那条路见 `pointerDrag`）。
+   * 滚轮 / 拖拽滚 **delta 像素**（触屏没有滚轮，拖拽那条路见 `PrepareScreen.dragDetail`）。
+   *
+   * ⚠️ 钳位走 `scrollWindow.clampOffset`（**复用**那一份边界规则）：
+   * 滚到尽头 / 内容不足一屏 / 空内容三种边界只有一处实现。
    *
    * @returns 有没有真的动（调用方据此决定要不要重画）。
    */
   scrollBy(delta: number): boolean {
     if (this.maxScroll <= 0) return false;
-    const next = Math.max(0, Math.min(this.scroll + delta, this.maxScroll));
+    /**
+     * ⚠️ 钳位走 `pixelViewport`（**像素**那一套）。曾经写成
+     * `clampOffset(this.scroll + delta, this.maxScroll, 1)` —— 而
+     * `clampOffset` 是**行**那一套（第三个数是"一屏几行"），拿它钳像素会
+     * 让上界差 1（滚到底时最后一行差一点点才露全）。
+     */
+    const next = pixelViewport(this.bodyViewH + this.maxScroll, this.bodyViewH, this.scroll + delta).offsetPx;
     if (next === this.scroll) return false;
     this.scroll = next;
     return true;
   }
 
   /**
-   * 这个逻辑点是不是落在**内容视口**里（拖拽要在里面才算"滚详情"）。
+   * 这个逻辑点是不是落在**正文视口**里（拖拽要在里面才算"滚详情"）。
+   *
+   * ⚠️ 上界是 `bodyTop`（**顶栏下缘**）而不是面板顶边：顶栏是钉住的，
+   * 在它上面拖动不该滚正文 —— 那会让玩家"想点标题却把内容滚走了"。
    */
   isOnDetail(px: number, py: number): boolean {
     const rect = detailRect();
+    const top = this.bodyTop === 0 ? rect.y + PREPARE_LAYOUT.detailPad : this.bodyTop;
     return (
       this.maxScroll > 0 &&
       px >= rect.x &&
       px <= rect.x + rect.w &&
-      py >= rect.y &&
+      py >= top &&
       py <= rect.y + rect.h
     );
   }
 
-  /** 右侧那条滚动条（只有真能滚时才画）。 */
-  private drawScrollBar(rect: {
-    readonly x: number;
-    readonly y: number;
-    readonly w: number;
-    readonly h: number;
-  }): void {
+  /** 右侧那条滚动条（只有真能滚时才画；轨道只在**正文视口**那一段）。 */
+  private drawScrollBar(
+    rect: {
+      readonly x: number;
+      readonly y: number;
+      readonly w: number;
+      readonly h: number;
+    },
+    bodyTop: number,
+  ): void {
     this.scrollBar.clear();
     if (this.maxScroll <= 0) return;
     const trackX = rect.x + rect.w - 5;
-    const trackTop = rect.y + PREPARE_LAYOUT.detailPad;
-    const trackH = rect.h - PREPARE_LAYOUT.detailPad * 2;
-    const viewH = trackH;
-    const total = trackH + this.maxScroll;
-    const thumbH = Math.max(24, Math.round((viewH / total) * trackH));
+    const trackTop = bodyTop;
+    const trackH = Math.max(0, rect.y + rect.h - PREPARE_LAYOUT.detailPad - bodyTop);
+    const thumbRatio = scrollThumbRatio(this.bodyViewH, this.maxScroll + this.bodyViewH);
+    const thumbH = Math.max(24, Math.round(thumbRatio * trackH));
     const progress = this.maxScroll === 0 ? 0 : this.scroll / this.maxScroll;
     const thumbY = trackTop + Math.round((trackH - thumbH) * progress);
     this.scrollBar
@@ -626,7 +635,7 @@ export class PrepareDetailPanel {
   }
 
   /**
-   * 内容比视口高时，按 `scroll` 把**整层上移**（而不是"末尾优先"）。
+   * 正文比视口高时，按 `scroll` 决定**看得见哪一段**（而不是"末尾优先"）。
    *
    * ==================================================================
    * ⚠️ 为什么从"末尾优先"改成"可滚"（实测逼出来的）
@@ -637,19 +646,33 @@ export class PrepareDetailPanel {
    * 顶出面板**——实测「色欲」那四条招式说明一进来，**「生命上限 420」
    * 就看不见了**，而那一行是"这个 Boss 多硬"的唯一线索。
    *
-   * 现在的窗口是 `[scroll, scroll + viewH]`，`scroll` 由四种输入改：
-   * 滚轮 / 拖拽 / ↑↓ 之外的**翻页键**（`PageUp` / `PageDown`）/
-   * 以及"换了聚焦项 → 归零"（见 `update`）。
+   * ==================================================================
+   * ⚠️⚠️ 2026-10-13 第三轮：顶栏**钉住**，只让正文滚
+   * ==================================================================
+   *
+   * 上一版把标题 / 副标题塞进那个"整体上移"的内容层里 —— 于是**滚到底**
+   * 时"生命上限 420"仍然会被滚出面板（那正是用户报的"详情区顶栏随内容
+   * 滚动会滚出面板"）。现在：
+   *
+   * ```
+   *   顶栏（标题 + 关键数值 + 头像）→ 钉在面板顶部，不参与滚动
+   *   正文（招式 / 说明 / 键值行）  → 在 [bodyTop, 面板底 − 内边距] 里滚
+   * ```
+   *
+   * ⚠️ 视口顶边是**顶栏下缘**（`bodyTop`）而不是面板顶边：正文滚到顶栏
+   * 底下就停住，不会与标题叠在一起。
    *
    * ⚠️ 触屏没有滚轮（AGENTS.md §3b）：拖拽那条路是**必须**的，不是补充。
-   * 它走 `SettingsPanel` 已有的入口模式（`canvasInput` 在 `pointermove`
-   * 时转发）—— 不自己挂 `window` 监听器。
+   * 它走 `canvasInput` 已有的入口模式（`pointermove` 时转发）——
+   * 不自己挂 `window` 监听器。
    */
-  private shiftContent(rect: { readonly y: number; readonly h: number }, contentBottom: number): void {
-    const viewH = rect.h - PREPARE_LAYOUT.detailPad * 2;
-    const maxScroll = Math.max(0, contentBottom - rect.y - PREPARE_LAYOUT.detailPad - viewH);
-    this.maxScroll = maxScroll;
-    this.scroll = Math.max(0, Math.min(this.scroll, maxScroll));
-    this.content.y = -this.scroll;
+  private shiftContent(
+    rect: { readonly y: number; readonly h: number },
+    bodyTop: number,
+    contentBottom: number,
+  ): void {
+    this.bodyViewH = Math.max(0, rect.y + rect.h - PREPARE_LAYOUT.detailPad - bodyTop);
+    this.maxScroll = pixelViewport(contentBottom - bodyTop, this.bodyViewH, 0).maxPx;
+    this.scroll = pixelViewport(contentBottom - bodyTop, this.bodyViewH, this.scroll).offsetPx;
   }
 }

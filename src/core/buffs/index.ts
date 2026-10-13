@@ -32,6 +32,24 @@
 
 import type { BuffDef, BuffFlags, BuffId, BuffInstance, Combatant, SkillTag } from '../types';
 
+/**
+ * **消费机制**（"用掉就消耗"等四种触发）实现搬到了 `./consume.ts`。
+ *
+ * 拆出去的理由是 AGENTS.md §3 的关注分离：本文件是"施加 / 过期 / 查询"
+ * （buff 的**生命周期由时间驱动**），而消费是另一件事
+ * （**生命周期由战斗事件驱动**）。两者唯一的交集是"都要改
+ * `combatant.buffs`"，而那只是一行 `filter`。
+ *
+ * ⚠️ 这里**转发**它们，所以 `from '../buffs'` 的写法照旧可用
+ * （`core/combat/` 与测试都这么 import）。
+ */
+export {
+  applyConsume,
+  consumeFactsFor,
+  matchedConsumeTriggers,
+} from './consume';
+export type { ConsumeFacts, ConsumeOutcome } from './consume';
+
 /** 施加 buff 的结果：新的 buff 列表 + 发生了哪种变化（供发事件）。 */
 export interface ApplyBuffResult {
   readonly buffs: readonly BuffInstance[];
@@ -371,9 +389,19 @@ export function expandBuffModifiers(
     const def = defs.get(buff.defId) ?? buff.def;
     if (!def?.modifiers) continue;
     for (const modifier of def.modifiers) {
-      // 每条修正带上 buffId 作为命名空间，保证 contrib 能引用到
       out.push({
+        // 每条修正带上 buffId 作为命名空间，保证 contrib 能引用到
         modifier: modifier.namespace ? modifier : { ...modifier, namespace: buff.defId },
+        /**
+         * ⚠️ `independent` 叠层下同一个 defId 会有**多个实例**，每个各带
+         * 一条修正 —— 于是修正被展开 N 次（是"线性叠加"，不是"取最大"）。
+         *
+         * 那不是"顺手就支持"的能力：本仓库的修正池语义是"同 namespace 的
+         * 修正按 `STAT_RULES` 聚合"，把同一份修正复制 N 份的表达在两个
+         * 概念上都说不通。所以 `validate.ts` 对"`independent` 且带
+         * `modifiers`"的 buff **报错拦下**（`INDEPENDENT_BUFF_MODIFIERS`）——
+         * 要让每层提供修正，用 `stack` / `stackRefresh`（那是它们的定义）。
+         */
         stacks: buff.stacks,
         buffId: buff.defId,
       });

@@ -109,6 +109,12 @@ export function characterSelectHitAreas(
     colW: L.playerColW,
     columns: L.playerColumns,
     h: L.cardH,
+    /**
+     * ⚠️ 这一屏画的是**人物卡**（有头像），所以取下限 `cardMinW` ——
+     * 与备战屏的人物那一块同一个数（`cardGrid` 的 `minW` 由调用方给，
+     * 因为炁机卡没有头像、下限更窄）。
+     */
+    minW: L.cardMinW,
   }).map((rect, i) => ({ kind: 'player' as const, id: players[i]!.id, ...rect }));
 }
 

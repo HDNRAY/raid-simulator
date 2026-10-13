@@ -92,8 +92,55 @@ export interface QijiLayout {
   readonly maxRowW: number;
   /** 标题的 y。 */
   readonly titleY: number;
-  /** 提示行的 y。 */
-  readonly hintY: number;
+  /**
+   * **排满时的那一块卡片**底边 → 提示行**中心**的距离。
+   *
+   * ⚠️ 提示行的 y 不写死（旧版是 `hintY: 470`）：它由 `qijiHintY()` 按
+   * "最多几行卡片"算出来 —— 见那个函数（那是这一屏**唯一**的提示行位置
+   * 来源）。
+   */
+  readonly hintGap: number;
+}
+
+/**
+ * **这一屏最多画几张候选卡**。
+ *
+ * ⚠️ 一个数、两个用途（所以提成常量而不是各写一遍）：
+ *
+ * 1. `QijiSelectScreen` 的 Label 池大小（每帧新建 Label 会重建纹理）
+ * 2. `qijiHintY()` 算"排满时卡片块有多高"→ 提示行放在它下面
+ *
+ * 今天候选最多 5 条（池子 8 条里已解锁的那些），而 `perRow = 3`（见
+ * `QIJI_SELECT_LAYOUT` 的 `cardW`）—— 所以 6 是"够用且留一点余量"的数。
+ */
+export const QIJI_SELECT_SLOTS = 6;
+
+/**
+ * 提示行的 y（**中心**）—— 由"排满时的卡片块底边" + `hintGap` 算出来。
+ *
+ * ==================================================================
+ * ⚠️ 修的是哪个 bug（用户报的 + 截图量出来的）
+ * ==================================================================
+ *
+ * 旧版 `hintY: 470` 是**手调**的，而卡片块是从 `rowTop: 150` 起、每张
+ * `cardH: 172` + `gap: 20` 排下去：
+ *
+ * ```
+ *   第一行 150 .. 322
+ *   第二行 342 .. 514      ← 提示行 470 正落在**第二行卡片里面**
+ * ```
+ *
+ * 于是"选择一个炁机生效（← → · Enter）"这行字压在第二行卡片的**下半张**
+ * 上（截图逐像素量过：提示行字框 461..479，与卡片 342..514 重叠 12px）。
+ *
+ * 修法不是"把 470 调小一点"（那只是把重叠挪到别的行数上），而是
+ * **让提示行从卡片块推出来** —— 排满（`QIJI_SELECT_SLOTS` 条）时也一定
+ * 在它下面。这也是本仓库对布局的硬规则（几何算出来、不许手调）。
+ */
+export function qijiHintY(L: QijiLayout = QIJI_SELECT_LAYOUT): number {
+  const rows = qijiRows(QIJI_SELECT_SLOTS, L).length;
+  const blockBottom = L.rowTop + rows * L.cardH + (rows - 1) * L.gap;
+  return blockBottom + L.hintGap;
 }
 
 /**
@@ -109,11 +156,26 @@ export interface QijiLayout {
 export const QIJI_SELECT_LAYOUT: QijiLayout = {
   rowTop: 150,
   cardW: 252,
-  cardH: 172,
+  /**
+   * ⚠️ 卡高从 **172 改 160**（2026-10-13 第三轮）。
+   *
+   * 172 × 2 行 + 20 间距 = 364，从 150 起就到 514 —— 而**提示行也得有
+   * 地方站**（那正是这次的 bug）。160 让两行卡片占 `150..490`，提示行
+   * 落在 508（见 `qijiHintY`），中间留 9px 的呼吸位。
+   *
+   * ⚠️ 减到 160 之后卡片内部仍然排得下（三段文字：名字 +30、说明
+   * +72/+92、右下角"已叠满" `h − 24 = +136`）—— 这三处是**内容相对
+   * 卡片顶边**的偏移（见 `QijiSelectScreen.redraw`），不随卡片高变化。
+   */
+  cardH: 160,
   gap: 20,
   maxRowW: 900,
   titleY: 62,
-  hintY: 470,
+  /**
+   * 提示行贴得紧一点（9px 呼吸位）：这一屏没有页脚声明，但底部也只
+   * 剩下 ~32px —— 再大就会顶到画布下缘。
+   */
+  hintGap: 18,
 };
 
 /**

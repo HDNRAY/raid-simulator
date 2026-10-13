@@ -78,6 +78,71 @@ export interface PrepareFooterOptions {
    * 难查得多。
    */
   readonly translate: TranslateFn;
+  /**
+   * 要不要显示**键盘**提示（触屏为假 → 换成触屏那一句）。
+   *
+   * ⚠️ 它来自 `render/platform.capsOf(mode).showKeyHints`（操作方式那个
+   * **唯一 flag** 派生出来的值），不在本文件里另判一次 —— 见 AGENTS.md §3b
+   * 与 `PrepareFooter.draw` 的说明。
+   */
+  readonly showKeyHints: () => boolean;
+}
+
+/**
+ * 本屏要拼上去的**键名**（键名不进 i18n，见 AGENTS.md §3b）。
+ *
+ * ⚠️ 它们与 `app/loopWiring.ts` 里真正接的键**一一对应**：
+ *
+ * | 键名 | 那一条 `case` |
+ * |---|---|
+ * | `方向键`（← → ↑ ↓） | 块**内**走光标（`prepare.cycle` / `prepare.stepVertical`） |
+ * | `Enter` | 确定 / 切换炁机层数 / 开战（`prepare.confirm`） |
+ * | `Tab` | **跨块**（`prepare.moveFocus`，Shift+Tab 反向） |
+ *
+ * ⚠️ 它们写成渲染层的常量（而不是 i18n 里的字面量）：改快捷键**不该**
+ * 改语言包 —— 那正是 §3b 记着的那条（"改快捷键害得改 i18n 吗？"）。
+ */
+const PREPARE_KEY_NAMES = {
+  confirm: 'Enter',
+  tab: 'Tab',
+} as const;
+
+/**
+ * **提示行该写哪一句**（纯函数：状态 → 文案 key）。
+ *
+ * ==================================================================
+ * 为什么单独抽出来（AGENTS.md §3 的关注分离 + §4 的"逻辑要有单测"）
+ * ==================================================================
+ *
+ * 这一条是**会被写错、而截图上看不出来**的规则：截图只能证明"有一行字"，
+ * 证明不了"触屏上**不该**出现 Enter"。而它错了的代价正是用户报的那条
+ * —— 纯触屏玩家按提示去按一个不存在的键。
+ *
+ * 抽成纯函数之后可以在 node 里断言"触屏那一支永远不含键名"，不必起 Pixi。
+ *
+ * ```
+ *   开发中的单位 → 换「开发中」（反馈优先于操作说明，见文件头）
+ *   键盘         → `hintCursor` + 渲染层拼的键名（Enter / Tab）
+ *   触屏         → `hintTouch`（**不拼键名**）
+ * ```
+ *
+ * @param showKeyHints `render/platform.capsOf(mode)` 的派生值（§3b 的
+ *   唯一 flag）—— **不在这里再判一次"是不是触屏"**。
+ * @returns 已经填好键名的**成品字符串**。
+ */
+export function prepareHintOf(
+  translate: TranslateFn,
+  state: { readonly developing: boolean; readonly showKeyHints: boolean },
+): string {
+  if (state.developing) return translate('roster.ui.developing');
+  if (state.showKeyHints) {
+    /**
+     * ⚠️ **键名从这里拼上去**（`{confirm}` / `{tab}` 是参数）—— 语言包里
+     * 只有标签（§3b：改快捷键不该改 i18n）。
+     */
+    return translate('roster.ui.hintCursor', PREPARE_KEY_NAMES);
+  }
+  return translate('roster.ui.hintTouch');
 }
 
 export class PrepareFooter {
@@ -163,7 +228,21 @@ export class PrepareFooter {
       .stroke({ color: skin.strokeColor, width: skin.strokeWidth });
     this.startLabel.setColor(skin.labelColor);
     this.startLabel.set(translate('roster.ui.start'));
-    this.hint.set(developing ? translate('roster.ui.developing') : translate('roster.ui.hintCursor'));
+    /**
+     * ⚠️ **两种模式两句话**（用户："触屏底部的提示 显示触屏的版本"）：
+     *
+     * ```
+     *   键盘 → `roster.ui.hintCursor` + 渲染层拼上的键名（Enter / Tab）
+     *   触屏 → `roster.ui.hintTouch`（**不拼键名** —— 触屏没有这些键）
+     * ```
+     *
+     * ⚠️ 判据是 `showKeyHints`（操作方式唯一 flag 的**派生值**），不是
+     * 本文件里再探测一次"是不是触屏"：两处判断会漂，而漂的表现是
+     * "触屏提示里出现 Enter"（旧版正是如此）。
+     */
+    this.hint.set(
+      prepareHintOf(translate, { developing, showKeyHints: this.options.showKeyHints() }),
+    );
     this.hint.setColor(developing ? PREPARE_SKIN.selectionText : PALETTE.textDim);
     this.notice.set(translate('roster.ui.notice'));
   }

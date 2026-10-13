@@ -46,34 +46,19 @@
  * 的"选了就离开这一屏"会造出两个语义打架的屏幕。
  *
  * ⚠️ **状态存在 `PrepareScreen` 之外**（`app/` 层的 `freeQijiStore`），
- * 本文件只提供纯函数：`cycleQijiStack()` 给下一帧的层数。
- * 这样"层数"这件事只有一处真相，而"怎么画"在渲染层。
- *
- * ==================================================================
- * ⚠️ 炁机层数：**沿用 `maxStacks`**，不另开一套自由模式规则
- * ==================================================================
- *
- * 判据（AGENTS.md §2 的"同一件事不许有第二份表达"）：`data/qiji.ts` 的
- * `maxStacks` 已经是"一个炁机最多生效几层"的**唯一**声明 ——
- * `core/run` 的候选生成读它、`buildPlayerKit` 按 `stacks` 展开修正也读它。
- * 自由模式若无视它、让每条都能无限叠，同一个字段就会有**两种含义**
- * （肉鸽里 3 层、自由模式里 ∞），而那种漂移不会报错、只会让数值对不上。
- *
- * 于是"任意个"落在**条数**上（8 条炁机想开几条开几条，随时改），
- * 而每条自己的**层数**仍然认 `maxStacks`（默认 1）：
- *
- *   「固本培元」(maxStacks 3) 可以点 3 次 = +90 生命
- *   「周天运转」(maxStacks 2) 可以点 2 次 = +20 炁/秒
- *   其余 6 条（无 `maxStacks`）**只能一层**，再点就归零重来
- *
- * ⚠️ **封顶之后继续点 = 归零**（而不是"没反应"）：层数就是卡上的角标，
- * 而"点到底了却什么都看不出"正是本仓库点名过的那种"以为按键坏了"。
- * 归零给了它一个**看得见的下一个状态**，也让"取消"不必再学第二个键。
- * 想往下退一层用 `Shift+Enter`（或在卡片左半边点一下）。
+ * 而"层数怎么变"（加 / 退 / 封顶归零）在 **`ui/freeQiji.ts`** —— 那是
+ * 纯数据，与"光标停在哪一条"（本文件）没有交集，所以 §3 的横向切割把
+ * 它挪走了。本文件只留下"炁机这一块的**光标**怎么走"。
  */
 
 import type { PrepareFocus, PrepareOption, PrepareSectionKind } from './prepareTypes';
-import { prepareHitAreas } from './prepareGeometry';
+import {
+  NO_SCROLL,
+  prepareHitAreas,
+  sectionColumns,
+  type SectionScroll,
+} from './prepareGeometry';
+import { stepGrid, type GridDirection } from './gridNav';
 
 export type { PrepareFocus, PrepareOption, PrepareSectionKind } from './prepareTypes';
 export type { PrepareHitArea, PrepareHitKind } from './prepareLayout';
@@ -83,13 +68,40 @@ export type { PrepareHitArea, PrepareHitKind } from './prepareLayout';
  * （`hitTestPrepare` 就用它）。转发之后消费者只有**一个**入口，
  * 而几何本身仍然只有 `prepareLayout` 那一份实现。
  */
+/**
+ * ⚠️ **转发炁机层数那一套**（实现在 `./freeQiji`）：
+ * 它们在 §3 的横向切割里搬走了，而调用方（`app/` 与既有测试）**一行都
+ * 不该改** —— 拆文件不该改 import 路径（那是纯噪音）。这里只是通道，
+ * 实现只有那一份。
+ */
 export {
+  cycleQijiStack,
+  freeQijiChoices,
+  stackCapOf,
+  stacksIn,
+  unstackQiji,
+  type FreeQiji,
+  type QijiCycle,
+} from './freeQiji';
+
+export {
+  cardGrid,
+  NO_SCROLL,
   prepareHitAreas,
   prepareLabelY,
   rowTopsOf,
   sectionBlockH,
+  sectionColumns,
+  sectionMaxScroll,
+  sectionRowStep,
+  sectionScrollbar,
+  sectionStackH,
   sectionsBottom,
+  sectionViewport,
+  sectionViewportH,
+  sectionViewportRows,
   startRect,
+  type SectionScroll,
 } from './prepareGeometry';
 
 /**
@@ -253,6 +265,11 @@ export function cursorTarget(
  *
  * ⚠️ 光标**从已选中的那一项**出发会产生"按一下方向键，光标跳回去又回来"，
  * 所以这里始终从**光标自己**的位置算下标。
+ *
+ * ⚠️ `delta` 是**线性**的 ±1：它对应 ← →（同一行内），也对应
+ * `stepCursor` 里"非炁机块"的 ↑ ↓ —— 那些块只有一行，上下本来就是
+ * "没有下一行"。而炁机那一块是**两行**，所以它的 ↑ ↓ 走 `gridNav.stepGrid`
+ * （见 `stepCursor`）。
  */
 export function cycleCursor(
   sel: PrepareSelection,
@@ -275,17 +292,97 @@ export function cycleCursor(
 }
 
 /**
- * 光标上下换槽位：人物 → 炁机 → 对手 → 开始。
+ * 方向键：在**当前这一块内部**移动光标（← → ↑ ↓）。
+ *
+ * ==================================================================
+ * ⚠️⚠️ 2026-10-13 第三轮：这是"炁机内部无法用方向键选择"的**修法**
+ * ==================================================================
+ *
+ * 用户原话："炁机内部无法用方向键选择，所以把人物 炁机 对手的切换换成 tab"。
+ *
+ * 旧版的 ↑ ↓ **不是"块内导航"而是"换块"**（`moveFocus`），于是：
+ *
+ * ```
+ *   炁机摊成 2 行（今天 8 条 → 5 + 3）
+ *   ← →  在"第一行 / 第二行"里走，走到行尾**没反应**（不环绕）
+ *   ↑ ↓  直接从炁机块跳到人物块 / 对手块      ← 到不了第二行（这是 bug）
+ * ```
+ *
+ * 结果是**炁机块里有一半的卡（第二行）永远选不到**，而"能选到第一行"
+ * 又会在行尾看起来像卡住了。两件事叠起来就是用户看到的那句
+ * "炁机内部无法用方向键选择"。
+ *
+ * 修法：
+ *
+ * ```
+ *   块【内】的导航 = 方向键（本函数）：← → 行内、↑ ↓ 同列换行
+ *   块【间】的切换 = Tab / Shift+Tab（`moveFocus`，唯一的路）
+ * ```
+ *
+ * ⚠️ 非炁机的两块是**一行**，所以它们的 ↑ ↓ 退化成"没有下一行"（返回原
+ * 对象）—— 这正是"块内导航"的应有语义：**在边界停住，不跨块**。
+ *
+ * @param dir ← → ↑ ↓。
+ */
+export function stepCursor(
+  sel: PrepareSelection,
+  players: readonly PrepareOption[],
+  bosses: readonly PrepareOption[],
+  dir: GridDirection,
+  qiji: readonly PrepareOption[] = [],
+): PrepareSelection {
+  const at = cursorTarget(sel, players, bosses, qiji);
+  if (at === undefined) return sel;
+  const horizontal: GridDirection = dir === 'left' ? 'left' : dir === 'right' ? 'right' : dir;
+  if (at.kind !== 'qiji') {
+    /**
+     * ⚠️ 人物 / 对手只有一行：← → 线性走，↑ ↓ **不动**（到边界停住）。
+     * 走 `cycleCursor` 而不是自己算下标 —— "一维里的 ±1"它已经有一份了。
+     */
+    const delta = horizontal === 'left' ? -1 : horizontal === 'right' ? 1 : 0;
+    if (delta === 0) return sel;
+    return cycleCursor(sel, players, bosses, delta, qiji);
+  }
+  const list = qiji;
+  const idx = Math.max(0, list.findIndex((e) => e.id === at.id));
+  const next = stepGrid(idx, dir, { count: list.length, columns: sectionColumns('qiji') });
+  const entry = list[next];
+  if (entry === undefined || entry.id === at.id) return sel;
+  return { ...sel, cursor: { ...sel.cursor, qijiId: entry.id } };
+}
+
+/**
+ * **块与块之间**换焦点：人物 → 炁机 → 对手 → 开始。
+ *
+ * ==================================================================
+ * ⚠️⚠️ 2026-10-13 第三轮：它现在是 **Tab / Shift+Tab 专用**
+ * ==================================================================
+ *
+ * 用户原话："**炁机内部无法用方向键选择，所以把人物 炁机 对手的切换换成
+ * tab**"。
+ *
+ * 旧版 ↑ ↓ 也走这个函数（`wrap = false`，"到两端停住"），于是"换块"与
+ * "块内导航"抢同一个键 —— 而块内一旦是**两行**（炁机今天 5+3），
+ * ↑ ↓ 就永远到不了第二行。现在分工是**互斥**的：
+ *
+ * ```
+ *   块【间】= Tab / Shift+Tab（本函数，永远环绕）
+ *   块【内】= ← → ↑ ↓（`stepCursor`，永远不跨块）
+ * ```
+ *
+ * ⚠️ `wrap` 参数**保留**是因为它表达的是调用方的意图（Tab 环绕），
+ * 而"环绕"是 Tab 的通用语义：在「开始战斗」上按 Tab 应该回到第一块，
+ * 而不是毫无反应（那正是"以为按键坏了"的形状）。
  *
  * ⚠️ 炁机排在人物**之后、对手之前**：它是"选了人物之后"的动作
  * （需求原文："选了人之后，可以激活任意个他的炁机"），所以紧贴人物；
  * 而对手是另一件事（打谁），排在后面。
  *
- * `wrap` 为假（方向键）：两端**停住** —— 与槽位内一致，避免"按了没反应"。
- * `wrap` 为真（Tab / Shift+Tab）：**环绕**（Tab 的通用语义就是循环）。
- *
  * ⚠️ 没有选项的槽位会被跳过（`canFocus`）：否则 Tab 会把光标送进一个
  * 空槽位，那里既没有卡片可高亮、按 Enter 也没有意义。
+ *
+ * ⚠️ **它不移动块内的光标**：焦点换了块，块内光标停在它自己上次的位置
+ * （`PrepareCursor` 每个槽位各记一份）—— 这正是"路过一趟回来还在原处"。
  */
 export function moveFocus(
   sel: PrepareSelection,
@@ -450,104 +547,6 @@ export function pickQiji(
 }
 
 /* ================================================================== *
- * 炁机激活（层数）
- * ================================================================== */
-
-/**
- * 一条炁机在自由模式里的层数上限。
- *
- * ⚠️ `maxStacks` 缺省 **1**（与 `QijiEntity.maxStacks` 的文档一致）——
- * 判据只有内容表那一处，这里不写第二份名单。
- * ⚠️ 上限至少 1：内容里写 `maxStacks: 0` 是没意义的（那条炁机永远开不了），
- * 但真写了也不该让界面无路可走 —— 夹到 1 然后由内容测试去拦它。
- */
-export function stackCapOf(maxStacks: number | undefined): number {
-  if (maxStacks === undefined) return 1;
-  if (!Number.isFinite(maxStacks)) return 1;
-  return Math.max(1, Math.floor(maxStacks));
-}
-
-/** 自由的炁机**层数表**：`id → 已叠层数`（缺键 = 没开、0 层）。 */
-export type FreeQiji = Readonly<Record<string, number>>;
-
-/** 这个 id 现在开了几层（不在表里 = 0）。 */
-export function stacksIn(free: FreeQiji, id: string): number {
-  return free[id] ?? 0;
-}
-
-/** 结果：下一帧的层数表 + 这次动作之后这个 id 的层数（渲染层画角标要用）。 */
-export interface QijiCycle {
-  readonly free: FreeQiji;
-  readonly stacks: number;
-}
-
-/**
- * 把一条炁机**往上叠一层**；已经到顶就**归零重来**。
- *
- * 需求："勾选 / 取消 ✓ 任意个"。一个键同时承担两件事的代价是"到顶之后
- * 再点是什么"必须有答案 —— 见文件头：归零（而不是"没反应"），因为层数
- * 就画在卡上，归零是**看得见**的下一步。
- *
- * ⚠️ 没变化的路径返回**同一个对象**（调用方据此跳过写存储 / 重画）。
- */
-export function cycleQijiStack(
-  free: FreeQiji,
-  id: string,
-  maxStacks: number | undefined,
-): QijiCycle {
-  const cap = stackCapOf(maxStacks);
-  const cur = stacksIn(free, id);
-  const next = cur >= cap ? 0 : cur + 1;
-  if (next === cur) return { free, stacks: cur };
-  return { free: withStacks(free, id, next), stacks: next };
-}
-
-/**
- * 把一条炁机**退一层**（`Shift+Enter` / 点卡片左半边）。
- *
- * 0 层再退就是 0（不变），所以"退到底"是稳定的，不会绕回上限。
- */
-export function unstackQiji(free: FreeQiji, id: string): QijiCycle {
-  const cur = stacksIn(free, id);
-  if (cur <= 0) return { free, stacks: 0 };
-  return { free: withStacks(free, id, cur - 1), stacks: cur - 1 };
-}
-
-/**
- * 写一层数。**0 层 = 删掉这个键**（而不是留一个 `{ id: 0 }`）：
- * 两份"没开"的表达（缺键 / 0）会让"这个 id 到底开没开"变成要看两个地方。
- */
-function withStacks(free: FreeQiji, id: string, stacks: number): FreeQiji {
-  if (stacks <= 0) {
-    const { [id]: _dropped, ...rest } = free;
-    return rest;
-  }
-  return { ...free, [id]: stacks };
-}
-
-/**
- * 层数表 → **`buildPlayerKit` 要的形状**（`{ qijiId, stacks }[]`）。
- *
- * ⚠️ 这个函数是"自由模式的炁机怎么进战斗"的**唯一翻译点**：产物直接喂给
- * `data/kit.buildPlayerKit`（与肉鸽那条路**同一个函数**），所以"两个模式
- * 的效果不一样"从结构上不可能 —— 差别只在**谁来填这张表**。
- *
- * ⚠️ **顺序按 `order`（内容表的顺序）排**，不按对象键顺序：
- * `buildPlayerKit` 的展开与 `Object.keys` 的插入顺序有关，而黄金截图 /
- * 断言要能复现同一份修正列表。
- * ⚠️ 不在 `order` 里的键被丢掉（内容表换了名字之后的陈旧存档）。
- */
-export function freeQijiChoices(
-  free: FreeQiji,
-  order: readonly { readonly id: string }[],
-): readonly { readonly qijiId: string; readonly stacks: number }[] {
-  return order.flatMap((entry) => {
-    const stacks = stacksIn(free, entry.id);
-    return stacks > 0 ? [{ qijiId: entry.id, stacks }] : [];
-  });
-}
-
-/* ================================================================== *
  * 能否开战
  * ================================================================== */
 
@@ -590,6 +589,10 @@ export function canStartBattle(
  * ⚠️ **同一次点击只返回一项**（命中即返回）：继续往下找会同时点中底下的卡。
  * ⚠️ 收起的那两块**只有块头**在命中区里 —— 它们的卡片不画、也点不到
  * （不会出现"看不见却能点中的幽灵卡片"）。
+ *
+ * ⚠️ **滚动状态要一起传进来**（第三个参数是 `scroll`）：滚过之后卡片的
+ * y 变了，命中区必须与画面上那一份**逐像素相同** —— 各算一遍偏移的话，
+ * "点到的卡"与"看到的卡"会差正好一个滚动量（而那看起来像"点击乱跳"）。
  */
 export function hitTestPrepare(
   px: number,
@@ -598,8 +601,9 @@ export function hitTestPrepare(
   bosses: readonly PrepareOption[],
   qiji: readonly PrepareOption[] = [],
   expanded: PrepareSectionKind = 'player',
+  scroll: SectionScroll = NO_SCROLL,
 ): { readonly kind: 'player' | 'qiji' | 'boss' | 'start' | 'summary'; readonly id: string } | undefined {
-  const areas = prepareHitAreas(players, bosses, qiji, expanded);
+  const areas = prepareHitAreas(players, bosses, qiji, expanded, scroll);
   /** 按钮优先（见上）。 */
   const start = areas.find((a) => a.kind === 'start');
   if (start !== undefined && inRect(px, py, start)) return { kind: 'start', id: start.id };

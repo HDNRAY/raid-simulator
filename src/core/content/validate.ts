@@ -18,6 +18,9 @@ import {
   type CapabilityIssue,
   type ContentRoot,
 } from './capabilityAudit';
+import { checkBuffCapabilities, validateBuff } from './buffValidation';
+import { validateLocaleKey } from './localeKey';
+import type { ValidationIssue } from './validationIssue';
 import { offGridTimeIssues } from './timeGrid';
 import type {
   Ability,
@@ -28,7 +31,6 @@ import type {
   StatKey,
   Behavior,
 } from '../types';
-import { STAT_RULES } from '../stats/aggregate';
 
 /**
  * 重新导出：`SUPPORTED_HOOKS` 是"引擎会处理哪些 hook"的唯一真相源，
@@ -37,78 +39,16 @@ import { STAT_RULES } from '../stats/aggregate';
  */
 export { SUPPORTED_HOOKS };
 
-export type ValidationCode =
-  | 'DUP_ID'
-  | 'MISSING_BUFF'
-  | 'MISSING_SKILL'
-  | 'MISSING_SOURCE'
-  | 'MISSING_LOCALE_KEY'
-  | 'KEY_ID_MISMATCH'
-  | 'CYCLE'
-  | 'HIT_ORDER'
-  | 'ZERO_DURATION'
-  | 'UNCAPPED_STACK'
-  | 'BAD_CLAMP'
-  | 'DANGLING_NAMESPACE'
-  | 'HARDCODED_TEXT'
-  | 'UNKNOWN_STAT'
-  | 'EMPOWERED_ABILITY'
-  /**
-   * `onSuccess` 退还的冷却与自己扣的不相等。
-   *
-   * 「截」的"成功不进 CD"就是靠这两个数字相等实现的 —— 不等会静默
-   * 坏掉（退多了被钳住看不出来，退少了成功之后还剩一截 CD）。
-   */
-  | 'COOLDOWN_REFUND_MISMATCH'
-  /**
-   * 内容用了 `Expr.counter`（离散计数器）。
-   *
-   * ⚠️ 这是个**能力尚未接线**的检查，不是"内容写错了"：计数器没有写入者，
-   * 战斗路径的 `getCounter` 是 `() => 0` 的桩 —— 用它会**静默得到 0**
-   * （不是报错，是算错，最坏的一种）。所以这里**默认拒绝**：
-   * 类型保留、能力保留，但在实现之前不可能被静默误用。
-   *
-   * 实现计数器之后把这条检查删掉即可。
-   */
-  | 'COUNTER_UNIMPLEMENTED'
-  /**
-   * 内容用了引擎**没有执行点**的 `Ability` kind（`grantSkill` / `consume`）。
-   *
-   * 同 `COUNTER_UNIMPLEMENTED` 的性质：它们是**设计过但还没接线**的能力
-   * （类型保留），可写进内容会**静默无效** —— 所以默认拒绝。
-   * "故意留给未来"也不例外：那该写成注释/TODO，而不是一份看起来会生效的内容。
-   * 想写设计稿就显式 `{ strict: false }`。
-   */
-  | 'ABILITY_UNIMPLEMENTED'
-  /**
-   * 内容挂了引擎**不会派发**的 hook。
-   *
-   * 同 `COUNTER_UNIMPLEMENTED` 的性质：`Hook` 是一整张声明表，
-   * 其中只有 `SUPPORTED_HOOKS` 会被真的处理。写进内容却不在表里的
-   * hook **静默无效** —— 所以默认拒绝，而不是让人"写了却没反应"。
-   */
-  | 'UNSUPPORTED_HOOK'
-  /**
-   * 时间值不在 **0.1 秒（一个逻辑步）的刻度**上，例如 `castTime: logicMs(2.5)`
-   * = 250ms。
-   *
-   * 与上面几条不同：这不是"引擎还没实现"，而是**内容写错了**，而且错得
-   * 很安静 —— 显示会向上折到 0.3 秒、引擎按 250ms 跑，两边**差一整个
-   * 刻度**，不报错、不崩、肉眼看不出来。所以照 AGENTS.md §2 的第三类
-   * 处理：**校验报错拦下**。
-   *
-   * ⚠️ 拦哪些字段（含为什么排除 `holdDrain.perLogicTick`、`gapMs` 怎么判）
-   * 全写在 `./timeGrid.ts` 的文件头 —— 判据在那里，这里只登记校验码。
-   */
-  | 'OFF_GRID_TIME';
-
-export interface ValidationIssue {
-  readonly severity: 'error' | 'warning';
-  readonly code: ValidationCode;
-  /** 出问题的位置，如 `entropy-clock.abilities[2].trigger.then[0]` */
-  readonly path: string;
-  readonly message: string;
-}
+/**
+ * 校验问题的形状（`ValidationIssue` / `ValidationCode`）**搬到了
+ * `./validationIssue.ts`**（本轮从本文件切出去：加 buff 消费校验后本文件
+ * 到了 712 行，AGENTS.md §3）。它们必须待在一个**叶子**里 ——
+ * `./buffValidation.ts` 也要产出这个形状，而从本文件 import 会造成
+ * `validate → buffValidation → validate` 的依赖倒挂。
+ *
+ * ⚠️ 这里**转发**，所以 `from './validate'` 的写法照旧可用。
+ */
+export type { ValidationCode, ValidationIssue } from './validationIssue';
 
 export interface ContentBundle {
   readonly entities: readonly GameEntity[];
@@ -157,7 +97,9 @@ export function validateContent(
     validateSkill(skill, skillIds, buffIds, bundle.localeKeys, push);
   }
   for (const buff of bundle.buffs) {
-    validateBuff(buff, buffIds, skillIds, bundle.localeKeys, push);
+    validateBuff(buff, buffIds, skillIds, bundle.localeKeys, push, (abilities, prefix) =>
+      checkAbilityHooks(abilities, prefix, push),
+    );
   }
   for (const entity of bundle.entities) {
     validateEntity(entity, entityIds, buffIds, skillIds, bundle.localeKeys, push);
@@ -167,6 +109,15 @@ export function validateContent(
   // `Expr.counter` 读出来恒为 0（没有写入者），用了就是**静默算错** ——
   // 所以默认拒绝，而不是让它在战斗里安静地给出错误数值。
   pushCapabilityIssues(counterExprIssues(contentRootsOf(bundle)), push);
+  /**
+   * buff 的 `consume`（"用掉就消耗"这类生命周期）声明了引擎会不会照做。
+   *
+   * 三种问题都是**静默**的：`on` 缺失 / 有个引擎不派发的触发 → buff
+   * **永远不消失**；`independent` + `modifiers` → 修正被展开 N 次
+   * （数值静默变大）。判据与"为什么 independent 不支持修正"在
+   * `./capabilityAudit.ts`。
+   */
+  checkBuffCapabilities(bundle, push);
 
   /* ---------- 2d. 时间值必须落在 0.1 秒刻度上 ---------- */
   // 判据与字段清单在 `./timeGrid.ts` 的文件头（那是"内容写错了"这一类，
@@ -304,7 +255,11 @@ function contentRootsOf(bundle: ContentBundle): readonly ContentRoot[] {
   ];
 }
 
-function checkDuplicates(ids: readonly string[], kind: string, push: (i: ValidationIssue) => void): void {
+function checkDuplicates(
+  ids: readonly string[],
+  kind: string,
+  push: (i: ValidationIssue) => void,
+): void {
   const seen = new Set<string>();
   for (const id of ids) {
     if (seen.has(id)) {
@@ -316,23 +271,6 @@ function checkDuplicates(ids: readonly string[], kind: string, push: (i: Validat
       });
     }
     seen.add(id);
-  }
-}
-
-function validateLocaleKey(
-  key: string | undefined,
-  path: string,
-  localeKeys: ReadonlySet<string> | undefined,
-  push: (i: ValidationIssue) => void,
-): void {
-  if (key === undefined) return;
-  if (localeKeys && !localeKeys.has(key)) {
-    push({
-      severity: 'error',
-      code: 'MISSING_LOCALE_KEY',
-      path,
-      message: `locale key "${key}" does not exist in the catalog`,
-    });
   }
 }
 
@@ -428,79 +366,6 @@ function validateSkill(
   }
 }
 
-function validateBuff(
-  buff: BuffDef,
-  buffIds: ReadonlySet<string>,
-  skillIds: ReadonlySet<string>,
-  localeKeys: ReadonlySet<string> | undefined,
-  push: (i: ValidationIssue) => void,
-): void {
-  const at = (field: string): string => `buff:${buff.id}.${field}`;
-
-  validateLocaleKey(buff.nameKey, at('nameKey'), localeKeys, push);
-
-  if (buff.duration <= 0) {
-    push({
-      severity: 'error',
-      code: 'ZERO_DURATION',
-      path: at('duration'),
-      message: `duration must be > 0 (got ${buff.duration})`,
-    });
-  }
-
-  if (buff.stacking.mode === 'stack' || buff.stacking.mode === 'stackRefresh') {
-    if (!Number.isFinite(buff.stacking.max) || buff.stacking.max < 1) {
-      push({
-        severity: 'error',
-        code: 'UNCAPPED_STACK',
-        path: at('stacking.max'),
-        message: 'stacking.max must be a positive finite number',
-      });
-    }
-  }
-
-  // 派生窗口引用的技能必须存在
-  for (const skillId of buff.flags?.comboWindow ?? []) {
-    if (!skillIds.has(skillId)) {
-      push({
-        severity: 'error',
-        code: 'MISSING_SKILL',
-        path: at('flags.comboWindow'),
-        message: `comboWindow references unknown skill "${skillId}"`,
-      });
-    }
-  }
-
-  // 修正的 stat 必须在规则表里
-  for (const [index, modifier] of (buff.modifiers ?? []).entries()) {
-    if (!(modifier.stat in STAT_RULES)) {
-      push({
-        severity: 'error',
-        code: 'UNKNOWN_STAT',
-        path: at(`modifiers[${index}].stat`),
-        message: `unknown stat "${modifier.stat}"`,
-      });
-    }
-    validateLocaleKey(modifier.sourceKey, at(`modifiers[${index}].sourceKey`), localeKeys, push);
-  }
-
-  // 触发产出的 buff 必须存在
-  for (const trigger of buff.triggers ?? []) {
-    for (const then of trigger.then) {
-      if (then.kind === 'grant' && !buffIds.has(then.buff.id)) {
-        push({
-          severity: 'error',
-          code: 'MISSING_BUFF',
-          path: at('triggers'),
-          message: `grant references unknown buff "${then.buff.id}"`,
-        });
-      }
-    }
-  }
-
-  // 触发器挂的 hook 必须在引擎**真的会派发**的那几个里
-  checkAbilityHooks(buffAbilities(buff), at(''), push);
-}
 
 function validateEntity(
   entity: GameEntity,

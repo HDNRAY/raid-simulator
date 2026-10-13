@@ -26,7 +26,7 @@
  */
 
 import { cardSkin, qijiSkin, type CardSkin, type QijiSkin } from './prepareRender';
-import type { PrepareHitArea } from './prepareLayout';
+import { PREPARE_LAYOUT, type PrepareHitArea } from './prepareLayout';
 import type { PrepareTarget } from './prepareLogic';
 import type { PrepareSectionKind } from './prepareTypes';
 
@@ -89,12 +89,22 @@ export function cardAppearance(input: CardAppearanceInput): CardAppearance {
  * 一帧里要画的所有卡（状态 → 一组"画在哪、画成什么样"）
  * ------------------------------------------------------------------ */
 
-/** 一张卡这一帧的完整画法：**位置 + 名字 + 皮肤**（渲染层照着画）。 */
+/**
+ * 一张卡这一帧的完整画法：**位置 + 名字 + 皮肤**（渲染层照着画）。
+ */
 export interface CardDraw extends CardAppearance {
   readonly kind: PrepareSectionKind;
   readonly id: string;
   /** **已本地化**的名字。 */
   readonly name: string;
+  /**
+   * 这张卡名字的**字号**（逻辑像素）。
+   *
+   * ⚠️ 它与位置一样是**几何给的数据**（`prepareLayout` 里按块算），不是
+   * 渲染层挑的：名字字号决定"卡片能多窄"（`cardMinW` / `qijiMinW` 的
+   * 推导就用它），两处各写一个数必然漂。今天人物 / 对手 17、炁机 15。
+   */
+  readonly nameSize: number;
   readonly x: number;
   readonly y: number;
   readonly w: number;
@@ -152,6 +162,7 @@ export function cardDrawsOf(args: CardDrawsArgs): readonly CardDraw[] {
       kind,
       id: area.id,
       name: args.nameOf(kind, area.id),
+      nameSize: kind === 'qiji' ? PREPARE_LAYOUT.qijiNameSize : PREPARE_LAYOUT.nameSize,
       x: area.x,
       y: area.y,
       w: area.w,

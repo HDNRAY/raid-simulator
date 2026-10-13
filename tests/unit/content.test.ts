@@ -301,6 +301,89 @@ describe('校验器能抓到各类内容错误', () => {
     expect(reported?.path).toContain('ticking');
   });
 
+  it('CONSUME_TRIGGER_UNIMPLEMENTED：引擎不派发的消费触发会被拦下', () => {
+    /**
+     * 消费触发是一张声明表，而引擎只派发 `core/buffs/consume.ts` 里实现的
+     * 那四种。写一条不派发的（这里用"类型上还不存在"的名字去试探运行期
+     * 白名单）⇒ 那个 buff **永远不会被消费**，而作者看内容却以为会。
+     *
+     * ⚠️ 这里是**故意构造的非法数据**（`'onKill'` 不是合法的消费触发），
+     * 所以用 `strict: false` 让校验器只报告分级 —— 我们要看的就是"它报了"。
+     */
+    const bundle: ContentBundle = {
+      ...baseBundle(),
+      buffs: [
+        makeBuffDef({
+          id: 'bad-consume',
+          consume: { on: ['onAttack', '不存在也不该存在的触发'] as never },
+        }),
+      ],
+    };
+    const issues = validateContent(bundle, { strict: false });
+    const reported = issues.find((i) => i.code === 'CONSUME_TRIGGER_UNIMPLEMENTED');
+    expect(reported?.severity).toBe('error');
+    expect(reported?.path).toContain('bad-consume');
+  });
+
+  it('CONSUME_TRIGGER_MISSING：写了 `consume` 却没有 `on`（没有任何可判的东西）', () => {
+    const bundle: ContentBundle = {
+      ...baseBundle(),
+      buffs: [
+        makeBuffDef({
+          id: 'empty-consume',
+          /** 故意缺 `on`（类型要求它，所以这是一份未经验证的数据）。 */
+          consume: {} as never,
+        }),
+      ],
+    };
+    expect(validateContent(bundle, { strict: false }).map((i) => i.code)).toContain(
+      'CONSUME_TRIGGER_MISSING',
+    );
+  });
+
+  it('INDEPENDENT_BUFF_MODIFIERS：独立叠层 + 修正被拦下（会线性叠加、绕过封顶）', () => {
+    const bundle: ContentBundle = {
+      ...baseBundle(),
+      buffs: [
+        makeBuffDef({
+          id: 'bad-independent',
+          stacking: { mode: 'independent', max: 3 },
+          modifiers: [
+            {
+              stat: 'damageBoost',
+              op: 'addPercent',
+              value: 10,
+              sourceKey: 'stat.haste',
+              namespace: 'badIndependent',
+            },
+          ],
+        }),
+      ],
+    };
+    const issues = validateContent(bundle, { strict: false });
+    expect(issues.map((i) => i.code)).toContain('INDEPENDENT_BUFF_MODIFIERS');
+  });
+
+  it('⚠️ 内联在技能里的 buff 也走同一套检查（不是只看顶层 `bundle.buffs`）', () => {
+    /**
+     * 内容作者可以直接在技能里写完整的 `BuffDef`（`hits[].effects[].buff`）。
+     * 那一份如果漏检，"声明了消费却不会被消费"就会静默发生 —— 而它恰恰
+     * 是最容易写的写法（「避」的无敌、「卸」的阈值都内联在技能里）。
+     */
+    const inline = makeBuffDef({
+      id: 'inline-consume',
+      consume: { on: ['引擎不认的触发'] as never },
+    });
+    const skill = makeSkillDef({
+      id: 'inline-buff-skill',
+      hits: [{ at: 0, effects: [{ kind: 'grantBuff', target: { mode: 'self' }, buff: inline }] }],
+    });
+    const bundle: ContentBundle = { ...baseBundle(), skills: [skill] };
+    expect(validateContent(bundle, { strict: false }).map((i) => i.code)).toContain(
+      'CONSUME_TRIGGER_UNIMPLEMENTED',
+    );
+  });
+
   it('严格模式（默认）把 warning 提升成 error —— 于是 assert 会抛', () => {
     /**
      * `ValidateOptions.strict` 曾经是个**空壳**：注释写着"把 warning 也当

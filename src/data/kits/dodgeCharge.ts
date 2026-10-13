@@ -44,37 +44,31 @@
  * `tests/unit/qiji.test.ts` 有一条断言从这个值读出"翻倍"再与文案对账。
  *
  * ==================================================================
- * ⚠️「用掉就消耗」怎么表达：攻击技能里的 `removeBuff`（**已有**机制）
+ * ⚠️「用掉就消耗」怎么表达：buff 自己的 `consume`（**引擎级机制**）
  * ==================================================================
  *
- * 引擎里"用掉一个 buff"的**唯一**已有通路，是"**消耗方**的命中里写一条
- * `removeBuff`"——先例是「击」消耗 `combo-window`（见 `kits/combo.ts` 的
- * `STRIKE.hits`）。**没有**"单次 buff"这类 flag，也**不能**用
- * `Ability: 'consume'`：
+ * 判据只有一处：**这个 buff 声明它在什么时候被消费**（下面的 `consume`
+ * 字段），引擎在每 tick 的消费结算里跑 —— 判定在
+ * `core/buffs/consume.ts`，接线在 `core/combat/consumeHandler.ts`。
  *
- *   - `ConsumeAbility` 的语义是"从资源池扣资源"（`core/types/abilities.ts`），
- *     与 buff 无关
- *   - 而且它**还没有执行点**（`content/capabilityAudit.ts` 的
- *     `UNIMPLEMENTED_ABILITY_KINDS` 会把它当 error 拦下）—— 写它 =
- *     静默无效，正是 AGENTS.md §2 最坏的那一类
+ * ⚠️ **这里曾经不是这样**：早先的写法是让**每个会造成伤害的技能**在自己的
+ * `hits[].effects` 里手写一条
+ * `{ kind: 'removeBuff', target: { mode: 'self' }, buffId: DODGE_CHARGE.id }`
+ * —— 那是一份**必须人工同步的跨文件契约**：加一个"林晚风能用的攻击技能"
+ * 却忘了写那条，那个技能就不消耗蓄势（下一击还能再翻倍）；静默，而且
+ * 只在"选了这条炁机"时才发生。所以当时不得不写一条**从技能表推导**的
+ * 测试盯着它（"每个带 `damage` 的技能都必须写那一条"）。
  *
- * 所以每个**会造成伤害的玩家技能**的 `hits[].effects` 里都写了：
+ * 现在真相只有一处：`consume.on = ['onAttack']`（"持有者打出了一次伤害"）。
+ * 「斩」「劈」「击」三条**已经不再写任何 `removeBuff`** —— 它们甚至不需要
+ * 知道这个 buff 存在，新增攻击技能天然正确。那条契约测试也改成了
+ * "断言机制本身"（`tests/unit/buffConsume.test.ts`）。
  *
- *   { kind: 'removeBuff', target: { mode: 'self' }, buffId: DODGE_CHARGE.id }
- *
- * ⚠️ **这是一份必须同步的契约**：将来加一个"林晚风能用的攻击技能"却
- * 忘了加这条，那个技能就**不消耗**蓄势（下一击还能再翻倍）—— 静默，
- * 而且只在"选了这条炁机"时才发生。所以
- * `tests/unit/qijiWiring.test.ts` 有一条**从技能表推导**的断言：
- * 林晚风每个带 `damage` 的技能都必须消耗它。漏了就是红的。
- *
- * ⚠️ 顺序：`damage` 写在 `removeBuff` **之前**（`resolveHit` 按数组顺序
- * 结算）。反过来写数值也不会错（同一次命中的 `casterStats` 是开头取一次
- * 的），但"先打、再消耗"才是读得对的顺序。
- *
- * ⚠️ 被闪掉时**照样消耗**：`removeBuff` 的 `target` 是 `self`，
- * `hitResolution` 的 `actsOnVictim` 因此判它"不作用于挨打者"、闪避不跳过
- * 它 —— 与「击」消耗窗口是同一条判据（你确实挥出了这一刀）。
+ * ⚠️ 被闪掉时**不消耗**：`onAttack` 的判据是"这一击真的造成了伤害"
+ * （`damage` 事件且 `amount > 0`），而闪避不产生 `damage`。所以"没打中
+ * 就不算用掉"，与 `onHitTaken` 触发器"没碰到人就不算受击"同一条口径。
+ * （旧写法在闪避时反而照样消耗 —— 那条 `removeBuff` 写在施法者自己的
+ * 命中里，与命中结果无关。）
  *
  * ==================================================================
  * ⚠️ 持续时间**无限**：唯一的终止条件是"打出去"
@@ -113,6 +107,16 @@ export const DODGE_CHARGE: BuffDef = {
    */
   maxStacks: 1,
   stacking: { mode: 'refresh' },
+  /**
+   * **用掉就消耗**：持有者**打出了**一次伤害（`onAttack`）→ 整条消失。
+   *
+   * ⚠️ 判据是"这一击真的造成了伤害"（`damage` 事件且 `amount > 0`）：
+   * 被闪掉 / 被整击挡下的那一击**不消耗**（它没有 `damage` 事件）。
+   * 完整口径与"为什么不再由攻击技能手写 `removeBuff`"见文件头。
+   *
+   * ⚠️ 不写 `stacks`：整条消失（用户要的是"下一次攻击翻倍"，不是"扣一层"）。
+   */
+  consume: { on: ['onAttack'] },
   modifiers: [
     {
       stat: 'damageBoost',

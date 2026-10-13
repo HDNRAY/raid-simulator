@@ -40,7 +40,6 @@ import { logicMs } from '../../core/loopConstants';
 import type { BuffDef, SkillDef } from '../../core/types';
 import type { SkillId } from '../../core/types/ids';
 import { C, S } from '../scale';
-import { DODGE_CHARGE } from './dodgeCharge';
 
 /**
  * 「派生窗口」：**只有这个 buff 在时，派生技能才会被激活**。
@@ -91,6 +90,19 @@ export const COMBO_WINDOW: BuffDef = {
   duration: logicMs(8),
   maxStacks: 1,
   stacking: { mode: 'refresh' },
+  /**
+   * **用掉就消失**（需求）—— 由**引擎的消费机制**表达，不由「击」的命中写
+   * `removeBuff`（那是契约式耦合：谁忘了写谁就静默失效）。
+   *
+   * 判据是"窗口持有者**打出了**一次伤害"：`STRIKE` 是带伤害的攻击，
+   * 所以它一命中就消耗掉窗口 —— 一次成功只换来一次「击」。
+   *
+   * ⚠️ 这条**必须与「击」真的会造成伤害**成对成立：若哪天把 `STRIKE` 的
+   * `damage` 删了，它会不再消耗窗口（于是窗口期内能反复放）—— 那个 bug
+   * 由 `tests/unit/buffConsume.test.ts` 的迁移断言挡住（它从技能表推导
+   * "谁该维持这条前提"）。
+   */
+  consume: { on: ['onAttack'] },
   /** UI 靠它把派生技画在源技能上方。见上面的说明。 */
   flags: { comboWindowSource: 'jie' },
 };
@@ -250,6 +262,26 @@ export const STRIKE: SkillDef = {
    * 不可用"，而不是"可用但被排除"（那是「限制」的语义）。
    */
   requires: [{ kind: 'hasBuff', who: 'self', buffId: 'combo-window' }],
+  /**
+   * ============================================================
+   * ⚠️ 这里**曾经**有一条 `{ kind: 'removeBuff', buffId: 'combo-window' }`
+   * ============================================================
+   *
+   * 它表达"用掉就消失"（需求），但那是**契约式耦合**：真相分散在
+   * 消耗方的命中里，谁忘了写谁就静默失效 —— 而且"窗口"与"蓄势"
+   * （「避实击虚」）各要写一条，将来再多一个全局 buff 就再多一条。
+   *
+   * 现在它由**被消耗方自己声明**：`COMBO_WINDOW.consume.on = ['onAttack']`
+   * （引擎在每 tick 的消费结算里跑，见 `core/buffs/consume.ts`）。
+   * 「击」是攻击、会造成伤害 ⇒ 引擎自动消耗窗口 —— 这条技能
+   * **不需要知道任何 buff 的存在**。
+   *
+   * ⚠️ 删掉它**不改变行为**：判据仍是"这一击真的打出去了"，
+   * 而被闪掉的「击」不会发 `damage` 事件 ⇒ 不消耗窗口（与旧的那条
+   * `target: self` 的 `removeBuff` 在闪避时"照样消耗"略有不同 ——
+   * 新的语义是"没打中就不算用掉"，与 `onHitTaken` 的 `taken > 0`
+   * 同一条口径）。
+   */
   hits: [
     {
       at: 0,
@@ -259,23 +291,6 @@ export const STRIKE: SkillDef = {
           /** 「斩」是 `S(10)`，所以这里 `S(5)` —— "伤害比攻少一半"。 */
           damage: { base: S(5), canCrit: false, countsAsHit: true },
         },
-        /**
-         * **用掉就消失**（需求）。
-         *
-         * 移除派生窗口本身 —— 于是"一次打断只换来一次「击」"。
-         * 不这么做的话窗口期内能反复放，派生技会完全取代基础技。
-         */
-        { kind: 'removeBuff', target: { mode: 'self' }, buffId: 'combo-window' },
-        /**
-         * ⚠️ **「击」也是攻击**，所以它同样要消耗「避实击虚」的蓄势。
-         *
-         * 不写这一条的话，蓄势会**穿过**一次攻击活下来（下一击再翻倍）
-         * —— 与用户说的"下一次攻击"不符。契约在 `kits/dodgeCharge.ts`
-         * 的文件头（含"为什么不能靠 `Ability: 'consume'`"）。
-         *
-         * ⚠️ 与上面那条一样，**没有那条炁机时是空操作**。
-         */
-        { kind: 'removeBuff', target: { mode: 'self' }, buffId: DODGE_CHARGE.id },
       ],
     },
   ],

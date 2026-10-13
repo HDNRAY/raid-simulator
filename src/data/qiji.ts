@@ -183,15 +183,19 @@ export const QIJI_FLASH_STRIKE: QijiEntity = {
  * 留着它就成了"看起来还在回缠"的第二份真相）。
  *
  * ==================================================================
- * 它是怎么表达出来的（**没有新引擎机制**）
+ * 它是怎么表达出来的
  * ==================================================================
  *
  *   ① 挂 buff：`onUse` 写一条 **`grant`**（引擎已有、`castPipeline` 在
  *      `castFinish` 真的会执行的那两种能力之一，另一种是 `resource`）。
  *   ② 翻倍：buff 带一条 `damageBoost +100`（累加器；100 = +100%）。
- *   ③ 消耗：攻击技能的命中里写 `removeBuff`（先例是「击」消耗
- *      `combo-window`）—— 契约与推导写在
- *      `data/kits/dodgeCharge.ts` 的文件头。
+ *   ③ 消耗：**由 buff 自己声明** —— `DODGE_CHARGE.consume.on = ['onAttack']`
+ *      （引擎级的消费机制，判定在 `core/buffs/consume.ts`）。攻击技能里
+ *      **不再有任何 `removeBuff`**。
+ *
+ * ⚠️ ③ 在 2026-10-13 之前是"攻击技能的命中里手写一条 `removeBuff`"
+ * （契约式耦合：漏写一条就静默不消耗）。迁移的来龙去脉见
+ * `data/kits/dodgeCharge.ts` 的文件头。
  *
  * ⚠️ **不是** `Ability: 'consume'`：那个能力是"从**资源池**扣资源"，与
  * buff 无关，而且**它还没有执行点**（`content/capabilityAudit.ts` 的

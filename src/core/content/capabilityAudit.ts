@@ -65,12 +65,18 @@
  */
 
 import { buffAbilities } from '../expr/deps';
-import type { Ability, Hook, TriggerDef } from '../types';
+import type { Ability, BuffDef, Hook, TriggerDef } from '../types';
 
 /** 一条"内容与引擎能力对不上"的问题（由 `validate.ts` 转成 `ValidationIssue`）。 */
 export interface CapabilityIssue {
   readonly severity: 'error' | 'warning';
-  readonly code: 'COUNTER_UNIMPLEMENTED' | 'UNSUPPORTED_HOOK' | 'ABILITY_UNIMPLEMENTED';
+  readonly code:
+    | 'COUNTER_UNIMPLEMENTED'
+    | 'UNSUPPORTED_HOOK'
+    | 'ABILITY_UNIMPLEMENTED'
+    | 'CONSUME_TRIGGER_UNIMPLEMENTED'
+    | 'CONSUME_TRIGGER_MISSING'
+    | 'INDEPENDENT_BUFF_MODIFIERS';
   readonly path: string;
   readonly message: string;
 }
@@ -262,6 +268,117 @@ function findCounterExprPaths(node: unknown, path: string, depth = 0): readonly 
 export interface ContentRoot {
   readonly path: string;
   readonly node: unknown;
+}
+
+/* ------------------------------------------------------------------ *
+ * 3. buff 的 `consume` / `independent`：声明了但没有消费者
+ * ------------------------------------------------------------------ *
+ *
+ * 与 `Hook` 那一节同一条线（AGENTS.md §2 的第三类）：**声明了、引擎不照做**
+ * 的内容必须被拦下，而不是在战斗里安静地什么都不发生。
+ *
+ * 这两个都**只吃一份 `BuffDef[]`**，不知道怎么从一整套内容里把 buff 找全
+ * （含技能里内联的）—— 那是 `./buffValidation.ts` 的事。分开的理由是
+ * "怎么找"与"找到之后判什么"是两个职责，而前者要求遍历内容树、后者只看
+ * 单个定义。
+ */
+
+/**
+ * 引擎**真的会消费**的四种触发（`BuffDef.consume.on`）。
+ *
+ * ⚠️ 这张表与 `core/buffs/consume.ts` 的 `TRIGGER_SOURCES` 必须对得上
+ * （"引擎会消费、校验器却说不行"是最坏的漂移），由
+ * `tests/unit/buffConsume.test.ts` 断言。
+ *
+ * 四种的判据（哪一刻算"打出去了"）写在 `consume.ts` 的
+ * `consumeFactsFor` 里 —— 那里是**唯一**一处解读。
+ */
+export const SUPPORTED_CONSUME_TRIGGERS: readonly string[] = [
+  'onAttack',
+  'onDamaged',
+  'onDodge',
+  'onBlock',
+];
+
+/**
+ * buff 声明的消费机制，引擎这一版**真的会执行吗**？
+ *
+ * 两类问题：
+ *   - `CONSUME_TRIGGER_MISSING`（error）：写了 `consume` 却没写 `on` ——
+ *     引擎没有可判的东西，而作者看内容会以为"它会消费"。
+ *   - `CONSUME_TRIGGER_UNIMPLEMENTED`（error）：`on` 里有一条引擎不派发的
+ *     触发（例如以后加了 `onCritTaken` 的名字但还没接线）—— 那条**永远
+ *     不会发生**，于是 buff 永远不消失。这正是 AGENTS.md §2 要拦的形状。
+ */
+export function consumeIssues(buffs: readonly BuffDef[]): readonly CapabilityIssue[] {
+  const out: CapabilityIssue[] = [];
+  for (const buff of buffs) {
+    const rule = buff.consume;
+    if (rule === undefined) continue;
+    const path = `buff:${buff.id}.consume.on`;
+    if (rule.on === undefined) {
+      out.push({
+        severity: 'error',
+        code: 'CONSUME_TRIGGER_MISSING',
+        path,
+        message:
+          `buff "${buff.id}" declares consume but no trigger "on" — the engine would ` +
+          `never consume it (declare onAttack / onDamaged / onDodge / onBlock)`,
+      });
+      continue;
+    }
+    for (const trigger of rule.on) {
+      if (SUPPORTED_CONSUME_TRIGGERS.includes(trigger)) continue;
+      out.push({
+        severity: 'error',
+        code: 'CONSUME_TRIGGER_UNIMPLEMENTED',
+        path,
+        message:
+          `consume trigger "${String(trigger)}" is never dispatched by the engine ` +
+          `(handled: ${SUPPORTED_CONSUME_TRIGGERS.join(', ')}) — the buff would ` +
+          `never be consumed. Implement the trigger first.`,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * `independent` 叠层**不支持**带 `modifiers` 的 buff。
+ *
+ * ==================================================================
+ * 为什么这不是"顺手就支持"的能力
+ * ==================================================================
+ *
+ * `independent` 的语义是"每次施加都是一个**新实例**"（同 defId 多份，
+ * 各自计时）。而 `expandBuffModifiers` 会把**每个实例**的修正都展开一次 ——
+ * 于是"每层 +10%"变成了 +10% × 层数，与 `stack` 模式的**线性叠加**长得
+ * 一样，却绕过了 `maxStacks` 的封顶（`independent` 的 max 是"最多几个实例"）。
+ *
+ * ⚠️ 这条**不是**"引擎还没实现"，而是**表达在两个概念上都说不通**：
+ *   - 要让"每层提供修正"，那正是 `stack` / `stackRefresh` 的定义
+ *   - `independent` 的用途是"各自计时的多份状态"（例如每层毒各自结算），
+ *     它的消费者应该读**实例**，而不是读修正池
+ *
+ * 所以内容里写了它会被报错拦下。真要"每层独立计时 **且** 每层给修正"，
+ * 先决定它在修正池里的聚合方式（相加？取最大？），那是设计决策，不是接线。
+ */
+export function independentModifierIssues(buffs: readonly BuffDef[]): readonly CapabilityIssue[] {
+  const out: CapabilityIssue[] = [];
+  for (const buff of buffs) {
+    if (buff.stacking.mode !== 'independent') continue;
+    if ((buff.modifiers ?? []).length === 0) continue;
+    out.push({
+      severity: 'error',
+      code: 'INDEPENDENT_BUFF_MODIFIERS',
+      path: `buff:${buff.id}.modifiers`,
+      message:
+        `buff "${buff.id}" is stacking:"independent" but has modifiers — the ` +
+        `modifier would be expanded once per instance (linear, uncapped). ` +
+        `Use stacking:"stack"/"stackRefresh" if each stack should contribute a stat.`,
+    });
+  }
+  return out;
 }
 
 /**

@@ -68,8 +68,15 @@ export interface CanvasInputTargets {
    * 四条招式说明装不下 —— 拖拽那条路是 §3b 的功能对等要求，不是补充。
    */
   readonly prepare: ScreenHitTarget & {
-    /** 这个点是不是落在详情区的可滚视口里（拖拽手势的入口判据）。 */
+    /** 这个点是不是落在详情区的可滚视口里（滚轮路由的判据）。 */
     isOnDetail(px: number, py: number): boolean;
+    /**
+     * 这个点是不是落在**可以拖拽滚动的区域**里（卡片视口 ∪ 详情区）。
+     *
+     * ⚠️ 拖拽手势只有**一个**入口判据（它）：分成两个布尔会让"这次手势
+     * 属于谁"在路由层再判一遍 —— 而那件事在 `dragDetail` 里按坐标分。
+     */
+    isOnScrollable(px: number, py: number): boolean;
     wheelDetail(px: number, py: number, deltaY: number): boolean;
     dragDetail(px: number, py: number, deltaY: number): boolean;
   };
@@ -251,11 +258,14 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
       else if (t.phase() === 'characterSelect') t.select.hitTest(px, py);
       else if (t.phase() === 'prepare') {
         /**
-         * ⚠️ **详情区的拖拽要先占住这次手势**（触屏滚说明，§3b）：
-         * `hitTest` 只回答"点了哪张卡"，而"按住拖动"是一次手势 ——
+         * ⚠️ **可拖拽滚动的区域要先占住这次手势**（触屏滚说明 / 滚炁机，
+         * §3b）：`hitTest` 只回答"点了哪张卡"，而"按住拖动"是一次手势 ——
          * 与设置页详情区（`detailDragId`）同一条处理方式。
+         *
+         * ⚠️ 判据用 `isOnScrollable`（卡片视口 ∪ 详情区）：两块都能拖之后
+         * 这里只问一次，而"哪一块吃下这次滚动"在 `dragDetail` 里按坐标分。
          */
-        if (t.prepare.isOnDetail(px, py)) {
+        if (t.prepare.isOnScrollable(px, py)) {
           prepareDetailDragId = event.pointerId;
           prepareDetailLastY = py;
         } else {

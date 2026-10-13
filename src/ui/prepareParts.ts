@@ -126,9 +126,17 @@ export function buildPrepareParts(args: PreparePartsArgs): PrepareParts {
   const cardGfx = new pixi.Graphics();
   /** 收起那两块「块头」的一支笔（与卡片分开：各清各的层）。 */
   const foldGfx = new pixi.Graphics();
+  /**
+   * **滚动条那一支笔**（三块共用一支，见 `prepareFrame.drawScrollBars`）。
+   *
+   * ⚠️ 它画在卡片**之上**（后加 = 上层）：滚动条压在卡片列最右那条
+   * `scrollGutter` 里，不该被卡片底板盖掉。
+   */
+  const scrollGfx = new pixi.Graphics();
   root.addChild(
     cardGfx,
     foldGfx,
+    scrollGfx,
     playerLabel.root,
     qijiLabel.root,
     bossLabel.root,
@@ -154,6 +162,12 @@ export function buildPrepareParts(args: PreparePartsArgs): PrepareParts {
     pixi,
     parent: root,
     translate: options.translate,
+    /**
+     * ⚠️ 它决定提示行写**键盘版还是触屏版**（见 `PrepareFooter.draw`）。
+     * 取值函数而不是布尔：操作方式可以在「通用」页里当场改（§3b 的
+     * 唯一 flag），每帧读一次才不会停在进场时的那一套。
+     */
+    showKeyHints: options.showKeyHints,
     /** ⚠️ 按钮的位置由张数算出来（见 `prepareGeometry.startRect`）。 */
     counts,
   });
@@ -197,6 +211,7 @@ export function buildPrepareParts(args: PreparePartsArgs): PrepareParts {
       foldBars,
       footer,
       detail: detailPanel,
+      scrollGfx,
     },
   };
 }

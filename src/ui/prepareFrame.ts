@@ -6,7 +6,7 @@
  * ==================================================================
  *
  * 它是一帧的**装配清单**：标题写什么字、三块各自在哪一行、哪些卡要画、
- * 哪两块收起（块头说什么）、页脚什么状态、详情区给谁。
+ * 哪两块收起（块头说什么）、页脚什么状态、详情区给谁、滚动条画在哪。
  *
  * ==================================================================
  * 为什么从 `PrepareScreen.ts` 切出来（AGENTS.md §3 的关注分离）
@@ -21,8 +21,24 @@
  * | 本文件 | 状态 → 画面（一帧怎么摆） |
  * | `PrepareScreen.ts` | 输入 → 状态（按键 / 指针怎么改选择） |
  *
- * ⚠️ 这一层**只读**：它不改 `selection` / `free`（那是 `PrepareScreen`
- * 的事），所以"谁能改状态"这件事仍然只有一个地方。
+ * ⚠️ 这一层**只读**：它不改 `selection` / `free` / `scroll`（那是
+ * `PrepareScreen` 的事），所以"谁能改状态"这件事仍然只有一个地方。
+ *
+ * ==================================================================
+ * ⚠️ 2026-10-13 第三轮：卡片区**排不下就滚**（三块共用一套）
+ * ==================================================================
+ *
+ * 用户原话："**现在的 layout 应该可以排更多炁机了，而且炁机排不下就滚动**"。
+ *
+ * 一帧里"看得见哪些卡"由**一处**决定：`sectionViewportRows`（几何）。
+ * 命中区（`prepareGeometry.prepareHitAreas`）读的是**同一个**判据，
+ * 所以"看到的卡片"与"点中的卡片"仍然是同一个矩形 —— 这一条是滚动能
+ * 成立的前提（各自算一遍偏移必然漂）。
+ *
+ * ⚠️ 偏移**不是"移动内容层"**（对比 `prepareDetailPanel` 的 `content.y`）：
+ * 卡片是**按行算出来**的（`cardGrid` + `gridRows` 裁剪），所以偏移体现在
+ * 每张卡的 y 上。两者都对，区别是卡片这里"行"是几何的一部分
+ * （命中区也要用），而详情区是自由文字（只能整体位移）。
  *
  * ==================================================================
  * ⚠️ 每帧只改字符串与可见性，**不重建** Text / Graphics
@@ -36,6 +52,7 @@
 import type { Graphics } from 'pixi.js';
 import type { Label } from './primitives';
 import type { TranslateFn } from '../i18n/translator';
+import { PALETTE } from '../render/theme';
 import { SECTION_ORDER, type PrepareCounts } from './prepareLayout';
 import {
   foldRect,
@@ -43,6 +60,8 @@ import {
   prepareHitAreas,
   prepareLabelY,
   rowTopsOf,
+  sectionScrollbar,
+  type SectionScroll,
 } from './prepareGeometry';
 import { canStartBattle, stacksIn, type FreeQiji, type PrepareSelection, type PrepareTarget } from './prepareLogic';
 import { cardDrawsOf } from './prepareCardState';
@@ -73,6 +92,8 @@ export interface PrepareFrameParts {
   readonly foldBars: PrepareFoldBars;
   readonly footer: PrepareFooter;
   readonly detail: PrepareDetailController;
+  /** 滚动条那一支笔（三块共用；画在卡片之上）。 */
+  readonly scrollGfx: Graphics;
 }
 
 /** 一帧要读的状态（全部由 `PrepareScreen` 现取）。 */
@@ -84,6 +105,8 @@ export interface PrepareFrameState {
   /** 光标此刻指着的那一项（`undefined` = 不在任何卡片上）。 */
   readonly cursor: PrepareTarget | undefined;
   readonly free: FreeQiji;
+  /** 三块各自的滚动偏移（**只读**；改它的是 `PrepareScreen`）。 */
+  readonly scroll: SectionScroll;
   readonly translate: TranslateFn;
   /** 这个 id 是不是"开发中"（注入，见 `prepareLogic.canStartBattle`）。 */
   readonly developing: (id: string) => boolean;
@@ -115,7 +138,13 @@ export function drawPrepareFrame(parts: PrepareFrameParts, state: PrepareFrameSt
   parts.sectionLabels.qiji.root.y = labelY.qiji;
   parts.sectionLabels.boss.root.y = labelY.boss;
 
-  const areas = prepareHitAreas(state.players, state.bosses, state.qiji, expanded);
+  const areas = prepareHitAreas(
+    state.players,
+    state.bosses,
+    state.qiji,
+    expanded,
+    state.scroll,
+  );
   const nameOf = (kind: PrepareSectionKind, id: string): string =>
     t(nameKeyOf(state, kind, id));
 
@@ -132,8 +161,40 @@ export function drawPrepareFrame(parts: PrepareFrameParts, state: PrepareFrameSt
   );
 
   parts.foldBars.draw(foldDraws(state, counts, expanded));
+  drawScrollBars(parts, state, counts, expanded);
   parts.footer.draw(state.selection.focus === 'start', developing);
   parts.detail.update(state.cursor);
+}
+
+/**
+ * 三块的**滚动条**（只有真能滚的那一块有）。
+ *
+ * ⚠️ 滑块**出现**本身就是"这一块还有内容在下面"的信号（这一版没有"还能
+ * 滚多少"的动画 / 提示行）—— 所以不能只画轨道。
+ *
+ * ⚠️ 用 `PALETTE` 的既有 token（渲染代码不写死颜色），与详情区那条滚动条
+ * 同一个语言：轨道 `panelLine` / 滑块 `textDim`。
+ */
+function drawScrollBars(
+  parts: PrepareFrameParts,
+  state: PrepareFrameState,
+  counts: PrepareCounts,
+  expanded: PrepareSectionKind,
+): void {
+  const gfx = parts.scrollGfx;
+  gfx.clear();
+  for (const kind of SECTION_ORDER) {
+    /** 收起的两块没有卡片区（只有一条块头），所以没有滚动条。 */
+    if (kind !== expanded) continue;
+    const bar = sectionScrollbar(kind, counts, state.scroll, expanded);
+    if (bar.maxPx <= 0) continue;
+    gfx
+      .roundRect(bar.trackX, bar.trackTop, bar.trackW, bar.trackH, 1.5)
+      .fill({ color: PALETTE.panelLine, alpha: 0.35 });
+    gfx
+      .roundRect(bar.trackX, bar.thumbTop, bar.trackW, bar.thumbH, 1.5)
+      .fill({ color: PALETTE.textDim, alpha: 0.9 });
+  }
 }
 
 /**
