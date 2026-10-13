@@ -21,7 +21,15 @@ import type { QijiEntity } from '../../src/core/types/qiji';
  * "卡片上是一串 key" —— 都是**静默**的，所以必须有断言。
  */
 
-const QIJI_KEYS = new Set(flattenCatalog(zhCN).keys());
+/**
+ * 语言包的扁平表（`key → 文案`）。
+ *
+ * ⚠️ 早先只有 `Set(keys)`（只验"key 在不在"）。加了"名字是四字 / 说明
+ * 点明源技能"那两条之后要**读值**，所以换成 Map —— key 的存在性断言
+ * 用 `.has()` 照旧。
+ */
+const QIJI_CATALOG = flattenCatalog(zhCN);
+const QIJI_KEYS = new Set(QIJI_CATALOG.keys());
 
 /** 三条"派生"的炁机（用户点名的那三条）。 */
 const DERIVED = ALL_QIJI.filter((q) => q.comboWindow !== undefined);
@@ -69,6 +77,74 @@ describe('文案：每个 key 都在语言包里（否则卡片上是一串 key�
       expect(qiji.nameKey).toBe(`qiji.${qiji.id}.name`);
       expect(qiji.descKey).toBe(`qiji.${qiji.id}.desc`);
     }
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * 2026-10-13：名字改成**四字成语**，于是"源技能"只能由 desc 点明
+ * ------------------------------------------------------------------ */
+
+describe('名字：一律四字（旧名 `截炁·生击` 那套已废）', () => {
+  /**
+   * ⚠️ 用户 2026-10-13 的改口原话是"四字成语、文雅一点点"。
+   *
+   * 旧名 `截炁·生击` 是 **5 字 + 中间一个点** —— 它一句话读得出"这是一条
+   * 关系"（源技能 + 结果），但不符合"四字"。换成成语之后那半条好处**必须
+   * 由 `desc` 补回来**（见下一条断言），否则玩家只看得到"当机立断"四个字。
+   */
+  it('每条名字恰好 4 个字（中文按码点算，`炁` 也算一个）', () => {
+    for (const qiji of ALL_QIJI) {
+      const name = QIJI_CATALOG.get(qiji.nameKey);
+      expect(name, `${qiji.id} 的 name 不在语言包`).toBeDefined();
+      expect([...(name ?? '')].length, `${qiji.id} 的名字不是四字：${String(name)}`).toBe(4);
+    }
+  });
+
+  it('五条的名字就是定稿的那一套（防"顺手改回去"）', () => {
+    const expected: Readonly<Record<string, string>> = {
+      jieShengJi: '当机立断',
+      xieShengJi: '以柔克刚',
+      shanShengJi: '电光石火',
+      vitality: '固本培元',
+      breath: '周天运转',
+    };
+    for (const qiji of ALL_QIJI) {
+      expect(QIJI_CATALOG.get(qiji.nameKey), qiji.id).toBe(expected[qiji.id]);
+    }
+  });
+
+  it('⚠️ 三条派生的说明**点明源技能**，且那个名字是从内容里取的', () => {
+    /**
+     * 源技能名（截 / 卸 / 闪）在语言包里是 **单字**，所以这里**不上参数**
+     * （那要把"哪个技能实体"从内容层穿过 `QijiCandidate` 递到渲染层，
+     * 只为传一个字）。代价是"技能改名时说明不会跟着变" —— 这条断言就是
+     * 为那个代价付的保险费：说明开头的「X」必须等于 `skill.<source>.name`。
+     *
+     * ⚠️ 断言的是"取到的那个值"，不是写死"截"：
+     * `skill.jie.name` 改成别的字，这里跟着改，测试仍然绿。
+     */
+    for (const qiji of DERIVED) {
+      const source = qiji.comboWindow?.sourceSkillId;
+      expect(source, `${qiji.id} 没有源技能`).toBeDefined();
+      const sourceName = QIJI_CATALOG.get(`skill.${String(source)}.name`);
+      expect(sourceName, `skill.${String(source)}.name 不在语言包`).toBeDefined();
+      const desc = QIJI_CATALOG.get(qiji.descKey ?? '') ?? '';
+      expect(
+        desc.startsWith(`「${String(sourceName)}」`),
+        `${qiji.id} 的说明没有以源技能「${String(sourceName)}」开头：${desc}`,
+      ).toBe(true);
+      /** 派生出来的是「击」（同一个技能，变的只是它从谁那儿派出来）。 */
+      expect(desc).toContain('「击」');
+    }
+  });
+
+  it('⚠️ 兜底两条的说明保留**结构化行**（数值 + 叠层），别被文案挤掉', () => {
+    /**
+     * 用户点名："卡片上已有的 '+30 生命上限。可叠 3 层。' 那类结构化行要在"。
+     * 这两条不是派生，说明本身就是结构化信息 —— 所以逐条钉住它的两行。
+     */
+    expect(QIJI_CATALOG.get('qiji.vitality.desc')).toBe('生命上限 +30。\n可叠 3 层。');
+    expect(QIJI_CATALOG.get('qiji.breath.desc')).toBe('炁回复速度 +10/秒。\n（基础 10/秒）可叠 2 层。');
   });
 });
 

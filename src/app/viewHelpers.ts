@@ -77,15 +77,42 @@ const POLARITY_COLORS = {
  * buff id → 极简标签的**语言 key**。
  *
  * 这张表的必要性：机制 id 与文案 key 不是同一套命名
- * （例如 `dodge-iframe` 的显示名是 `buffShort.dodgeIframe`）。
+ * （例如 `dodge-iframe` 的显示名是 `skill.dodge.name`）。
  * 没登记时回退到中性占位，不影响玩法。
+ *
+ * ==================================================================
+ * ⚠️ 这张表**必须覆盖内容里每一个会显示的 buff**（不是"缺了也能跑"）
+ * ==================================================================
+ *
+ * 缺项的后果是**静默**的：图标上是一个「？」，而"漏登记"与"这个 buff
+ * 本来就没名字"在画面上长得一模一样。所以覆盖率由
+ * `tests/unit/viewHelpers.test.ts` 钉住（`ALL_BUFFS` 的每一条都要有标签）
+ * —— 加一个 buff 却忘了登记，测试会红。
+ *
+ * ⚠️ **`ALL_BUFFS` 不是"全部 buff id"**：`boss-enrage-active` 是引擎在
+ * `core/combat/stats.ts` 里**现造**的（它的 `damageMultBoost` 是参数，
+ * 塞不进静态注册表），所以必须在下面**显式登记**一条 —— 覆盖率测试看不见
+ * 它（那条测试的输入就是 `ALL_BUFFS`）。
  */
 const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
   'dodge-iframe': 'skill.dodge.name',
+  /**
+   * ⚠️ **补漏（2026-10-13 报的 bug）**：「闪」的 0.2 秒无敌窗口没登记，
+   * 于是战斗 HUD 上那个图标一直显示「？」（截图里能看到）。
+   *
+   * 与 `dodge-iframe` 同源：它自己的 `BuffDef.nameKey` 就是
+   * `skill.flash.name`（`data/kits/kaili.ts`），所以这里取同一个 key。
+   */
+  'flash-iframe': 'skill.flash.name',
   guard: 'skill.guard.name',
   focus: 'skill.focus.name',
   sunder: 'debuff.sunder.name',
   'boss-enrage': 'buffShort.enrage',
+  /**
+   * ⚠️ **引擎现造的 buff**（不在 `ALL_BUFFS` 里，见上面的说明）：
+   * 「狂暴开始」那一刻挂上的，显示名沿用同一个「狂暴」。
+   */
+  'boss-enrage-active': 'buffShort.enrage',
   'boss-empowered': 'buffShort.empowered',
   'boss-telegraph': 'buffShort.telegraph',
   /**
@@ -99,12 +126,44 @@ const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
    */
   'boss-armor': 'buffShort.bossArmor',
   'boss-cleave-armor': 'buffShort.bossArmor',
+  /**
+   * ⚠️ 傲慢的「碾压」霸体（`BOSS_HEAVY_ARMOR`）。
+   *
+   * 它的 `nameKey` 就是 `boss.armor.name`（"霸体"），与上面两条是同一个
+   * 显示名 —— 玩家看到的是同一个东西，所以复用同一个短标签。
+   */
+  'boss-heavy-armor': 'buffShort.bossArmor',
   'combo-window': 'buffShort.comboWindow',
   knockdown: 'buffShort.knockdown',
   /** 色欲的眩晕与印记（不登记就会显示中性兜底「？」）。 */
   'lust-stun': 'buffShort.stunned',
   'lust-mark': 'buffShort.lustMark',
 };
+
+/**
+ * **开发期**的"兜底被用到了"告警（每个 id 每局一次）。
+ *
+ * ⚠️ 这只是**第二道防线**：第一道是上面那条覆盖率测试 —— 它拦得住
+ * "`ALL_BUFFS` 里的 buff 忘了登记"（终局覆盖），而测试**看不见**引擎现造
+ * 的 id（`boss-enrage-active` 那类）。两者合起来才是闭环。
+ *
+ * ⚠️ 用 `import.meta.env.DEV` 而不是 `NODE_ENV`：这是**客户端**代码，
+ * 判据跟"构建模式"走（生产构建里整段被摇掉）。所以它是**开发期**的声音，
+ * 玩家看到的仍然是那个中性的「？」—— 那是**有意的兜底**，不该变成面向
+ * 玩家的弹窗 / 报错（看不见名字时，"没登记"比"被一个错误的名字误导"好，
+ * 见 `shortLabelKeyOf`）。
+ */
+const warnedUnknownShortLabels = new Set<string>();
+
+export function warnUnknownShortLabel(buffId: string): void {
+  if (!import.meta.env.DEV) return;
+  if (warnedUnknownShortLabels.has(buffId)) return;
+  warnedUnknownShortLabels.add(buffId);
+  console.warn(
+    `[buffShort] ${buffId} 没有短标签登记（显示成「？」）—— ` +
+      `请在 src/app/viewHelpers.ts 的 SHORT_LABEL_KEYS 里补一条`,
+  );
+}
 
 /**
  * buff → 极简标签的语言 key。
@@ -117,7 +176,16 @@ const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
  * 玩家知道"这个没名字"，而不是被一个**错误的**名字误导。
  */
 export function shortLabelKeyOf(buffId: string): string {
-  return SHORT_LABEL_KEYS[buffId] ?? 'buffShort.unknown';
+  const key = SHORT_LABEL_KEYS[buffId];
+  if (key !== undefined) return key;
+  /**
+   * ⚠️ 调用点就是渲染路径（`viewAdapter` 每帧为每个 buff 调一次），
+   * 所以这里顺手喊一声 —— 开发期必须有人发现"又漏了一个"（见上面的
+   * `warnUnknownShortLabel`）。测试环境里 `import.meta.env.DEV` 同为真，
+   * 但覆盖率测试**不会**走到这个分支（它先把整张表断言一遍）。
+   */
+  warnUnknownShortLabel(buffId);
+  return 'buffShort.unknown';
 }
 
 export function blockKeyOf(reason: string): string {
