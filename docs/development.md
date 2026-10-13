@@ -52,6 +52,15 @@ pnpm run typecheck  →  pnpm run lint  →  pnpm run test:run  →  pnpm run bu
 | `?prepare=skip` | 跳过备战界面直接进战斗 |
 | `?prepare=skip&boss=lust` | 指定 Boss 直接开一局 |
 | `?noai=1` | Boss 不出招（观察用） |
+| `?runlen=N` | 肉鸽这一局打几场（正整数；不传 = Boss 池多长打几场） |
+| `?runseed=N` | 指定肉鸽这一局的种子（**Boss 顺序 + 每场战斗内部**都可复现；不传 = 每次现取时钟） |
+
+⚠️ 解析口径只有一处：`src/app/urlParams.ts`（正整数才认，写错当没写）。
+⚠️ `?runseed=` 钉住**整个一局**：一场战斗的种子从 run seed 派生
+（`battleSeed(runSeed, 位置)`，落点在 `src/app/battleSetup.ts` 的
+`battleSeedOf`）—— 所以同一条 URL 跑两次，Boss 顺序与每场战斗内部的
+随机（出招 / 概率判定）都相同。自由模式 / 直接单场**没有那一局**，
+战斗种子仍是时钟（`Date.now() >>> 0`）。
 
 ⚠️ 画布有 letterbox：`clientY = rect.top + 逻辑Y × (rect.width / 960)`。
 

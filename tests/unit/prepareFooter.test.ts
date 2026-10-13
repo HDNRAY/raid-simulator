@@ -68,12 +68,19 @@ describe('键盘那一句：跟着 Tab 的改动更新', () => {
     expect(text).not.toContain('Enter 开始');
   });
 
+  it('⚠️ 提到 **Shift+↑↓** 是"滚动详情"（2026-10-13 第五轮：详情区不是一块独立的区域，只能滚）', () => {
+    expect(text).toContain('Shift+↑↓');
+    expect(text).toContain('滚动详情');
+  });
+
   it('键名确实是从渲染层拼上去的（不可能是语言包里的字面量）', () => {
     const raw = zhCN.roster.ui.hintCursor;
     expect(raw).toContain('{confirm}');
     expect(raw).toContain('{tab}');
+    expect(raw).toContain('{detailScroll}');
     expect(raw).not.toContain('Enter');
     expect(raw).not.toContain('Tab');
+    expect(raw).not.toContain('Shift');
   });
 });
 

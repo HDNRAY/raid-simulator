@@ -111,7 +111,31 @@ declare global {
           readonly hintTop: number;
         };
       };
+      /**
+       * 战斗探针：把"战斗里到底发生了什么"摊平成一条可读读数（**只读**，
+       * 不推进 tick、不消费事件）。
+       *
+       * ⚠️ 字段分三类，取值时**别混**（逐字段说明在 `app/debugProbe.ts`）：
+       *   - **活读数**（`tick` / `status` / `playerHp` / `playerDouqi` /
+       *     `playerCasts` / `bossHp` / `bossCasts` / `frameCount` / `errors`）：
+       *     每个 tick 都可能变
+       *   - **基线**（`playerHpCap` / `bossHpCap`）：这一局的上限，整场不变
+       *   - **渲染视图**（`skillCount` / `floatingCount`）：只有渲染层知道，
+       *     每帧重建；`act()` 后下一次读会立刻重建
+       *
+       * ⚠️ `playerCooldowns` 的值是**剩余 tick 数**（`0` = 已可用，随 tick
+       * **递减**），不是引擎里那个"下一次可用 tick"的绝对值 —— 后者施放一次
+       * 之后就不再变，读起来像"冷却没在走"（误导过一个 agent）。
+       */
       probe(): {
+        /**
+         * 这一场战斗的**种子**（基线；`-1` = 没有战斗）。
+         *
+         * ⚠️ B 的验收要用它：肉鸽里应当等于 `battleSeed(runSeed, position)`
+         * （同一条 URL 跑两次 → 同一个数），而自由模式 / 直接单场每次都不同
+         * （时钟兜底）。只看"结果不同"分不出是哪一支，所以这个读数是必要的。
+         */
+        seed: number;
         tick: number;
         status: string;
         playerHp: number;

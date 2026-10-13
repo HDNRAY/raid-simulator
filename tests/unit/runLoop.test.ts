@@ -106,8 +106,9 @@ function battleOptionsWithKit(
  * 会话里已经生效的炁机**定义**（`phaseFlow.activeQiji` 的同一段逻辑）。
  *
  * ⚠️ `RunState.chosen` 的元素只有一个 `qijiId`（2026-10-13 起没有 `stacks`
- * —— 肉鸽"一局只能选一次、不叠加"），所以这里给的是定义数组；
- * 喂给 `buildPlayerKit` 时由调用方补上恒为 1 的 `stacks`。
+ * —— 肉鸽"一局只能选一次、不叠加"），而 `buildPlayerKit` 的入参**就是
+ * 定义数组**（恒为 1 的 `stacks` 已删，见 `data/kit.ts` 的作废段）——
+ * 所以这里到得了、也只需到得了"定义"这一步。
  */
 function activeQiji(session: ReturnType<typeof createRunSession>): readonly QijiEntity[] {
   const state = session.state();
@@ -120,10 +121,7 @@ function activeQiji(session: ReturnType<typeof createRunSession>): readonly Qiji
 
 /** 这一局此刻的玩家装配（`phaseFlow.playerKit` 的同一段逻辑）。 */
 function kitOf(session: ReturnType<typeof createRunSession>, playerId = 'player'): PlayerKit {
-  return buildPlayerKit(
-    playerId,
-    activeQiji(session).map((def) => ({ def, stacks: 1 })),
-  );
+  return buildPlayerKit(playerId, activeQiji(session));
 }
 
 describe('`?runlen=2`：跑完一圈（逻辑层，真引擎）', () => {
@@ -331,9 +329,9 @@ describe('炁机：一局只能选一次（不叠加）· 选了不能取消（�
     expect(session.chooseQiji('vitality')).toBe(true);
 
     /**
-     * ⚠️ `stacks` 是 `buildPlayerKit` 的入参形状、肉鸽这边**恒为 1**。
-     * 这条断言把它钉在**数字**上：若哪天有人按"既然没层就叠满"改成 2，
-     * 这里会变成 `+60`（210）而不是 `+30`（180）。
+     * ⚠️ **入参里没有层数了**（2026-10-13 删掉那个恒为 1 的 `stacks`），
+     * 所以"只生效一次"的落点是 `chosen` —— 这条断言把它钉在**数字**上：
+     * `chosen` 只追加一次 ⇒ `kitOf` 拿到一条定义 ⇒ `+30`。
      */
     const modifiers = kitOf(session).modifiers;
     const fromVitality = modifiers.filter((m) => m.sourceKey === 'qiji.vitality');
@@ -381,7 +379,7 @@ describe('「炁脉·自生」：下一场的回炁真的变快', () => {
   }
 
   it('属性真的进了引擎（`statsOf` 读到 +10/秒）', () => {
-    const kit = buildPlayerKit('player', [{ def: ALL_QIJI[1]!, stacks: 1 }]);
+    const kit = buildPlayerKit('player', [ALL_QIJI[1]!]);
     const engine = new BattleEngine(battleOptionsWithKit('player', 'meiichiro', kit, FIXED_SEED));
     expect(engine.statsOf('player').energyRegen).toBe(10);
   });
@@ -394,7 +392,7 @@ describe('「炁脉·自生」：下一场的回炁真的变快', () => {
      * 而这里要钉的是"炁机让它变快了"这一条因果。
      */
     const bare = buildPlayerKit('player', []);
-    const boosted = buildPlayerKit('player', [{ def: ALL_QIJI[1]!, stacks: 1 }]);
+    const boosted = buildPlayerKit('player', [ALL_QIJI[1]!]);
     const baseGain = energyGained(bare, 300);
     const boostedGain = energyGained(boosted, 300);
     expect(baseGain).toBeGreaterThan(0);

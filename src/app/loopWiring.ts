@@ -55,6 +55,14 @@ export interface CanvasHost {
      * ⚠️ 它与 `moveFocus`（Tab）**是两件事**，见下面那段分支里的说明。
      */
     stepVertical(dir: 'up' | 'down'): void;
+    /**
+     * **Shift + ↑ ↓**：滚**详情区正文**（`up` = 往回看）。
+     *
+     * ⚠️ 详情区**不是一块独立的区域**（用户原话："每个 tab 都有详情啊"）——
+     * 它显示的就是"当前展开那一块"里的东西，所以滚它**不切焦点、不动
+     * 光标**，也不是"第 4 个站"（见 `PrepareScreen.scrollDetail`）。
+     */
+    scrollDetail(dir: 'up' | 'down'): void;
     /** **Tab / Shift+Tab**：块与块之间换焦点。 */
     moveFocus(delta: number, wrap?: boolean): void;
     confirm(): void;
@@ -294,7 +302,8 @@ export function wireLoop(o: WireOptions): void {
      * | 选角色 | ← → / Tab | 在卡片间移动光标（不改已确定的角色） |
      * | 选角色 | Enter | 以光标处的角色开始一局肉鸽 |
      * | 自由模式 | ← → | 在槽位里**移动光标**（不改选择） |
-     * | 自由模式 | ↑ ↓ | 换槽位（人物 → 对手 → 开始），两端停住 |
+     * | 自由模式 | ↑ ↓ | **块内**走光标（人物 → 对手 → 开始），两端停住 |
+     * | 自由模式 | Shift + ↑ ↓ | **滚详情区正文**（不切焦点、不动光标；见下） |
      * | 自由模式 | Tab / Shift+Tab | 同上但**环绕**（Tab 的通用语义） |
      * | 自由模式 | Enter | **确定**光标处的那一项；在「开始战斗」上时开战 |
      * | 自由模式 / 选角色 | `Esc` | **返回首页**（战斗中无反应，见上） |
@@ -424,6 +433,7 @@ export function wireLoop(o: WireOptions): void {
          * ```
          *   ← → ↑ ↓  → 块【内】**（`cycle` / `stepVertical`，到边界停住）
          *   Tab      → 块【间】（`moveFocus`，唯一的路，环绕）
+         *   Shift+↑↓ → **详情区正文**（`scrollDetail`：不切焦点、不动光标）
          * ```
          */
         case 'ArrowLeft':
@@ -433,11 +443,32 @@ export function wireLoop(o: WireOptions): void {
           host.prepare.cycle(1);
           return;
         case 'ArrowUp':
-          host.prepare.stepVertical('up');
+        case 'ArrowDown': {
+          const dir = event.key === 'ArrowUp' ? 'up' : 'down';
+          /**
+           * ============================================================
+           * ⚠️⚠️ 2026-10-13 第五轮：**Shift + ↑ ↓ = 滚详情区正文**
+           * ============================================================
+           *
+           * 详情区**不是一块独立的区域**（用户纠正过上层的一个理解错误：
+           * "**每个 tab 都有详情啊**"）—— 它显示的就是"当前展开那一块"
+           * 里的东西。所以"滚它"是**不需要切焦点**的动作：
+           *
+           * ```
+           *   ↑ ↓        → 块【内】走光标（`stepVertical`，到边界停住）
+           *   Shift+↑ ↓  → 滚详情区（本分支；不管当前展开哪一块、光标在哪）
+           * ```
+           *
+           * ⚠️ 两条路在这里**互斥**（裸 ↑↓ 一个字没变）：详情区没有自己的
+           * 焦点，"滚它"就绝不能抢走"块内走光标"。
+           *
+           * ⚠️ 触屏对等（AGENTS.md §3b）走的是**另一条已经存在的路**
+           * ——拖动详情（`PrepareScreen.dragDetail`），不是这一条。
+           */
+          if (event.shiftKey) host.prepare.scrollDetail(dir);
+          else host.prepare.stepVertical(dir);
           return;
-        case 'ArrowDown':
-          host.prepare.stepVertical('down');
-          return;
+        }
         case 'Tab':
           /**
            * Shift+Tab 反向。它是**唯一**能跨块的键，所以必须**环绕** ——

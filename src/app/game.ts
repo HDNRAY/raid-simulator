@@ -245,6 +245,19 @@ export function createGame(o: CreateGameDeps): GameHandle {
      * 装配顺序不是依赖顺序（见文件头"顺序即正确性"）。
      */
     getPlayerKit: (playerId) => flow.playerKit(playerId),
+    /**
+     * ⚠️ **这一场战斗的种子从哪来**（B：run seed → 第 N 场 → 战斗 seed）。
+     *
+     * 传 `flow.runState` 本身（**取值函数**，不是快照）：`position` 每场都在
+     * 变、重开一局还会换掉整个 `RunState`，快照一份会让第 2 场拿着第 1 场的
+     * 种子。与上面 `getPlayerKit` 是同一种"延迟取值" —— `flow` 在本函数
+     * 下面才构造，但这个箭头体只在**开一场战斗**时执行。
+     *
+     * ⚠️ **自由模式 / 直接单场**（`?prepare=skip`，没有进行中的一局）时它
+     * 返回 `undefined` ⇒ `battleSetup.battleSeedOf` 回落到 `Date.now() >>> 0`
+     * —— 与改动前**逐字相同**（黄金夹具走的正是那一条）。
+     */
+    getRun: () => flow.runState(),
   });
 
   /**
@@ -307,6 +320,20 @@ export function createGame(o: CreateGameDeps): GameHandle {
      * `urlParams.ts` 的 `runLength`）。
      */
     runLength: url.runLength ?? undefined,
+    /**
+     * ⚠️ **`?runseed=N` 的接线点**：这一局的种子。
+     *
+     * 它现在钉住**两件事**（B，2026-10-13）：`order` 的洗牌**以及**每场
+     * 战斗内部的种子（`battleSeed(runSeed, position)`，见
+     * `battleSetup.ts` 的 `battleSeedOf`）—— 所以同一条 URL 跑两次是
+     * **完整复现**（Boss 顺序 + 每场出招 / 骰子都一样）。
+     *
+     * 不传（`null` → `undefined`）时行为**逐字不变** ——
+     * `startRoguelikeRun` 仍然现取 `Date.now() >>> 0`，而一场战斗的种子
+     * 也仍由 `battleSeedOf` 从上一条派生，没有额外的随机源。
+     * 口径见 `urlParams.ts` 的 `runSeed`。
+     */
+    runSeed: url.runSeed ?? undefined,
   });
   const {
     applyPhase,

@@ -38,7 +38,7 @@
  * | 性质 | 例子 | 处理 |
  * |---|---|---|
  * | **重复**：同一件事有第二份表达 | `Behavior: 'interruptible'` / `'timeLimit'` | 删（已删）|
- * | **未实现**：设计过、还没接线 | `Expr.counter` / `Hook: 'onPhaseChange'` / `grantSkill` / `consume` | **保留类型**，但内容用了就报错 |
+ * | **未实现**：设计过、还没接线 | `Expr.counter` / `Hook: 'onPhaseChange'` / `grantSkill` / `Ability: 'consume'` | **保留类型**，但内容用了就报错 |
  * | **会静默算错**：用了不报错、结果错 | `Expr.counter`（读出来恒为 0）| 同上，报 error 拦下 |
  * | **刻度外**：值在逻辑层不可忠实表达 | `castTime: logicMs(2.5)` = 250ms | 见 `./timeGrid.ts` |
  *
@@ -196,6 +196,11 @@ export function abilityHookIssues(
  * 判定依据（2026-10-12 全仓 grep）：`castPipeline` / `runAi` /
  * `combat/triggers.ts` 三个能力执行点都不认 `grantSkill` / `consume`。
  * 实现之后从这里删掉对应项即可。
+ *
+ * ⚠️ 这里的 `'consume'` 是 **`Ability: 'consume'`**（`ConsumeAbility`，
+ * "从某个池子扣资源"），**不是** `BuffDef.consume`（buff 被谁消费掉 ——
+ * 那个机制**已经实现**，见本节 3 的作废段）。两个"consume"同名不同物，
+ * 删任何一边之前先确认清是哪一边。
  */
 const UNIMPLEMENTED_ABILITY_KINDS: readonly string[] = ['grantSkill', 'consume'];
 
@@ -270,17 +275,67 @@ export interface ContentRoot {
   readonly node: unknown;
 }
 
+/*
+ * ⚠️ 【作废 · 2026-10-13】本节原来的标题与引言在**这一节自己的范围内**是错的
+ *
+ * 原文（**保留，用来记住当时为什么那么想**）：
+ *
+ *   「3. buff 的 `consume` / `independent`：声明了但没有消费者」
+ *
+ *   「与 `Hook` 那一节同一条线（AGENTS.md §2 的第三类）：**声明了、引擎不照做**
+ *    的内容必须被拦下，而不是在战斗里安静地什么都不发生。」
+ *
+ * **当时为什么那么想**：写下这一节时（2026-10-12 的能力对账）这两样**确实**
+ * 是"有类型、没接线"—— 那时全仓还没有任何消费路径，`independent` 的接收侧
+ * 也没有多实例。于是它们与 `grantSkill` 被归成同一类（"未实现"）。
+ *
+ * **实测为什么不再成立**：两样**都已经有实现**了 ——
+ *
+ *   - `BuffDef.consume`：整套消费机制已接线。判据在 `core/buffs/consume.ts`
+ *     （`consumeFactsFor` / `matchedConsumeTriggers` / `applyConsume`），
+ *     落到状态上是 `core/combat/consumeHandler.ts` 的 `settleConsumableBuffs`
+ *     （tick 管线的第 2c 步），四种触发逐条有实现，实测见
+ *     `tests/unit/buffConsume.test.ts`（31 条）。生产内容也**已经在用**：
+ *     `data/kits/combo.ts` 与 `data/kits/dodgeCharge.ts` 的 buff 都声明了
+ *     `consume: { on: ['onAttack'] }`。
+ *   - `independent`（多实例各自计时）：`core/buffs/index.ts` 已实现
+ *     （`applyBuff` 的分流、`findExisting` 永远不复用、上限时替换最早那个），
+ *     实测能造出多个实例（`buffConsume.test.ts` 的"三个实例封顶"）。
+ *
+ * **现在的规则（逐条核实过；本节下面的代码与报错一条都没删）**：
+ *
+ *   - `SUPPORTED_CONSUME_TRIGGERS`（四种触发）**仍然活**：它是对账表，而且
+ *     仍然"少一条就静默失效"—— 内容声明了 `onAttack` 而引擎不派发它，buff
+ *     就永远不消失。
+ *   - `CONSUME_TRIGGER_UNIMPLEMENTED` / `CONSUME_TRIGGER_MISSING` **仍然活**：
+ *     名字里的 "UNIMPLEMENTED" 今天读起来有点旧（机制本身已实现），但它报的
+ *     是"**这一条触发**引擎不派发"（或 `on` 干脆缺失）—— 那是**内容与引擎
+ *     当前能力对不上**，不是机制欠接线。所以这两条报错照旧保留。
+ *   - `INDEPENDENT_BUFF_MODIFIERS` **仍然活**，而且与本节标题无关：它拦的
+ *     不是"没实现"，而是"表达说不通"（见下面 `independentModifierIssues` 的
+ *     段注释 —— `expandBuffModifiers` 会把每个实例的修正各展开一次，线性
+ *     叠加、绕过封顶）。这条**从来没"过期"过**。
+ *   - 「这两个都只吃一份 `BuffDef[]`」以及"怎么找 buff 是
+ *     `./buffValidation.ts` 的事"**仍然成立**（那是这一节的切分理由）。
+ *
+ * ⚠️ **一个同名陷阱**（本节曾经的标题真假难辨，一半就是它造成的）：
+ * `Ability: 'consume'`（`core/types/abilities.ts` 的 `ConsumeAbility`，
+ * "从某个池子扣资源"）与 `BuffDef.consume`（buff 的生命周期由谁结束）
+ * 是**两件不同的事**，只共用一个词。前者**仍然没有执行点**
+ * （`castPipeline` / `runAi` / `combat/triggers.ts` 都不认它），所以
+ * `UNIMPLEMENTED_ABILITY_KINDS` 里的 `'consume'` **是对的、别删**。
+ * 两个"consume"不要互相牵连。
+ */
+
 /* ------------------------------------------------------------------ *
- * 3. buff 的 `consume` / `independent`：声明了但没有消费者
+ * 3. buff 的消费触发 / `independent` 叠层：内容 ↔ 引擎能力的对账
  * ------------------------------------------------------------------ *
  *
- * 与 `Hook` 那一节同一条线（AGENTS.md §2 的第三类）：**声明了、引擎不照做**
- * 的内容必须被拦下，而不是在战斗里安静地什么都不发生。
+ * 判据在下面两个函数里。⚠️ 上面那段"作废"说明解释了为什么本节**不再**说
+ * "没有消费者"—— 这两样今天都有实现，留下的是两条**仍然有效**的检查：
  *
- * 这两个都**只吃一份 `BuffDef[]`**，不知道怎么从一整套内容里把 buff 找全
- * （含技能里内联的）—— 那是 `./buffValidation.ts` 的事。分开的理由是
- * "怎么找"与"找到之后判什么"是两个职责，而前者要求遍历内容树、后者只看
- * 单个定义。
+ *   - 内容声明了一条引擎**不派发**的消费触发（或干脆没写 `on`）→ 拦下
+ *   - `independent` 叠层**带 `modifiers`** → 拦下（表达说不通，不是欠接线）
  */
 
 /**

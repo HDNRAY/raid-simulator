@@ -193,6 +193,12 @@ const KEYS = {
   Tab: { code: 'Tab', key: 'Tab', vk: 9 },
   'Shift+Tab': { code: 'Tab', key: 'Tab', vk: 9, modifiers: 8 },
   /**
+   * `Shift+↓`：滚备战屏详情区正文（`loopWiring` 那个分支读 `event.key` +
+   * `shiftKey`，所以要带 `modifiers: 8`）。用途是拍"滚到中段 / 滚到底"——
+   * 滚动条几何（滑块 y / h）只有那三张图能钉死。
+   */
+  'Shift+ArrowDown': { code: 'ArrowDown', key: 'ArrowDown', vk: 40, modifiers: 8 },
+  /**
    * `F1`（打开设置；P2 收尾时 `Esc` / `,` 换成了它）。
    *
    * ⚠️ `windowsVirtualKeyCode: 112` 是 VK_F1 —— CDP 要靠它把这次按键送到

@@ -67,7 +67,13 @@ import { runLengthOf, type RunBattleRecord, type RunState } from './types';
  * ================================================================== */
 
 export interface StartRunInput {
-  /** 一局肉鸽的种子（app 层生成，`Date.now() >>> 0`）。**决定 Boss 顺序**。 */
+  /**
+   * 一局肉鸽的种子（app 层生成，`Date.now() >>> 0`）。
+   *
+   * ⚠️ 它决定的不止 Boss 顺序：**每一场战斗的种子也从它派生**
+   * （`battleSeed(runSeed, position)`，落点 `app/battleSetup.ts` 的
+   * `battleSeedOf`；沿革见 `app/urlParams.ts` 的 `runSeed`）。
+   */
   readonly runSeed: number;
   readonly playerId: CombatantId;
   /** 已经洗好的 Boss 顺序（`shuffle(bossPool, runSeed)`）。空表示"还没定"。 */

@@ -116,7 +116,17 @@ export interface RunBattleRecord {
   readonly position: number;
   /** 这一场打的是谁。 */
   readonly bossId: EntityId;
-  /** 这一场用的战斗种子（由 `shuffle.ts` 的 `battleSeed` 派生，**每场独立**）。 */
+  /**
+   * 这一场用的战斗种子（由 `shuffle.ts` 的 `battleSeed` 派生，**每场独立**）。
+   *
+   * ⚠️ **2026-10-13 之前这条注释描述的是一件线上没发生的事**：当时
+   * `app/battleSetup.ts` 给的是 `seed: Date.now() >>> 0`，与 run seed 没有
+   * 派生关系（结构性证据：`StartBattleDeps` 里根本没有 seed / 场次字段）。
+   * 现在生产路径按本行派生（`battleSeedOf`），约定与线上一致。
+   *
+   * ⚠️ 仍然**不是**"记录已经接上了"：本记录的写入路径
+   * （`lifecycle.ts` 的 `battleRecordOf`）在生产里**零调用** —— 存档是 P7。
+   */
   readonly seed: number;
   readonly outcome: 'victory' | 'defeat';
   /**
@@ -171,7 +181,16 @@ export interface RunChoice {
  * 于是"谁改了它"在代码里显式可见，重放与 diff 也不需要防御性拷贝）。
  */
 export interface RunState {
-  /** 本局的一局肉鸽种子，**决定 Boss 顺序**（由 app 层生成，§7.1）。 */
+  /**
+   * 本局的一局肉鸽种子（由 app 层生成，§7.1）。
+   *
+   * ⚠️ 它决定的不止 Boss 顺序（B，2026-10-13）：**每一场战斗的种子也从
+   * 它派生**（`shuffle.ts` 的 `battleSeed(runSeed, position)`，落点在
+   * `app/battleSetup.ts` 的 `battleSeedOf`）。原先战斗种子另取时钟 ——
+   * 于是同一个 `runSeed` 复现不出"整局"，而 `RunBattleRecord.seed` 的
+   * 注释与 `tests/unit/run/record.test.ts` 早就按派生在写（沿革见
+   * `app/urlParams.ts` 的 `runSeed`）。
+   */
   readonly runSeed: number;
   /** 玩家选定的角色 id（`data/roster.ts` 的 `PLAYER_ROSTER`）。 */
   readonly playerId: CombatantId;

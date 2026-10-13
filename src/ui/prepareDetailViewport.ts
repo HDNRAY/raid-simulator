@@ -66,7 +66,7 @@
 import type { Graphics } from 'pixi.js';
 import { PALETTE } from '../render/theme';
 import { PREPARE_LAYOUT } from './prepareLayout';
-import { pixelViewport, scrollThumbRatio } from './scrollWindow';
+import { pixelViewport, scrollBarGeometry } from './scrollWindow';
 
 /** 一行在**内容坐标**里的区间（`endTop` 不含 `rowGap`）。 */
 export interface DetailRowExtent {
@@ -108,6 +108,22 @@ export function snapToRowTop(
   }
   return snapped;
 }
+
+/**
+ * ⚠️ **滑块几何搬去了 `scrollWindow.scrollBarGeometry`**（2026-10-13 第六轮：
+ * AGENTS.md §2 去重）。
+ *
+ * 原先这里有一份 `detailScrollThumb(viewportPx, maxScrollPx, scrollPx,
+ * trackLenPx, minLengthPx)` —— 它是**对的**（就是把
+ * `scrollThumbRatio` 的两个参数写反那次修出来的），但备战屏卡片区的
+ * `sectionScrollbar` 另有一份**也是对的**实现，而两份的**参数顺序不同**
+ * （一份 `(内容, 视口)`、一份 `(视口, 内容, 偏移, 轨道)`）：
+ * 两份正确实现下一个人抄错一次，就又回到"滑块 = 整条轨道、永远贴顶端"。
+ *
+ * 现在全仓库只有 `scrollBarGeometry({ viewportPx, maxScrollPx, scrollPx,
+ * trackLenPx, minLengthPx })` 一处，而且入参是**具名结构** —— 那串同型
+ * number 没法再"静默传反"（写反的病史与两条性质都记在那个函数头上）。
+ */
 
 export class DetailViewport {
   /** 顶栏下缘（正文视口的顶边，**面板坐标**）—— 每帧由 `measure` 写。 */
@@ -248,7 +264,14 @@ export class DetailViewport {
     return viewTop - bodyTop;
   }
 
-  /** 右侧那条滚动条（只有真能滚时才画；轨道只在**正文视口**那一段）。 */
+  /**
+   * 右侧那条滚动条（只有真能滚时才画；轨道只在**正文视口**那一段）。
+   *
+   * ⚠️ 滑块的**长度与位置每帧从当前偏移算**（`scrollBarGeometry`）——
+   * 它不是"内容变化时算一次"的缓存值。这一点是用户报的"滚动内容
+   * 滚动条没动"的落点：那条数学的参数曾经写反，滑块成了整条轨道；
+   * 现在它与卡片区共用 `scrollWindow` 里那**唯一**一份（入参具名）。
+   */
   drawScrollBar(
     gfx: Graphics,
     rect: { readonly x: number; readonly y: number; readonly w: number; readonly h: number },
@@ -258,15 +281,17 @@ export class DetailViewport {
     const trackX = rect.x + rect.w - 5;
     const trackTop = this.bodyTopPx;
     const trackH = Math.max(0, rect.y + rect.h - PREPARE_LAYOUT.detailPad - this.bodyTopPx);
-    const thumbRatio = scrollThumbRatio(this.viewHPx, this.maxScrollPx + this.viewHPx);
-    const thumbH = Math.max(24, Math.round(thumbRatio * trackH));
-    const progress = this.maxScrollPx === 0 ? 0 : this.scrollPx / this.maxScrollPx;
-    const thumbY = trackTop + Math.round((trackH - thumbH) * progress);
+    const thumb = scrollBarGeometry({
+      viewportPx: this.viewHPx,
+      maxScrollPx: this.maxScrollPx,
+      scrollPx: this.scrollPx,
+      trackLenPx: trackH,
+    });
     gfx
       .roundRect(trackX, trackTop, 3, trackH, 1.5)
       .fill({ color: PALETTE.panelLine, alpha: 0.35 });
     gfx
-      .roundRect(trackX, thumbY, 3, thumbH, 1.5)
+      .roundRect(trackX, trackTop + thumb.offset, 3, thumb.length, 1.5)
       .fill({ color: PALETTE.textDim, alpha: 0.9 });
   }
 }

@@ -133,10 +133,10 @@ describe('① 解锁：2 次不出现 / 3 次出现（真 `advanceRun`）', () =
   });
 
   /** 由 id 展开成 `buildPlayerKit` 要的那份（与 `runLoop.test.ts` 同一段）。 */
-  function chosen(ids: readonly string[]): readonly { def: (typeof ALL_QIJI)[number]; stacks: number }[] {
+  function chosen(ids: readonly string[]): readonly (typeof ALL_QIJI)[number][] {
     return ids.flatMap((id) => {
       const def = BY_ID.get(id);
-      return def === undefined ? [] : [{ def, stacks: 1 }];
+      return def === undefined ? [] : [def];
     });
   }
 
@@ -222,13 +222,13 @@ function castDouqiDelta(
   };
 }
 
-const KIT_DODGE = buildPlayerKit('player', [{ def: BY_ID.get('biShiJiXu')!, stacks: 1 }]);
-const KIT_FOCUS_COST = buildPlayerKit('player', [{ def: BY_ID.get('ningShenJuQi')!, stacks: 1 }]);
-const KIT_FOCUS_BOOST = buildPlayerKit('player', [{ def: BY_ID.get('ningShenRuDao')!, stacks: 1 }]);
+const KIT_DODGE = buildPlayerKit('player', [BY_ID.get('biShiJiXu')!]);
+const KIT_FOCUS_COST = buildPlayerKit('player', [BY_ID.get('ningShenJuQi')!]);
+const KIT_FOCUS_BOOST = buildPlayerKit('player', [BY_ID.get('ningShenRuDao')!]);
 /** 两条「凝」一起选 —— 用户说它们**互不冲突**。 */
 const KIT_BOTH = buildPlayerKit('player', [
-  { def: BY_ID.get('ningShenJuQi')!, stacks: 1 },
-  { def: BY_ID.get('ningShenRuDao')!, stacks: 1 },
+  BY_ID.get('ningShenJuQi')!,
+  BY_ID.get('ningShenRuDao')!,
 ]);
 
 /* ------------------------------------------------------------------ *

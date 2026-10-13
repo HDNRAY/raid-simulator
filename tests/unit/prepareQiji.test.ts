@@ -29,12 +29,13 @@ import { PLAYER_ROSTER } from '../../src/data/roster';
  * ⚠️ 这一份钉的是**语义**，不是界面：
  *   - 一次切换 = 开或关（关着的点一下必开 —— 这正是用户报的那条）
  *   - 多条可以同时开着
- *   - 效果**只生效一次**（`stacks: 1`，见 `freeQijiChoices`）
+ *   - 效果**只生效一次**（每条激活只给**一份定义**，见 `freeQijiChoices`）
  *
  * ⚠️ 肉鸽那边**没有层数**（2026-10-13：用户"肉鸽也改成一局只能选一次
  * （不叠加）"）—— 它的 `maxStacks` 字段**已整条删除**。所以"层数"这件事
  * 今天**两个模式都不存在**；本文件与肉鸽唯一的共同点是最终都进
- * `buildPlayerKit`（那里的 `stacks` 入参两个模式都恒为 1）。
+ * `buildPlayerKit`（那里的入参就是定义数组，恒为 1 的那个 `stacks`
+ * 也已删除，见 `data/kit.ts` 的作废段）。
  */
 
 const players = [{ id: 'player' }, { id: 'kaili' }];
@@ -97,13 +98,10 @@ describe('炁机激活：**开关**（没有层数）', () => {
   });
 });
 
-describe('激活集合 → `buildPlayerKit` 的形状（自由模式唯一的翻译点）', () => {
-  it('按**内容表顺序**排，只留开着的，且 `stacks` 恒为 1', () => {
+describe('激活集合 → 这一局选中的炁机 id（自由模式唯一的翻译点）', () => {
+  it('按**内容表顺序**排，只留开着的', () => {
     const choices = freeQijiChoices(['breath', 'vitality'], qiji);
-    expect(choices).toEqual([
-      { qijiId: 'vitality', stacks: 1 },
-      { qijiId: 'breath', stacks: 1 },
-    ]);
+    expect(choices).toEqual([{ qijiId: 'vitality' }, { qijiId: 'breath' }]);
   });
 
   it('【关键】顺序**不按集合的顺序**（黄金截图 / 断言要能复现同一份修正列表）', () => {
@@ -112,23 +110,21 @@ describe('激活集合 → `buildPlayerKit` 的形状（自由模式唯一的翻
     expect(a).toEqual(b);
   });
 
-  it('【关键】效果**只生效一次**（`stacks` 恒为 1，不会因为"没层"变成叠 3 次）', () => {
+  it('【关键】效果**只生效一次**（每条激活只产出一个 id，不会变成叠 3 次）', () => {
     const choices = freeQijiChoices(['vitality'], qiji);
-    expect(choices).toEqual([{ qijiId: 'vitality', stacks: 1 }]);
-    /** 一次激活 → 一条修正。3 层是**肉鸽**的语义，自由模式取不到。 */
-    expect(choices.every((c) => c.stacks === 1)).toBe(true);
+    expect(choices).toEqual([{ qijiId: 'vitality' }]);
+    /** 一次激活 → 一条修正。叠层是**内容表**的历史语义，自由模式取不到。 */
+    expect(choices).toHaveLength(1);
   });
 
   it('不认识的 id 被丢掉（内容改名之后的陈旧存档）', () => {
-    expect(freeQijiChoices(['ghost', 'vitality'], qiji)).toEqual([
-      { qijiId: 'vitality', stacks: 1 },
-    ]);
+    expect(freeQijiChoices(['ghost', 'vitality'], qiji)).toEqual([{ qijiId: 'vitality' }]);
   });
 });
 
 /**
- * ⚠️ **真 `buildPlayerKit`**：把"效果只生效一次"从"`stacks: 1`"落到**数字**上
- * （用户要的验收口径就是数：maxHp / 炁回复）。
+ * ⚠️ **真 `buildPlayerKit`**：把"效果只生效一次"从"翻译只产出一个 id"
+ * 落到**数字**上（用户要的验收口径就是数：maxHp / 炁回复）。
  */
 describe('【关键】效果**只生效一次**（真 `buildPlayerKit`）', () => {
   const PLAYER = PLAYER_ROSTER[0]!.id;
@@ -143,7 +139,7 @@ describe('【关键】效果**只生效一次**（真 `buildPlayerKit`）', () =
       freeQijiChoices(ids, ALL_QIJI).map((choice) => {
         const def = ALL_QIJI.find((q) => q.id === choice.qijiId);
         if (def === undefined) throw new Error(`测试里不该有找不到的炁机：${choice.qijiId}`);
-        return { def, stacks: choice.stacks };
+        return def;
       }),
     );
 

@@ -29,6 +29,29 @@
  *      三处（技能栏 / 触屏双弧 / 设置页）不出错的前提
  *
  * 定稿见 `docs/specs/2026-10-12-player-kits.md`。
+ *
+ * ==================================================================
+ * 2026-10-13：**一场战斗的种子从 run seed 派生**（B）
+ * ==================================================================
+ *
+ * 原先是 `seed: Date.now() >>> 0`：与 `RunState.runSeed` **没有任何派生
+ * 关系**。于是 `core/run/types.ts` 的 `RunBattleRecord.seed` 注释（"由
+ * `battleSeed` 派生"）与 `tests/unit/run/record.test.ts` 造的记录，都描述的
+ * 是一件**线上没发生**的事 —— 文档 / 测试与线上对不上，P7（中途存档 +
+ * 重放）也就复现不出"同一局"。
+ *
+ * 现在分两支（判据是**有没有进行中的一局肉鸽**）：
+ *
+ *   1. **肉鸽**（`getRun` 给得出 `runSeed` + `position`）：
+ *      `battleSeed(runSeed, position)` —— 纯函数、每场独立（§7.1 的约定，
+ *      原文就写在 `docs/specs/2026-10-12-roguelike.md` §7.1 里）。
+ *   2. **自由模式 / 直接单场 / 黄金夹具**（没有那一局）：仍然是
+ *      `Date.now() >>> 0`。⚠️ 这一支**逐字不变** —— 黄金基线与单场路径
+ *      都走它，所以"基线动了没有"是实测出来的，不是推理出来的。
+ *
+ * ⚠️ 与 `?runseed=` 的收益：同一条 URL 跑两次，**Boss 顺序 + 每场战斗
+ * 内部**（出招序列 / 骰子）全部相同。`REPLAY_FORMAT_VERSION` **不动** ——
+ * 依据写在下面的 `battleSeedOf`。
  */
 
 import { BattleLoop } from './battleLoop';
@@ -41,6 +64,8 @@ import type { ContentRegistry } from '../core/content/registry';
 import type { KeyBinding } from '../input/keyboard';
 import type { StatKey, StatModifier } from '../core/types';
 import type { InputSource } from '../input/keyboard';
+import { battleSeed } from '../core/run/index';
+import type { RunState } from '../core/run/index';
 import { translateSafe } from './translate';
 
 /** 组装一局战斗需要的东西（每次开局读一次，"当前选择"是活的）。 */
@@ -67,6 +92,18 @@ export interface StartBattleDeps {
    * 单场 / 自由模式因此**逐字不变**。
    */
   readonly getPlayerKit?: (playerId: string) => PlayerKit;
+  /**
+   * **当前这一局肉鸽**（`RunState`），没有进行中的一局时返回 `undefined`。
+   *
+   * ⚠️ 它存在的**唯一**用途是取出 `(runSeed, position)` 去派生一场战斗的
+   * 种子（`battleSeedOf`）。传 getter 而不是两个数：`position` 每场都在变
+   * （打完一场 → 第 2 场），而 `runSeed` 两处读会在"重开一局"时漂开
+   * —— 分开两个 getter 就会允许"种子是这一局的、场次是上一局的"。
+   *
+   * ⚠️ **默认不传 = 没有那一局**（单场 / 自由模式 / 黄金夹具）：那时战斗
+   * 种子照旧现取时钟，与"这一局"无关（判据与理由见 `battleSeedOf`）。
+   */
+  readonly getRun?: () => RunState | undefined;
   /** `?noai=1` 时为真（对手不行动）。 */
   readonly noAi: boolean;
   /** 每场战斗的时限。超时判负。与 Boss 的 enrage 阈值一致。 */
@@ -115,6 +152,51 @@ export function bindingsForPlayer(
 ): readonly KeyBinding[] {
   const owned = playerSkillIdsFor(playerId);
   return bindings.filter((b) => owned.has(b.skillId));
+}
+
+/**
+ * **一场战斗的种子**：有那一局肉鸽就从 run seed 派生，否则现取时钟。
+ *
+ * ==================================================================
+ * 为什么分两支、兜底为什么是时钟
+ * ==================================================================
+ *
+ * - **肉鸽（有 `runSeed` + `position`）**：`battleSeed(runSeed, position)`
+ *   —— 这是 `docs/specs/2026-10-12-roguelike.md` §7.1 **早就写死**的约定
+ *   （"每场战斗的种子 = `battleSeed(runSeed, k)`，每场独立"），也是
+ *   `core/run/types.ts` 的 `RunBattleRecord.seed` 与
+ *   `tests/unit/run/record.test.ts` 一直在用的那条。原先线上跑的是
+ *   `Date.now()`，所以两边对不上（沿革见文件头）。
+ * - **没有那一局**（自由模式 / 直接单场 `?prepare=skip` / 黄金夹具）：
+ *   仍然 `Date.now() >>> 0`。**这不是"忘了改"** —— 那几步根本**没有**
+ *   `runSeed` / `position` 可取（没有一局肉鸽），硬凑一个来源只会造出
+ *   一个假的确定性。⚠️ 黄金基线（`tests/golden/fixtures.ts`）走的正是
+ *   这一支，所以"基线不动"是它**保持原样**的结果。
+ *
+ * `position` **只认正整数**：`RunState.position` 在肉鸽里是 1-based
+ * （`battleRecordOf` 直接抄它进记录），非正数说明调用方拿错了状态 ——
+ * 那时回落到时钟，而不是把 `position = 0` 混进种子（那会让"记录里的
+ * 场次"与"种子里的场次"是两个不同的数）。
+ *
+ * ⚠️ **`REPLAY_FORMAT_VERSION` 不 +1（依据）**：
+ *
+ *   - 版本号钉的是**引擎的确定性语义**（同一份 `seed + 输入` → 同一结果），
+ *     本改动**一个字都没碰引擎** —— 重放文件里的 `seed` 是**存下来的**，
+ *     拿它再跑一遍仍然逐位相同。
+ *   - 真正变的是 **app 层"新一局战斗的种子从哪儿取"**。它不改任何既有
+ *     `RecordedRun` 的含义，也不要求重标定 `GOLDEN_OUTCOME`（实测见下方
+ *     回报）。这正是 `record.ts` 里那条"两个版本号判据不同、不要互相
+ *     套用"的另一个实例：记录**形状**变了才动 `RUN_FORMAT_VERSION`，
+ *     引擎**语义**变了才动 `REPLAY_FORMAT_VERSION`，这次两边都没变。
+ */
+export function battleSeedOf(
+  run: Pick<RunState, 'runSeed' | 'position'> | undefined,
+  clock: () => number = Date.now,
+): number {
+  if (run !== undefined && Number.isInteger(run.position) && run.position >= 1) {
+    return battleSeed(run.runSeed, run.position);
+  }
+  return clock() >>> 0;
 }
 
 /**
@@ -180,8 +262,15 @@ export function createStartBattle(d: StartBattleDeps): () => BattleLoop {
          * 凯丽 120），见 `data/units.ts` 的 `PLAYER_HP_BY_ID`。
          */
         combatants: [makePlayer(playerId, { kit }), makeBoss(bossId, { noAi: d.noAi })],
-        // 用真实时钟做种子：每次开局不同，但仍可复现（记录 seed 即可）
-        seed: Date.now() >>> 0,
+        /**
+         * **一场战斗的种子**（见 `battleSeedOf`）：
+         *   - 肉鸽 → `battleSeed(runSeed, position)`（每场独立，§7.1）
+         *   - 自由模式 / 单场 / 黄金夹具 → 照旧 `Date.now() >>> 0`
+         *
+         * ⚠️ **每次开局现读**（`d.getRun?.()`）：`position` 一场一变，
+         * 快照一份会让第 2 场还拿着第 1 场的种子（两场内部一模一样）。
+         */
+        seed: battleSeedOf(d.getRun?.()),
         bossId,
         timeLimitMs: d.timeLimitMs,
         /**

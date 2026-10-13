@@ -78,7 +78,7 @@
 | 玩家技能全集 | 9 个：`attack` / `blast` / `focus` / `break` / `dodge` / `guard` / `flash` / `jie` / `strike`(派生) | `src/data/content.ts:545-557`。⚠️ **2026-10-12 第二次重标定后**：「破」移出玩家技能全集、进 `PENDING_SKILLS`（无人带、不可绑），全集变成 **8 个**；判据见 `2026-10-12-player-kits.md` §6 |
 | "哪些技能是玩家的" | 全局唯一真相 `PLAYER_SKILL_IDS`，**没有 per-character 概念** | `src/data/content.ts:585-587` |
 | **引擎的边界 = 一场战斗** | `BattleEngine` 是一个 encounter 的状态机；当前"重开"是**重建一个 `BattleLoop`**，不是引擎里的第二场 | `src/core/combat/battleState.ts:74-83`、`src/app/battleSetup.ts:59-117` |
-| 种子从哪来（现状） | app 层 `seed: Date.now() >>> 0`（`core/` 禁 `Date.now`） | `src/app/battleSetup.ts:89-90` |
+| 种子从哪来（现状） | **一局**：app 层 `Date.now() >>> 0`（`core/` 禁 `Date.now`）。**一场战斗**：从 run seed 派生 —— `battleSeed(runSeed, position)`，落点 `src/app/battleSetup.ts` 的 `battleSeedOf`（自由模式 / 直接单场没有那一局，仍取时钟） | `src/app/phaseFlow.ts:451-473`、`src/app/battleSetup.ts` 的 `battleSeedOf` |
 | 两条随机流 | `BattleState.rngSeed`（玩家侧）+ `BattleState.aiRngSeed`（AI 选招），**刻意分开** | `src/core/types/runtime.ts:73-88`、`src/core/ai/index.ts:57-63` |
 | 随机数工具 | `core/rng.ts` 的 mulberry32（`nextRandom` / `randomInt` / `rollChance`），状态手动穿线、纯函数 | `src/core/rng.ts` |
 | 重放格式 | `REPLAY_FORMAT_VERSION = 2`；`RecordedRun = {version, seed, ticks, input}`，**一场战斗一份**；测试断言它就是 2 | `src/core/run.ts:44-62`、`tests/golden/replay.test.ts:81-88` |
@@ -232,13 +232,32 @@ startRun(runSeed, playerId, order)
 
 ```
 ?runlen=2        只打 2 场战斗（第一个位置用最软档，最后一个位置用最硬档）
-?runlen=7        默认（正式形态）
+?runlen=7        满编形态（7 个 Boss 都做完之后）
+?runseed=123     指定这一局的种子（⚠️ 决定 Boss 顺序；不传 = 现取 Date.now() >>> 0）
 ?order=k1,k2,... 指定顺序（复现某个具体局面 / 截图）
 ?tier=4          强制某一档（调曲线用）
 ```
 
-这些走**玩家同一条代码路径**（与现有 `?prepare=skip` / `?boss=` 的思路一致，
-`src/app/game.ts:143-159`），不做旁路。
+⚠️ **今天真正实现的只有 `?runlen=` 与 `?runseed=`**（解析在
+`src/app/urlParams.ts`，落点在 `src/app/phaseFlow.ts`）；`?order=` /
+`?tier=` 是**设计稿**，还没接线。另外 `?runlen=` **不传时是"池子多长
+打几场"、不是 7** —— 7 是满编终点，拿它当缺省会让"今天只有 2 个 Boss"
+的一局永远通不了关（见 `src/app/urlParams.ts` 的 `runLength`）。
+
+⚠️ ⭐ `?runseed=` **钉住整个一局**（B，2026-10-13）：一场战斗的种子从
+run seed 派生（`battleSeed(runSeed, position)`，落点 `battleSetup.ts` 的
+`battleSeedOf`），所以同一个 `?runseed=` 跑两次 —— **Boss 顺序 + 每场战斗
+内部的随机（出招 / 概率判定）全部相同**，这就是"完整复现一局"。
+
+⚠️ **沿革（为什么这条注释改过）**：上一版这里写的是"战斗种子另取时钟
+（`Date.now() >>> 0`），与 run seed 没有派生关系"。那是当时的**事实**，
+而 `core/run/types.ts` 的 `RunBattleRecord.seed` 与 §7.1 下表早就写着
+"由 `battleSeed` 派生" —— **约定在、线上没接**。两边对不上的后果是 P7
+（中途存档 + 重放）复现不出"同一局"，且爆出来的位置离原因很远。
+现在线上按约定派生，文档 / 测试 / 线上三者一致。
+
+这些走**玩家同一条代码路径**（与现有 `?prepare=skip` / `?boss=` 的思路一致），
+不做旁路。
 
 ⚠️ **为什么不"用占位轮转假装 7 个都能打"**：5 个未实现 Boss 现在共用
 傲慢的行为表（`data/units.ts:88-105`），对玩家来说"第 4 场是嫉妒"和
@@ -987,7 +1006,7 @@ M1（二阶段）+ M2（霸体）+ M3（控制）三条通道**；至少一条�
 
 | 问题 | 答案 |
 |---|---|
-| 从哪来 | **app 层**用 `Date.now() >>> 0`。已有先例：`battleSetup.ts:90` 就是这么给一场战斗种种子的。**`core/` 里不许有它**（lint C2，`tests/unit/lintRules.test.ts:85-91`） |
+| 从哪来 | **app 层**用 `Date.now() >>> 0`（一局的种子）。**一场战斗**的种子从它派生：`battleSeed(runSeed, position)`，落点 `app/battleSetup.ts` 的 `battleSeedOf`。**`core/` 里不许有 `Date.now`**（lint C2，`tests/unit/lintRules.test.ts:85-91`） |
 | 存在哪 | `RunState.runSeed`（内存）；落盘见 §12 决议 #10 |
 | 怎么派生顺序 | `shuffle(BOSS_ROSTER, runSeed)` 用 `core/rng.ts` 的 mulberry32（`randomInt`），**纯函数、状态显式穿线** |
 | 每场战斗的种子 | `battleSeed(runSeed, k)`（纯函数，再跑一次 mulberry32 取 uint32）。**每场独立**，绝不共用同一 seed（否则两个 Boss 的出招序列会相关） |
@@ -1007,7 +1026,7 @@ M1（二阶段）+ M2（霸体）+ M3（控制）三条通道**；至少一条�
 | 层面 | 做法 |
 |---|---|
 | **一场战斗的重放** | **不变**。`RecordedRun`（`core/run.ts:48-62`）仍是 `{version, seed, ticks, input}`。理由：`RunState` 不进 `BattleState`，对引擎而言每一场依旧只是"combatants + seed + input" |
-| **一局肉鸽的记录（P0 已实现）** | `RunRecord = { runFormatVersion, state: RunState, battles: RunBattleRecord[] }`（`core/run/record.ts`），**当前 `RUN_FORMAT_VERSION = 2`**（1 → 2 是因为 `RunBattleRecord` 加了必填的 `flawless`；见下面的「两个版本号」）。⚠️ **不内嵌**引擎的 `RecordedRun`：那会让一局肉鸽的记录在战斗重放格式变更时被迫一起变。**校验规则与 `replayRun` 刻意不同**：`replayRun` 的入参是开发者给的重放文件（版本不匹配 → **英文抛错**），而这里的入参是**用户的存档**（版本旧了是常态 → **整条丢弃**返回 `undefined`）。同一件事的正确反应天生不同，所以刻意不一致 |
+| **一局肉鸽的记录（P0 已实现）** | `RunRecord = { runFormatVersion, state: RunState, battles: RunBattleRecord[] }`（`core/run/record.ts`），**当前 `RUN_FORMAT_VERSION = 3`**（1 → 2 是 `RunBattleRecord` 加了必填的 `flawless`；2 → 3 是 `RunChoice` 删掉 `stacks`；见下面的「两个版本号」）。⚠️ **不内嵌**引擎的 `RecordedRun`：那会让一局肉鸽的记录在战斗重放格式变更时被迫一起变。**校验规则与 `replayRun` 刻意不同**：`replayRun` 的入参是开发者给的重放文件（版本不匹配 → **英文抛错**），而这里的入参是**用户的存档**（版本旧了是常态 → **整条丢弃**返回 `undefined`）。同一件事的正确反应天生不同，所以刻意不一致 |
 | **`REPLAY_FORMAT_VERSION` 要不要 +1** | **看具体工作项**（见下表）。判断依据是 `run.ts:37-45` 的原文："改动引擎的**确定性语义**时必须 +1" |
 
 #### ⚠️ 两个版本号，**判据不同，不要互相套用**

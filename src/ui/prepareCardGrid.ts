@@ -34,7 +34,7 @@
 
 import { PREPARE_LAYOUT, type PrepareCounts, type PrepareLayout } from './prepareLayout';
 import type { PrepareSectionKind } from './prepareTypes';
-import { pixelViewport, scrollThumbRatio, steppedViewport } from './scrollWindow';
+import { pixelViewport, scrollBarGeometry, steppedViewport } from './scrollWindow';
 
 /** 一个矩形（布局层给渲染 / 命中测试的通用形状）。 */
 export interface Rect {
@@ -407,10 +407,24 @@ export function sectionScrollbar(
   const trackX = L.pad + colWOf(kind, L) - 3;
   const trackTop = rowTop;
   const trackH = Math.max(0, view.viewPx);
-  const thumbRatio = scrollThumbRatio(view.countPx, view.viewPx);
-  const thumbH = Math.max(24, Math.round(thumbRatio * trackH));
-  const progress = view.maxPx === 0 ? 0 : view.offsetPx / view.maxPx;
-  const thumbTop = trackTop + Math.round((trackH - thumbH) * progress);
+  /**
+   * ⚠️ 滑块的几何走 `scrollWindow.scrollBarGeometry`（**唯一**一份滑动条
+   * 数学）—— 详情区那条滚动条用的是同一个函数。这里只是把它的 `offset`
+   * 加上轨道顶边，换成**屏幕坐标**。
+   *
+   * ⚠️ 入参是具名结构：`viewportPx` / `maxScrollPx` / `scrollPx` /
+   * `trackLenPx` 各写各的名字 —— 旧版这里是
+   * `scrollThumbRatio(view.countPx, view.viewPx)`，而详情区那份的参数顺序
+   * 不同，两份都"对"也会被抄错（见 `scrollBarGeometry` 的文件）。
+   */
+  const thumb = scrollBarGeometry({
+    viewportPx: view.viewPx,
+    maxScrollPx: view.maxPx,
+    scrollPx: view.offsetPx,
+    trackLenPx: trackH,
+  });
+  const thumbH = thumb.length;
+  const thumbTop = trackTop + thumb.offset;
   return { trackX, trackTop, trackW: 3, trackH, thumbH, thumbTop, maxPx: view.maxPx };
 }
 

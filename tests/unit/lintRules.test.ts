@@ -458,3 +458,135 @@ describe('测试不许 import 被 gitignore 的素材', () => {
     ).toEqual([]);
   });
 });
+
+/**
+ * AGENTS.md §2：**滑块几何只能有一份**（去重）。
+ *
+ * ------------------------------------------------------------------
+ * 它防的是什么（这不是"为了整洁"）
+ * ------------------------------------------------------------------
+ *
+ * 2026-10-13 用户报的"**滚动内容 滚动条没动**"，根因是详情区把
+ * `scrollThumbRatio(count, rows)` 的两个参数**写反**（传的是
+ * `(视口, 内容)`）：它恒返回 `1` ⇒ 滑块长度 = 整条轨道 ⇒
+ * `(轨道 − 滑块)` 恒为 0 ⇒ 滑块永远贴顶端。
+ *
+ * 修好之后场上却成了**两份**实现（备战屏卡片区 `sectionScrollbar`、
+ * 详情区 `detailScrollThumb`），而且**参数顺序不同** —— 两份都"对"，
+ * 下一个人抄错一次就又回来。所以两处都并到了
+ * `src/ui/scrollWindow.ts`：**像素**那份是
+ * `scrollBarGeometry({ viewportPx, maxScrollPx, scrollPx, trackLenPx,
+ * minLengthPx })`（入参具名 —— 那串同型 number 没法再静默传反），
+ * 而 `scrollThumbRatio` 退成它内部用的**按行**比例。
+ *
+ * ------------------------------------------------------------------
+ * 为什么必须有这条扫描（`scrollBarGeometry` 的注释拦不住抄写）
+ * ------------------------------------------------------------------
+ *
+ * `src/ui/logReview.ts` 有一个**很自然**的诱惑：它是一个"转发
+ * `scrollWindow` 那族数学"的模块，谁想再写一条滚动条，顺手就
+ * `import { scrollThumbRatio } from './logReview'`，自己乘轨道长 ——
+ * 于是**第二份滑块几何**在没人注意的地方长出来。"只有一处"这件事
+ * **必须由机器守**，不能靠下一个人记得（本仓库 §1 的 `as any` 扫描、
+ * `process` 扫描都是同一个判据）。
+ *
+ * ⚠️ 为什么钉的是 `scrollThumbRatio` 而不是 `scrollFraction`：
+ * 前者**只有**"把内容/视口换成滑块长度比例"这一个含义，别处出现就
+ * 一定是第二份几何；而 `scrollFraction` 是通用的"偏移 → 0..1 进度"，
+ * 还有与滚动条无关的正当用途（`LogReviewPanel.pointerRatio` 拿它给
+ * 验证脚本反推指针点在第几行）。钉后者会误报，钉前者够用 —— 而
+ * "滑块贴在顶端不动"那个 bug 的入口正是前者。
+ */
+describe('AGENTS.md §2：滑块几何只有 scrollWindow 一份', () => {
+  it('src/ 下没有第二处自己算滑块长度比例的模块', async () => {
+    const { readFileSync, globSync } = await import('node:fs');
+
+    /**
+     * 只有它**允许**算滑块长度比例（`scrollBarGeometry` 的家）。
+     * 其余模块一律只许 import `scrollBarGeometry` 的结果。
+     */
+    const HOME = 'src/ui/scrollWindow.ts';
+
+    /**
+     * ⚠️ **允许例外**：单位是"行"的两条滚动条（复盘整屏 / 设置页技能详情）。
+     *
+     * 它们**不是**这次出 bug 的那条像素几何，而且结构上不同：
+     *
+     * ```
+     *   像素（出过 bug）  内容 = 视口 + maxScrollPx；滑块长 = 视口/内容 × 轨道
+     *   行（这两条）      滑块长 = 行数比例 × 轨道；设置页的"一屏几行"来自
+     *                     另一个行高（LINE_H），与轨道高**不是**同一个数
+     *                     （直接改走像素那份会改变行为，见 AGENTS.md §3：
+     *                      这一轮只做搬家，不许"顺手改得更合理"）
+     * ```
+     *
+     * 它们留在原处是**明账**：新增一处、或这两个文件里再长出一条，都会因为
+     * 不在这张表里而红。这张表只会**变短**（等哪天行 / 像素两套真能合成
+     * 同一个具名入参，就把对应条目删掉）。
+     */
+    const ROW_BASED_ALLOWED: readonly string[] = [
+      'src/ui/LogReviewPanel.ts',
+      'src/ui/settings/SkillDetail.ts',
+    ];
+
+    /**
+     * 剥掉注释**和字符串字面量**（与 §1 的扫描同一做法）：
+     * 这一条防线会在注释里被**引用**（"别处不许再算…"），那不是违规；
+     * 而 import 路径是字符串，剥掉之后 `from './scrollWindow'` 那种
+     * 形式自然不匹配（`from` 后没有括号调用）—— 只有真实调用留下。
+     */
+    function stripCommentsAndStrings(source: string): string {
+      const blank = (m: string): string => m.replace(/[^\n]/g, ' ');
+      return source
+        .replace(/\/\*[\s\S]*?\*\//g, blank)
+        .replace(/\/\/[^\n]*/g, blank)
+        .replace(/'(?:[^'\\\n]|\\.)*'/g, blank)
+        .replace(/"(?:[^"\\\n]|\\.)*"/g, blank)
+        .replace(/`(?:[^`\\]|\\.)*`/g, blank);
+    }
+
+    /** 把"内容/视口"换成滑块长度比例 —— 只许 `scrollWindow` 自己调。 */
+    const THUMB_RATIO = /\bscrollThumbRatio\s*\(/;
+    const offenders: string[] = [];
+
+    for (const file of globSync('src/**/*.{ts,tsx,mts,cts}')) {
+      if (file === HOME || ROW_BASED_ALLOWED.includes(file)) continue;
+      const lines = stripCommentsAndStrings(readFileSync(file, 'utf8')).split('\n');
+      lines.forEach((line, i) => {
+        if (THUMB_RATIO.test(line)) {
+          offenders.push(`${file}:${i + 1} → ${line.trim().slice(0, 90)}`);
+        }
+      });
+    }
+
+    expect(
+      offenders,
+      `src/ 下出现了第二处滑块几何。按 AGENTS.md §2：把偏移换成滑块几何只有一份 ——\n` +
+        `    像素：scrollWindow.scrollBarGeometry({ viewportPx, maxScrollPx, scrollPx, trackLenPx })\n` +
+        `确实需要另开一处时，请在 \`ROW_BASED_ALLOWED\` 里写明"为什么它与像素那份不是同一件事"。\n` +
+        offenders.join('\n'),
+    ).toEqual([]);
+
+    /**
+     * ⚠️ 反向验证：**两处像素调用点真的走了入参具名的那一份**。
+     *
+     * 只扫"没人再调 `scrollThumbRatio`"不够 —— 谁把调用点改回自己乘一个
+     * `view.viewPx / view.countPx`（不经过那个函数名）也照样是第二份几何。
+     * 这里钉住"调用点确实在调它"，于是"把唯一那份删掉"这条路也会红。
+     */
+    const PIXEL_CALLERS: readonly string[] = [
+      'src/ui/prepareCardGrid.ts',
+      'src/ui/prepareDetailViewport.ts',
+    ];
+    const missing = PIXEL_CALLERS.filter(
+      (file) => !readFileSync(file, 'utf8').includes('scrollBarGeometry('),
+    );
+
+    expect(
+      missing,
+      `这些像素滚动条的调用点没有走 scrollWindow.scrollBarGeometry：\n${missing.join('\n')}`,
+    ).toEqual([]);
+  });
+});
+
+

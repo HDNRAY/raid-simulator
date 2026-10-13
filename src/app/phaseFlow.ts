@@ -77,6 +77,24 @@ export interface PhaseFlowDeps {
    */
   readonly runLength?: number | undefined;
   /**
+   * **这一局的种子**（`?runseed=N`；`undefined` = 每次现取 `Date.now() >>> 0`）。
+   *
+   * ⚠️ 与 `runLength` 同族：**构造期常量**（来自 URL），一局开始之后再改
+   * 没有意义（`order` 已经洗好了）。它是**调试入口** —— 存在的理由是
+   * "复现某一局特定的 Boss 顺序"，来龙去脉见 `urlParams.ts` 的 `runSeed`。
+   *
+   * ⚠️ **它钉住的不止顺序**（B，2026-10-13）：一场战斗的种子由
+   * `battleSetup.battleSeedOf` 从 `(runSeed, position)` 派生
+   * （`battleSeed(runSeed, position)`）—— 所以同一个 `?runseed=` 跑两次，
+   * **Boss 顺序 + 每场战斗内部**都相同。
+   *
+   * ⚠️ 沿革：这一条**原先写的是"战斗种子另取时钟、与它没有派生关系"**
+   * ——那句描述的是当时的**事实**，而事实与 `core/run/types.ts` /
+   * `tests/unit/run/record.test.ts` 里"由 `battleSeed` 派生"的约定**对不上**。
+   * 现在线上改成按约定派生，两边才一致（见 `battleSetup.ts` 文件头）。
+   */
+  readonly runSeed?: number | undefined;
+  /**
    * **自由模式当前开着的炁机**（2026-10-13）。
    *
    * ⚠️ 传**取值函数**而不是一张算好的表：与 `getPlayerKit` 同一条理由 ——
@@ -177,8 +195,9 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
    * 只有 id。展开只在这一处，所以"某个 id 在不在池子里"只有一个答案。
    *
    * ⚠️ **没有层数**（2026-10-13）：肉鸽一局只能选一次、不叠加
-   * （用户原话："肉鸽也改成一局只能选一次（不叠加）"）。所以下面给
-   * `buildPlayerKit` 的每一份都**恒是 1 次**。
+   * （用户原话："肉鸽也改成一局只能选一次（不叠加）"）。所以这里给出的是
+   * **定义数组**，`buildPlayerKit` 的入参就是它（那个恒为 1 的 `stacks`
+   * 已整条删除，见 `data/kit.ts` 的作废段）。
    */
   const activeQiji = (): readonly QijiEntity[] => {
     const state = runSession.state();
@@ -192,8 +211,7 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
      * 效果本身走的是同一个 `buildPlayerKit`。
      *
      * ⚠️ 自由模式的"开 / 关"语义**一个字都没改**：`freeQijiChoices`
-     * 仍然按内容表顺序给出选中的那些（那里的 `stacks` 是
-     * `buildPlayerKit` 入参形状要求的，恒 1）。
+     * 仍然按内容表顺序给出选中的那些。
      */
     if (state === undefined) {
       return freeQijiChoices(d.freeQiji(), ALL_QIJI).flatMap((choice) => {
@@ -215,15 +233,12 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
    * `buildPlayerKit(playerId)` 于是与"今天"逐字相同（`caps` = 角色的、
    * `modifiers` = 空、`comboWindows` = 空）。
    *
-   * ⚠️ 每条炁机的 `stacks` **恒为 1**（肉鸽一局只能选一次、自由模式是
-   * 开关）—— 见 `activeQiji` 的说明。`buildPlayerKit` 的入参形状要求
-   * 一个数，所以这里是那唯一一处"写 1"的翻译点。
+   * ⚠️ **没有层数**（肉鸽一局只能选一次、自由模式是开关，见 `activeQiji`）：
+   * `buildPlayerKit` 的入参就是那份定义数组，这里不再有"把层数写成 1"
+   * 的翻译（2026-10-13 删）。
    */
   const playerKit = (playerId: string): PlayerKit =>
-    buildPlayerKit(
-      playerId,
-      activeQiji().map((def) => ({ def, stacks: 1 })),
-    );
+    buildPlayerKit(playerId, activeQiji());
 
   /**
    * **界面路由的唯一落实点**：把 `phase` 写进状态，并一次性重设
@@ -443,8 +458,13 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
     /**
      * ⚠️ **`?runlen=N` 在 `begin` 里生效**（`runSession` 的 `runLength`）：
      * 它截断洗好的 Boss 顺序，于是"这一局打几场"从第一场起就是确定的。
+     *
+     * ⚠️ **`?runseed=N` 是种子的唯一覆盖点**（`d.runSeed`）：给了就用它，
+     * 不给就是**逐字不变**的 `Date.now() >>> 0`（`app/` 层允许非确定性，
+     * `core/` 不许 —— 见 `battleSetup.ts` 给战斗种子的同一做法）。
+     * 两个参数互不影响：种子决定**顺序**，`runlen` 决定**截多长**。
      */
-    runSession.begin(playerId, Date.now() >>> 0);
+    runSession.begin(playerId, d.runSeed ?? (Date.now() >>> 0));
     const bossId = runSession.bossId();
     /**
      * `BOSS_POOL` 为空才会走到这里（现在有 2 个）。**留在选角色屏**，

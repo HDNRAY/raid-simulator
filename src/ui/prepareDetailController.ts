@@ -36,6 +36,7 @@ import type { Container } from 'pixi.js';
 import type { PixiCtor } from './primitives';
 import { PrepareDetailPanel } from './prepareDetailPanel';
 import { detailModelOf, focusedTarget, type DetailContext, type DetailModel } from './prepareDetail';
+import { DETAIL_SCROLL_STEP } from './prepareDetailMetrics';
 import type { PrepareTarget } from './prepareLogic';
 import type { TranslateFn } from '../i18n/translator';
 
@@ -120,6 +121,21 @@ export class PrepareDetailController {
   /** 滚详情区（滚轮 / 拖拽都走它）。 */
   scrollBy(delta: number): boolean {
     return this.panel.scrollBy(delta);
+  }
+
+  /**
+   * **Shift + ↑ ↓**：按一个**固定步长**滚详情区（键盘那条路；滚轮 / 拖拽
+   * 那条路是 `scrollBy`，步长由输入自己的位移决定）。
+   *
+   * ⚠️ 它**不需要焦点在详情区上**、也**不碰**光标：详情区不是第 4 个"站"，
+   * 它显示的就是"当前展开那一块"里的东西（见文件头）。所以"滚它"是一个
+   * 随时可做的动作，与裸 ↑↓ 的"块内走光标"互不影响。
+   *
+   * @returns 有没有真的动（内容不足一屏时为 `false` —— 那是**正常**的
+   *   "什么也不做"，不是 bug；调用方据此决定要不要重画）。
+   */
+  scrollStep(dir: 'up' | 'down'): boolean {
+    return this.panel.scrollBy(dir === 'up' ? -DETAIL_SCROLL_STEP : DETAIL_SCROLL_STEP);
   }
 
   /** 当前该显示的那一项（探针用；等价于渲染层实际拿到的输入）。 */

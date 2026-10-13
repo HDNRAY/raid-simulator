@@ -62,8 +62,8 @@
  * ⚠️ 本文件**仍然一个字都不读层数** —— 上面那句"别合并"的结论照旧，
  * 只是现在连"另一件事"也不存在了。
  *
- * ⚠️ **不要**因为"没有层"就让效果叠 N 次：`freeQijiChoices` 给每一条的
- * `stacks` 恒为 **1**（见那个函数）。
+ * ⚠️ **不要**因为"没有层"就让效果叠 N 次：`freeQijiChoices` 给每一条
+ * **一份定义**（不再有那个恒为 1 的 `stacks` —— 见那个函数）。
  */
 
 /**
@@ -95,15 +95,21 @@ export function toggleQiji(free: FreeQiji, id: string): FreeQiji {
 }
 
 /**
- * 激活集合 → **`buildPlayerKit` 要的形状**（`{ qijiId, stacks }[]`）。
+ * 激活集合 → **这一局选中的炁机 id**（按内容表顺序；`buildPlayerKit`
+ * 拿到的就是它们的定义）。
  *
  * ⚠️ 这个函数是"自由模式的炁机怎么进战斗"的**唯一翻译点**：产物直接喂给
  * `data/kit.buildPlayerKit`（与肉鸽那条路**同一个函数**），所以"两个模式
  * 的效果不一样"从结构上不可能 —— 差别只在**谁来填这张表**。
  *
- * ⚠️ **`stacks` 恒为 1**（激活没有层）：它不是从哪读来的数，而是
- * `buildPlayerKit` 的入参形状要求一个数。写 1 = 效果**只生效一次**；
- * 若哪天有人按"既然没层就随便给个 3"来改，一条炁机的效果会**静默翻倍**。
+ * ⚠️ **本文件一个字都不读层数，产物里也不再有层数**（2026-10-13）：
+ * 上一版这里给每一条拼了一个恒为 1 的 `stacks`，因为 `buildPlayerKit`
+ * 的入参形状当时要一个数。那个数**两个模式都恒为 1**（自由这边是开关、
+ * 肉鸽那边一局只能选一次），是 AGENTS.md §2 意义上的死值 —— 所以
+ * 入参形状改成了"直接给定义"，`stacks` 整条删除（见 `data/kit.ts`
+ * 的作废段）。
+ *
+ * ⚠️ **不要**因为"没有层"就让效果叠 N 次：一条激活 = 一条定义 = 一份效果。
  *
  * ⚠️ **顺序按 `order`（内容表的顺序）排**，不按集合的顺序：
  * `buildPlayerKit` 的展开与遍历顺序有关，而黄金截图 / 断言要能复现同一份
@@ -113,8 +119,6 @@ export function toggleQiji(free: FreeQiji, id: string): FreeQiji {
 export function freeQijiChoices(
   free: FreeQiji,
   order: readonly { readonly id: string }[],
-): readonly { readonly qijiId: string; readonly stacks: number }[] {
-  return order
-    .filter((entry) => isQijiOn(free, entry.id))
-    .map((entry) => ({ qijiId: entry.id, stacks: 1 }));
+): readonly { readonly qijiId: string }[] {
+  return order.filter((entry) => isQijiOn(free, entry.id)).map((entry) => ({ qijiId: entry.id }));
 }

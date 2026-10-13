@@ -353,6 +353,18 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
       isOpen: () => d.scene.logReview.isOpen(),
       pointerRatio: () => d.scene.logReview.pointerRatio(),
     },
+    /**
+     * **战斗探针**（只读；字段来源与刷新时机的逐条说明在 `app/debugProbe.ts`）。
+     *
+     * ⚠️ 两个实参的分工是**刻意的**，不要"统一成一个"：
+     *   - `l.engineState` 是**活引擎** —— 战斗者 / tick / status 全部从它现取
+     *   - `l.snapshot` 是**渲染视图**（只有技能栏槽位数与飘字条数需要它）；
+     *     它每帧重建，且 `injectActions` 会主动作废，所以 `act()` 之后这里
+     *     读到的是按刚推进过的引擎重建的新视图，不是上一帧的
+     *
+     * ⚠️ 探针**不许**走 `drainEvents()`：那是排空语义，读了就等于从另外三个
+     * 消费者手里把事件拿走（`act()` 踩过的同一个坑）。
+     */
     probe: () => {
       const l = battle();
       /** 备战阶段没有战斗可测：给一份零值快照，而不是 crash。 */

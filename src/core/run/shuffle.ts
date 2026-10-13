@@ -20,10 +20,19 @@
  *
  * 于是这一层的两个入口都只接受一个 `runSeed`：
  *   - `startRun(runSeed, …)`（`lifecycle.ts`）：由 **app 层**生成并传入
- *     （`Date.now() >>> 0`，与 `app/battleSetup.ts` 给一场战斗种子的做法
- *     一致）。`core/` 里**不许**有 `Date.now` / `Math.random`（lint C2）。
- *   - `shuffle(items, runSeed)` / `battleSeed(runSeed, position)`：**纯函数**，
- *     状态显式穿线，同一个种子必然给同一串结果。
+ *     （`Date.now() >>> 0`）。`core/` 里**不许**有
+ *     `Date.now` / `Math.random`（lint C2）。
+ *   - `shuffle(items, runSeed)`：Boss 顺序的洗牌，**纯函数**。
+ *   - `battleSeed(runSeed, position)`：**一场战斗的种子**，也是**纯函数**。
+ *     生产路径就是它 —— `app/battleSetup.ts` 的 `battleSeedOf` 从
+ *     `RunState` 取 `(runSeed, position)` 调它。⚠️ 这一点**曾经不是真的**：
+ *     当时线上给战斗种子的是 `Date.now() >>> 0`（自由模式那条路现在仍是
+ *     时钟），而本文件与 `RunBattleRecord.seed` 的注释早就写着"由
+ *     `battleSeed` 派生" —— 约定在、接线没做。2026-10-13 接上了
+ *     （沿革见 `app/urlParams.ts` 的 `runSeed`）。
+ *     ⚠️ 自由模式 / 直接单场**没有一局肉鸽**，取不到 `runSeed`，所以那条路
+ *     仍然用时钟 —— 黄金夹具走的正是它（见 `app/battleSetup.ts` 的
+ *     `battleSeedOf`），于是基线不动。
  *
  * 随机数走**已有的** `core/rng.ts`（mulberry32），不另起一套 —— 重复实现
  * 一个 RNG 会让"同种子同结果"这条验收变成两份各自可能漂的实现。

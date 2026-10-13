@@ -5,8 +5,8 @@
  * 这个文件是什么（一句话，没有"和"）
  * ==================================================================
  *
- * 它是**炁机 → 战斗输入**的唯一规范化点：拿"这一局选了哪些炁机、各几层"，
- * 算出下一场战斗玩家的上限 / 被动修正 / 派生窗口产出者。
+ * 它是**炁机 → 战斗输入**的唯一规范化点：拿"这一局选了哪些炁机（每一条
+ * 一份定义、没有层数）"，算出下一场战斗玩家的上限 / 被动修正 / 派生窗口产出者。
  *
  * 设计稿：`docs/specs/2026-10-12-roguelike.md` §5.5（`BattleKit`）与
  * §0.3.1 的 W6 / W7。⚠️ 它是 W7 的**务实那一半**：今天只有两条路被接上
@@ -78,37 +78,46 @@ export interface PlayerKit {
  *     再存一份就是**同一件事的第二份表达**（会漂）
  */
 
-/**
- * 一局里"已经生效"的炁机（定义 + 层数）。
+/* ------------------------------------------------------------------ *
+ * ⚠️ 曾经的 `ActiveQiji`（定义 + 层数）：已删（2026-10-13）
+ * ------------------------------------------------------------------ *
  *
- * ⚠️ **`stacks` 不来自 `RunState.chosen`**：`chosen` 的元素只有一个
- * `qijiId`（2026-10-13 起 —— 肉鸽"一局只能选一次、不叠加"，
- * 层数字段整条删除，见 `RunChoice` 的说明）。
+ * 原文（**保留，用来记住当时为什么那么想**）：
  *
- * 保留这个字段是因为**它是本函数的入参形状**，而两个模式的填充方式不同：
+ *   「一局里"已经生效"的炁机（定义 + 层数）。
  *
- *   - **肉鸽**：每条恒 `1`（一局只能选一次）
- *   - **自由模式**：也恒 `1`（那张卡是开关，见 `ui/freeQiji.ts`）
+ *    ⚠️ **`stacks` 不来自 `RunState.chosen`**：`chosen` 的元素只有一个
+ *    `qijiId`（2026-10-13 起 —— 肉鸽"一局只能选一次、不叠加"）。
  *
- * 所以今天的调用方**全都传 1**。它是"效果只生效一次"的那条保证的落点：
- * 谁敢按"既然没层就随便给个 3"来改，一条炁机的效果会**静默翻倍**
- * （`freeQiji.ts` 里记着同一个坑）。
+ *    保留这个字段是因为**它是本函数的入参形状**，而两个模式的填充方式不同：
+ *      - **肉鸽**：每条恒 `1`（一局只能选一次）
+ *      - **自由模式**：也恒 `1`（那张卡是开关，见 `ui/freeQiji.ts`）」
+ *
+ * **当时为什么那么想**：层数是"一条炁机生效几次"的载体。肉鸽那一版**真的
+ * 叠过层**（`RunState.chosen` 存 `{ qijiId, stacks }`、内容表有 `maxStacks`），
+ * 所以入参里留一个数是有内容的。
+ *
+ * **实测为什么不再成立**：用户把两边都定死成"没有层"—— 肉鸽"一局只能选一次
+ * （不叠加）"（`RunChoice` 的层数字段随之整条删除），自由模式的卡是**开 / 关**。
+ * 于是两个模式**恒传 1**，那个数成了 AGENTS.md §2 意义上的**死值**：它读不出
+ * 任何信息，却看起来像"可以给 3"。
+ *
+ * **现在的规则**：入参就是 `QijiEntity`（定义）本身 —— "一条炁机生效一次"由
+ * `chosen` / 激活集合的**条数**表达，不需要第二个数来说同一件事。谁想要
+ * "叠 N 次"，是往集合里放 N 条定义（`kit.test.ts` 里那条"同一份定义传两次"
+ * 的测试钉着它的行为）。
  */
-export interface ActiveQiji {
-  readonly def: QijiEntity;
-  readonly stacks: number;
-}
 
 /**
  * **把选中的炁机接成战斗输入**。纯函数，可在 node 里单测。
  *
  * @param playerId 角色 id（`data/roster.ts` 的 `PLAYER_ROSTER`）
- * @param chosen 已经生效的炁机（**顺序无关**：所有 op 都是交换的，
+ * @param chosen 已经生效的炁机**定义**（**顺序无关**：所有 op 都是交换的，
  *   §5.3 明令禁止 `setOverride` —— 那一条由内容测试钉住）
  */
 export function buildPlayerKit(
   playerId: string,
-  chosen: readonly ActiveQiji[] = [],
+  chosen: readonly QijiEntity[] = [],
 ): PlayerKit {
   const baseCaps = playerCapsFor(playerId);
 
@@ -118,16 +127,10 @@ export function buildPlayerKit(
   /** `maxHp` 的累加值 —— 最后加进 `caps.hp`（见文件头第 2 条）。 */
   let bonusHp = 0;
 
-  for (const { def, stacks } of chosen) {
-    /**
-     * ⚠️ 层数按**逐份复制**展开，而不是把 value 乘起来：
-     * 修正条目本身带 `sourceKey`（溯源面板用它），而"3 层"在溯源里就是
-     * 三条同源条目 —— 折成一条会让面板显示不出"叠了几层"。
-     * （交换律保证结果与"乘以层数"相同，见 §5.3。）
-     */
+  for (const def of chosen) {
     for (const ability of def.abilities) {
       if (ability.kind !== 'modifier') continue;
-      for (let i = 0; i < stacks; i += 1) modifiers.push(ability.modifier);
+      modifiers.push(ability.modifier);
       /**
        * `maxHp` 额外累加进 caps（W6 的过渡）。取值只在**纯数字**时有效：
        * 表达式型的 `maxHp` 今天表达不了（`caps` 是编译期常量），
@@ -136,7 +139,7 @@ export function buildPlayerKit(
        */
       if (ability.modifier.stat !== 'maxHp') continue;
       const value = typeof ability.modifier.value === 'number' ? ability.modifier.value : 0;
-      if (ability.modifier.op === 'add') bonusHp += value * stacks;
+      if (ability.modifier.op === 'add') bonusHp += value;
     }
 
     const window = def.comboWindow;
@@ -149,9 +152,8 @@ export function buildPlayerKit(
     }
 
     /**
-     * ⚠️ **层数不参与**：`skillTweak` 说的都是**绝对值**（代价 −20、
-     * 增伤变成 100%），叠第二层没有任何语义 —— 所以这里每条只收一份，
-     * 哪怕调用方传了 `stacks > 1`（今天的调用方全都传 1，见 `ActiveQiji`）。
+     * ⚠️ **每条只收一份**：`skillTweak` 说的都是**绝对值**（代价 −20、
+     * 增伤变成 100%），给第二条同名关系没有任何语义。
      */
     if (def.skillTweak !== undefined) skillTweaks.push(def.skillTweak);
   }

@@ -105,6 +105,7 @@ export interface PrepareFooterOptions {
  * | `方向键`（← → ↑ ↓） | 块**内**走光标（`prepare.cycle` / `prepare.stepVertical`） |
  * | `Enter` | 确定 / 切换炁机层数 / 开战（`prepare.confirm`） |
  * | `Tab` | **跨块**（`prepare.moveFocus`，Shift+Tab 反向） |
+ * | `Shift+↑↓` | **滚详情区正文**（`prepare.scrollDetail`；不切焦点、不动光标） |
  *
  * ⚠️ 它们写成渲染层的常量（而不是 i18n 里的字面量）：改快捷键**不该**
  * 改语言包 —— 那正是 §3b 记着的那条（"改快捷键害得改 i18n 吗？"）。
@@ -112,6 +113,11 @@ export interface PrepareFooterOptions {
 const PREPARE_KEY_NAMES = {
   confirm: 'Enter',
   tab: 'Tab',
+  /**
+   * ⚠️ 它**不是**"Shift + 方向键"的另一种写法，而就是键位本身：详情区
+   * 只能靠 `Shift+↑↓` 滚（裸 ↑↓ 是块内走光标，见 `loopWiring` 的键位表）。
+   */
+  detailScroll: 'Shift+↑↓',
 } as const;
 
 /**
@@ -129,7 +135,7 @@ const PREPARE_KEY_NAMES = {
  *
  * ```
  *   开发中的单位 → 换「开发中」（反馈优先于操作说明，见文件头）
- *   键盘         → `hintCursor` + 渲染层拼的键名（Enter / Tab）
+ *   键盘         → `hintCursor` + 渲染层拼的键名（Enter / Tab / Shift+↑↓）
  *   触屏         → `hintTouch`（**不拼键名**）
  * ```
  *
@@ -246,7 +252,7 @@ export class PrepareFooter {
      * ⚠️ **两种模式两句话**（用户："触屏底部的提示 显示触屏的版本"）：
      *
      * ```
-     *   键盘 → `roster.ui.hintCursor` + 渲染层拼上的键名（Enter / Tab）
+     *   键盘 → `roster.ui.hintCursor` + 渲染层拼上的键名（Enter / Tab / Shift+↑↓）
      *   触屏 → `roster.ui.hintTouch`（**不拼键名** —— 触屏没有这些键）
      * ```
      *

@@ -284,6 +284,11 @@ export class PrepareScreen {
     this.apply(this.followCursor(stepCursor(this.selection, this.players, this.bosses, dir, this.qiji)));
   }
 
+  /** **Shift + ↑ ↓**：滚详情区正文（不切焦点、不动光标 —— 见 `prepareDetailController.scrollStep`）。 */
+  scrollDetail(dir: 'up' | 'down'): void {
+    this.detailPanel.scrollStep(dir);
+  }
+
   /**
    * **Tab / Shift+Tab**：块与块之间换焦点（人物 ↔ 炁机 ↔ 对手 ↔ 开始）。
    *
