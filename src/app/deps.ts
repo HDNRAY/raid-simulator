@@ -20,6 +20,9 @@ import {
   skillsForPlayer,
 } from '../data/content';
 import { DEFAULT_PLAYER_ID, resolvePlayerId } from '../data/roster';
+import { ALL_QIJI, qijiById } from '../data/qiji';
+import { loadFreeQiji, saveFreeQiji } from './freeQijiStore';
+import { stackCapOf, type FreeQiji } from '../ui/prepareLogic';
 import { flattenCatalog } from '../i18n/translator';
 import { zhCN } from '../i18n/locales/zh-CN';
 import { resolveOperationMode } from '../render/platform';
@@ -83,6 +86,35 @@ export interface GameDeps {
    * 以及老存档迁移的目标，都读它，不再各自 `resolvePlayerId` 一遍）。
    */
   readonly playerId: string;
+  /**
+   * **自由模式的炁机激活**（2026-10-13）。
+   *
+   * ⚠️ 它是**活的持有者**（`get` 取当前值、`set` 写入），而不是一张快照：
+   * 备战屏会改它，而 `phaseFlow` 每开一局都要读**当前**值。
+   * 合成一个可变 holder 而不是"两处各留一份" —— 那正是漂移的来源。
+   *
+   * ⚠️ 它**不是** `SettingsStore` 的字段：那份存档管的是**输入配置**
+   * （键位 / 触屏槽位 / 操作方式 / 缩放），而"这一局带哪些强化"是另一
+   * 件事（见 `app/freeQijiStore.ts` 的文件头）。
+   */
+  readonly freeQiji: FreeQijiHolder;
+}
+
+/** 自由模式炁机层数表的**活持有者**（唯一真相）。 */
+export interface FreeQijiHolder {
+  get(): FreeQiji;
+  set(next: FreeQiji): void;
+}
+
+/**
+ * 一条炁机的层数上限（`maxStacks`，缺省 1）。
+ *
+ * ⚠️ 走 `ui/prepareLogic.stackCapOf`（**同一个函数**，有单测）：存档校验
+ * 与界面上的"再点归零"必须认同一个上限，各写一遍就会出现"存档说 3 层、
+ * 界面只让你点到 1 层"这种自相矛盾。
+ */
+function qijiCapOf(id: string): number {
+  return stackCapOf(qijiById(id)?.maxStacks);
 }
 
 /**
@@ -221,6 +253,32 @@ export function createGameDeps(): GameDeps {
    * ⚠️ 存储可用而 `setItem` 失败（配额满）无所谓：这次会话里按钮仍然对，
    * 只是下次加载会再迁移一次 —— 迁移是**幂等**的（同样的输入给同样的结果）。
    */
+  /**
+   * ================================================================
+   * 自由模式的炁机激活（2026-10-13）：读一次存档，之后由界面持有
+   * ================================================================
+   *
+   * ⚠️ **读回时要过一遍当前池子**（`loadFreeQiji`）：存档里的 id 可能来自
+   * 旧版本（这一周池子就从 5 条变 8 条、有两条改了 id）。不校验会让"一条
+   * 不存在的炁机"一路静默到 `buildPlayerKit`（那里找不到就丢掉 ——
+   * 表现为玩家的某一条**静默失效**）。
+   *
+   * ⚠️ 上限也一起校验（`maxStacks` 夹一下）：内容把上限从 3 改成 1 之后，
+   * 老存档不该带着 3 层进战斗。
+   */
+  let freeQiji: FreeQiji = loadFreeQiji(
+    storage,
+    ALL_QIJI.map((q) => q.id),
+    (id) => qijiCapOf(id),
+  );
+  const freeQijiHolder: FreeQijiHolder = {
+    get: () => freeQiji,
+    set: (next) => {
+      freeQiji = next;
+      saveFreeQiji(storage, next);
+    },
+  };
+
   const touchPool = bindableSkillIdsOf(registry);
   const touchLoad = loadTouchButtons(
     settingsStore.touchButtonsRaw,
@@ -242,5 +300,6 @@ export function createGameDeps(): GameDeps {
     touchButtons: touchLoad.skillIds,
     inputMode,
     playerId,
+    freeQiji: freeQijiHolder,
   };
 }

@@ -62,6 +62,8 @@ import { translator } from '../i18n/translator';
 import { observeStage } from '../render/sizes';
 import { UI_SCALE_MAX, UI_SCALE_MIN, type ScalingMode } from '../render/scaling';
 import { parseUiScale } from './settingsStore';
+import { ALL_QIJI } from '../data/qiji';
+import { prepareDetailContext } from './prepareDetailContext';
 import { createStartBattle } from './battleSetup';
 import { createPhaseFlow } from './phaseFlow';
 import { createGameState } from './flow';
@@ -297,6 +299,8 @@ export function createGame(o: CreateGameDeps): GameHandle {
     selection,
     scene,
     startBattle,
+    /** ⚠️ **取值函数**：每开一局都要读当前值（备战屏可以随时改）。 */
+    freeQiji: () => d.freeQiji.get(),
     /**
      * ⚠️ **`?runlen=N` 的接线点**（P2 的调试入口）：这一局打几场。
      * 不传（`null`）时 `runSession` 用 Boss 池的长度 —— 不是 7（见
@@ -347,6 +351,18 @@ export function createGame(o: CreateGameDeps): GameHandle {
     runSummary,
     continueRun,
     initial: { playerId: selection.playerId, bossId: selection.bossId },
+    /**
+     * **自由模式的炁机**（2026-10-13）：池子从内容表读，激活状态由
+     * `d.freeQiji`（启动时读存档的那个活持有者）持有。
+     */
+    qijiOptions: ALL_QIJI.map((q) => ({
+      id: q.id,
+      nameKey: q.nameKey,
+      ...(q.maxStacks === undefined ? {} : { maxStacks: q.maxStacks }),
+    })),
+    prepareDetailContext: (free) => prepareDetailContext(free),
+    freeQiji: d.freeQiji.get(),
+    rememberFreeQiji: (free) => d.freeQiji.set(free),
   });
   state.home = screens.home;
   state.select = screens.select;

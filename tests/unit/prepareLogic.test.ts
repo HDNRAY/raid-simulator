@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  PREPARE_LAYOUT,
   canStartBattle,
   confirmCursor,
   cursorFromSelection,
@@ -12,6 +11,7 @@ import {
   type PrepareOption,
   type PrepareSelection,
 } from '../../src/ui/prepareLogic';
+import { PREPARE_LAYOUT } from '../../src/ui/prepareLayout';
 import {
   BOSS_ROSTER,
   DEFAULT_BOSS_ID,
@@ -46,7 +46,7 @@ const sel = (over: Partial<PrepareSelection> = {}): PrepareSelection => {
     playerId: 'player',
     bossId: 'meiichiro',
     focus: 'player',
-    cursor: { playerId: 'player', bossId: 'meiichiro' },
+    cursor: { playerId: 'player', bossId: 'meiichiro', qijiId: '' },
     ...over,
   };
   return over.cursor === undefined ? { ...base, cursor: cursorFromSelection(base) } : base;
@@ -62,7 +62,11 @@ describe('命中区域：渲染与点击共用同一份几何', () => {
   it('【关键】只有一个选项时卡片**居中**（不贴左）', () => {
     const [card] = prepareHitAreas(players, bosses);
     const centerX = (card?.x ?? 0) + (card?.w ?? 0) / 2;
-    expect(centerX).toBeCloseTo(PREPARE_LAYOUT.width / 2, 0);
+    /**
+     * ⚠️ 判据从"画布中心"改成"**卡片列**中心"：右边切走了详情区，
+     * 按整张画布居中会让卡片在左列里看起来偏右。
+     */
+    expect(centerX).toBeCloseTo(PREPARE_LAYOUT.pad + PREPARE_LAYOUT.playerColW / 2, 0);
   });
 
   it('选项变多时等分且不重叠', () => {
@@ -112,7 +116,7 @@ describe('键盘：同槽位里移动光标（⚠️ 不改选择）', () => {
   });
 
   it('当前光标 id 不在列表里时从第 0 个重新算（不产生 NaN）', () => {
-    const s = sel({ playerId: 'ghost', cursor: { playerId: 'ghost', bossId: 'meiichiro' } });
+    const s = sel({ playerId: 'ghost', cursor: { playerId: 'ghost', bossId: 'meiichiro', qijiId: '' } });
     expect(cycleCursor(s, multiPlayers, bosses, 1).cursor.playerId).toBe('b');
   });
 
@@ -141,7 +145,7 @@ describe('键盘：同槽位里移动光标（⚠️ 不改选择）', () => {
      * 旧实现从"已选中的 id"算下标，于是"光标在 b、选择是 a、再按一下"
      * 会回到 b（看起来像没反应）。这里要求它走到 c。
      */
-    const s = sel({ playerId: 'a', cursor: { playerId: 'b', bossId: 'meiichiro' } });
+    const s = sel({ playerId: 'a', cursor: { playerId: 'b', bossId: 'meiichiro', qijiId: '' } });
     expect(cycleCursor(s, multiPlayers, bosses, 1).cursor.playerId).toBe('c');
     expect(cycleCursor(s, multiPlayers, bosses, -1).cursor.playerId).toBe('a');
   });
@@ -180,7 +184,7 @@ describe('Enter：确定光标处的那一项', () => {
   });
 
   it('列表里没有光标那个 id 时回落到第 0 项（不写进不存在的 id）', () => {
-    const s = sel({ playerId: 'a', cursor: { playerId: 'ghost', bossId: 'meiichiro' } });
+    const s = sel({ playerId: 'a', cursor: { playerId: 'ghost', bossId: 'meiichiro', qijiId: '' } });
     const confirmed = confirmCursor(s, multiPlayers, bosses);
     expect(confirmed.playerId).toBe('a');
   });
@@ -212,7 +216,7 @@ describe('键盘：上下换槽位', () => {
   });
 
   it('【关键】换槽位**不改选择、也不丢光标**（回来时还在原来那一格）', () => {
-    const s = sel({ playerId: 'a', cursor: { playerId: 'b', bossId: 'meiichiro' } });
+    const s = sel({ playerId: 'a', cursor: { playerId: 'b', bossId: 'meiichiro', qijiId: '' } });
     const down = moveFocus(s, 1, { players: multiPlayers, bosses });
     expect(down.focus).toBe('boss');
     expect(down.playerId).toBe('a');
@@ -279,7 +283,7 @@ describe('点击 = 移光标 + 确定（一步到位）', () => {
   });
 
   it('点同一张卡但**光标不在那儿**（理论到不了）→ 也要把光标带过来', () => {
-    const s = sel({ playerId: 'a', cursor: { playerId: 'c', bossId: 'meiichiro' } });
+    const s = sel({ playerId: 'a', cursor: { playerId: 'c', bossId: 'meiichiro', qijiId: '' } });
     const next = pickOption(s, multiPlayers, bosses, 'player', 'a');
     expect(next.cursor.playerId).toBe('a');
   });
@@ -287,7 +291,7 @@ describe('点击 = 移光标 + 确定（一步到位）', () => {
 
 describe('光标位置查询（渲染层用它决定给哪张卡画光标）', () => {
   it('返回槽位 + id', () => {
-    const s = sel({ playerId: 'a', cursor: { playerId: 'b', bossId: 'meiichiro' } });
+    const s = sel({ playerId: 'a', cursor: { playerId: 'b', bossId: 'meiichiro', qijiId: '' } });
     expect(cursorTarget(s, multiPlayers, bosses)).toEqual({ kind: 'player', id: 'b' });
   });
 
@@ -382,7 +386,7 @@ describe('能不能开战：开发中的单位灰掉且**不能开战**', () => 
      * 判定必须只看已确定的选择。旧版两者合一，光标一挪就变成"不能开战"，
      * 而玩家根本没打算选它。
      */
-    const s = sel({ playerId: 'player', cursor: { playerId: 'kaili', bossId: 'meiichiro' } });
+    const s = sel({ playerId: 'player', cursor: { playerId: 'kaili', bossId: 'meiichiro', qijiId: '' } });
     expect(canStartBattle(s, developing)).toBe(true);
   });
 

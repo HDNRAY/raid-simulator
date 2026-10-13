@@ -156,16 +156,6 @@ describe('I18N-T5：数字格式化', () => {
     expect(t.percent(-0.1, { signed: true })).toBe('-10.0%');
     expect(t.percent(0, { signed: true })).toBe('0.0%');
   });
-
-  it('duration 保留一位小数直到 1 分钟，之后用 m/s', () => {
-    expect(t.duration(300)).toBe('0.3s');
-    expect(t.duration(12500)).toBe('12.5s');
-    expect(t.duration(45000)).toBe('45.0s');
-    expect(t.duration(59900)).toBe('59.9s');
-    expect(t.duration(60000)).toBe('1m00s');
-    expect(t.duration(125000)).toBe('2m05s');
-    expect(t.duration(600000)).toBe('10m00s');
-  });
 });
 
 describe('复数形式', () => {

@@ -3,11 +3,9 @@ import { translator } from '../../src/i18n/translator';
 import { ALL_SKILLS, PLAYER_SKILL_IDS } from '../../src/data/content';
 import { FONT, LAYOUT } from '../../src/ui/layout';
 import {
-  formatClock,
   formatCountdown,
   isTightWindow,
   ratioOf,
-  telegraphHint,
   type BuffView,
 } from '../../src/render/viewModel';
 
@@ -63,25 +61,6 @@ describe('ratioOf', () => {
   });
 });
 
-describe('formatClock', () => {
-  it('M:SS 格式', () => {
-    expect(formatClock(0)).toBe('0:00');
-    expect(formatClock(1000)).toBe('0:01');
-    expect(formatClock(65_000)).toBe('1:05');
-    expect(formatClock(180_000)).toBe('3:00');
-  });
-
-  it('向上取整（剩 0.1 秒也显示 1 秒，不会提前显示 0）', () => {
-    expect(formatClock(100)).toBe('0:01');
-    expect(formatClock(1801_000)).toBe('30:01');
-  });
-
-  it('负数与 Infinity 安全', () => {
-    expect(formatClock(-500)).toBe('0:00');
-    expect(formatClock(Number.POSITIVE_INFINITY)).toBe('--:--');
-  });
-});
-
 describe('formatCountdown —— 倒计时的显示规则（一处）', () => {
   /**
    * 用户报的 bug（原话）："闪 和 避 的buff，现在显示的1s？"
@@ -132,8 +111,20 @@ describe('formatCountdown —— 倒计时的显示规则（一处）', () => {
   it('向上取整：窗口还活着就**不显示 0**（`0.2` 秒的最后一刻仍是 `0.1`）', () => {
     expect(formatCountdown(100)).toBe('0.1');
     expect(formatCountdown(1)).toBe('0.1');
-    /** 与 `formatClock` 同一个口径：剩 0.1 秒也显示 1 秒，不提前显示 0。 */
+    /** 与 `hudUtils.formatClockSafe` 同一个口径：剩 0.1 秒也显示 1 秒，不提前显示 0。 */
     expect(formatCountdown(0)).toBe('0');
+  });
+
+  /**
+   * ⚠️ 需求（原话的由来）：预警条右边**只显示剩余秒数**，不要"闪避或卸力"
+   * 那种文案 —— 那条文案是纯噪声，而且渲染层不许持有可显示文字（i18n I1）。
+   *
+   * 这条断言原先挂在 `viewModel.telegraphHint`（一个只包了本函数的壳，生产里
+   * 没人调用，2026-10-13 随死代码删掉）。需求是活的，所以留在实现这里。
+   */
+  it('输出只有数字，没有任何可显示文案（i18n 规范 I1）', () => {
+    expect(formatCountdown(1500)).toMatch(/^[\d.]+$/);
+    expect(formatCountdown(1500)).not.toMatch(/[\u4e00-\u9fff]/);
   });
 
   it('尾零不显示（与 `displaySeconds` 同一条口径）', () => {
@@ -160,43 +151,6 @@ describe('formatCountdown —— 倒计时的显示规则（一处）', () => {
       expect(formatCountdown(ms).length, `${ms}`).toBeLessThanOrEqual(3);
       expect(formatCountdown(ms), `${ms}`).not.toMatch(/0{4,}|9{4,}/);
     }
-  });
-});
-
-describe('telegraphHint —— 预警必须告诉玩家该做什么', () => {
-  /**
-   * 预警条右侧的提示**只剩剩余秒数**。
-   *
-   * 需求：不要"闪避或卸力"字样。这两种应对永远适用，写出来是噪声；
-   * 玩家真正要读的是"还有多久命中"。所以这里不再断言任何文案 key。
-   */
-  it('给出剩余秒数（保留 1 位）', () => {
-    const hint = telegraphHint({
-      skillId: 'corruption',
-      nameKey: 'boss.cleave.name',
-      progress: 0.5,
-      interruptible: true,
-      remainingMs: 1500,
-    });
-    expect(hint?.seconds).toBe('1.5');
-    expect(Object.keys(hint ?? {})).toEqual(['seconds']);
-  });
-
-  it('没有读条时返回 undefined', () => {
-    expect(telegraphHint(undefined)).toBeUndefined();
-  });
-
-  it('【关键】只有数字，没有任何可显示文案 —— 渲染层不持有文字（i18n 规范 I1）', () => {
-    const hint = telegraphHint({
-      skillId: 'x',
-      nameKey: 'boss.x.name',
-      progress: 0,
-      interruptible: true,
-      remainingMs: 1000,
-    });
-    // 去掉"闪避或卸力"之后，提示里只剩一个数字串
-    expect(hint?.seconds).toMatch(/^[\d.]+$/);
-    expect(JSON.stringify(hint)).not.toMatch(/[\u4e00-\u9fff]/);
   });
 });
 

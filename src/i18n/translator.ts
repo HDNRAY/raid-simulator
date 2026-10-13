@@ -122,8 +122,6 @@ export interface Translator {
   number(value: number): string;
   /** `0.204` → `20.4%`；`signed` 为真时带正负号 */
   percent(value: number, options?: { digits?: number; signed?: boolean }): string;
-  /** `12500` → `12.5s` */
-  duration(ms: number): string;
   /** 按语言规则选择单复数形式 */
   plural(forms: { one: MessageKey; other: MessageKey }, count: number): string;
   /** 该语言有多少条 key（测试与调试用） */
@@ -211,16 +209,6 @@ export function createTranslator(
       const { digits = 1, signed = false } = options;
       const formatted = percentFormatter(digits).format(value);
       return signed && value > 0 ? `+${formatted}` : formatted;
-    },
-
-    duration(ms: number): string {
-      // 规则：保留一位小数直到 60 秒（玩家关心"还剩 12.5 秒"），
-      // 超过 1 分钟改用 m/s，且秒数补零对齐。
-      const seconds = ms / 1000;
-      if (seconds < 60) return `${seconds.toFixed(1)}s`;
-      const minutes = Math.floor(seconds / 60);
-      const rest = Math.floor(seconds % 60);
-      return `${minutes}m${rest.toString().padStart(2, '0')}s`;
     },
 
     plural(forms, count): string {

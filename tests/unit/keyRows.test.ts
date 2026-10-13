@@ -250,6 +250,30 @@ describe('行的内容：没有战斗快照时也要有结构化信息', () => {
     expect(row?.cdText).not.toBe('冷却 1 秒');
   });
 
+  /**
+   * ⚠️ 2026-10-13：「凝」重标定（增伤 20%→60% / 30 秒→10 秒 / 50→40 缠）
+   * 之后，**设置页那一行必须自动跟着变**（用户验收项 4）。
+   *
+   * 这一条走的就是 `SkillDetail` 实际读的两个来源：
+   *   - 代价 → `keyRows` 从 `FOCUS.cost[0].value` 推 → `costText`
+   *   - 说明 → `descKey` + `descParams`（`{percent}` / `{seconds}` 由
+   *     `app/descParams.ts` 从 `FOCUS_BUFF` 推）
+   *
+   * 所以它证明的是"改内容定义一处、界面那一行自己变" —— 而不是
+   * "有人把 60 / 10 / 40 又抄了一遍"。
+   */
+  it('⚠️ 「凝」那一行：60% / 10 秒 / 40 缠（全部从内容定义推）', () => {
+    const row = rowsWithoutSnapshot().find((r) => r.skillId === 'focus');
+    expect(row, '设置页要有「凝」这一行').toBeDefined();
+    expect(row?.costText, '代价从 `FOCUS.cost` 推').toBe('40 缠');
+    expect(row?.descParams?.percent, '增伤% 从 `FOCUS_BUFF.modifiers` 推').toBe(60);
+    expect(row?.descParams?.seconds, '秒数从 `FOCUS_BUFF.duration` 推').toBe(10);
+    /** 渲染出来就是用户看到的那句（`{...}` 都替换掉了）。 */
+    expect(translator.t(row?.descKey as never, row?.descParams as never)).toBe(
+      '自身增伤 60%，持续 10 秒。',
+    );
+  });
+
   it('⚠️ 文案里的占位符必须被插值，不能把 `{seconds}` 原样显示出来', () => {
     const rows = rowsWithoutSnapshot();
     for (const r of rows) {

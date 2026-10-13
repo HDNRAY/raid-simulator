@@ -36,7 +36,7 @@
  */
 
 import { PLAYER_BASE, playerCapsFor } from './units';
-import type { QijiEntity } from '../core/types/qiji';
+import type { QijiEntity, QijiSkillTweak } from '../core/types/qiji';
 import type { StatKey, StatModifier } from '../core/types';
 import type { ComboWindowSpec } from '../core/combat/comboWindow';
 
@@ -64,6 +64,19 @@ export interface PlayerKit {
   readonly modifiers: readonly StatModifier[];
   /** 派生窗口产出者（`CreateBattleOptions.comboWindows`）。 */
   readonly comboWindows: readonly ComboWindowSpec[];
+  /**
+   * **对某些技能定义的改动**（用户的「避回缠 / 凝减耗 / 凝增伤」三条）。
+   *
+   * ⚠️ 它是**纯数据里的纯数据**：`buildPlayerKit` 只负责"把内容层的
+   * `QijiSkillTweak` 收集、按顺序排好"，**不解析**它。
+   * 真正的解释在 `data/skillTweak.ts` 的 `applySkillTweaks`
+   * （那里才知道 `SkillDef` / `BuffDef` 的形状），由
+   * `app/battleSetup.ts` 在建战斗时应用到技能表上。
+   *
+   * 这样切是为了守住"默认没有炁机 → 逐字等于今天"：空数组时
+   * 装配那边一个分支都不进，单场 / 自由模式 / 黄金重放完全不变。
+   */
+  readonly skillTweaks: readonly QijiSkillTweak[];
 }
 
 /*
@@ -100,6 +113,7 @@ export function buildPlayerKit(
 
   const modifiers: StatModifier[] = [];
   const comboWindows: ComboWindowSpec[] = [];
+  const skillTweaks: QijiSkillTweak[] = [];
   /** `maxHp` 的累加值 —— 最后加进 `caps.hp`（见文件头第 2 条）。 */
   let bonusHp = 0;
 
@@ -132,6 +146,13 @@ export function buildPlayerKit(
         ...(window.viaBuffId === undefined ? {} : { viaBuffId: window.viaBuffId }),
       });
     }
+
+    /**
+     * ⚠️ **层数不参与**：`skillTweak` 说的都是**绝对值**（代价 −20、
+     * 增伤变成 100%），叠第二层没有任何语义。所以这里每条只收一份，
+     * 哪怕 `stacks > 1`（这类炁机不写 `maxStacks`，默认 1 层）。
+     */
+    if (def.skillTweak !== undefined) skillTweaks.push(def.skillTweak);
   }
 
   return {
@@ -139,5 +160,6 @@ export function buildPlayerKit(
     caps: { ...baseCaps, hp: baseCaps.hp + bonusHp },
     modifiers,
     comboWindows,
+    skillTweaks,
   };
 }

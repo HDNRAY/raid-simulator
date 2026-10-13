@@ -308,15 +308,6 @@ export function ratioOf(resource: ResourceView): number {
   return Number.isFinite(r) ? Math.min(1, Math.max(0, r)) : 0;
 }
 
-/** 剩余时间显示：`M:SS`。 */
-export function formatClock(ms: number): string {
-  if (!Number.isFinite(ms)) return '--:--';
-  const total = Math.max(0, Math.ceil(ms / 1000));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
 /**
  * 倒计时"细档"的上界：**10 秒**（`0.1` 秒刻度上的 `100`）。
  *
@@ -343,8 +334,8 @@ const COUNTDOWN_FINE_TENTHS = 100;
  *      两者都是 `1` —— 一个完全不含信息的数。
  *   2. **窗口在缩短必须看得出来**（`0.5 → 0.4 → 0.3 …`）。只给整秒
  *      的话，0.5 秒的窗口整个生命周期都显示 `1`，玩家学不到"还剩多少"。
- *   3. **长倒计时不能变成噪音。**「凝」是 30 秒 —— 若一律给一位小数，
- *      它会从 `30.0` 一路 `29.9 → 29.8 → …` 每 0.1 秒跳一次数字。
+ *   3. **长倒计时不能变成噪音。** 举例：一个 30 秒的 buff —— 若一律给一位
+ *      小数，它会从 `30.0` 一路 `29.9 → 29.8 → …` 每 0.1 秒跳一次数字。
  *      那不是精度，是抖动。
  *
  * ⚠️ **为什么这条线画在 10 秒**：本作需要 0.1 秒分辨力的量都在 10 秒
@@ -400,35 +391,6 @@ export function formatCountdown(ms: number): string {
    * 而 `20 / 10 → "2"` 自然把尾零省掉。
    */
   return String(tenths / 10);
-}
-
-/**
- * 预警提示：告诉玩家**该做什么**，而不只是"Boss 在读条"。
- *
- * 这是从截图里总结出来的：预警条右边直接写"闪避或卸力"，
- * 比只画一根进度条有用得多。
- *
- * 返回的是**本地化 key + 参数**，不是拼好的文案 ——
- * 渲染层不持有任何可显示文字（i18n 规范 I1）。
- */
-export interface TelegraphHint {
-  /**
-   * 剩余的读条时间，秒 —— 走 `formatCountdown` 的口径
-   * （10 秒以下一位小数、以上整秒，且不显示尾零）。
-   */
-  readonly seconds: string;
-}
-
-/**
- * 预警条右侧只显示**剩余秒数**。
- *
- * 需求：不要"闪避或卸力"字样。这两种应对永远都适用，写出来是
- * 纯噪声；玩家真正需要读的是"还有多久命中"。
- * 霸体状态改由**秒数颜色**表达（青绿 = 可打断 / 青蓝 = 霸体）。
- */
-export function telegraphHint(cast: CombatantView['cast']): TelegraphHint | undefined {
-  if (!cast) return undefined;
-  return { seconds: formatCountdown(cast.remainingMs) };
 }
 
 /** 判定窗口的剩余时间是否短到需要高亮（< 0.2s 时闪红）。 */

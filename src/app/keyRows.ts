@@ -67,6 +67,20 @@ import { zhCN } from '../i18n/locales/zh-CN';
 const TEMPLATES = flattenCatalog(zhCN);
 
 /**
+ * 一个 i18n key 的**模板原文**（基准语言）。
+ *
+ * ⚠️ 导出它而不是让调用方自己 `flattenCatalog(zhCN)`：**同一份扁平表
+ * 就是同一处真相**。备战屏的详情区（`app/prepareDetailContext.ts`）要
+ * 按模板里的占位符推导 Boss 招式的 `{cast}` / `{damage}` —— 它若自己
+ * 再扁平化一次，就会出现"两处都叫模板表"的局面。
+ *
+ * @returns 没有这个 key 时 `undefined`（调用方据此退化成不带参数）。
+ */
+export function descTemplateOf(key: string): string | undefined {
+  return TEMPLATES.get(key);
+}
+
+/**
  * 模板里含某个占位符的全部 i18n key。
  *
  * ⚠️ **导出是为了能对它写测试**：下面那条"说明里的秒数必须来自数据"

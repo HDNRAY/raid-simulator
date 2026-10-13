@@ -39,19 +39,51 @@ function toPlainText(metrics: readonly PanelTextMetric[]): PanelTextMetric[] {
   return metrics.map((t) => ({ ...t }));
 }
 
-/** 备战界面暴露给调试的最小面（`PrepareScreen` 满足它）。 */
+/**
+ * 备战界面暴露给调试的最小面（`PrepareScreen` 满足它）。
+ *
+ * ⚠️ 2026-10-13（自由模式改造）加了四样，**都是为了"截图能当证据"**：
+ *
+ *   - `current.cursor.qijiId`：光标现在停在哪条炁机上
+ *   - `freeQiji`：当前开着哪些炁机、各几层（**效果叠加**的验收要读它）
+ *   - `hover(x, y)`：鼠标悬停（详情区的鼠标那条路）
+ *   - `detail()`：详情区**此刻显示的是哪一项** —— 截图能看出"面板上有字"，
+ *     但"是**谁的**字"只有这个读数能钉死
+ *
+ * ⚠️ 全部是**只读 + 转调**（同本文件的纪律）：探针不解释规则，
+ * 只是把界面已有的状态读出来。
+ */
 export interface PrepareDebugTarget {
   current: {
     readonly playerId: string;
     readonly bossId: string;
-    readonly focus: 'player' | 'boss' | 'start';
-    readonly cursor: { readonly playerId: string; readonly bossId: string };
+    readonly focus: 'player' | 'qiji' | 'boss' | 'start';
+    readonly cursor: { readonly playerId: string; readonly bossId: string; readonly qijiId: string };
   };
+  /** 当前开着的炁机（id → 层数；没开的不出现）。 */
+  readonly freeQiji: Readonly<Record<string, number>>;
   cycle(delta: number): void;
   moveFocus(delta: number, wrap?: boolean): void;
-  confirm(): void;
+  confirm(back?: boolean): void;
   pick(kind: 'player' | 'boss', id: string): void;
-  focusSlot(slot: 'player' | 'boss' | 'start'): void;
+  focusSlot(slot: 'player' | 'qiji' | 'boss' | 'start'): void;
+  /** 鼠标悬停到逻辑坐标（返回有没有命中）。 */
+  hover(px: number, py: number): boolean;
+  /** 详情区此刻显示的是哪一项（`undefined` = 没聚焦任何卡片）。 */
+  detail(): { readonly kind: 'player' | 'qiji' | 'boss'; readonly id: string } | undefined;
+  /** 详情区**此刻拿到的画面模型**（只读；`undefined` = 没聚焦任何卡片）。 */
+  detailModel(): unknown;
+  /** 清空炁机激活（让截图 / 探针可复现）。 */
+  resetQiji(): void;
+  /** 当前布局的可点区域（**只读**；截图脚本按它换算真实坐标）。 */
+  hitAreas(): readonly {
+    readonly kind: string;
+    readonly id: string;
+    readonly x: number;
+    readonly y: number;
+    readonly w: number;
+    readonly h: number;
+  }[];
 }
 
 /**
@@ -68,11 +100,17 @@ export interface PrepareDebugTarget {
 export function prepareDebugApi(prepare: PrepareDebugTarget): {
   readonly prepare: {
     state(): PrepareDebugTarget['current'];
+    freeQiji(): Readonly<Record<string, number>>;
+    detail(): ReturnType<PrepareDebugTarget['detail']>;
     cycle(delta: number): void;
     moveFocus(delta: number, wrap?: boolean): void;
-    confirm(): void;
+    confirm(back?: boolean): void;
     pick(kind: 'player' | 'boss', id: string): void;
-    focusSlot(slot: 'player' | 'boss' | 'start'): void;
+    focusSlot(slot: 'player' | 'qiji' | 'boss' | 'start'): void;
+    hover(px: number, py: number): boolean;
+    hitAreas(): ReturnType<PrepareDebugTarget['hitAreas']>;
+    detailModel(): unknown;
+    resetQiji(): void;
   };
 } {
   const copy = (): PrepareDebugTarget['current'] => ({
@@ -89,8 +127,15 @@ export function prepareDebugApi(prepare: PrepareDebugTarget): {
       cycle: (delta) => prepare.cycle(delta),
       /** 同 ↑ ↓（`wrap` = Tab / Shift+Tab：可见地环绕）。 */
       moveFocus: (delta, wrap = false) => prepare.moveFocus(delta, wrap),
-      /** 同 Enter：确定光标处那一项（光标在「开始战斗」上则开战）。 */
-      confirm: () => prepare.confirm(),
+      /** 当前开着的炁机（效果叠加的验收读它）。 */
+      freeQiji: () => ({ ...prepare.freeQiji }),
+      /** 详情区此刻显示的是哪一项（"是**谁的**字"只有这个读数能钉死）。 */
+      detail: () => prepare.detail(),
+      /**
+       * 同 Enter：确定光标处那一项；光标在炁机上则**叠一层**
+       * （`back` = Shift+Enter：退一层）。
+       */
+      confirm: (back = false) => prepare.confirm(back),
       /** 同点击卡片：移光标 + 确定（一步到位）。 */
       pick: (kind, id) => prepare.pick(kind, id),
       /**
@@ -100,6 +145,18 @@ export function prepareDebugApi(prepare: PrepareDebugTarget): {
        * "按几次方向键"这种一改布局就失效的脆弱脚本。
        */
       focusSlot: (slot) => prepare.focusSlot(slot),
+      /** 同鼠标划过：只影响详情区（不动光标）。 */
+      hover: (px, py) => prepare.hover(px, py),
+      /**
+       * 当前**可点区域**（只读）。
+       *
+       * ⚠️ 它是"截图脚本不许复制一份几何"的落点（与 `touchButtonCenter`
+       * 同一条纪律）：布局一调，脚本不该跟着改；脚本问页面要坐标，
+       * 点在真实命中区上，"点空了"与"功能坏了"才不会混成一个样子。
+       */
+      hitAreas: () => prepare.hitAreas().map((a) => ({ ...a })),
+      detailModel: () => prepare.detailModel(),
+      resetQiji: () => prepare.resetQiji(),
     },
   };
 }
@@ -142,7 +199,21 @@ export function homeDebugApi(home: HomeDebugTarget): {
 }
 
 /** 选角色屏暴露给调试的最小面（`CharacterSelectScreen` 满足它）。 */
+/**
+ * 选角色屏暴露给调试的最小面。
+ *
+ * ⚠️ `current` 与备战界面**同一个形状**（`PrepareDebugTarget['current']`）：
+ * 两个界面共用一套光标模型，调试脚本可以复用同一段读状态的代码。
+ * 选角色屏的 `bossId` 恒为空串、`cursor.qijiId` 恒为空串、`focus` 恒为
+ * `'player'`（它没有对手槽位、没有炁机行、没有开始键）。
+ */
 export interface CharacterSelectDebugTarget {
+  /**
+   * ⚠️ 形状与备战界面**同一个**（`PrepareDebugTarget['current']`），所以
+   * `focus` 的类型里带着 `'qiji'` —— 而这一屏今天**到不了**那个值
+   * （没有炁机行）。保留同一个类型是**有意**的：调试脚本读状态的代码
+   * 要能两屏复用，而"这一屏不会产生它"是运行期事实、不是类型要管的。
+   */
   readonly current: PrepareDebugTarget['current'];
   cycle(delta: number): void;
   confirm(): void;

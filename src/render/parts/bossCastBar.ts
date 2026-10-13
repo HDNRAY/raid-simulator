@@ -35,6 +35,17 @@ export class BossCastBarPart implements FramePart {
      * 英文路径本身**（实测截图抓到过，见 `app/skillHints.ts`）。
      */
     const tagLabel = (cast.hintTags ?? []).map((key) => translate(key)).join(' · ');
+    /**
+     * 右侧只写**剩余秒数**。
+     *
+     * 需求：不要"闪避或卸力"字样 —— 这两种应对永远适用，写出来是纯噪声；
+     * 玩家真正需要读的是"还有多久命中"。霸体状态改由**秒数颜色**表达
+     * （见下面的 `setNameColor`：青绿 = 可打断 / 青蓝 = 霸体）。
+     *
+     * ⚠️ 这条规则原先住在 `viewModel.ts` 的 `telegraphHint`（一个只包了
+     * `formatCountdown` 的壳，生产里没人调用，2026-10-13 随死代码删掉）——
+     * 需求本身是活的，所以搬到这里：它就是这一行。
+     */
     this.castBar.setContent(
       translate(cast.nameKey),
       `${formatCountdown(cast.remainingMs)}s`,

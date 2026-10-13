@@ -21,6 +21,11 @@
  *    ⚠️ 用户特别叮嘱："**这个整体是一个炁机，不是 击 是炁机**" ——
  *    所以下面三条的 `comboWindow` 才是它们的本体：**关系**（源 → 击）
  *    是炁机，`击` 只是那条关系的出口。
+ * 5. ⚠️ **三条改"某个技能本身"的炁机**（2026-10-13 新增）：
+ *    「避」3 次 → 避用出后回 20 缠；「凝」3 次 → **两条一起**解锁
+ *    （凝减耗 −20 / 凝增伤变成 100%）。它们的落点是 `skillTweak`
+ *    （见 `core/types/qiji.ts` 的 `QijiSkillTweak`），
+ *    **不是**继承来的 `abilities` —— 那个只能改玩家属性。
  *
  * ==================================================================
  * ⚠️ 名字：文案进 i18n，这里的 `nameKey` 只是键
@@ -35,17 +40,21 @@
  * ==================================================================
  *
  * 我们**没有**把它们注册进内容注册表（那是 W8 的另一半，P6）：注册表是
- * "引擎按 id 解析**战斗内**定义"的地方，而炁机的效果走两条**明路**：
+ * "引擎按 id 解析**战斗内**定义"的地方，而炁机的效果走三条**明路**：
  *
  *   `abilities[].modifier` → `app/kit.ts` 的 `buildPlayerKit` → `passiveModifiers`
  *   `comboWindow`          → `app/kit.ts` 的 `buildPlayerKit` → `comboWindows`
+ *   `skillTweak`           → `app/kit.ts` 的 `applySkillTweaks` → 覆盖技能表
  *
  * 所以今天"一个炁机引用了不存在的 buff / 技能"没有校验器会拦 —— 记在
  * `docs/specs/2026-10-12-roguelike.md` 的 P6 里，**不要**以为它是安全的。
+ * ⚠️ 但 `skillTweak` 那一半**自己会抛错**（`applySkillTweaks`：技能 /
+ * 代价项 / buff 修正找不到就崩），见那里的说明。
  */
 
 import type { QijiEntity } from '../core/types/qiji';
 import { COMBO_WINDOW, comboWindowFor } from './kits/combo';
+import { FOCUS_BUFF } from './kits/shared';
 
 /* ================================================================== *
  * 1. 三条「派生 击」：炁机 = **关系**（源技能 → 击）
@@ -154,7 +163,115 @@ export const QIJI_FLASH_STRIKE: QijiEntity = {
 };
 
 /* ================================================================== *
- * 2. 两个兜底：开局就解锁（§5.4 的"通用炁机"）
+ * 2. 三条**改某个技能本身**的炁机（2026-10-13 加）
+ * ================================================================== */
+
+/**
+ * 「避」用出后**回复 20 缠**（用户原话："3 次避之后解锁，避回 20 缠"）。
+ *
+ * ==================================================================
+ * ⚠️ "避回 20 缠" 的读法 —— 为什么是"回复"而不是"消耗减少"
+ * ==================================================================
+ *
+ * 「避」（`data/kits/linwanfeng.ts` 的 `DODGE`）的代价是 **15 炁**
+ * （`cost: [{ resource: 'energy', value: S(15) }]`），**一点缠都不花**。
+ * 所以"避的缠消耗 −20"这条读法在本作里**没有意义**（它压根不消耗缠），
+ * 只可能是"**用出避之后回 20 缠**"。
+ *
+ * 这是**实测查清的**，不是猜的 —— 依据就是那个 `cost` 字段（见
+ * `tests/unit/qijiWiring.test.ts` 里对「避」代价的断言）。
+ *
+ * 「回」= 回复 / 得到：`onUse` 一次性加 20 缠（形状复用引擎已有的
+ * `ResourceAbility`，与"基础技产生 18 点炁"是同一条路）。
+ */
+export const QIJI_DODGE_DOUQI: QijiEntity = {
+  id: 'biShiJiXu',
+  kind: 'qiji',
+  nameKey: 'qiji.biShiJiXu.name',
+  descKey: 'qiji.biShiJiXu.desc',
+  icon: 'char_dodge',
+  category: 'utility',
+  rarity: 'uncommon',
+  unlock: {
+    kind: 'statAtLeast',
+    stat: { s: 'skillUses', skillId: 'dodge', scope: 'run' },
+    value: 3,
+  },
+  abilities: [],
+  skillTweak: {
+    skillId: 'dodge',
+    onUse: { kind: 'resource', target: { mode: 'self' }, resource: 'douqi', delta: 20 },
+  },
+};
+
+/**
+ * 「凝」的缠消耗 **−20**（50 → 40 → **20**；40 是 2026-10-13 的重标定）。
+ *
+ * ⚠️ 与下一条**同一个解锁条件**，两条会**一起**出现在候选里
+ * （用户："3 次凝解锁 2 个契机"）—— 所以 `unlock` 逐字相同是**有意的**，
+ * 不是抄漏了一处。
+ */
+export const QIJI_FOCUS_COST: QijiEntity = {
+  id: 'ningShenJuQi',
+  kind: 'qiji',
+  nameKey: 'qiji.ningShenJuQi.name',
+  descKey: 'qiji.ningShenJuQi.desc',
+  icon: 'char_focus',
+  category: 'tempo',
+  rarity: 'uncommon',
+  unlock: {
+    kind: 'statAtLeast',
+    stat: { s: 'skillUses', skillId: 'focus', scope: 'run' },
+    value: 3,
+  },
+  abilities: [],
+  skillTweak: {
+    skillId: 'focus',
+    costDeltas: [{ resource: 'douqi', delta: -20 }],
+  },
+};
+
+/**
+ * 「凝」的增伤**变成 100%**（⚠️ **覆盖**，不是 +100%）。
+ *
+ * ==================================================================
+ * 用户原话是"变成 100%"，所以是 `setOverride` 的语义 —— 但**没违反**
+ * §5.3 的"禁止 setOverride"
+ * ==================================================================
+ *
+ * §5.3 禁的是**属性修正**里的 `op: 'setOverride'`（那会让叠加顺序有影响）。
+ * 这里改的是**一条 buff 定义里的那个数**：目标值是**绝对**的 100，
+ * 与"先加后加"无关，所以交换律照旧成立（两条炁机的效果互不冲突：
+ * 一条改代价、一条改增伤值）。
+ *
+ * ⚠️ **与其它来源仍然相加**：这里改的是「凝」这条 buff 贡献的百分比；
+ * 若别处还有 `addPercent`（装备 / 别的 buff），玩家最终是 `100 + 那些`。
+ * 这与 `core/stats/aggregate.ts` 的"增伤百分比层相加"是同一条规则。
+ */
+export const QIJI_FOCUS_BOOST: QijiEntity = {
+  id: 'ningShenRuDao',
+  kind: 'qiji',
+  nameKey: 'qiji.ningShenRuDao.name',
+  descKey: 'qiji.ningShenRuDao.desc',
+  icon: 'char_focus',
+  category: 'offense',
+  rarity: 'uncommon',
+  unlock: {
+    kind: 'statAtLeast',
+    stat: { s: 'skillUses', skillId: 'focus', scope: 'run' },
+    value: 3,
+  },
+  abilities: [],
+  skillTweak: {
+    skillId: 'focus',
+    buffOverrides: [
+      { buffId: FOCUS_BUFF.id, modifiers: [{ stat: 'damageBoost', value: 100 }] },
+    ],
+  },
+};
+
+/* ================================================================== *
+ * 3. 两个兜底：开局就解锁（§5.4 的"通用炁机"）
  * ================================================================== */
 
 /**
@@ -221,7 +338,7 @@ export const QIJI_BREATH: QijiEntity = {
 };
 
 /* ================================================================== *
- * 3. 池子
+ * 4. 池子
  * ================================================================== */
 
 /**
@@ -240,6 +357,9 @@ export const ALL_QIJI: readonly QijiEntity[] = [
   QIJI_JIE_STRIKE,
   QIJI_GUARD_STRIKE,
   QIJI_FLASH_STRIKE,
+  QIJI_DODGE_DOUQI,
+  QIJI_FOCUS_COST,
+  QIJI_FOCUS_BOOST,
 ];
 
 /** 按 id 取一个炁机（`chosen` 里存的是 id，记录 / UI 要还原定义）。 */

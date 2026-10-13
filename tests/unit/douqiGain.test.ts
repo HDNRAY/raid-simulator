@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BattleEngine } from '../../src/core/combat/battleState';
 import { douqiFromDamage } from '../../src/core/combat/holds';
 import { DOUQI_PER_DAMAGE, DOUQI_PER_INTERNAL_DAMAGE } from '../../src/data/balance';
+import { ALL_SKILLS } from '../../src/data/content';
 import { makeGoldenEngineOptions } from '../golden/fixtures';
 
 /**
@@ -134,7 +135,17 @@ describe('伤害 → 缠：系数与取整', () => {
 });
 
 describe('规则 (C)：用缠的技能不给**施放者**回缠', () => {
-  it('「劈」「轰」「凝」不回缠（代价含 50 缠）', () => {
+  /** 那个技能付的缠（从内容定义推 —— 「凝」2026-10-13 从 50 改成 40）。 */
+  function douqiCostOf(skillId: string): number {
+    const skill = ALL_SKILLS.find((s) => s.id === skillId);
+    const cost = skill?.cost.find((c) => c.resource === 'douqi');
+    if (cost === undefined || typeof cost.value !== 'number') {
+      throw new Error(`${skillId} 没有数字型缠代价`);
+    }
+    return cost.value;
+  }
+
+  it('「劈」「轰」「凝」不回缠（各自扣满自己的缠代价）', () => {
     const cases = [
       { skillId: 'pi', label: '劈', damage: 45 },
       { skillId: 'blast', label: '轰', damage: 30 },
@@ -145,10 +156,14 @@ describe('规则 (C)：用缠的技能不给**施放者**回缠', () => {
       const r = castByPlayer(c.skillId, 100);
       expect(r.damageToBoss, `「${c.label}」打出的伤害`).toBe(c.damage);
       /**
-       * 只扣了代价 50，**一点都没退回**。
+       * 扣了**这个技能自己的缠代价**，一点都没退回。
        * 改这条规则之前，「劈」是 `-50 + 22 = -28`（退回 44% 的代价）。
+       *
+       * ⚠️ 期望值从 `SkillDef.cost` 推，不在测试里抄一个数：
+       * 「凝」的代价 2026-10-13 从 50 → 40，抄死的话改一处会漏另一处。
        */
-      expect(r.douqiDelta, `「${c.label}」不该给施放者回缠`).toBe(-50);
+      const cost = douqiCostOf(c.skillId);
+      expect(r.douqiDelta, `「${c.label}」不该给施放者回缠`).toBe(-cost);
     }
   });
 

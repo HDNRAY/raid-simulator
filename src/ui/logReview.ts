@@ -35,7 +35,7 @@ import { PALETTE } from '../render/theme';
  * ⚠️ 这里没有 import `core/loopConstants` 的 `TICKS_PER_SECOND`：渲染层
  * **不许** import core 内部模块（架构规范 C3，`raid/render/no-core-internals`
  * 会当场报错）。所以这个 60 是"渲染层对引擎刻度的一次显式声明"，
- * 与 `render/viewModel.ts` 的 `formatClock`（那里也是直接写 60）同一个约定。
+ * 与 `render/hudUtils.ts` 的 `formatClockSafe`（那里也是直接写 60）同一个约定。
  */
 export const TICKS_PER_SECOND = 60;
 

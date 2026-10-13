@@ -8,6 +8,7 @@ import {
 } from './fixtures';
 import { roughlyUsable } from '../../src/core/run';
 import { registry } from './fixtures';
+import { FOCUS_BUFF } from '../../src/data/kits/shared';
 
 /**
  * 真实内容的集成测试。
@@ -341,7 +342,16 @@ describe('真实内容：玩家招式都接线了', () => {
     expect(engine.drainEvents().some((e) => e.kind === 'buffApplied' && e.buffId === 'focus')).toBe(
       true,
     );
-    expect(engine.statsOf('player').damageBoost).toBeCloseTo(20, 5);
+    /**
+     * ⚠️ **期望值从 `FOCUS_BUFF` 推**（不写死 20 / 60）：2026-10-13 的
+     * 重标定（20% → 60%）只改内容一处。本断言要钉的是"「凝」真的把那条
+     * buff 挂上、属性管线真的读到了它"，与那个数是多少无关。
+     */
+    const boost = (FOCUS_BUFF.modifiers ?? []).find((m) => m.stat === 'damageBoost');
+    if (boost === undefined || typeof boost.value !== 'number') {
+      throw new Error('FOCUS_BUFF 没有数字型 damageBoost 修正');
+    }
+    expect(engine.statsOf('player').damageBoost).toBeCloseTo(boost.value, 5);
   });
 
   it('破：打断 Boss 的任何读条（不看可打断性）', () => {

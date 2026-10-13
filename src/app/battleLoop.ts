@@ -297,8 +297,44 @@ export class BattleLoop {
     }
   }
 
-  /** 推进一个逻辑 tick。 */
-  private step(): void {
+  /**
+   * **外部注入一批动作并立刻推进一 tick**（调试入口 `__raidBattle.act` 用）。
+   *
+   * ==================================================================
+   * 为什么必须从这里进，而不是调用方自己去戳 `engineState.tick`
+   * ==================================================================
+   *
+   * `step()` 是**唯一**的事件消费点：引擎 `drainEvents()` 出来的事件在
+   * 这里被分发给三个消费者（视图适配器 / 日志 / 肉鸽事件流）。绕开它
+   * 直接 `engineState.tick(...)` 会**把这一 tick 的事件排空后丢掉** ——
+   * 引擎状态确实变了（冷却跳了、读条挂上了），但日志、飘字、肉鸽统计
+   * 一个字都看不到。这正是"**静默无效**"：不报错、结果不对，而任何靠
+   * `act()` 驱动状态的验证脚本都会读到与渲染层对不上的读数。
+   *
+   * ⚠️ **不做成"让调用方再 tick 一次"的旁路**：注入的动作与玩家按键走
+   * **同一条** `Action[] → engine.tick → 事件三消费者`；它只是把"下一帧
+   * 才轮到的那一 tick"**现在就推**（headless 下 rAF 会被降频，脚本需要
+   * "推到某个状态再拍"）。所以它仍然是一条**合法的 `Action[]` 注入**，
+   * 不改变确定性：同一串注入动作 + 同一串输入 → 同一个结果。
+   */
+  injectActions(actions: readonly Action[], actorId?: string): void {
+    if (actions.length === 0) return;
+    this.step(actions, actorId);
+    /**
+     * ⚠️ 丢掉缓存的渲染快照：下一次读 `snapshot`（探针 / 渲染）会按
+     * **刚推进过的引擎**重建 —— 否则探针会读到注入前的旧视图
+     * （"引擎与读数不一致"正是这次要修的读数之一）。
+     */
+    this.view = undefined;
+  }
+
+  /**
+   * 推进一个逻辑 tick。
+   *
+   * @param extra 本 tick 额外注入的动作（`injectActions` 用；与真实输入同路）
+   * @param extraActorId 注入动作的执行者。不给则与真实输入一样按阵营推断
+   */
+  private step(extra: readonly Action[] = [], extraActorId?: string): void {
     const state = this.engine.snapshot;
     if (this.options.stopOnEnd !== false && state.status !== 'running') {
       // 战斗已结束：仍消费输入（让重开生效），但不推进引擎
@@ -315,10 +351,16 @@ export class BattleLoop {
      *   - 触屏：`touch:attack` 这类**合成 key**（见 `touchInput.ts`）
      *
      * 两边的 key 空间不重叠，所以合并很安全。
+     *
+     * ⚠️ **注入的动作合进同一个数组**（`injectActions` 的 `extra`）：
+     * 玩家那条路的执行者由引擎按阵营推断，注入的也一样。显式指定了
+     * `extraActorId`（例如给 Boss 发招）时**不并入** —— 那种动作由下面
+     * 的 `applyActions` 按指定执行者应用。
      */
     const fromInput = [
       ...(this.input?.drain() ?? []),
       ...(this.touchInput?.drain() ?? []),
+      ...(extraActorId === undefined ? extra : []),
     ];
     /**
      * ⚠️ **这一 tick 刚被请求过的技能**，不让连发逻辑再补一发。
@@ -367,6 +409,18 @@ export class BattleLoop {
           )
         : []),
     ];
+
+    /**
+     * ⚠️ **显式指定执行者的注入**（`injectActions(actions, actorId)`）：
+     * 引擎的 `tick()` 只接受**一个**执行者给整批动作，所以这类注入先用
+     * `applyActions(actions, actorId)` 应用到工作副本 —— 它开/提交自己的一份
+     * 副本，随后 `tick()` 再开一份读提交后的状态，两边看到的 tick 号相同。
+     * 事件留在引擎里，由下面**同一个** `drainEvents()` 分发给三个消费者
+     * （这正是"不丢事件"的关键）。
+     */
+    if (extraActorId !== undefined && extra.length > 0) {
+      this.engine.applyActions(extra, extraActorId);
+    }
 
     const actions: Action[] = [...fromInput, ...held];
     this.engine.tick(actions);

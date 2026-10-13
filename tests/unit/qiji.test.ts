@@ -3,6 +3,7 @@ import { ALL_QIJI, QIJI_BREATH, QIJI_JIE_STRIKE, QIJI_VITALITY, qijiById } from 
 import { flattenCatalog } from '../../src/i18n/translator';
 import { zhCN } from '../../src/i18n/locales/zh-CN';
 import { COMBO_WINDOW } from '../../src/data/kits/combo';
+import { FOCUS_BUFF } from '../../src/data/kits/shared';
 import type { QijiEntity } from '../../src/core/types/qiji';
 
 /**
@@ -34,10 +35,14 @@ const QIJI_KEYS = new Set(QIJI_CATALOG.keys());
 /** 三条"派生"的炁机（用户点名的那三条）。 */
 const DERIVED = ALL_QIJI.filter((q) => q.comboWindow !== undefined);
 
+/** 三条**改技能本身**的炁机（2026-10-13 新增：避回缠 / 凝减耗 / 凝增伤）。 */
+const TWEAKED = ALL_QIJI.filter((q) => q.skillTweak !== undefined);
+
 describe('炁机池：数量与形状', () => {
-  it('一共 5 条：2 条兜底 + 3 条派生', () => {
-    expect(ALL_QIJI).toHaveLength(5);
+  it('一共 8 条：2 条兜底 + 3 条派生 + 3 条改技能', () => {
+    expect(ALL_QIJI).toHaveLength(8);
     expect(DERIVED).toHaveLength(3);
+    expect(TWEAKED).toHaveLength(3);
     expect(ALL_QIJI.filter((q) => q.unlock.kind === 'always')).toHaveLength(2);
   });
 
@@ -100,13 +105,16 @@ describe('名字：一律四字（旧名 `截炁·生击` 那套已废）', () =
     }
   });
 
-  it('五条的名字就是定稿的那一套（防"顺手改回去"）', () => {
+  it('八条的名字就是定稿的那一套（防"顺手改回去"）', () => {
     const expected: Readonly<Record<string, string>> = {
       jieShengJi: '当机立断',
       xieShengJi: '以柔克刚',
       shanShengJi: '电光石火',
       vitality: '固本培元',
       breath: '周天运转',
+      biShiJiXu: '避实击虚',
+      ningShenJuQi: '聚气凝神',
+      ningShenRuDao: '凝神入道',
     };
     for (const qiji of ALL_QIJI) {
       expect(QIJI_CATALOG.get(qiji.nameKey), qiji.id).toBe(expected[qiji.id]);
@@ -307,5 +315,106 @@ describe('三条派生炁机共用一个窗口 buff id（窗口只有一份）',
       expect(buff?.stacking).toEqual(COMBO_WINDOW.stacking);
       expect(buff?.flags?.comboWindow).toEqual(COMBO_WINDOW.flags?.comboWindow);
     }
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * ③ 三条"改技能本身"的炁机（2026-10-13）
+ * ------------------------------------------------------------------ */
+
+describe('三条 `skillTweak`：解锁条件 + 效果形状', () => {
+  const dodge = qijiById('biShiJiXu') as QijiEntity;
+  const cost = qijiById('ningShenJuQi') as QijiEntity;
+  const boost = qijiById('ningShenRuDao') as QijiEntity;
+
+  it('恰好三条，且都**不带** `comboWindow`（两类炁机不混）', () => {
+    expect(TWEAKED.map((q) => q.id).sort()).toEqual(['biShiJiXu', 'ningShenJuQi', 'ningShenRuDao']);
+    for (const qiji of TWEAKED) expect(qiji.comboWindow).toBeUndefined();
+  });
+
+  it('解锁条件都是 `statAtLeast(skillUses, <源技能>, run) >= 3`（本局累计）', () => {
+    expect(dodge.unlock).toEqual({
+      kind: 'statAtLeast',
+      stat: { s: 'skillUses', skillId: 'dodge', scope: 'run' },
+      value: 3,
+    });
+    expect(cost.unlock).toEqual({
+      kind: 'statAtLeast',
+      stat: { s: 'skillUses', skillId: 'focus', scope: 'run' },
+      value: 3,
+    });
+  });
+
+  it('⚠️ 两条「凝」的解锁条件**逐字相同**（用户："3 次凝解锁 2 个契机"）', () => {
+    expect(cost.unlock).toEqual(boost.unlock);
+  });
+
+  it('「避实击虚」：用出避 → `resource` 一次性 +20 缠（自己）', () => {
+    expect(dodge.skillTweak?.skillId).toBe('dodge');
+    expect(dodge.skillTweak?.onUse).toEqual({
+      kind: 'resource',
+      target: { mode: 'self' },
+      resource: 'douqi',
+      delta: 20,
+    });
+    /** 它**不**改代价（「避」的代价是炁，见下面那条断言）。 */
+    expect(dodge.skillTweak?.costDeltas).toBeUndefined();
+  });
+
+  it('「聚气凝神」：`costDeltas` 只有一条 `douqi −20`', () => {
+    expect(cost.skillTweak?.skillId).toBe('focus');
+    expect(cost.skillTweak?.costDeltas).toEqual([{ resource: 'douqi', delta: -20 }]);
+    expect(cost.skillTweak?.buffOverrides).toBeUndefined();
+  });
+
+  it('「凝神入道」：把 `focus` buff 的 `damageBoost` **覆盖**成 100', () => {
+    expect(boost.skillTweak?.skillId).toBe('focus');
+    expect(boost.skillTweak?.costDeltas).toBeUndefined();
+    expect(boost.skillTweak?.buffOverrides).toEqual([
+      { buffId: FOCUS_BUFF.id, modifiers: [{ stat: 'damageBoost', value: 100 }] },
+    ]);
+  });
+
+  it('⚠️ 覆盖的**基准**是当前 `FOCUS_BUFF` 的值（60），所以 100 是"变成"不是"+100"', () => {
+    const base = (FOCUS_BUFF.modifiers ?? []).find((m) => m.stat === 'damageBoost');
+    expect(typeof base?.value).toBe('number');
+    expect(base?.value).toBe(60);
+    /** 若它写成"加 100"，应用后会是 160 —— 那条由 wiring 实测钉住。 */
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * 文案与数值的对账（说明里的数字必须等于内容里的数字）
+ * ------------------------------------------------------------------ */
+
+describe('三条新炁机的说明与内容**对得上**', () => {
+  it('说明里点名的源技能 = `skillTweak.skillId` 的显示名', () => {
+    for (const qiji of TWEAKED) {
+      const source = qiji.skillTweak?.skillId;
+      const sourceName = QIJI_CATALOG.get(`skill.${String(source)}.name`);
+      const desc = QIJI_CATALOG.get(qiji.descKey ?? '') ?? '';
+      expect(
+        desc.startsWith(`「${String(sourceName)}」`),
+        `${qiji.id} 的说明没有以源技能「${String(sourceName)}」开头：${desc}`,
+      ).toBe(true);
+    }
+  });
+
+  it('说明里的数字与内容一致（避 20 / 凝减耗 20 / 凝增伤 100%）', () => {
+    /**
+     * ⚠️ 与 `vitality` / `breath` 同一条口径：数字的家在 `data/qiji.ts`，
+     * 说明只是文案。两处不一致 = 玩家看到的和生效的不是一回事。
+     */
+    const dodgeDesc = QIJI_CATALOG.get('qiji.biShiJiXu.desc') ?? '';
+    const delta = qijiById('biShiJiXu')?.skillTweak?.onUse?.delta;
+    expect(dodgeDesc).toContain(`回复 ${String(delta)} 缠`);
+
+    const costDesc = QIJI_CATALOG.get('qiji.ningShenJuQi.desc') ?? '';
+    const reduction = qijiById('ningShenJuQi')?.skillTweak?.costDeltas?.[0]?.delta;
+    expect(costDesc).toContain(`减少 ${String(Math.abs(reduction ?? 0))}`);
+
+    const boostDesc = QIJI_CATALOG.get('qiji.ningShenRuDao.desc') ?? '';
+    const override = qijiById('ningShenRuDao')?.skillTweak?.buffOverrides?.[0]?.modifiers[0]?.value;
+    expect(boostDesc).toContain(`变为 ${String(override)}%`);
   });
 });

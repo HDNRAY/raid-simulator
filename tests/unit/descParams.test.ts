@@ -177,19 +177,42 @@ describe('伤害数字：从技能自己的命中推（「斩」10 / 「轰」30
 });
 
 /* ================================================================== *
- * ② 百分比：从自己身上 `addPercent` 修正推（「凝」20%）
+ * ② 百分比：从自己身上 `addPercent` 修正推（「凝」）
  * ================================================================== */
 
-describe('百分比：从 buff 的 `addPercent` 修正推（「凝」20%）', () => {
-  it('「凝」的 20% 与 30 秒分别来自修正值与 buff 时长', () => {
+/**
+ * 「凝」那句文案里的两个数，**从它自己授予的那个 buff 推**。
+ *
+ * ⚠️ 为什么不写死 `'自身增伤 60%，持续 10 秒。'`：本文件要证的是
+ * "文案里的百分号与秒数**来自内容定义**"。写死的话，2026-10-13 的重标定
+ * （20% → 60% / 30 秒 → 10 秒）会同时改内容与那个字面串 —— 断言绿了，
+ * 但"推导坏了"这件事**看不出来**。从 buff 反推则保证：内容改了、文案
+ * 必须跟着改；而"反推本身有没有坏"由下一条变异断言（77）钉住。
+ */
+function selfBuffNumbers(focus: SkillDef): { readonly percent: number; readonly seconds: number } {
+  const grant = focus.abilities.find((a) => a.kind === 'grant' && a.target.mode === 'self');
+  if (grant === undefined || grant.kind !== 'grant') throw new Error('focus 没有自我 grant');
+  const percent = (grant.buff.modifiers ?? []).find((m) => m.op === 'addPercent')?.value;
+  if (typeof percent !== 'number') throw new Error('focus 的增伤推不出来');
+  return { percent, seconds: displaySeconds(grant.buff.duration) };
+}
+
+describe('百分比：从 buff 的 `addPercent` 修正推（「凝」）', () => {
+  it('「凝」的增伤% 与持续秒数都来自内容定义', () => {
     const focus = skillOf('focus');
-    expect(render(focus)).toBe('自身增伤 20%，持续 30 秒。');
-    expect(paramsOf(focus)?.percent).toBe(20);
+    const { percent, seconds } = selfBuffNumbers(focus);
+    expect(render(focus)).toBe(`自身增伤 ${String(percent)}%，持续 ${String(seconds)} 秒。`);
+    /** 数值本身也钉一下（推导路径另有变异断言兜着）。 */
+    expect(percent).toBe(60);
+    expect(seconds).toBe(10);
+    expect(paramsOf(focus)?.percent).toBe(60);
   });
 
   it('⚠️ 变异：修正值改成 77 → 文案跟着变', () => {
-    expect(render(withSelfBuffModifierValue(skillOf('focus'), 77))).toBe(
-      '自身增伤 77%，持续 30 秒。',
+    const focus = skillOf('focus');
+    const { seconds } = selfBuffNumbers(focus);
+    expect(render(withSelfBuffModifierValue(focus, 77))).toBe(
+      `自身增伤 77%，持续 ${String(seconds)} 秒。`,
     );
   });
 });

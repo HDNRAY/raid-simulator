@@ -113,7 +113,6 @@ const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
    * 「狂暴开始」那一刻挂上的，显示名沿用同一个「狂暴」。
    */
   'boss-enrage-active': 'buffShort.enrage',
-  'boss-empowered': 'buffShort.empowered',
   'boss-telegraph': 'buffShort.telegraph',
   /**
    * ⚠️ 下面这几条是**补漏**：它们原本没登记，于是命中了下方的兜底 ——
@@ -125,7 +124,6 @@ const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
    * 中性的**（见 `shortLabelKeyOf`）。
    */
   'boss-armor': 'buffShort.bossArmor',
-  'boss-cleave-armor': 'buffShort.bossArmor',
   /**
    * ⚠️ 傲慢的「碾压」霸体（`BOSS_HEAVY_ARMOR`）。
    *

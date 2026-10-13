@@ -137,23 +137,63 @@ declare global {
        * 方法走的是界面自己的路径（同键盘 / 同点击），不是另写一套旁路。
        */
       prepare: {
-        /** 当前状态（选择 + 光标）。 */
+        /**
+         * 当前状态（选择 + 光标）。
+         *
+         * ⚠️ 2026-10-13（自由模式改造）`focus` 多了 `'qiji'`、`cursor` 多了
+         * `qijiId`（炁机行），并加了 `freeQiji()` / `detail()` / `hover()`
+         * 三个探针 —— 它们存在的理由都是"截图证明不了"：
+         *   - `freeQiji()`：**效果叠加**的验收要读"开了几条、各几层"
+         *   - `detail()`：截图能看出详情区有字，但"是**谁的**字"读不出来
+         *   - `hover()`：headless 下模拟真实指针划过不可靠
+         */
         state(): {
           readonly playerId: string;
           readonly bossId: string;
-          readonly focus: 'player' | 'boss' | 'start';
-          readonly cursor: { readonly playerId: string; readonly bossId: string };
+          readonly focus: 'player' | 'qiji' | 'boss' | 'start';
+          readonly cursor: {
+            readonly playerId: string;
+            readonly bossId: string;
+            readonly qijiId: string;
+          };
         };
+        /** 当前开着的炁机（id → 层数；没开的不出现）。 */
+        freeQiji(): Readonly<Record<string, number>>;
+        /** 详情区此刻显示的是哪一项（`undefined` = 没聚焦任何卡片）。 */
+        detail(): { readonly kind: 'player' | 'qiji' | 'boss'; readonly id: string } | undefined;
+        /**
+         * 当前布局的**可点区域**（只读；截图脚本按它换算真实坐标）。
+         *
+         * ⚠️ 有了它，脚本就不必"复制一份几何"—— 那正是布局一调就静默
+         * 失效的那类脆弱脚本（与 `touchButtonCenter` 同一个理由）。
+         */
+        hitAreas(): readonly {
+          readonly kind: string;
+          readonly id: string;
+          readonly x: number;
+          readonly y: number;
+          readonly w: number;
+          readonly h: number;
+        }[];
+        /** 详情区此刻拿到的**画面模型**（只读；`undefined` = 没聚焦卡片）。 */
+        detailModel(): unknown;
+        /** 清空炁机激活（让截图 / 探针可复现）。 */
+        resetQiji(): void;
         /** 同 ← →：**只移动光标**，不改选择。 */
         cycle(delta: number): void;
         /** 同 ↑ ↓ / Tab：换槽位（`wrap` 为真时环绕）。 */
         moveFocus(delta: number, wrap?: boolean): void;
-        /** 同 Enter：确定光标处那一项；光标在「开始战斗」上则开战。 */
-        confirm(): void;
+        /**
+         * 同 Enter：确定光标处那一项；光标在**炁机**上则叠一层
+         * （`back` = Shift+Enter：退一层）；光标在「开始战斗」上则开战。
+         */
+        confirm(back?: boolean): void;
         /** 同点击卡片：移光标 + 确定（一步到位）。 */
         pick(kind: 'player' | 'boss', id: string): void;
         /** 直接把焦点放到某个槽位（截图用，省掉"按几次方向键"）。 */
-        focusSlot(slot: 'player' | 'boss' | 'start'): void;
+        focusSlot(slot: 'player' | 'qiji' | 'boss' | 'start'): void;
+        /** 同鼠标划过某点：只影响详情区（不动光标）。 */
+        hover(px: number, py: number): boolean;
       };
       /**
        * **首页**（默认入口；调试用）。
@@ -176,11 +216,20 @@ declare global {
        * `bossId` 恒为空串 —— 这一屏没有对手槽位。
        */
       characterSelect: {
+        /**
+         * ⚠️ 形状与 `prepare` 相同（共用一套光标模型），所以这里也带着
+         * `'qiji'` / `qijiId` —— 而这一屏**到不了**那两个值（它没有炁机行）。
+         * 同一个类型是**有意**的：调试脚本读状态的代码要两屏复用。
+         */
         state(): {
           readonly playerId: string;
           readonly bossId: string;
-          readonly focus: 'player' | 'boss' | 'start';
-          readonly cursor: { readonly playerId: string; readonly bossId: string };
+          readonly focus: 'player' | 'qiji' | 'boss' | 'start';
+          readonly cursor: {
+            readonly playerId: string;
+            readonly bossId: string;
+            readonly qijiId: string;
+          };
         };
         /** 同 ← → / Tab：**只移动光标**，不改已确定的角色。 */
         cycle(delta: number): void;

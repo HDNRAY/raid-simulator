@@ -48,17 +48,20 @@
  */
 
 import {
-  PREPARE_LAYOUT,
   confirmCursor,
   cursorTarget,
   cycleCursor,
   pickOption,
-  prepareHitAreas,
-  type PrepareHitArea,
-  type PrepareLayout,
   type PrepareOption,
   type PrepareSelection,
 } from './prepareLogic';
+import {
+  PREPARE_LAYOUT,
+  cardGrid,
+  rowTopsOf,
+  type PrepareHitArea,
+  type PrepareLayout,
+} from './prepareLayout';
 
 /**
  * 选角色屏的布局。
@@ -72,10 +75,20 @@ import {
  */
 export const CHARACTER_SELECT_LAYOUT: PrepareLayout = {
   ...PREPARE_LAYOUT,
-  playerRowY: 190,
+  /**
+   * ⚠️ 这一屏**没有主标题下面那两行**（选角色屏的标题是它自己画的），
+   * 而卡片行的 y 现在由 `titleY` 推出来（见 `rowTopsOf`）—— 所以"把卡片
+   * 往下挪"这件事落在 `titleY` 上。
+   */
+  titleY: 140,
   cardH: 110,
   cardGap: 20,
-  cardMaxW: 320,
+  /**
+   * ⚠️ 挤在**左列**里（右列这一屏没有详情区，但列宽仍是共用的那一个）：
+   * 卡片满高 110，而"名字 + 头像"的排布由 `prepareCards` 按 `showPortrait`
+   * 决定，不需要这一屏另开一套尺寸。
+   */
+  playerColumns: 3,
 };
 
 /**
@@ -91,7 +104,17 @@ export function characterSelectHitAreas(
   players: readonly PrepareOption[],
   L: PrepareLayout = CHARACTER_SELECT_LAYOUT,
 ): readonly PrepareHitArea[] {
-  return prepareHitAreas(players, [], L).filter((area) => area.kind === 'player');
+  /**
+   * ⚠️ **直接算几何**（不再经过 `prepareHitAreas`，因为那一份还要开始键与
+   * 炁机行）：选角色屏只有人物卡一行，而"开始"是回车。
+   */
+  /** ⚠️ 行顶由 `rowTopsOf` 给（与备战屏**同一个**推导，见那边的说明）。 */
+  const top = rowTopsOf({ players: players.length, bosses: 0, qiji: 0 }, L).player;
+  return cardGrid(players.length, top, L, {
+    colW: L.playerColW,
+    columns: L.playerColumns,
+    h: L.cardH,
+  }).map((rect, i) => ({ kind: 'player' as const, id: players[i]!.id, ...rect }));
 }
 
 /**
@@ -107,7 +130,13 @@ export function characterSelection(playerId: string): PrepareSelection {
     playerId,
     bossId: '',
     focus: 'player',
-    cursor: { playerId, bossId: '' },
+    /**
+     * ⚠️ `qijiId` 是空串：这一屏没有炁机行，而 `PrepareCursor` 要求
+     * 每个槽位各记一格（见 `prepareLogic` 的 `cursorFromSelection`）。
+     * 空串在 `cursorTarget` 那里会落到"列表里找不到 → 用第 0 项"，
+     * 而这一屏的列表里根本没有 qiji 槽位 —— 走不到。
+     */
+    cursor: { playerId, bossId: '', qijiId: '' },
   };
 }
 

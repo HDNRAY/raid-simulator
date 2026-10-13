@@ -61,8 +61,18 @@ export interface CanvasInputTargets {
   readonly home: ScreenHitTarget;
   /** 选角色屏（肉鸽模式的第一屏；含它自己的齿轮与返回箭头）。 */
   readonly select: ScreenHitTarget;
-  /** 自由模式（原备战界面；含它自己的齿轮与返回箭头）。 */
-  readonly prepare: ScreenHitTarget;
+  /**
+   * 自由模式（原备战界面；含它自己的齿轮与返回箭头）。
+   *
+   * ⚠️ 它还带**详情区的滚动**（滚轮 / 拖拽）：触屏没有滚轮，而 Boss 的
+   * 四条招式说明装不下 —— 拖拽那条路是 §3b 的功能对等要求，不是补充。
+   */
+  readonly prepare: ScreenHitTarget & {
+    /** 这个点是不是落在详情区的可滚视口里（拖拽手势的入口判据）。 */
+    isOnDetail(px: number, py: number): boolean;
+    wheelDetail(px: number, py: number, deltaY: number): boolean;
+    dragDetail(px: number, py: number, deltaY: number): boolean;
+  };
   /** 选炁机屏（P3；含它自己的齿轮与返回箭头）。 */
   readonly qijiSelect: ScreenHitTarget;
   /** 一局结束屏（P3；含它自己的齿轮与返回箭头）。 */
@@ -152,6 +162,15 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
   let detailDragId: number | null = null;
 
   /**
+   * **备战屏详情区**拖拽占住的指针 id 与上一帧的 y。
+   *
+   * ⚠️ 与设置页那个 `detailDragId` 分开记账：两者**不在同一屏**，合成
+   * 一个就会出现"手指从设置拖到备战屏还在滚"的串台。
+   */
+  let prepareDetailDragId: number | null = null;
+  let prepareDetailLastY = 0;
+
+  /**
    * 复盘拖拽**占住了这次手势**的指针 id。
    *
    * ⚠️ 两个作用：move / up 只转发给"开始拖的那个指针"，以及
@@ -230,8 +249,19 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
        */
       if (t.phase() === 'home') t.home.hitTest(px, py);
       else if (t.phase() === 'characterSelect') t.select.hitTest(px, py);
-      else if (t.phase() === 'prepare') t.prepare.hitTest(px, py);
-      else if (t.phase() === 'qijiSelect') t.qijiSelect.hitTest(px, py);
+      else if (t.phase() === 'prepare') {
+        /**
+         * ⚠️ **详情区的拖拽要先占住这次手势**（触屏滚说明，§3b）：
+         * `hitTest` 只回答"点了哪张卡"，而"按住拖动"是一次手势 ——
+         * 与设置页详情区（`detailDragId`）同一条处理方式。
+         */
+        if (t.prepare.isOnDetail(px, py)) {
+          prepareDetailDragId = event.pointerId;
+          prepareDetailLastY = py;
+        } else {
+          t.prepare.hitTest(px, py);
+        }
+      } else if (t.phase() === 'qijiSelect') t.qijiSelect.hitTest(px, py);
       else t.runOver.hitTest(px, py);
       return;
     }
@@ -320,6 +350,16 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
       return;
     }
     /**
+     * 备战屏详情区的拖拽（触屏滚说明 —— 与设置页那条同源）。
+     * ⚠️ 用**上一帧的 y** 算位移：`scrollBy` 要的是增量，而指针事件给的
+     * 是绝对坐标。
+     */
+    if (prepareDetailDragId === event.pointerId) {
+      const dy = py - prepareDetailLastY;
+      prepareDetailLastY = py;
+      if (t.prepare.dragDetail(px, py, dy)) return;
+    }
+    /**
      * 鼠标悬停到技能格 = **选中它**（需求："方向键选中和鼠标选中，
      * 应该合并"）。与方向键走同一条路径，所以高亮与详情完全一致。
      */
@@ -345,6 +385,7 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
   };
 
   const onUp = (event: PointerEvent): void => {
+    if (prepareDetailDragId === event.pointerId) prepareDetailDragId = null;
     endReviewDrag(event);
     t.touch.onPointerUp(event.pointerId);
     endDrag(event);
@@ -355,6 +396,7 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
    * 不释放会让引擎一直按那个技能的代价扣资源。
    */
   const onCancel = (event: PointerEvent): void => {
+    if (prepareDetailDragId === event.pointerId) prepareDetailDragId = null;
     endReviewDrag(event);
     t.touch.onPointerCancel(event.pointerId);
     endDrag(event);
@@ -371,6 +413,17 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
    * 详情区滚得动时页面不该跟着滚。滚不动时**不拦**（那一下不属于面板）。
    */
   const onWheel = (event: WheelEvent): void => {
+    /**
+     * ⚠️ **备战屏的详情区先问一次**（它不在设置面板里）：Boss 的招式
+     * 说明装不下时，滚轮要能滚它。没消费才轮到设置面板 / 页面。
+     */
+    if (!t.settingsOpen() && t.phase() === 'prepare') {
+      const { px, py } = at(event);
+      if (t.prepare.wheelDetail(px, py, event.deltaY)) {
+        event.preventDefault();
+        return;
+      }
+    }
     if (!t.settingsOpen()) return;
     const { px, py } = at(event);
     /**

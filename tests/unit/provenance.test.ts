@@ -71,6 +71,23 @@ function clockModifiers(): StatModifier[] {
   return out;
 }
 
+/**
+ * 「凝」buff 贡献的增伤百分比（从内容定义推）。
+ *
+ * ⚠️ 不能在测试里写死 60：那样"把 20 改成 60"会**逼着**改两处，
+ * 而本仓库的纪律是内容那一个数才作数（AGENTS.md 的"两份真相"）。
+ * 这两个断言要测的是**溯源归属**与"buff 摘掉就归零"，与具体数值无关。
+ */
+function focusPercentOf(): number {
+  const modifier = (FOCUS_BUFF.modifiers ?? []).find(
+    (m) => m.stat === 'damageBoost' && m.op === 'addPercent',
+  );
+  if (modifier === undefined || typeof modifier.value !== 'number') {
+    throw new Error('FOCUS_BUFF 没有 damageBoost 的 addPercent 修正');
+  }
+  return modifier.value;
+}
+
 describe('属性溯源', () => {
   it('基础值单独列出（不是混进加法层）', () => {
     const engine = makeEngine();
@@ -124,8 +141,15 @@ describe('属性溯源', () => {
     engine.replaceCombatantForTest({ ...combatant, buffs: applied.buffs });
 
     const bd = engine.statsBreakdownOf('player')!;
-    // 「凝」用 addPercent 20 → 进 percentSum 层
-    expect(bd.damageBoost?.percentSum).toBeCloseTo(20, 5);
+    /**
+     * 「凝」用 `addPercent` → 进 percentSum 层。
+     *
+     * ⚠️ **期望值从 `FOCUS_BUFF` 推**（不在测试里再抄一个 60）：
+     * 2026-10-13 把增伤 20 → 60 时只改内容一处、这里跟着变。
+     * 本文件要钉的是**溯源归属**（namespace = 'focus'），不是那个数 ——
+     * "推导本身有没有坏"由 `descParams.test.ts` 的变异断言负责。
+     */
+    expect(bd.damageBoost?.percentSum).toBeCloseTo(focusPercentOf(), 5);
     expect(bd.damageBoost?.flat.some((f) => f.namespace === 'focus')).toBe(true);
   });
 
@@ -134,7 +158,7 @@ describe('属性溯源', () => {
     const combatant = engine.snapshot.combatants[0]!;
     const applied = applyBuff(combatant, FOCUS_BUFF, combatant.id, 0);
     engine.replaceCombatantForTest({ ...combatant, buffs: applied.buffs });
-    expect(engine.statsBreakdownOf('player')!.damageBoost?.percentSum).toBeCloseTo(20, 5);
+    expect(engine.statsBreakdownOf('player')!.damageBoost?.percentSum).toBeCloseTo(focusPercentOf(), 5);
 
     // 摘掉 buff（模拟过期）
     engine.replaceCombatantForTest({ ...combatant, buffs: [] });

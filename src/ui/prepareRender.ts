@@ -229,6 +229,100 @@ export function cardSkin(input: CardSkinInput): CardSkin {
 }
 
 /* ------------------------------------------------------------------ *
+ * 炁机卡皮肤
+ * ------------------------------------------------------------------ */
+
+export interface QijiSkin {
+  readonly fillColor: number;
+  readonly fillAlpha: number;
+  readonly strokeColor: number;
+  readonly strokeWidth: number;
+  readonly nameColor: number;
+  readonly ring: boolean;
+  readonly ringColor: number;
+  /**
+   * 是否画"已开几层"的角标。
+   *
+   * ⚠️ **只在 `stacks > 1` 时为真**：1 层是默认态，给它角标会让"开了一条"
+   * 与"开了三条"看起来差不多 —— 角标的意义就没了。
+   */
+  readonly badge: boolean;
+}
+
+/**
+ * 状态 → 炁机卡皮肤（`PrepareScreen` 不再自己写 if）。
+ *
+ * ==================================================================
+ * ⚠️ 为什么与人物卡分开（而不是给 `cardSkin` 多加一个字段）
+ * ==================================================================
+ *
+ * 人物 / Boss 卡是**二选一**（"我选它上场"）：金 = 已确定、冷白 = 光标。
+ * 炁机卡是**开关**（不叠层的选一个，叠层的选 0..N 层）：它没有"光标与
+ * 选择分离"这回事 —— 开着就是开着，与光标在不在它上面无关。
+ *
+ * 硬合进 `cardSkin` 会让那个函数同时服务两种语义，而它的**判据**
+ * （`selected` vs `stacks`）会变成一个"看 kind 决定读哪个"的分支。
+ *
+ * ⚠️ **"已开"用金色**（`selectionLine`）：与人物卡的"已确定"是同一个
+ * 语义 —— "这个东西**生效了**"。本作里"生效"只有一种颜色。
+ */
+export function qijiSkin(input: {
+  readonly developing: boolean;
+  readonly cursored: boolean;
+  /** 已叠层数（0 = 没开）。 */
+  readonly stacks: number;
+}): QijiSkin {
+  const on = input.stacks > 0;
+  if (input.developing) {
+    return {
+      fillColor: PREPARE_SKIN.idleFill,
+      fillAlpha: 0.02,
+      strokeColor: 0x2a2c38,
+      strokeWidth: 2,
+      nameColor: PALETTE.textDim,
+      ring: input.cursored,
+      ringColor: PREPARE_SKIN.cursorLineMuted,
+      badge: false,
+    };
+  }
+  if (on) {
+    return {
+      fillColor: PREPARE_SKIN.selectionFill,
+      fillAlpha: 0.3,
+      strokeColor: PREPARE_SKIN.selectionLine,
+      strokeWidth: 2,
+      nameColor: PREPARE_SKIN.selectionText,
+      /** ⚠️ 开着 + 光标在它上面 → 加外环（否则"光标在哪"看不出来）。 */
+      ring: input.cursored,
+      ringColor: PREPARE_SKIN.cursorLine,
+      badge: input.stacks > 1,
+    };
+  }
+  if (input.cursored) {
+    return {
+      fillColor: PREPARE_SKIN.cursorFill,
+      fillAlpha: 0.1,
+      strokeColor: PREPARE_SKIN.cursorLine,
+      strokeWidth: CARD_STROKE.cursor,
+      nameColor: PALETTE.text,
+      ring: false,
+      ringColor: PREPARE_SKIN.cursorLine,
+      badge: false,
+    };
+  }
+  return {
+    fillColor: PREPARE_SKIN.idleFill,
+    fillAlpha: 0.04,
+    strokeColor: PREPARE_SKIN.idleLine,
+    strokeWidth: CARD_STROKE.idle,
+    nameColor: PALETTE.text,
+    ring: false,
+    ringColor: PREPARE_SKIN.cursorLine,
+    badge: false,
+  };
+}
+
+/* ------------------------------------------------------------------ *
  * 开始键皮肤
  * ------------------------------------------------------------------ */
 

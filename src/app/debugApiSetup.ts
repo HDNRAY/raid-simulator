@@ -165,11 +165,25 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
     act: (skillId: string, actorId?: string) => {
       const l = battle();
       if (l === undefined) return;
-      l.engineState.tick(
+      /**
+       * ⚠️ **走 `BattleLoop.injectActions`，不许再直接戳 `engineState`。**
+       *
+       * 老写法是自己 `engineState.tick(...)` 之后再 `engineState.drainEvents()`
+       * —— 那一步 drain 把**本 tick 的全部事件排空后丢掉**（`skillUsed` /
+       * `castStarted` / 瞬发技的效果事件），于是日志、飘字、肉鸽统计看不到
+       * 这次注入，而验证脚本读到的引擎读数与渲染层对不上。这就是
+       * "静默无效"的形状（不报错、结果不对），见 `battleLoop.ts` 的
+       * `injectActions` 文件说明。
+       *
+       * ⚠️ 它仍是**一条合法的 `Action[]` 注入**：与玩家按键走同一条
+       * `Action[] → engine.tick → 事件三消费者`，不改变确定性。
+       * ⚠️ 也**不是**"先 act 再 sleep 等一下"那种掩盖 —— 根因（事件被
+       * 排空丢弃 + 旁路 `step()`）在这里被去掉，而不是靠时序绕过。
+       */
+      l.injectActions(
         [{ type: 'useSkill', skillId, atTick: l.engineState.snapshot.tick }],
         actorId,
       );
-      l.engineState.drainEvents();
     },
     /**
      * 当前键位表（顶层探针）。

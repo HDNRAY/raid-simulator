@@ -206,6 +206,20 @@ export interface LabelProps {
    * 见 `theme.ts` 里关于楷体的说明。
    */
   readonly kai?: boolean;
+  /**
+   * **自动换行**（中文必须同时开 `breakWords`，见下）。
+   *
+   * ⚠️ 加它是为了备战屏右侧那块**详情区**（`PrepareDetail`）：它要画
+   * 技能 / 炁机的说明，而那些说明是整句话（`descKey`），一行放不下。
+   *
+   * ⚠️ 这里**只加一个开关**，不引入第二处"多宽"的真相：宽度仍由调用方
+   * 按自己的矩形算好传进来。
+   * ⚠️ 中文**没有空格**，Pixi 的 `wordWrap` 默认按空格断词 —— 不开
+   * `breakWords` 的话整句话会被当成"一个超长单词"而不换行（实测：
+   * 文字直接溢出面板）。所以 `breakWords` 与 `wordWrap` **一起**由
+   * 这个开关打开。
+   */
+  readonly wrap?: { readonly width: number };
 }
 
 export class Label {
@@ -220,6 +234,9 @@ export class Label {
         fontSize: props.size ?? TYPE.sm,
         fill: css(props.color ?? 0xf0f0f6),
         fontWeight: props.bold ? '700' : '400',
+        ...(props.wrap === undefined
+          ? {}
+          : { wordWrap: true, breakWords: true, wordWrapWidth: props.wrap.width }),
         ...(props.stroke === undefined
           ? {}
           : { stroke: { color: css(props.stroke), width: props.strokeWidth ?? 3 } }),

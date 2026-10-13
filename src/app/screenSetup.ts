@@ -36,7 +36,9 @@
 import { Container, Graphics, Sprite, Text, type Application } from 'pixi.js';
 import { CharacterSelectScreen } from '../ui/CharacterSelectScreen';
 import { HomeScreen } from '../ui/HomeScreen';
-import { PrepareScreen } from '../ui/PrepareScreen';
+import { PrepareScreen, type PrepareQijiOption } from '../ui/PrepareScreen';
+import type { DetailContext } from '../ui/prepareDetail';
+import type { FreeQiji } from '../ui/prepareLogic';
 import { QijiSelectScreen } from '../ui/QijiSelectScreen';
 import { RunOverScreen } from '../ui/RunOverScreen';
 import { translateSafe } from './translate';
@@ -80,6 +82,24 @@ export interface ScreenSetupDeps {
   readonly continueRun: () => void;
   /** 备战界面进屏时的初始选择。 */
   readonly initial: { readonly playerId: string; readonly bossId: string };
+  /**
+   * **自由模式的炁机选项 + 详情区装配**（2026-10-13 加）。
+   *
+   * ⚠️ 三样都要**注入**，不在这里 import 内容表：
+   *   - `qijiOptions`：从 `data/qiji.ALL_QIJI` 读**当前**池子（今天 8 条，
+   *     以后还会变）—— 界面写死条数会在加一条时静默少一张卡
+   *   - `prepareDetailContext`：Boss 招式 / 人物技能那一整套取值函数
+   *     （见 `app/prepareDetailContext`）
+   *   - `freeQiji`：**活的持有者**（备战屏会改它，`phaseFlow` 每开一局
+   *     都要读当前值）
+   */
+  readonly qijiOptions: readonly PrepareQijiOption[];
+  readonly prepareDetailContext: (free: {
+    readonly stacks: (id: string) => number;
+    readonly cap: (id: string) => number;
+  }) => DetailContext;
+  readonly freeQiji: FreeQiji;
+  readonly rememberFreeQiji: (free: FreeQiji) => void;
 }
 
 export interface Screens {
@@ -165,6 +185,12 @@ export function buildScreens(d: ScreenSetupDeps): Screens {
     translate: translateSafe,
     players: PLAYER_ROSTER,
     bosses: BOSS_ROSTER,
+    /** ⚠️ 炁机池**从内容表读**（`d.qijiOptions`），界面不写死条数。 */
+    qiji: d.qijiOptions,
+    /** 详情区那套取值函数（Boss 招式 / 人物技能），见 `app/prepareDetailContext`。 */
+    detailContext: d.prepareDetailContext,
+    /** 上次存下来的炁机激活（**活的持有者** —— 备战屏会改它）。 */
+    freeQiji: d.freeQiji,
     initial: { playerId: d.initial.playerId, bossId: d.initial.bossId },
     showKeyHints: d.showKeyHints,
     f1Label: d.f1Label,
@@ -172,6 +198,7 @@ export function buildScreens(d: ScreenSetupDeps): Screens {
     onBack: backIn('prepare'),
     onStart: (playerId: string, bossId: string) => d.onPrepareStart(playerId, bossId),
     onChange: (playerId: string, bossId: string) => d.rememberPick(playerId, bossId),
+    onQijiChange: (free) => d.rememberFreeQiji(free),
   });
   d.app.stage.addChild(prepare.root);
 

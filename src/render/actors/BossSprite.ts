@@ -181,7 +181,7 @@ export class BossSprite {
      *      换，描边自然跟随动作，且是沿轮廓的
      *
      * ⚠️ 霸体**状态本身没有丢失**：读条秒数的颜色仍然区分
-     * "可打断（青绿）/ 霸体（青蓝）"，见 `viewModel.telegraphHint`。
+     * "可打断（青绿）/ 霸体（青蓝）"，见 `parts/bossCastBar.ts` 的 `setNameColor`。
      */
     // 受击闪白：整体提亮（用 tint 比重绘便宜），贴图走同一个值
     const tint = flash > 0 ? mixWhite(flash) : 0xffffff;

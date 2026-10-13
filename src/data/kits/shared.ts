@@ -21,21 +21,28 @@ import { logicMs } from '../../core/loopConstants';
 import type { BuffDef, SkillDef } from '../../core/types';
 import { C, S } from '../scale';
 
-/** 凝：增伤 20%，持续 30 秒。 */
+/** 凝：增伤 60%，持续 10 秒。 */
 export const FOCUS_BUFF: BuffDef = {
   id: 'focus',
   nameKey: 'skill.focus.name',
   icon: 'char_focus',
   polarity: 'buff',
   color: C.focus,
-  duration: logicMs(300),
+  /**
+   * **10 秒 = `logicMs(100)`**（用户 2026-10-13 重标定："凝改成增伤 60%
+   * 持续 10 秒，代价 40 缠"）。
+   *
+   * ⚠️ 必须落在 **100ms 的整数格**上：内容校验器的 `OFF_GRID_TIME` 会拦
+   * 非整格的时长（`logicMs(100)` = 10 秒 ✓；`logicMs(105)` = 10.5 秒 ✗）。
+   */
+  duration: logicMs(100),
   maxStacks: 1,
   stacking: { mode: 'refresh' },
   modifiers: [
     {
       stat: 'damageBoost',
       op: 'addPercent',
-      value: 20,
+      value: 60,
       sourceKey: 'skill.focus.name',
       namespace: 'focus',
       tier: 'buff',
@@ -44,7 +51,13 @@ export const FOCUS_BUFF: BuffDef = {
 };
 
 /**
- * 凝：消耗 50 缠，增伤 20%，持续 30 秒。**两个角色共用同一个定义。**
+ * 凝：消耗 40 缠，增伤 60%，持续 10 秒。**两个角色共用同一个定义。**
+ *
+ * ⚠️ **2026-10-13 重标定**（用户原话："**凝改成增伤 60% 持续 10 秒，
+ * 代价 40 缠**"）：数值 20 → **60**、时长 30 秒 → **10 秒**、
+ * 代价 50 缠 → **40 缠**。说明文案**一个字都没改** ——
+ * `{percent}` / `{seconds}` 是从这里（`FOCUS_BUFF`）推导的，
+ * 代价由 `keyRows` 从 `cost` 推导（`app/descParams.ts` 的"一份真相"）。
  *
  * ⚠️ 共用是**有意的**（不是偷懒）：两人的「凝」在定稿里是同一个技能 ——
  * 同代价、同读条、同效果。分成两份会立刻漂（改了一个忘了另一个），
@@ -65,7 +78,7 @@ export const FOCUS: SkillDef = {
   ],
   castTime: 0,
   cooldown: 0,
-  cost: [{ resource: 'douqi', value: S(50) }],
+  cost: [{ resource: 'douqi', value: S(40) }],
   targeting: { mode: 'self' },
   hits: [],
   tags: [],

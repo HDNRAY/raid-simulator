@@ -35,6 +35,7 @@ import { BattleLoop } from './battleLoop';
 import { slotsFromBindings } from './viewAdapter';
 import { makeBoss, makePlayer } from '../data/units';
 import { buildPlayerKit, type PlayerKit } from '../data/kit';
+import { applySkillTweaks } from '../data/skillTweak';
 import { playerSkillIdsFor } from '../data/content';
 import type { ContentRegistry } from '../core/content/registry';
 import type { KeyBinding } from '../input/keyboard';
@@ -140,6 +141,19 @@ export function createStartBattle(d: StartBattleDeps): () => BattleLoop {
      */
     const kit = d.getPlayerKit?.(playerId) ?? buildPlayerKit(playerId);
 
+    /**
+     * **炁机的 `skillTweak` 落点**（「避」回缠 / 「凝」减耗 / 「凝」增伤）。
+     *
+     * ⚠️ 它必须在**建战斗那一刻**应用（不能改注册表里的定义）：注册表是
+     * **按角色缓存**的（`deps.ts` 的 `perPlayer`），就地改它会让
+     * "这一局选了减耗炁机"污染所有后来的局 —— 而且缓存那一份还是
+     * 设置页 / 备战界面读的"基础定义"，改了它两边都会漂。
+     *
+     * 空 `skillTweaks` 时 `applySkillTweaks` 直接回**同一张表**（引用不变），
+     * 所以单场 / 自由模式 / 黄金重放走的还是注册表原本的那两个 Map。
+     */
+    const tweaked = applySkillTweaks({ skills: registry.skills, buffs: registry.buffs }, kit.skillTweaks);
+
     return new BattleLoop({
       // 飘字要"闪躲"这种本地化文案 —— 注入取词函数，而不是让
       // ViewAdapter 去 import i18n 单例
@@ -175,9 +189,13 @@ export function createStartBattle(d: StartBattleDeps): () => BattleLoop {
          * `StartBattleDeps.registryFor`。注册表里只有这个角色的 5 招
          * （加 Boss 的招），所以"按下别的角色的技能"是不可能的：
          * 引擎解析不到那个 id，技能栏里也不会有它的槽位。
+         *
+         * ⚠️ 这两行读的是 `tweaked`（可能被炁机改过的**副本**）——
+         * 技能的代价 / 挂上去的 buff 因此在这一局里真的变了；
+         * 没有 `skillTweak` 时它就是 `registry` 那两个 Map 本身。
          */
-        buffs: registry.buffs,
-        skills: registry.skills,
+        buffs: tweaked.buffs,
+        skills: tweaked.skills,
         baseStats: new Map<string, Partial<Record<StatKey, number>>>([
           [playerId, kit.base],
           [bossId, {}],

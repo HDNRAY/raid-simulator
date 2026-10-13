@@ -32,6 +32,7 @@ import { BOSS_POOL, resolveBossId, resolvePlayerId } from '../data/roster';
 import { ALL_QIJI, qijiById } from '../data/qiji';
 import { buildPlayerKit, type PlayerKit } from '../data/kit';
 import type { QijiEntity } from '../core/types/qiji';
+import { freeQijiChoices, type FreeQiji } from '../ui/prepareLogic';
 import type { RunState } from '../core/run/index';
 import { runLengthOf } from '../core/run/index';
 import { createRunSession } from './runSession';
@@ -75,6 +76,18 @@ export interface PhaseFlowDeps {
    * 一局开始之后再改它没有意义（`order` 已经截断了）。
    */
   readonly runLength?: number | undefined;
+  /**
+   * **自由模式当前开着的炁机**（2026-10-13）。
+   *
+   * ⚠️ 传**取值函数**而不是一张算好的表：与 `getPlayerKit` 同一条理由 ——
+   * 玩家在备战屏上改一次炁机，下一场战斗就该带上它。快照一份会让改动
+   * 停在第一次开战那一刻。
+   *
+   * ⚠️ 自由模式**没有一局肉鸽**（`runSession.active === false`），所以
+   * `RunState.chosen` 那条路在自由模式里是空的 —— 这份表就是自由模式
+   * 唯一的炁机来源。两者最终都汇进 `buildPlayerKit`（**同一个函数**）。
+   */
+  readonly freeQiji: () => FreeQiji;
 }
 
 /**
@@ -165,7 +178,20 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
    */
   const activeQiji = (): readonly { readonly def: QijiEntity; readonly stacks: number }[] => {
     const state = runSession.state();
-    if (state === undefined) return [];
+    /**
+     * ⚠️ **自由模式那一支**（没有进行中的一局）：读题面注入的层数表，
+     * 按 `ALL_QIJI` 的顺序翻译成"定义 + 层数"。
+     *
+     * ⚠️ 两个模式**共用同一个翻译出口**（`freeQijiChoices` → `qijiById`）：
+     * 肉鸽那边是 `RunState.chosen`，自由这边是玩家在备战屏点出来的表 ——
+     * 差别只在"谁来填这张表"，效果本身走的是同一个 `buildPlayerKit`。
+     */
+    if (state === undefined) {
+      return freeQijiChoices(d.freeQiji(), ALL_QIJI).flatMap((choice) => {
+        const def = qijiById(choice.qijiId);
+        return def === undefined ? [] : [{ def, stacks: choice.stacks }];
+      });
+    }
     return state.chosen.flatMap((choice) => {
       /** ⚠️ 走 `qijiById`（内容表自己的 id→定义 查找）而不是在这里再写一遍 find。 */
       const def = qijiById(choice.qijiId);

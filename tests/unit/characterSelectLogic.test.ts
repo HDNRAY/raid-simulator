@@ -33,7 +33,7 @@ describe('命中区域：复用备战界面的几何，但没有「开始」槽�
 
   it('几何与 `prepareHitAreas(players, [])` 的人物那部分**逐字相同**', () => {
     const select = characterSelectHitAreas(players);
-    const prepare = prepareHitAreas(players, [], CHARACTER_SELECT_LAYOUT).filter(
+    const prepare = prepareHitAreas(players, [], [], CHARACTER_SELECT_LAYOUT).filter(
       (a) => a.kind === 'player',
     );
     expect(select).toEqual(prepare);

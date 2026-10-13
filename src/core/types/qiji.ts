@@ -26,6 +26,9 @@
 import type { GameEntity } from './skills';
 import type { BuffDef } from './buffs';
 import type { BuffId, SkillId } from './ids';
+import type { ResourceKey } from './resources';
+import type { StatKey } from './stats';
+import type { ResourceAbility } from './abilities';
 import type { BattleStatQuery as RunStatQuery } from '../run/query';
 
 /* ================================================================== *
@@ -183,6 +186,14 @@ export interface QijiEntity extends GameEntity {
    * `core/run/`（解锁那一条线）**不读它** —— 解锁只看统计。
    */
   readonly comboWindow?: QijiComboWindow;
+  /**
+   * **它对某个技能的改动**（代价 / 成功后的一次性资源）。
+   *
+   * 见 `QijiSkillTweak` 的说明：与 `comboWindow` 同一条路 —— 都是
+   * "内容层多一种专门字段"，因为它们要表达的东西继承来的 `abilities`
+   * 表达不了。
+   */
+  readonly skillTweak?: QijiSkillTweak;
 }
 
 /**
@@ -201,6 +212,95 @@ export interface QijiComboWindow {
   readonly buff: BuffDef;
   /** 第二条成功通道：这个 buff 挡下整击时也算成功（「卸」/「闪」）。 */
   readonly viaBuffId?: BuffId;
+}
+
+/**
+ * **一个炁机对某个技能的改动**（2026-10-13 加的）。
+ *
+ * ==================================================================
+ * 为什么 `abilities` 表达不了它（这是它存在的全部理由）
+ * ==================================================================
+ *
+ * `QijiEntity` 继承来的 `abilities` 只有两条生效路径
+ * （`data/kit.ts` 的 `buildPlayerKit`）：
+ *
+ *   - `modifier` / `derived` → `passiveModifiers`：改的是**玩家身上的属性**
+ *   - `comboWindow`          → `comboWindows`：接回一条派生关系
+ *
+ * 而用户点名的三条新炁机改的是**某一个技能的定义本身**：
+ *
+ *   - 「避」用出后**回复 20 缠**（一次性的资源变动，挂在"用出避"这一刻）
+ *   - 「凝」的**缠消耗 −20**（改的是那个技能的 `cost`）
+ *   - 「凝」的**增伤变成 100%**（改的是那个 buff 的修正值）
+ *
+ * 这三样都**不是玩家属性**：`passiveModifiers` 加不出"某个技能便宜 20 缠"
+ * （代价读的是 `SkillDef.cost`，属性管线碰不到它）；而 `ResourceAbility`
+ * （引擎有消费者，`castPipeline` 付账后结算 `kind:'resource'`）只能挂在
+ * **技能自己的** `abilities` 上，不在炁机里。
+ *
+ * ==================================================================
+ * ⚠️ 它属于**既有模型**，不是新开的一套（判据在 AGENTS.md §2）
+ * ==================================================================
+ *
+ * 与 `QijiComboWindow` 逐条同构：
+ *
+ *   | | `comboWindow` | `skillTweak` |
+ *   |---|---|---|
+ *   | 住在 | `QijiEntity` 的一个可选字段 | 同 |
+ *   | 谁写它 | 内容（`data/qiji.ts`） | 同 |
+ *   | 谁消费 | `buildPlayerKit` → `comboWindows` | `buildPlayerKit` → 覆盖后的技能表 |
+ *   | 为什么不能复用 `abilities` | 派生关系不是能力 | 技能定义不是属性 |
+ *
+ * 也就是说：**没有加"引擎机制"，加的是"内容能说什么"** ——
+ * 与 P3 给炁机加 `comboWindow` 是同一步的继续。
+ *
+ * ==================================================================
+ * 两条效果，各自的语义
+ * ==================================================================
+ *
+ * - `costDeltas`：**加**在技能基础代价上（`40 − 20 = 20`）。多个炁机改同一个
+ *   技能时**相加**，所以它天然满足 §5.3 的"交换律"（不像 `setOverride`）。
+ *   ⚠️ 只对**数字**代价生效；表达式代价（`Cost.value: Expr`）今天加不了，
+ *   而"静默不生效"比"报错"危险得多 —— 所以 `applySkillTweak` 会对
+ *   **找不到的代价项**抛错（见那里的说明）。
+ * - `buffOverrides`：把**某个 buff 的修正值整体改成这个数**（不是加上去）。
+ *   用户原话是"增伤**变成** 100%" —— 那是覆盖，不是 +100%。
+ *   与 `passiveModifiers` 里其它来源的 `addPercent` 仍然**相加**：
+ *   「凝」贡献 100，装备再给 10，玩家就是 110（符合"增伤百分比层相加"）。
+ */
+export interface QijiSkillTweak {
+  /** 被改的那个技能。 */
+  readonly skillId: SkillId;
+  /** 代价的增量（负 = 减少）。同名资源的多条会在应用时合并。 */
+  readonly costDeltas?: readonly {
+    readonly resource: ResourceKey | string;
+    readonly delta: number;
+  }[];
+  /**
+   * **成功用出这个技能时**一次性给资源。
+   *
+   * 形状就是引擎已经支持的 `ResourceAbility`（它挂在技能上时由
+   * `castPipeline` 在付账后结算，与 `on: 'castFinish'` 同一时刻）——
+   * 这里复用那个形状，而不是再造一个"回缠"的专属字段。
+   *
+   * ⚠️ 时点：本仓库今天的"用了 3 次"（`skillUses`）数的是**用出去**
+   * （`skillUsed` 事件），所以"回缠"跟它同一时刻 —— 见
+   * `tests/unit/qijiWiring.test.ts` 的实测。
+   */
+  readonly onUse?: ResourceAbility;
+  /**
+   * 把某个 buff 的修正值**覆盖**成给定值（按 `stat` 匹配）。
+   *
+   * ⚠️ 只覆盖 `value`，其余字段（`sourceKey` / `namespace` / `tier`）
+   * 保持原样，所以溯源面板仍然认得它。
+   */
+  readonly buffOverrides?: readonly {
+    readonly buffId: BuffId;
+    readonly modifiers: readonly {
+      readonly stat: StatKey;
+      readonly value: number;
+    }[];
+  }[];
 }
 
 /**

@@ -32,6 +32,8 @@ describe('没有炁机时：逐字等于"今天"', () => {
     expect(kit.base).toEqual(PLAYER_BASE);
     expect(kit.modifiers).toEqual([]);
     expect(kit.comboWindows).toEqual([]);
+    /** ⚠️ 2026-10-13 加的 `skillTweaks` 同样是空 —— 默认路径逐字不变。 */
+    expect(kit.skillTweaks).toEqual([]);
   });
 
   it('⚠️ 不传 `chosen` 与传空数组**同一个结果**（默认参数不是第二份实现）', () => {
