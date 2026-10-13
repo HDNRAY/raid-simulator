@@ -33,7 +33,7 @@ import {
   shortLabelKeyOf,
 } from './viewHelpers';
 import { hintKeysOf } from './skillHints';
-import { LAYOUT } from '../ui/layout';
+import { floatAnchorOf } from '../render/actorLayout';
 import type { TranslateFn } from '../i18n/translator';
 import type {
   BattleSnapshotView,
@@ -136,16 +136,34 @@ export class ViewAdapter {
       switch (event.kind) {
         case 'damage': {
           if (event.amount <= 0) break;
-          // 飘字落在**被打的人**头上。用 side 判断而不是写死 id ——
-          // 换 Boss 时不需要改这里。
+          /**
+           * **这一下打的是谁**。判据是"目标不叫 `player`"（不是写死 Boss 的
+           * id）—— 换 Boss 时不需要改这里。
+           *
+           * ⚠️ 它**不**用来决定飘字的落点（那由 `floatAnchorOf` 自己判，
+           * 见下）；这里只管闪白、累计伤害与顿帧 id。
+           */
           const onBoss = event.targetId !== 'player';
-          const baseY = onBoss ? LAYOUT.combatTextY.boss : LAYOUT.combatTextY.player;
-          const baseX = onBoss ? 630 : 300;
+          /**
+           * ⚠️ **锚点从角色自己的位置派生**（`floatAnchorOf`）—— 渲染层
+           * 不再自己写 `630` / `300`。
+           *
+           * 2026-10-13 的 bug：这两行曾经是
+           * `baseX = onBoss ? 630 : 300`，而站位互换之后**玩家的 x 是
+           * 630、Boss 是 300** —— 于是飘字正好落反：玩家的伤害数字飘在
+           * Boss 头上，Boss 的飘在玩家头上（用户报的"角色和boss位置互换
+           * 了，战斗文字飘的位置好像没有跟着换"）。
+           *
+           * 根因不是"数字写错了"，而是**同一个事实（谁站在哪）被算了两
+           * 遍**：一遍在 `actorLayout.ACTOR_POS`（角色真的画在那里），
+           * 一遍在这里的字面量里（飘字用）。两处必然漂 —— 现在只有一处。
+           */
+          const anchor = floatAnchorOf(event.targetId);
           this.pushFloating(
             `-${event.amount}${event.crit ? '!' : ''}`,
             damageColor(event.amount, event.crit),
-            baseX,
-            baseY,
+            anchor.x,
+            anchor.y,
           );
           /**
            * 强度用**比例**（伤害 ÷ 最大生命），于是暴击/重击自然更重，
@@ -174,7 +192,16 @@ export class ViewAdapter {
         }
         case 'heal': {
           if (event.amount <= 0) break;
-          this.pushFloating(`+${event.amount}`, PALETTE.buff.bright, 300, 380);
+          /**
+           * ⚠️ 回血也落在**被回血的人**头上，不是写死玩家那边。
+           *
+           * 原先这里是 `(300, 380)` 两个字面量 —— 与伤害那一处是同一个
+           * 病（第二份"谁在哪"），而且更隐蔽：傲慢的「回补」是**它自己**
+           * 回血，`targetId` 是 Boss，所以 `+126` 会飘在玩家头上。
+           * 现在与伤害共用同一个派生函数。
+           */
+          const anchor = floatAnchorOf(event.targetId);
+          this.pushFloating(`+${event.amount}`, PALETTE.buff.bright, anchor.x, anchor.y);
           break;
         }
         case 'avoided': {
@@ -182,7 +209,15 @@ export class ViewAdapter {
           // 满免伤飘「闪躲」（动作词），不是机制词「免疫」
           const label =
             event.reason === 'immune' ? this.text('hud.dodged') : '0';
-          this.pushFloating(label, PALETTE.iframe.bright, 300, LAYOUT.combatTextY.player);
+          /**
+           * ⚠️ 闪躲飘在**躲掉的那一方**头上（`targetId`，不是施法者）——
+           * 与伤害、回血共用同一个派生函数。
+           *
+           * 原先这里也写死 `(300, ...)`：玩家被互换到右边之后，闪躲提示
+           * 会飘到 Boss 那侧。
+           */
+          const anchor = floatAnchorOf(event.targetId);
+          this.pushFloating(label, PALETTE.iframe.bright, anchor.x, anchor.y);
           this.playerFlash = 0.6;
           break;
         }

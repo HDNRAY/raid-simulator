@@ -121,4 +121,28 @@ describe('buff 短标签：覆盖率（判据是"会显示的都要有"）', () 
      */
     expect(shortLabelKeyOf('boss-enrage-active')).toBe('buffShort.enrage');
   });
+
+  it('⚠️ 引擎现造的 `douqi-full`（缠满门槛标记）也登记了', () => {
+    /**
+     * 与上一条同源，但**更隐蔽**：`douqi-full` 由
+     * `core/combat/castPipeline.ts` 的 `syncDouqiFull()` 现造，而它
+     * **不在** `ALL_BUFFS` 里 —— 覆盖率那条看不见它。
+     *
+     * ⚠️ 它今天**没有产出者**（`syncDouqiFull()` 只在 castFinish 的
+     * `resource` 能力之后调用，玩家技能里没有这一支），所以这条断言
+     * 钉的是"**结构**"而不是"今天画面上有没有它"：哪天内容接回终结技，
+     * 这里已经有一条短标签等着，不会突然冒出一个「？」。
+     *
+     * ⚠️ 语言包那一行曾经是「炁满」——**上一次资源对调留下的旧字**。
+     * 已按仓库自己写明的映射规则（`energy` = 炁 / `douqi` = 缠）改成
+     * 「缠满」，沿革记在 `zh-CN.ts` 的 `douqiFull` 上。
+     *
+     * ⚠️ 这里**顺手把字面也钉住**（与下面 `buffShort.unknown` = '？'
+     * 同一种钉法）：这个字是"按资源名映射规则推导出来的"结论，不是随手
+     * 挑的词 —— 钉住它，改回去（或改错）时会红。
+     */
+    expect(shortLabelKeyOf('douqi-full')).toBe('buffShort.douqiFull');
+    expect(CATALOG_KEYS.has('buffShort.douqiFull')).toBe(true);
+    expect(flattenCatalog(zhCN).get('buffShort.douqiFull')).toBe('缠满');
+  });
 });

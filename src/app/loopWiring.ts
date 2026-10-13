@@ -47,7 +47,15 @@ export interface CanvasHost {
   /** 自由模式（原备战界面；`frame()` / 键盘分发用）。 */
   readonly prepare: {
     frame(): void;
+    /** ← →：**块内**移动光标。 */
     cycle(delta: number): void;
+    /**
+     * ↑ ↓：**块内**换行（炁机那块是两行；人物 / 对手只有一行）。
+     *
+     * ⚠️ 它与 `moveFocus`（Tab）**是两件事**，见下面那段分支里的说明。
+     */
+    stepVertical(dir: 'up' | 'down'): void;
+    /** **Tab / Shift+Tab**：块与块之间换焦点。 */
     moveFocus(delta: number, wrap?: boolean): void;
     confirm(): void;
   };
@@ -398,6 +406,26 @@ export function wireLoop(o: WireOptions): void {
         }
       }
       switch (event.key) {
+        /**
+         * ==============================================================
+         * ⚠️⚠️ 2026-10-13 第三轮：**方向键只管块内，Tab 才跨块**
+         * ==============================================================
+         *
+         * 用户原话："**炁机内部无法用方向键选择，所以把人物 炁机 对手的
+         * 切换换成 tab**"。
+         *
+         * 旧版这里 ↑ ↓ 调的是 `moveFocus`（= 换块），而炁机那一块是**两行**
+         * （8 条 5 列）—— 于是**第二行的炁机永远选不到**（↑↓ 直接从炁机块
+         * 跳到人物 / 对手），而 ← → 到行尾又不环绕。两件事叠起来就是用户
+         * 看到的那句"炁机内部无法用方向键选择"。
+         *
+         * 现在分工是**互斥**的（见 `prepareLogic.stepCursor` 的说明）：
+         *
+         * ```
+         *   ← → ↑ ↓  → 块【内】**（`cycle` / `stepVertical`，到边界停住）
+         *   Tab      → 块【间】（`moveFocus`，唯一的路，环绕）
+         * ```
+         */
         case 'ArrowLeft':
           host.prepare.cycle(-1);
           return;
@@ -405,16 +433,19 @@ export function wireLoop(o: WireOptions): void {
           host.prepare.cycle(1);
           return;
         case 'ArrowUp':
-          host.prepare.moveFocus(-1);
+          host.prepare.stepVertical('up');
           return;
         case 'ArrowDown':
-          host.prepare.moveFocus(1);
+          host.prepare.stepVertical('down');
           return;
         case 'Tab':
           /**
-           * Shift+Tab 反向。与 ↑↓ 的区别只有**环绕**（Tab 的通用语义）——
+           * Shift+Tab 反向。它是**唯一**能跨块的键，所以必须**环绕** ——
            * 两端停住的话，在「开始战斗」上按 Tab 会毫无反应，而玩家对
            * Tab 的预期是"跳到下一个"。
+           *
+           * ⚠️ 触屏没有 Tab（AGENTS.md §3b）：那条路是**点块头展开**
+           * （`PrepareScreen.expand`，见 `hitTest` 的 `summary` 分支）。
            */
           host.prepare.moveFocus(event.shiftKey ? -1 : 1, true);
           event.preventDefault();

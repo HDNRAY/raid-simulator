@@ -603,19 +603,73 @@ export function hitTestPrepare(
   expanded: PrepareSectionKind = 'player',
   scroll: SectionScroll = NO_SCROLL,
 ): { readonly kind: 'player' | 'qiji' | 'boss' | 'start' | 'summary'; readonly id: string } | undefined {
+  const intent = pointerIntentOf(px, py, players, bosses, qiji, expanded, scroll);
+  if (intent.kind === 'none') return undefined;
+  if (intent.kind === 'start') return { kind: 'start', id: 'start' };
+  if (intent.kind === 'expand') return { kind: 'summary', id: intent.slot };
+  return { kind: intent.kind === 'qiji' ? 'qiji' : intent.option, id: intent.id };
+}
+
+/**
+ * 一次点击的**意图**（纯数据：屏幕照它改状态，不再自己判一遍"点了什么"）。
+ *
+ * ==================================================================
+ * 为什么单独一个类型（而不是让屏幕直接改状态）
+ * ==================================================================
+ *
+ * `PrepareScreen.hitTest` 里原来是一串 `if (at.kind === …)`：先点按钮、
+ * 再点块头、再点炁机的左/右半边、最后是人物的确定 —— 四件事挤在一个
+ * Pixi 类里，**只能靠截图看对不对**（而"点炁机左半边是退一层"这件事
+ * 截图上根本看不出来）。
+ *
+ * 抽成意图之后：
+ *   - 判定在 node 里可以精确测（`tests/unit/prepareLogic.test.ts`）
+ *   - 屏幕那一层只剩一个 `switch`（谁改状态仍然只有一处）
+ *
+ * ⚠️ `qiji` 那一支**连"左半 / 右半"一起算好**（`back`）：那是触屏唯一的
+ * "退一层"入口（AGENTS.md §3b 的功能对等），所以它属于**判定**，不属于
+ * "照着做"。
+ */
+export type PreparePointerIntent =
+  /** 没点中任何东西（调用方据此"不消费这次点击"）。 */
+  | { readonly kind: 'none' }
+  /** 点「开始战斗」。 */
+  | { readonly kind: 'start' }
+  /** 点收起的**块头** → 只展开那一块（不改选择）。 */
+  | { readonly kind: 'expand'; readonly slot: PrepareSectionKind }
+  /** 点炁机卡：`back` 为真 = 左半边（退一层），假 = 右半边（叠一层）。 */
+  | { readonly kind: 'qiji'; readonly id: string; readonly back: boolean }
+  /** 点人物 / 对手卡 → 移光标 + 确定（一步到位）。 */
+  | { readonly kind: 'pick'; readonly option: 'player' | 'boss'; readonly id: string };
+
+/**
+ * 这个逻辑点上的点击**是什么意思**。
+ *
+ * ⚠️ 几何来自 `prepareHitAreas`（与渲染**同一份**，含滚动偏移）——
+ * 这里不自己算任何矩形。
+ * ⚠️ 顺序即优先级（按钮 → 块头 → 卡片），而且**命中即返回**：继续往下
+ * 找会同时点中底下的卡。
+ */
+export function pointerIntentOf(
+  px: number,
+  py: number,
+  players: readonly PrepareOption[],
+  bosses: readonly PrepareOption[],
+  qiji: readonly PrepareOption[] = [],
+  expanded: PrepareSectionKind = 'player',
+  scroll: SectionScroll = NO_SCROLL,
+): PreparePointerIntent {
   const areas = prepareHitAreas(players, bosses, qiji, expanded, scroll);
-  /** 按钮优先（见上）。 */
-  const start = areas.find((a) => a.kind === 'start');
-  if (start !== undefined && inRect(px, py, start)) return { kind: 'start', id: start.id };
-  for (const area of areas) {
-    if (area.kind === 'start') continue;
-    if (area.kind === 'summary') {
-      if (inRect(px, py, area)) return { kind: 'summary', id: area.id };
-      continue;
-    }
-    if (inRect(px, py, area)) return { kind: area.kind, id: area.id };
+  const hit = areas.find((a) => inRect(px, py, a));
+  if (hit === undefined) return { kind: 'none' };
+  if (hit.kind === 'start') return { kind: 'start' };
+  if (hit.kind === 'summary') {
+    return isSectionKind(hit.id) ? { kind: 'expand', slot: hit.id } : { kind: 'none' };
   }
-  return undefined;
+  if (hit.kind === 'qiji') {
+    return { kind: 'qiji', id: hit.id, back: halfOfCard(px, hit) === 'left' };
+  }
+  return { kind: 'pick', option: hit.kind, id: hit.id };
 }
 
 function inRect(
@@ -629,14 +683,13 @@ function inRect(
 /**
  * 一次点击落在卡片的**哪一半**（炁机卡的"加一层 / 退一层"）。
  *
- * ⚠️ 触屏没有 hover、也没有 Shift（AGENTS.md §3b 的功能对等）：所以
- * "退一层"必须有**纯指针**的入口。按横向中线分：
+ * ⚠️ 触屏没有 Shift（AGENTS.md §3b 的功能对等）：所以"退一层"必须有
+ * **纯指针**的入口 —— 右半 = 加一层（与 Enter 同义），左半 = 退一层
+ * （与 Shift+Enter 同义）。
  *
- *   - 右半 → 加一层（与 Enter 同义，也是绝大多数点击会发生的那一半）
- *   - 左半 → 退一层（与 Shift+Enter 同义）
- *
- * ⚠️ 左半正是"头像 / 图标"那一侧 —— 而炁机卡上画的正是图标，
- * 所以这个划分在**触屏**上也看得出来（不是一条看不见的分界线）。
+ * ⚠️ 这条中线**在画面上看不出来**（炁机卡是整张名字卡，没有图标也没有
+ * 分栏）：所以它是"触屏可用的兜底"，而键盘那条路（Enter / Shift+Enter）
+ * 才是主要路径。文案里写清了它（`roster.ui.hintTouch`）。
  */
 export function halfOfCard(
   px: number,

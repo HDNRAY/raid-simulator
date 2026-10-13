@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  NO_SCROLL,
   canStartBattle,
   confirmCursor,
   cursorFromSelection,
@@ -10,9 +11,11 @@ import {
   hitTestPrepare,
   initialSelection,
   moveFocus,
+  pointerIntentOf,
   pickOption,
   pickQiji,
   prepareHitAreas,
+  sectionRowStep,
   type PrepareOption,
   type PrepareSelection,
 } from '../../src/ui/prepareLogic';
@@ -519,5 +522,77 @@ describe('手风琴：焦点决定展开哪一块', () => {
     expect(hit).toEqual({ kind: 'summary', id: 'boss' });
     /** 而对手的卡片**不在**命中区里（收起时它没被画出来）。 */
     expect(areas.some((a) => a.kind === 'boss')).toBe(false);
+  });
+});
+
+describe('⚠️ 点击的**意图**（`pointerIntentOf`：把"点了什么"从 Pixi 类里拿出来）', () => {
+  /**
+   * 这一份测的是**触屏唯一入口**的判定：点按钮 / 块头 / 炁机左右半边 /
+   * 人物卡各是什么意思。
+   *
+   * ⚠️ 它原来内联在 `PrepareScreen.hitTest` 里（一个 Pixi 类），只能靠
+   * 截图看对不对 —— 而"点炁机**左半**是退一层"这件事在截图上根本看不出来。
+   */
+  const qiji = [{ id: 'q1' }, { id: 'q2' }];
+
+  it('点「开始战斗」→ `start`（它不是卡片）', () => {
+    const start = prepareHitAreas(players, bosses, qiji).find((a) => a.kind === 'start')!;
+    expect(pointerIntentOf(start.x + 2, start.y + 2, players, bosses, qiji)).toEqual({
+      kind: 'start',
+    });
+  });
+
+  it('点收起的那一块的块头 → `expand`（只展开，不改选择）', () => {
+    /** 展开的是人物 → 炁机那一块是收起的块头。 */
+    const bars = prepareHitAreas(players, bosses, qiji, 'player').filter((a) => a.kind === 'summary');
+    const qijiBar = bars.find((a) => a.id === 'qiji')!;
+    expect(pointerIntentOf(qijiBar.x + 4, qijiBar.y + 4, players, bosses, qiji, 'player')).toEqual({
+      kind: 'expand',
+      slot: 'qiji',
+    });
+  });
+
+  it('【关键】炁机卡：**右半边 = 加一层**、**左半边 = 退一层**', () => {
+    /** 展开炁机那一块，取第一张卡的矩形（渲染与命中同一份几何）。 */
+    const card = prepareHitAreas(players, bosses, qiji, 'qiji').find((a) => a.kind === 'qiji' && a.id === 'q1')!;
+    const right = pointerIntentOf(card.x + card.w - 2, card.y + 4, players, bosses, qiji, 'qiji');
+    expect(right).toEqual({ kind: 'qiji', id: 'q1', back: false });
+    const left = pointerIntentOf(card.x + 2, card.y + 4, players, bosses, qiji, 'qiji');
+    expect(left).toEqual({ kind: 'qiji', id: 'q1', back: true });
+  });
+
+  it('点人物 / 对手卡 → `pick`（移光标 + 确定一步到位）', () => {
+    const card = prepareHitAreas(players, bosses, qiji, 'player').find((a) => a.kind === 'player')!;
+    expect(pointerIntentOf(card.x + 2, card.y + 2, players, bosses, qiji, 'player')).toEqual({
+      kind: 'pick',
+      option: 'player',
+      id: card.id,
+    });
+  });
+
+  it('点在空白处 → `none`（调用方据此不消费这次点击）', () => {
+    expect(pointerIntentOf(-50, -50, players, bosses, qiji)).toEqual({ kind: 'none' });
+  });
+
+  it('⚠️ 滚动过之后仍然点得中（几何用的是**同一份**含偏移的命中区）', () => {
+    const many = Array.from({ length: 20 }, (_, i) => ({ id: `q${i}` }));
+    const scroll = { ...NO_SCROLL, qiji: sectionRowStep('qiji') };
+    /** 滚过一行之后，第一行位置上是下标 5 的那张（不是 q0）。 */
+    const top = prepareHitAreas(players, bosses, many, 'qiji', scroll).find(
+      (a) => a.kind === 'qiji',
+    )!;
+    expect(top.id).toBe('q5');
+    /** 左半边 = 退一层（点得中的是**滚过之后**画在那里的那一张）。 */
+    expect(pointerIntentOf(top.x + 2, top.y + 2, players, bosses, many, 'qiji', scroll)).toEqual({
+      kind: 'qiji',
+      id: 'q5',
+      back: true,
+    });
+  });
+
+  it('`hitTestPrepare` 与它**同一个判定**（转发关系，不是第二份实现）', () => {
+    const card = prepareHitAreas(players, bosses, qiji, 'qiji').find((a) => a.kind === 'qiji')!;
+    const at = hitTestPrepare(card.x + 2, card.y + 4, players, bosses, qiji, 'qiji');
+    expect(at).toEqual({ kind: 'qiji', id: card.id });
   });
 });

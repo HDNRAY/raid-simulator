@@ -183,10 +183,16 @@ function drawScrollBars(
 ): void {
   const gfx = parts.scrollGfx;
   gfx.clear();
+  const tops = rowTopsOf(counts, expanded);
   for (const kind of SECTION_ORDER) {
     /** 收起的两块没有卡片区（只有一条块头），所以没有滚动条。 */
     if (kind !== expanded) continue;
-    const bar = sectionScrollbar(kind, counts, state.scroll, expanded);
+    /**
+     * ⚠️ 行顶由**这里**给（`rowTopsOf` 是本文件的输入之一）：滚动条要贴在
+     * "这一块现在画在哪一行"上，而"三块怎么摞"是 `prepareGeometry` 的
+     * 职责 —— 让 `sectionScrollbar` 自己读它会造出几何文件之间的环。
+     */
+    const bar = sectionScrollbar(kind, counts, state.scroll, tops[kind]);
     if (bar.maxPx <= 0) continue;
     gfx
       .roundRect(bar.trackX, bar.trackTop, bar.trackW, bar.trackH, 1.5)

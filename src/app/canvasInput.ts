@@ -68,13 +68,14 @@ export interface CanvasInputTargets {
    * 四条招式说明装不下 —— 拖拽那条路是 §3b 的功能对等要求，不是补充。
    */
   readonly prepare: ScreenHitTarget & {
-    /** 这个点是不是落在详情区的可滚视口里（滚轮路由的判据）。 */
-    isOnDetail(px: number, py: number): boolean;
     /**
-     * 这个点是不是落在**可以拖拽滚动的区域**里（卡片视口 ∪ 详情区）。
+     * 这个点是不是落在**可以拖拽滚动的区域**里（展开那一块的卡片视口 ∪
+     * 详情区）。
      *
      * ⚠️ 拖拽手势只有**一个**入口判据（它）：分成两个布尔会让"这次手势
      * 属于谁"在路由层再判一遍 —— 而那件事在 `dragDetail` 里按坐标分。
+     * ⚠️ 这里原来还声明了一个 `isOnDetail`：路由改用 `isOnScrollable`
+     * 之后它就没人调了（死接口），删掉。
      */
     isOnScrollable(px: number, py: number): boolean;
     wheelDetail(px: number, py: number, deltaY: number): boolean;

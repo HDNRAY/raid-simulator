@@ -82,6 +82,13 @@ export interface PrepareDebugTarget {
   detailModel(): unknown;
   /** 清空炁机激活（让截图 / 探针可复现）。 */
   resetQiji(): void;
+  /**
+   * **三块各自的滚动偏移**（**只读**）。
+   *
+   * ⚠️ 滚动位置在截图上看不出来（"排满"与"滚过一行"各一张图，但偏移是
+   * 0 还是 46 只有读数能证明）—— 与 `hitAreas()` 同一条理由。
+   */
+  scrollOffsets(): { readonly player: number; readonly qiji: number; readonly boss: number };
   /** 当前布局的可点区域（**只读**；截图脚本按它换算真实坐标）。 */
   hitAreas(): readonly {
     readonly kind: string;
@@ -117,6 +124,7 @@ export function prepareDebugApi(prepare: PrepareDebugTarget): {
     expand(slot: 'player' | 'qiji' | 'boss'): void;
     hover(px: number, py: number): boolean;
     hitAreas(): ReturnType<PrepareDebugTarget['hitAreas']>;
+    scrollOffsets(): ReturnType<PrepareDebugTarget['scrollOffsets']>;
     detailModel(): unknown;
     resetQiji(): void;
   };
@@ -166,6 +174,7 @@ export function prepareDebugApi(prepare: PrepareDebugTarget): {
        * 点在真实命中区上，"点空了"与"功能坏了"才不会混成一个样子。
        */
       hitAreas: () => prepare.hitAreas().map((a) => ({ ...a })),
+      scrollOffsets: () => ({ ...prepare.scrollOffsets() }),
       detailModel: () => prepare.detailModel(),
       resetQiji: () => prepare.resetQiji(),
     },

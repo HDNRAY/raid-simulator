@@ -136,13 +136,27 @@ export function stepGrid(
   }
 
   const rows = gridRows(count, cols);
+  /**
+   * 行内第 `col` 格的**下标**；目标行比上面短时**夹到那一行的最后一格**。
+   *
+   * ⚠️ 为什么是"夹"而不是"没有就停住"：网格的**最后一行常常不满**
+   * （8 条炁机 5 列 → 第二行只有 3 张）。若"没有正下方那一格就不动"，
+   * 那么第一行第 5 张按 ↓ **毫无反应** —— 而它下面明明还有一行。
+   * 玩家看到的是"最右边那一列的下键坏了"（本仓库点名过的"以为按键坏了"）。
+   */
+  const cellIn = (targetRow: number, wantCol: number): number => {
+    const start = targetRow * cols;
+    const len = Math.min(cols, count - start);
+    return start + Math.min(wantCol, Math.max(0, len - 1));
+  };
+
   if (wrap) {
     const nextRow = (((row + step) % rows) + rows) % rows;
-    return gridIndexOf(nextRow, col, count, cols) ?? at;
+    return cellIn(nextRow, col);
   }
   const nextRow = row + step;
   if (nextRow < 0 || nextRow >= rows) return at;
-  return gridIndexOf(nextRow, col, count, cols) ?? at;
+  return cellIn(nextRow, col);
 }
 
 /**

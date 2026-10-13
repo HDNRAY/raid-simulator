@@ -157,6 +157,31 @@ const RAW_KEYS = (process.env.RAID_SHOT_KEYS ?? '')
   .split(',')
   .map((k) => k.trim())
   .filter((k) => k.length > 0);
+/**
+ * `RAID_SHOT_KEYS_BEFORE`：在**放技能之前**按的键（`RAID_SHOT_KEYS` 同格式）。
+ *
+ * ==================================================================
+ * 为什么需要第二组键（2026-10-13 实测逼出来的）
+ * ==================================================================
+ *
+ * 流水线里技能的"放"排在按键**之前**（见文件头）。而"打到**第二屏**"
+ * 那条验收路径是**三段**的：
+ *
+ * ```
+ *   ① 按键：首页 →「肉鸽模式」→ 选角色 → 开打
+ *   ② 放技能：把这一场打赢
+ *   ③ 按键：关掉复盘（`Space`）→ `Enter` 离开战斗
+ * ```
+ *
+ * 只有 `RAID_SHOT_KEYS` 一组时，①与③挤在同一处，而①必须发生在②**之前**
+ * —— 于是"选炁机屏 / 一局结束屏"（打完第一场才出现的那两屏）**拍不到**。
+ *
+ * ⚠️ 两组键仍然是"只按键、不做断言"（AGENTS.md §4），不是第二个 e2e。
+ */
+const RAW_KEYS_BEFORE = (process.env.RAID_SHOT_KEYS_BEFORE ?? '')
+  .split(',')
+  .map((k) => k.trim())
+  .filter((k) => k.length > 0);
 
 const KEYS = {
   ArrowLeft: { code: 'ArrowLeft', key: 'ArrowLeft', vk: 37 },
@@ -174,6 +199,19 @@ const KEYS = {
    * 页面；给 0 的话某些浏览器路径会把它当未知键丢掉。
    */
   F1: { code: 'F1', key: 'F1', vk: 112 },
+  /**
+   * 空格。
+   *
+   * ⚠️ `key` 是**一个半角空格**（`' '`）而不是 `'Space'`：浏览器给空格键的
+   * `event.key` 就是 `' '`，而应用读的是 `event.key` —— 写 `'Space'` 会
+   * 静默不匹配（实测：打完一局之后 `Space,Enter` 里那一下被吞掉，复盘
+   * 一直开着，脚本看起来像"Enter 没用"）。
+   *
+   * ⚠️ `vk: 32` 是 VK_SPACE（与 `F1` 同一条：给 0 时某些路径会把它当未知键丢掉）。
+   * 用途：**战斗结束后关掉复盘面板**（`LogReviewPanel.handleKey(' ')`），
+   * 否则"打完之后那一屏"（选炁机 / 一局结束）拍不到。
+   */
+  Space: { code: 'Space', key: ' ', vk: 32 },
 };
 
 /** 起始调试端口（`RAID_SHOT_PORT` 可覆盖；被占则往后找，见 `pickPort`）。 */
@@ -387,6 +425,34 @@ try {
     return r.exceptionDetails ? `EXC ${r.exceptionDetails.text}` : r.result?.value;
   };
 
+  /**
+   * 按一下某个键（`rawKeyDown` + `keyUp` 一对）。
+   *
+   * ⚠️ 只发 `keyDown` 会让浏览器认为键一直按着（下一次 Tab 会被当成连发，
+   * `event.repeat` 也变成真）。
+   *
+   * ⚠️ 抽成函数是因为**两处**都要按：技能之前的 `RAID_SHOT_KEYS_BEFORE`
+   * （先"走进战斗"）与截图之前的 `RAID_SHOT_KEYS`（再"离开结算"）。
+   * 两份实现会漂的地方恰恰是"只发 keyDown"这一类细节。
+   */
+  const pressOnce = async (name) => {
+    const k = KEYS[name] ?? { code: name, key: name, vk: 0 };
+    const base = { key: k.key, code: k.code, windowsVirtualKeyCode: k.vk, nativeVirtualKeyCode: k.vk };
+    const modifiers = k.modifiers === undefined ? {} : { modifiers: k.modifiers };
+    await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...base, ...modifiers });
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', ...base, ...modifiers });
+  };
+
+  /**
+   * ⚠️ **开打之前**的按键（`RAID_SHOT_KEYS_BEFORE`）：把界面推到"已经在
+   * 战斗里"再放技能 —— 否则技能会落在首页 / 选角色屏上（什么都不会发生）。
+   */
+  for (const name of RAW_KEYS_BEFORE) {
+    await pressOnce(name);
+    await sleep(180);
+  }
+  if (RAW_KEYS_BEFORE.length > 0) logStep(`开打前按键：${RAW_KEYS_BEFORE.join(',')}`);
+
   /** 依次"放"给定的技能（每次间隔 300ms 让结算走完）。 */
   for (const skill of SKILLS) {
     await ev(`window.__raidBattle.act(${JSON.stringify(skill)})`);
@@ -438,18 +504,7 @@ try {
    * 按着（下一次 Tab 会被当成连发，`event.repeat` 也变成真）。
    */
   for (const name of RAW_KEYS) {
-    const k = KEYS[name] ?? { code: name, key: name, vk: 0 };
-    const base = { key: k.key, code: k.code, windowsVirtualKeyCode: k.vk, nativeVirtualKeyCode: k.vk };
-    await send('Input.dispatchKeyEvent', {
-      type: 'rawKeyDown',
-      ...base,
-      ...(k.modifiers === undefined ? {} : { modifiers: k.modifiers }),
-    });
-    await send('Input.dispatchKeyEvent', {
-      type: 'keyUp',
-      ...base,
-      ...(k.modifiers === undefined ? {} : { modifiers: k.modifiers }),
-    });
+    await pressOnce(name);
     await sleep(120);
   }
 
@@ -550,9 +605,17 @@ try {
    * 它**只打印**，不做断言（AGENTS.md §4：截图工具不发展成 e2e）。
    */
   if (process.env.RAID_SHOT_TEXT === '1') {
+    /**
+     * ⚠️ `prepareScroll` 与 `prepare` 分开打：滚动偏移是"输入有没有生效"
+     * 的硬证据（滚轮 / 拖拽 / 光标跟随都改它），而截图看不出"0 还是 46"。
+     *
+     * ⚠️ 说明写在**模板串外面**（下面那一大坨是一个 `JSON.stringify` 的
+     * 表达式文本，往里塞 `/** … *\/` 会让解析器把整个文件读崩 —— 实测）。
+     */
     const diag = await ev(`JSON.stringify({
       settingsOpen: window.__raidBattle.settings.isOpen(),
       prepare: window.__raidBattle.prepare.state(),
+      prepareScroll: window.__raidBattle.prepare.scrollOffsets(),
       buttonFocused: window.__raidBattle.settings.buttonFocused(),
       back: window.__raidBattle.back.visible(),
       backCenter: window.__raidBattle.back.center(),

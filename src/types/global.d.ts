@@ -180,6 +180,13 @@ declare global {
           readonly w: number;
           readonly h: number;
         }[];
+        /**
+         * **三块各自的滚动偏移**（只读）。
+         *
+         * ⚠️ 滚动位置在截图上看不出来（"排满"与"滚过一行"各一张图，但
+         * 偏移是 0 还是 46 只有读数能证明）—— 与 `hitAreas()` 同一条理由。
+         */
+        scrollOffsets(): { readonly player: number; readonly qiji: number; readonly boss: number };
         /** 详情区此刻拿到的**画面模型**（只读；`undefined` = 没聚焦卡片）。 */
         detailModel(): unknown;
         /** 清空炁机激活（让截图 / 探针可复现）。 */

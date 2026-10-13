@@ -89,10 +89,20 @@ const POLARITY_COLORS = {
  * `tests/unit/viewHelpers.test.ts` 钉住（`ALL_BUFFS` 的每一条都要有标签）
  * —— 加一个 buff 却忘了登记，测试会红。
  *
- * ⚠️ **`ALL_BUFFS` 不是"全部 buff id"**：`boss-enrage-active` 是引擎在
- * `core/combat/stats.ts` 里**现造**的（它的 `damageMultBoost` 是参数，
- * 塞不进静态注册表），所以必须在下面**显式登记**一条 —— 覆盖率测试看不见
- * 它（那条测试的输入就是 `ALL_BUFFS`）。
+ * ⚠️ **`ALL_BUFFS` 不是"全部 buff id"**：有两条是引擎**现造**的
+ * （它们带着运行期参数，塞不进静态注册表）——
+ *   - `boss-enrage-active`（`core/combat/stats.ts` 的 `enrageBuff()`，
+ *     带 `damageMultBoost` 参数）
+ *   - `douqi-full`（`core/combat/castPipeline.ts` 的 `syncDouqiFull()`，
+ *     "缠满"的门槛标记）
+ * 所以它们必须在下面**显式登记** —— 覆盖率测试看不见它们（那条测试的
+ * 输入就是 `ALL_BUFFS`），漏了就是一个玩家可见的「？」。
+ *
+ * ⚠️ 反面：**内容里内联的 buff**（例如 `data/entities/entropyClock.ts` 的
+ * `entropy-surge`）同样不在 `ALL_BUFFS` 里，但它今天**没有任何装配路径**
+ * 能进战斗（那件奇物只被测试引用）。所以它**不补** —— 补一个没人看得见
+ * 的短标签是第二份真相；哪天它被接进战斗，`shortLabelKeyOf` 的开发期
+ * 告警会喊出来（`warnUnknownShortLabel`）。
  */
 const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
   'dodge-iframe': 'skill.dodge.name',
@@ -113,6 +123,24 @@ const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
    * 「狂暴开始」那一刻挂上的，显示名沿用同一个「狂暴」。
    */
   'boss-enrage-active': 'buffShort.enrage',
+  /**
+   * ⚠️ **引擎现造的 buff**（不在 `ALL_BUFFS` 里，见上面的说明）：
+   * `castPipeline.ts` 的 `syncDouqiFull()` 在**缠满**时挂上它，供内容用
+   * `hasBuff: 'douqi-full'` 表达"终结技的门槛"。它**不是 hidden**，
+   * 所以会画图标 —— 而它的短标签在语言包里早就存在
+   * （`buffShort.douqiFull`，此前全仓零引用）。
+   *
+   * ⚠️ 今天**没有产出者**：`syncDouqiFull()` 只在"castFinish 的
+   * `resource` 能力"之后调用，而玩家技能里没有这一支（唯一的
+   * `resource` 能力是 Boss「回补」加血，Boss 的缠上限是 0）。所以这次
+   * 登记**不改变任何现成画面** —— 它是把"哪天接回终结技就会出现的
+   * 「？」"提前堵掉（与 `boss-enrage-active` 同一条处置）。
+   *
+   * ⚠️ 语言包里那一行原来写的是「炁满」，是**上一次资源对调留下的旧字**
+   * （沿革记在 `zh-CN.ts` 的 `douqiFull` 上）—— 已按仓库自己写明的映射
+   * 规则改成「**缠满**」（`energy` = 炁、`douqi` = 缠），不是新造词。
+   */
+  'douqi-full': 'buffShort.douqiFull',
   'boss-telegraph': 'buffShort.telegraph',
   /**
    * ⚠️ 下面这几条是**补漏**：它们原本没登记，于是命中了下方的兜底 ——

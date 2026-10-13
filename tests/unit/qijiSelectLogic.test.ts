@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   QIJI_SELECT_LAYOUT,
+  QIJI_SELECT_SLOTS,
   canConfirm,
   clampIndex,
   confirmQiji,
@@ -9,6 +10,7 @@ import {
   qijiAtPoint,
   qijiCursorTarget,
   qijiHitAreas,
+  qijiHintY,
   qijiRows,
   type QijiCandidate,
   type QijiView,
@@ -236,5 +238,74 @@ describe('确认（Enter）与光标目标', () => {
   it('⚠️ `canConfirm` 在没候选时为假（不能"确认一个不存在的炁机"）', () => {
     expect(canConfirm(FOUR)).toBe(true);
     expect(canConfirm([])).toBe(false);
+  });
+});
+
+describe('⚠️ 提示行不与卡片重叠（用户报的那个 UI bug，2026-10-13 第三轮）', () => {
+  /**
+   * 用户原话："底部提示行「选择一个炁机生效（← → · Enter）」与**第二行卡片
+   * 的底边轻微重叠**"。
+   *
+   * ⚠️ 旧版是布局表里一个**手调**的 `hintY: 470`，而卡片块从 `rowTop: 150`
+   * 起、每张 `cardH: 172` + `gap: 20` 排下去：
+   *
+   * ```
+   *   第一行 150 .. 322
+   *   第二行 342 .. 514      ← 470 正落在第二行卡片**里面**
+   * ```
+   *
+   * 现在 `qijiHintY()` 从"排满时的卡片块底边"算出来，这一份测试钉住
+   * "排满也不重叠、也不出画布"。
+   */
+  const BOX = (size: number) => Math.ceil(size * 1.3);
+
+  it('【关键】提示行的**字框顶端**在排满卡片的**底边之下**（有余量）', () => {
+    const rows = qijiRows(QIJI_SELECT_SLOTS, QIJI_SELECT_LAYOUT).length;
+    const blockBottom =
+      QIJI_SELECT_LAYOUT.rowTop +
+      rows * QIJI_SELECT_LAYOUT.cardH +
+      (rows - 1) * QIJI_SELECT_LAYOUT.gap;
+    const hintY = qijiHintY(QIJI_SELECT_LAYOUT);
+    /**
+     * 提示行是 `FONT.small`(13) 且 `anchorY 0.5` —— 字框是
+     * `hintY ± ceil(13 × 1.3)/2 = ±9`（与 `prepareLayout.test.ts` 同一口径）。
+     */
+    const half = BOX(13) / 2;
+    expect(hintY - half).toBeGreaterThanOrEqual(blockBottom);
+    /** 而且是**真的留了呼吸位**（不是"刚好贴住"）。 */
+    expect(hintY - half - blockBottom).toBeGreaterThanOrEqual(4);
+  });
+
+  it('提示行与卡片块都**在画布内**（540）', () => {
+    const hintY = qijiHintY(QIJI_SELECT_LAYOUT);
+    expect(hintY + BOX(13) / 2).toBeLessThanOrEqual(540);
+    const rows = qijiRows(QIJI_SELECT_SLOTS, QIJI_SELECT_LAYOUT).length;
+    const blockBottom =
+      QIJI_SELECT_LAYOUT.rowTop +
+      rows * QIJI_SELECT_LAYOUT.cardH +
+      (rows - 1) * QIJI_SELECT_LAYOUT.gap;
+    expect(blockBottom).toBeLessThan(hintY);
+  });
+
+  it('候选只有一行时，提示行**不动**（位置由"排满"决定，不跟着张数跳）', () => {
+    /** 一行候选的底边比排满时低 —— 提示行仍然在排满时那个位置。 */
+    const oneRowBottom =
+      QIJI_SELECT_LAYOUT.rowTop + QIJI_SELECT_LAYOUT.cardH;
+    const twoRowBottom =
+      oneRowBottom + QIJI_SELECT_LAYOUT.gap + QIJI_SELECT_LAYOUT.cardH;
+    expect(qijiHintY(QIJI_SELECT_LAYOUT)).toBe(twoRowBottom + QIJI_SELECT_LAYOUT.hintGap);
+    /** ⚠️ 一行时提示行在卡片下面**更远**（不会压上去）。 */
+    expect(qijiHintY(QIJI_SELECT_LAYOUT)).toBeGreaterThan(oneRowBottom);
+  });
+
+  it('命中区与提示行**不相交**（"点卡片"不该点到提示行上，反之亦然）', () => {
+    const candidates: readonly QijiCandidate[] = Array.from({ length: QIJI_SELECT_SLOTS }, (_, i) => ({
+      qiji: { id: `q${i}`, nameKey: 'k', icon: 'i' } satisfies QijiView,
+      remaining: 1,
+    }));
+    const hintTop = qijiHintY(QIJI_SELECT_LAYOUT) - BOX(13) / 2;
+    for (const area of qijiHitAreas(candidates, QIJI_SELECT_LAYOUT)) {
+      expect(area.y + area.h).toBeLessThanOrEqual(hintTop);
+    }
   });
 });

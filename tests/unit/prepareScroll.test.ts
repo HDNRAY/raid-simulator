@@ -256,17 +256,34 @@ describe('块与块之间：Tab 是唯一的路（方向键不跨块）', () => 
     expect(sel.cursor.qijiId).toBe('q4');
     /** 行尾再往右：**停住**（第二行的 q5 在它**下面**，不是右边）。 */
     expect(stepCursor(sel, players, bosses, 'right', qiji).cursor.qijiId).toBe('q4');
-    /** ↓ 换到第二行同一列 → q9（下标 9）。 */
+    /** ↓ 换到第二行**同一列** → q9（下标 9 = 1×5 + 4）。 */
     const below = stepCursor(sel, players, bosses, 'down', qiji);
     expect(below.cursor.qijiId).toBe('q9');
-    /**
-     * ⚠️ 第二行只有 5 张（下标 5..9），所以 `q9` **就是这一行的行尾** ——
-     * 再往右要**停住**（不是跳到第三行的 `q10`）。
-     */
-    expect(below.cursor.qijiId).toBe('q9');
+    /** 到了第二行就在**那一行里**左右走（下标 5..9），行尾停住。 */
     expect(stepCursor(below, players, bosses, 'right', qiji).cursor.qijiId).toBe('q9');
-    /** 行内往左走一格：q8。 */
     expect(stepCursor(below, players, bosses, 'left', qiji).cursor.qijiId).toBe('q8');
+    /** 一路往左：到**本行行首**（q5）停住，不会跑回上一行的 q4。 */
+    let left = below;
+    for (let i = 0; i < 6; i += 1) left = stepCursor(left, players, bosses, 'left', qiji);
+    expect(left.cursor.qijiId).toBe('q5');
+  });
+
+  it('⚠️【真实数据】8 条炁机（5 + 3）：最右一列按 ↓ **也走得掉**', () => {
+    /**
+     * 8 条 = 第一行 5 张（0..4）+ 第二行 3 张（5..7）。
+     * 第一行第 5 张的"正下方"**没有格子** —— 那里必须**夹到第二行最后
+     * 一格**（q7），而不是"按了没反应"（那看起来像"最右一列的 ↓ 坏了"）。
+     */
+    const eight = qijiOf(QIJI_TODAY);
+    const eightCounts = countsOf(QIJI_TODAY);
+    const eightLists = { players, bosses, qiji: eight };
+    let sel = focusTarget(initialSelection({ playerId: 'a', bossId: 'x' }, eight), 'qiji', eightLists);
+    for (let i = 0; i < 4; i += 1) sel = stepCursor(sel, players, bosses, 'right', eight);
+    expect(sel.cursor.qijiId).toBe('q4');
+    const below = stepCursor(sel, players, bosses, 'down', eight);
+    expect(below.cursor.qijiId).toBe('q7');
+    /** 而且它**真的画在第二行**（视口里看得见，不用滚）。 */
+    expect(sectionMaxScroll('qiji', eightCounts)).toBe(0);
   });
 
   it('空槽位不会被 Tab 送进去（`canFocus` 那条判据不变）', () => {

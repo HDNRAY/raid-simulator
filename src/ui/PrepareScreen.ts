@@ -2,28 +2,45 @@
  * **自由模式（备战屏）**：选人物 →（开炁机）→ 选对手 → 开始战斗。
  *
  * ==================================================================
- * 需求（本轮，用户原话）
+ * 它是什么（一句话，没有"和"）
  * ==================================================================
  *
- * > "自由选择对的 layout 可以优化"
- * > "1. 先选炁机 再选 boss"
- * > "2. 详情页右上角是空的，名字 头像 血量啥的，优化一下布局"
- * > "3. 开始战斗和按钮错位了，并且所有的角色 boss 选项卡 可以再小一点"
- * > "4. 同一时间只展开暂时 3 个选择中的一个，其他的收起来，只展示当前选择"
+ * 它是这一屏的**输入层**：按键 / 指针进来，它改状态，然后把状态交给
+ * `prepareFrame` 去画。
  *
- * 四件事的落点：
+ * ⚠️ 本文件**只是装配** —— 每一件事都只有一个家，这里不再抄一遍：
  *
- * | 需求 | 落在哪 |
+ * | 那一件事 | 家 |
  * |---|---|
- * | ① 顺序：人物 → **炁机** → 对手 | `prepareLayout.SECTION_ORDER` + `rowTopsOf` 的递推顺序（**只改声明顺序**，不再手调 y） |
- * | ② 详情区顶栏（名字 / 头像 / 血量） | `prepareDetail`（模型）+ `prepareDetailPanel`（画） |
- * | ③ 「开始战斗」与文字对齐 + 卡片更小 | `prepareLayout.startRect`（按钮唯一出处）+ `prepareFooter`；卡片尺寸见布局表的推导 |
- * | ④ 手风琴（同时只展开一块） | `prepareLogic.expanded`（状态）+ `prepareLayout`（几何）+ `prepareFold` / `prepareFoldBars`（收起那块显示什么 / 怎么画） |
+ * | 这一屏长什么样（矩形 / 网格 / 视口 / 滚动条在哪） | `prepareLayout` + `prepareCardGrid` |
+ * | 光标 / 选择 / 焦点怎么走（含块内 ← → ↑ ↓ 的网格数学） | `prepareLogic` + `gridNav` |
+ * | 滚动怎么算（谁滚、滚多少、光标跟随） | `prepareScroll` + `scrollWindow` |
+ * | "点了什么"（按钮 / 块头 / 炁机左右半边 / 卡片） | `prepareLogic.pointerIntentOf` |
+ * | 皮肤（颜色 / 线宽） | `prepareRender` |
+ * | 详情区（内容模型 / 画 / 它自己的滚动） | `prepareDetail` + `prepareDetailMetrics` + `prepareDetailPanel` |
+ * | 收起那块显示什么 | `prepareFold` + `prepareFoldBars` |
+ * | 页脚（开始键 / 提示行 / 声明） | `prepareFooter` |
+ * | **按键怎么路由到这一屏**（哪个键调哪个方法） | `app/loopWiring.ts`（那里有唯一的键位表） |
  *
- * ⚠️ 本文件**只是装配**：几何在 `prepareLayout`、状态机在 `prepareLogic`、
- * 皮肤在 `prepareRender`、详情内容在 `prepareDetail`、块头文案在
- * `prepareFold`。这一层负责"把它们的产物摆到 Pixi 对象上"，以及"输入事件
- * 该调哪个纯函数"。
+ * ==================================================================
+ * ⚠️ 2026-10-13 第三轮：**方向键只管块内，Tab 才跨块**
+ * ==================================================================
+ *
+ * 用户原话："**炁机内部无法用方向键选择，所以把人物 炁机 对手的切换换成
+ * tab**"。
+ *
+ * | 动作 | 键盘 | 触屏 / 鼠标 |
+ * |---|---|---|
+ * | 块**内**走光标 | ← → ↑ ↓（二维网格，到边界停住） | 点卡片（移光标 + 确定） |
+ * | 块**间**切换 | **Tab / Shift+Tab**（环绕） | **点块头**（`expand`） |
+ * | 确定人物 / 对手 | Enter | 点卡片 |
+ * | 炁机 +1 / −1 层 | Enter / Shift+Enter | 点卡片**右半 / 左半** |
+ * | 看详情 | 移动焦点 | **点一下**（触屏没有 hover） |
+ * | 开战 | Enter（光标在「开始」上） | 点「开始战斗」 |
+ *
+ * ⚠️ 旧版 ↑ ↓ 是"换块"，而炁机摊成两行之后**第二行永远选不到**（← → 到
+ * 行尾又不环绕）—— 规则与根因写在 `prepareLogic.stepCursor` 与
+ * `prepareLogic.moveFocus` 的文件说明里，键位表在 `loopWiring`。
  *
  * ==================================================================
  * ⚠️ 手风琴：**焦点在哪一块，就展开哪一块**
@@ -31,9 +48,9 @@
  *
  * | 输入 | 行为 |
  * |---|---|
- * | 键盘方向键 / Tab 移到收起的那一块 | **立刻展开它**（一步，不用先按 Enter） |
+ * | 键盘 `Tab` 移到收起的那一块 | **立刻展开它**（一步，不用先按 Enter） |
  * | 点 / 点触收起那块「块头」 | 展开它（**不改选择**） |
- * | **鼠标划过**块头 | **不展开**（划一下就展开太跳 —— 见下） |
+ * | **鼠标划过**块头 | **不展开** |
  *
  * ⚠️ **为什么不给块头做 hover 展开**：这一屏的鼠标划过卡片时详情区会跟着
  * 切（"hover 优先"），若 hover 也展开手风琴，那么"从卡片划到另一块"的
@@ -41,40 +58,15 @@
  * **展开只由"焦点"决定**（键盘 / 点击），hover 只管详情区。
  *
  * ⚠️ **为什么是"自动展开"而不是"按 Enter 才展开"**：进界面后玩家的第一
- * 个动作可能是 ↑↓ 换块，而"焦点在一块收起的块上、画面上却没有光标"正是
+ * 个动作可能是 `Tab` 换块，而"焦点在一块收起的块上、画面上却没有光标"正是
  * 本仓库点名过的那种"以为按键坏了"。触屏对等也靠同一条：点块头就是
  * 一次操作展开它（不需要"选中 → 确认"两步）。
  *
- * ==================================================================
- * ⚠️ 收起的那两块里，**卡片是点不到的**（也就 hover 不到）
- * ==================================================================
+ * ⚠️ 收起的那两块里**卡片点不到**（命中区只有展开那一块的卡）—— 于是详情区
+ * 恒等于"当前展开那一块里"的那一项。用户明确允许这个判断："若不能 →
+ * 详情区就只显示当前展开那块里的东西，但要说明"。
  *
- * 命中区里只有**展开那一块**的卡（`prepareLayout.prepareHitAreas`）——
- * 收起的块里根本没有"看不见却能点中的幽灵卡"。于是详情区恒等于"**当前
- * 展开那一块**里"的那一项（焦点 / 悬停都落在可见的卡上）。用户明确
- * 允许这个判断："若不能 → 详情区就只显示当前展开那块里的东西，但要说明"。
- *
- * ==================================================================
- * ⚠️ 每帧只改字符串与可见性，不重建 Text / Graphics
- * ==================================================================
- *
- * `Label` / `Graphics` 全部在构造时建好，`draw()` 只做
- * `set()` / `clear()` / 坐标。加东西时请照这条走 —— 每帧 `new Text()`
- * 会重建 GPU 纹理（本仓库为此专门收窄过 `Label.set`）。
- *
- * ==================================================================
- * ⚠️ 键盘与触屏**功能对等**（AGENTS.md §3b）
- * ==================================================================
- *
- * | 动作 | 键盘 | 触屏 / 鼠标 |
- * |---|---|---|
- * | 移光标 | ← → ↑ ↓ / Tab | 点卡片 |
- * | 确定人物 / Boss | Enter | 点卡片（一步到位） |
- * | 炁机 +1 层 | Enter | 点卡片**右半边** |
- * | 炁机 −1 层 | Shift+Enter | 点卡片**左半边** |
- * | **展开收起的那一块** | 焦点移过去（自动） | **点那块头** |
- * | 看详情 | 移动焦点 | **点一下**（触屏没有 hover） |
- * | 开战 | Enter（光标在「开始」上） | 点「开始战斗」 |
+ * ⚠️ 每帧只改字符串与可见性，**不重建** Text / Graphics（见 `prepareFrame`）。
  */
 
 import type { Container } from 'pixi.js';
@@ -90,18 +82,17 @@ import {
   cycleQijiStack,
   expandSection,
   focusTarget,
-  halfOfCard,
-  hitTestPrepare,
   initialSelection,
-  isSectionKind,
   moveFocus,
   pickOption,
   pickQiji,
+  pointerIntentOf,
   stackCapOf,
   stacksIn,
   stepCursor,
   unstackQiji,
   type FreeQiji,
+  type PreparePointerIntent,
   type PrepareSelection,
   type PrepareTarget,
 } from './prepareLogic';
@@ -250,6 +241,18 @@ export class PrepareScreen {
     return this.selection.expanded;
   }
 
+  /**
+   * **三块各自的滚动偏移**（只读探针）。
+   *
+   * ⚠️ 它存在的理由与 `hitAreas()` / `detailModel()` 同源：**滚动位置在
+   * 截图上看不出来**（"排满"与"滚到第二行"各一张图，但"偏移是 0 还是 46"
+   * 只有读数能钉死）。滚轮 / 拖拽 / 光标跟随三条路都会改它，所以
+   * "这一次输入到底有没有让它动"要能读出来。
+   */
+  scrollOffsets(): SectionScroll {
+    return this.scroll;
+  }
+
   /** 当前布局的可点区域（探针 / 单测读它与渲染对账）。 */
   hitAreas(): readonly PrepareHitArea[] {
     return prepareHitAreas(
@@ -390,12 +393,13 @@ export class PrepareScreen {
    * ---------------------------------------------------------------- */
 
   /**
-   * **悬停**（鼠标）。只影响详情区，**不动光标、也不展开手风琴**（见文件头）。
+   * 这个点上的点击是什么意思（`pointerIntentOf` 的**唯一**调用点）。
    *
-   * @returns 悬停落在某一项上（供调用方判"要不要重画"）。
+   * ⚠️ 抽出来是为了不让那个 7 参数的调用出现两遍（参数写反一次就是
+   * "点到别的卡上"，而那种 bug 截图看不出来）。判定规则见 `prepareLogic`。
    */
-  hover(px: number, py: number): boolean {
-    const at = hitTestPrepare(
+  private intentAt(px: number, py: number): PreparePointerIntent {
+    return pointerIntentOf(
       px,
       py,
       this.players,
@@ -404,13 +408,27 @@ export class PrepareScreen {
       this.selection.expanded,
       this.scroll,
     );
-    /** ⚠️「开始战斗」与「块头」都不是"一张卡"，悬停它们不该把详情区切走。 */
+  }
+
+  /**
+   * **悬停**（鼠标）。只影响详情区，**不动光标、也不展开手风琴**（见文件头）。
+   *
+   * @returns 悬停落在某一项上（供调用方判"要不要重画"）。
+   */
+  hover(px: number, py: number): boolean {
+    const intent = this.intentAt(px, py);
+    /**
+     * ⚠️ 只有"点在**一张卡**上"才更新悬停：「开始战斗」「块头」「没点中」
+     * 都不是一张卡 —— 把详情区切到它们身上会让玩家"划一下鼠标，面板空了"。
+     */
     const next =
-      at === undefined || at.kind === 'start' || at.kind === 'summary'
-        ? undefined
-        : { kind: at.kind, id: at.id };
+      intent.kind === 'qiji'
+        ? { kind: 'qiji' as const, id: intent.id }
+        : intent.kind === 'pick'
+          ? { kind: intent.option, id: intent.id }
+          : undefined;
     if (this.detailPanel.hoverAt(next)) this.draw();
-    return at !== undefined;
+    return intent.kind !== 'none';
   }
 
   /** 指针离开画布：清掉悬停（否则详情区会一直停在最后划过的那一项）。 */
@@ -427,16 +445,6 @@ export class PrepareScreen {
    */
   isOnScrollable(px: number, py: number): boolean {
     return this.sectionAt(px, py) !== undefined || this.detailPanel.isOnDetail(px, py);
-  }
-
-  /**
-   * 这个点是不是落在详情区的**可滚视口**里。
-   *
-   * ⚠️ 保留它（而不是只留 `isOnScrollable`）：`wheelDetail` 要分别问
-   * "卡片区吃不吃"与"详情区吃不吃"两件事，合成一个布尔就分不出来了。
-   */
-  isOnDetail(px: number, py: number): boolean {
-    return this.detailPanel.isOnDetail(px, py);
   }
 
   /**
@@ -484,11 +492,8 @@ export class PrepareScreen {
   }
 
   /**
-   * 把某一块**滚动 `delta` 像素**（正数 = 往下看更多）。
-   *
-   * ⚠️ 钳位在 `scrollWindow.clampOffset`（**复用**那一份边界规则，
-   * 不在这写第二遍）：滚到尽头 / 内容不足一屏 / 空内容三种边界只有
-   * 一处实现。
+   * 把某一块**滚动 `delta` 像素**（正数 = 往下看更多）；钳位在
+   * `prepareScroll.scrolledBy`（那里是唯一的边界规则）。
    */
   private scrollSection(kind: PrepareSectionKind, delta: number): boolean {
     const next = scrolledBy(kind, delta, this.counts(), this.scroll);
@@ -501,8 +506,8 @@ export class PrepareScreen {
   /**
    * **光标跟随**：光标换行时，若它落在视口外就把视角推过去。
    *
-   * ⚠️ 规则在 `prepareScroll.followedCursor`（纯函数）—— 这里只负责
-   * "算出新偏移就换上去"（`undefined` = 光标本来就看得见，不动）。
+   * ⚠️ 规则（判据是"行"、爆出视口才滚、上收下跟）写在
+   * `prepareScroll.followedCursor` —— 这里只把它的产物换上去。
    */
   private scrollToShowCursor(sel: PrepareSelection): void {
     const next = followedCursor(sel, this.lists(), this.counts(), this.scroll);
@@ -512,53 +517,47 @@ export class PrepareScreen {
   /**
    * 点一下（逻辑坐标）。
    *
+   * ⚠️ **"点了什么"由 `prepareLogic.pointerIntentOf` 判**（纯函数、有单测：
+   * 按钮 → 块头 → 炁机左右半边 → 人物/对手的确定）。这里只负责"照着改
+   * 状态" —— 于是"谁能改状态"仍然只有本类一处，而判定不再只能靠截图验。
+   *
+   * ⚠️ 齿轮 / 返回箭头**先于**卡片（顺序即优先级）。
+   *
    * @returns 是否消费了这次点击
    */
   hitTest(px: number, py: number): boolean {
-    /** ⚠️ 齿轮 / 返回箭头先于卡片（顺序即优先级）。 */
     if (this.chrome.hitTest(px, py)) return true;
-    const at = hitTestPrepare(
-      px,
-      py,
-      this.players,
-      this.bosses,
-      this.qiji,
-      this.selection.expanded,
-      this.scroll,
-    );
-    if (at === undefined) return false;
-    if (at.kind === 'start') {
-      this.start();
-      return true;
+    const intent = this.intentAt(px, py);
+    switch (intent.kind) {
+      case 'none':
+        return false;
+      case 'start':
+        this.start();
+        return true;
+      case 'expand':
+        this.expand(intent.slot);
+        return true;
+      case 'qiji':
+        /**
+         * ⚠️ **左右半边 = 加一层 / 退一层**（`halfOfCard`，判定在
+         * `pointerIntentOf` 里）：触屏没有 Shift，而"取消"这条路必须存在
+         * （AGENTS.md §3b 的功能对等）。
+         */
+        this.applyQiji(intent.id, intent.back);
+        return true;
+      case 'pick': {
+        const next = pickOption(this.selection, this.players, this.bosses, intent.option, intent.id);
+        if (next !== this.selection) this.apply(this.followCursor(next), true);
+        /**
+         * ⚠️ **点一下也要更新详情**（触屏没有 hover，这是它唯一的路）：
+         * `pickOption` 已经把光标移到那一项上，所以详情自然跟着换 ——
+         * 这里只需要在"点的是同一张卡"（`next === this.selection`）时
+         * 也刷一次详情。
+         */
+        else this.draw();
+        return true;
+      }
     }
-    /**
-     * ⚠️ **点收起态的块头 = 展开那一块**（不改选择）：触屏没有"Tab 到那一块"
-     * 这条路（AGENTS.md §3b 的功能对等）。
-     */
-    if (at.kind === 'summary') {
-      if (isSectionKind(at.id)) this.expand(at.id);
-      return true;
-    }
-    if (at.kind === 'qiji') {
-      /**
-       * ⚠️ **左右半边 = 加一层 / 退一层**（`halfOfCard`）：触屏没有 Shift，
-       * 而"取消"这条路必须存在（AGENTS.md §3b 的功能对等）。
-       */
-      const card = this.hitAreas().find((a) => a.kind === 'qiji' && a.id === at.id);
-      const back = card !== undefined && halfOfCard(px, card) === 'left';
-      this.applyQiji(at.id, back);
-      return true;
-    }
-    const next = pickOption(this.selection, this.players, this.bosses, at.kind, at.id);
-    if (next !== this.selection) this.apply(next, true);
-    /**
-     * ⚠️ **点一下也要更新详情**（触屏没有 hover，这是它唯一的路）：
-     * `pickOption` 已经把光标移到那一项上，所以详情自然跟着换 ——
-     * 这里只需要在"点的是同一张卡"（`next === this.selection`）时
-     * 也刷一次详情。
-     */
-    else this.draw();
-    return true;
   }
 
   /* ---------------------------------------------------------------- *

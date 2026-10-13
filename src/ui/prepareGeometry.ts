@@ -33,282 +33,43 @@ import {
 } from './prepareLayout';
 import type { PrepareSectionKind } from './prepareTypes';
 import { gridCell } from './gridNav';
-import { pixelViewport, scrollThumbRatio, steppedViewport } from './scrollWindow';
-
-/* ------------------------------------------------------------------ *
- * 卡片网格
- * ------------------------------------------------------------------ */
-
-/** 一个矩形（布局层给渲染 / 命中测试的通用形状）。 */
-export interface Rect {
-  readonly x: number;
-  readonly y: number;
-  readonly w: number;
-  readonly h: number;
-}
-
-/** 某个槽位的卡片数。 */
-export function countOf(kind: PrepareSectionKind, counts: PrepareCounts): number {
-  if (kind === 'player') return counts.players;
-  if (kind === 'qiji') return counts.qiji;
-  return counts.bosses;
-}
-
-/** 某个槽位的目标列数 / 列宽 / 卡片高（三块各自的几何，集中在这里）。 */
-function columnsOf(kind: PrepareSectionKind, L: PrepareLayout): number {
-  if (kind === 'player') return L.playerColumns;
-  if (kind === 'qiji') return L.qijiColumns;
-  return L.bossColumns;
-}
-
-function colWOf(kind: PrepareSectionKind, L: PrepareLayout): number {
-  if (kind === 'player') return L.playerColW;
-  if (kind === 'qiji') return L.qijiColW;
-  return L.bossColW;
-}
-
-function cardHOf(kind: PrepareSectionKind, L: PrepareLayout): number {
-  return kind === 'qiji' ? L.qijiCardH : L.cardH;
-}
-
-function cardMinWOf(kind: PrepareSectionKind, L: PrepareLayout): number {
-  return kind === 'qiji' ? L.qijiMinW : L.cardMinW;
-}
+import {
+  NO_SCROLL,
+  cardGrid,
+  countOf,
+  sectionMetrics,
+  sectionRowStep,
+  sectionStackH,
+  sectionViewportH,
+  sectionViewportRows,
+  type Rect,
+  type SectionScroll,
+} from './prepareCardGrid';
 
 /**
- * 某一块的卡片**目标列数**（键盘在二维网格里走位要用它）。
- *
- * ⚠️ 与 `cardGrid` 用的是**同一个数**：面板按 5 列画、键盘按 5 列走 ——
- * 两处各写一遍会让"↓ 到底去了哪一格"和画面对不上（`gridNav` 记着这条）。
+ * ⚠️ **转发卡片网格 / 视口那一套**（实现在 `./prepareCardGrid`）：
+ * §3 的横向切割把它们搬走了，而调用方（`prepareLogic` 的转发、测试、
+ * 渲染层）**一行都不该改** —— 拆文件不该改 import 路径。
  */
-export function sectionColumns(kind: PrepareSectionKind, L: PrepareLayout = PREPARE_LAYOUT): number {
-  return columnsOf(kind, L);
-}
-
-/**
- * 卡片网格：把 `count` 张卡放进 `columns` 列的网格，返回每个格子的矩形。
- *
- * ⚠️ **列数由调用方给**（各槽位的 `*Columns`）：一行放不下时**它自己
- * 折行**，不是靠"调用方预先算好每行几张"。这保证了加第 9 条炁机时不会
- * 溢出，也不会有人手写一个 `4` 到命中测试里去。
- *
- * ⚠️ **居中按"卡片列"算**，不是按整张画布（960）算：详情区占了右边
- * 296，若还按画布居中，卡片在左列里会看起来偏右。
- *
- * ⚠️ 宽度取 `max(minW, 按列等分)`：取到下限时**可能溢出列宽**，
- * 那是"该分更多行 / 列数太多"的信号 —— 布局测试里有一条"整块不越出
- * 卡片列"会先失败，比默默缩到点不中好。
- *
- * @param colW 这一列的可用宽度（`playerColW` / `bossColW` / `qijiColW`）。
- * @param columns 目标列数（张数更少时会自动减到 `count`）。
- * @param minW 这一块的**可读性下限**（人物 / 对手 = `cardMinW`，炁机 = `qijiMinW`）。
- * @param rows 网格行数（`undefined` = 由 `count` 与列数推出）。
- * @param gridRows 只算前几行的矩形（`undefined` = 全部）—— 见下面的说明。
- */
-export function cardGrid(
-  count: number,
-  topY: number,
-  L: PrepareLayout,
-  opts: {
-    readonly colW: number;
-    readonly columns: number;
-    readonly h: number;
-    readonly minW: number;
-    readonly rows?: number;
-    readonly gridRows?: number;
-  },
-): readonly Rect[] {
-  if (count <= 0) return [];
-  const columns = Math.max(1, Math.min(opts.columns, count));
-  const allRows = Math.max(1, opts.rows ?? Math.ceil(count / columns));
-  /**
-   * ⚠️ `gridRows` **只裁剪行数，不改变每行的张数**：卡片的位置是"内容的
-   * 实际排布"算出来的，所以"只看第 2、3 行"时它们的 y / x 与看全部时
-   * **逐像素相同**（不会因为裁剪而重新居中）。
-   *
-   * 这一条是**滚动**能成立的前提：视口只决定"画哪几行"，内容的排布不跟着变。
-   */
-  const rows =
-    opts.gridRows === undefined
-      ? allRows
-      : Math.max(0, Math.min(allRows, Math.floor(opts.gridRows)));
-  if (rows === 0) return [];
-
-  const byColumn = Math.floor((opts.colW - L.cardGap * (columns - 1)) / columns);
-  const w = Math.max(opts.minW, byColumn);
-
-  /**
-   * 每行的实际张数：`count` 张按行优先摊到 `rows` 行上，
-   * **最后一行可能不满**（7 张 5 列 2 行 → 5 + 2）。
-   */
-  const base = Math.floor(count / allRows);
-  const extra = count % allRows;
-
-  const out: Rect[] = [];
-  for (let row = 0; row < rows; row += 1) {
-    const inRow = base + (row < extra ? 1 : 0);
-    if (inRow === 0) continue;
-    const totalW = inRow * w + L.cardGap * (inRow - 1);
-    const x0 = L.pad + Math.round((opts.colW - totalW) / 2);
-    for (let col = 0; col < inRow; col += 1) {
-      out.push({
-        x: x0 + col * (w + L.cardGap),
-        y: topY + row * (opts.h + L.cardGap),
-        w,
-        h: opts.h,
-      });
-    }
-  }
-  return out;
-}
-
-/** 某个槽位在默认列数下会摊成几行。 */
-export function cardRowsOf(count: number, columns: number): number {
-  if (count <= 0) return 0;
-  return Math.ceil(count / Math.max(1, Math.min(columns, count)));
-}
-
-/**
- * 某个槽位整块（含折行）的**内容**高度（**不裁剪**）。
- *
- * ⚠️ 它回答的是"这些卡摊开来有多高"（滚动条要用它算滑块比例）；而
- * **画面上占多高**由 `sectionBlockH`（= min(内容, 视口)）回答。
- * 两者混用会让"内容比视口高"这件事在几何里消失。
- */
-export function cardBlockH(count: number, columns: number, cardH: number, L: PrepareLayout): number {
-  const rows = cardRowsOf(count, columns);
-  if (rows === 0) return 0;
-  return rows * cardH + (rows - 1) * L.cardGap;
-}
-
-/* ------------------------------------------------------------------ *
- * 滚动视口（三块共用同一套，见 prepareLayout 的 `visibleRows`）
- * ------------------------------------------------------------------ */
-
-/**
- * **一块的卡片区现在滚到哪**（逻辑像素，`0` = 顶部）。
- *
- * ⚠️ 这是"滚动状态"的类型（三块各一份），不是几何。它由 `PrepareScreen`
- * 持有（唯一可写者），几何 / 命中 / 渲染都只**读**它。
- */
-export interface SectionScroll {
-  readonly player: number;
-  readonly qiji: number;
-  readonly boss: number;
-}
-
-/** 没滚过的那一份（构造 / 换块 / 复位时用）。 */
-export const NO_SCROLL: SectionScroll = { player: 0, qiji: 0, boss: 0 };
-
-/** 一块的一行占多高（卡片高 + 行距）—— 视口 / 滚动条都用它。 */
-export function sectionRowStep(kind: PrepareSectionKind, L: PrepareLayout = PREPARE_LAYOUT): number {
-  return cardHOf(kind, L) + L.cardGap;
-}
-
-/**
- * 可滚视口的**高度**（逻辑像素）。
- *
- * ```
- *   视口高 = L.visibleRows × 卡片高 + (L.visibleRows − 1) × 行距
- * ```
- *
- * ⚠️ 它与张数**无关**（见 `PrepareLayout.visibleRows`）：张数只决定
- * "内容多高 / 要不要滚"，不决定"视口多高"。反过来说，"开始战斗"的 y
- * 也不会跟着张数跳。
- */
-export function sectionViewportH(
-  kind: PrepareSectionKind,
-  L: PrepareLayout = PREPARE_LAYOUT,
-): number {
-  const rows = sectionVisibleRows(kind, L);
-  return rows * cardHOf(kind, L) + (rows - 1) * L.cardGap;
-}
-
-/**
- * 这一块一屏放**几行**。
- *
- * ⚠️ 它是 `sectionViewportH`（视口多高）与 `sectionViewportRows`（看得见
- * 哪几行）**唯一**的行数来源：两份各算一遍就会漂（第一版正是如此 ——
- * 一个按像素除法算、一个按布局表算，差 1 行，第二行卡片凭空消失）。
- */
-export function sectionVisibleRows(
-  kind: PrepareSectionKind,
-  L: PrepareLayout = PREPARE_LAYOUT,
-): number {
-  /** ⚠️ 它今天三块同值；按块给是为了"以后某一块想多放一行"不必改签名。 */
-  void kind;
-  return Math.max(1, Math.floor(L.visibleRows));
-}
-
-/**
- * 这一块的内容**摊开来**有多高（不裁剪）—— 滚动条滑块比例的输入。
- *
- * ⚠️ 名字里的 `Stack` 是"全部卡片一层层摞起来"的意思：它**不是**画面
- * 上占的高度（那是 `sectionBlockH`）。两者混用会让"内容比视口高"这件事
- * 在几何里消失。
- */
-export function sectionStackH(
-  kind: PrepareSectionKind,
-  counts: PrepareCounts,
-  L: PrepareLayout = PREPARE_LAYOUT,
-): number {
-  const count = countOf(kind, counts);
-  if (count <= 0) return 0;
-  return cardBlockH(count, columnsOf(kind, L), cardHOf(kind, L), L);
-}
-
-/** 这一块**能滚多远**（0 = 不用滚）。 */
-export function sectionMaxScroll(
-  kind: PrepareSectionKind,
-  counts: PrepareCounts,
-  L: PrepareLayout = PREPARE_LAYOUT,
-): number {
-  /**
-   * ⚠️ 用 `pixelViewport`（**像素**那一套）而不是 `clampOffset`（行那一套）：
-   * 后者的第二个参数是"一个单位几个一行"，而这里两个参数都是像素 ——
-   * 混用会让上限差 1（`clampOffset(offset, max, 1)` 算出的上界是
-   * `max − 1`，第一版正是如此：滚到底时差 1 像素，看起来像"最后一行
-   * 差一点点才露全"）。
-   */
-  return pixelViewport(sectionStackH(kind, counts, L), sectionViewportH(kind, L), 0).maxPx;
-}
-
-/**
- * 这一块此刻的视口（内容高 / 视口高 / 钳过的偏移 / 还能滚多少）。
- *
- * ⚠️ 偏移**在这里钳**（而不是让每个消费者自己钳）：滚轮 / 拖拽 / 光标
- * 跟随三条路都会改它，钳在几何一处，三条路就不可能各自越界。
- */
-export function sectionViewport(
-  kind: PrepareSectionKind,
-  counts: PrepareCounts,
-  scroll: SectionScroll = NO_SCROLL,
-  L: PrepareLayout = PREPARE_LAYOUT,
-): ReturnType<typeof pixelViewport> {
-  return pixelViewport(sectionStackH(kind, counts, L), sectionViewportH(kind, L), scroll[kind]);
-}
-
-/**
- * **这一块现在该显示哪几行**（`first` = 第一行的下标）。
- *
- * ⚠️ 行数 / 视口行数 / 第一行三件事都由 `scrollWindow.steppedViewport`
- * 算 —— 与复盘 / 设置页技能详情是**同一份边界规则**（滚到尽头、
- * 内容不足一屏、空内容）。
- */
-export function sectionViewportRows(
-  kind: PrepareSectionKind,
-  counts: PrepareCounts,
-  scroll: SectionScroll = NO_SCROLL,
-  L: PrepareLayout = PREPARE_LAYOUT,
-): ReturnType<typeof steppedViewport> {
-  const count = countOf(kind, counts);
-  return steppedViewport(
-    cardRowsOf(count, columnsOf(kind, L)),
-    sectionVisibleRows(kind, L),
-    scroll[kind],
-    sectionRowStep(kind, L),
-  );
-}
+export {
+  NO_SCROLL,
+  cardBlockH,
+  sectionColumns,
+  sectionMetrics,
+  cardGrid,
+  cardRowsOf,
+  countOf,
+  sectionMaxScroll,
+  sectionRowStep,
+  sectionScrollbar,
+  sectionStackH,
+  sectionViewport,
+  sectionViewportH,
+  sectionViewportRows,
+  sectionVisibleRows,
+  type Rect,
+  type SectionScroll,
+} from './prepareCardGrid';
 
 /* ------------------------------------------------------------------ *
  * 手风琴：三块的纵向链
@@ -600,14 +361,15 @@ export function prepareHitAreas(
     }
     const windows = sectionViewportRows(kind, counts, scroll, L);
     /** 只算**可见那几行**的矩形（`gridRows` 裁剪行数，不重排内容）。 */
+    const m = sectionMetrics(kind, L);
     const rects = cardGrid(list.length, top, L, {
-      colW: colWOf(kind, L),
-      columns: columnsOf(kind, L),
-      h: cardHOf(kind, L),
-      minW: cardMinWOf(kind, L),
+      colW: m.colW,
+      columns: m.columns,
+      h: m.cardH,
+      minW: m.minW,
       gridRows: windows.first + windows.rows,
     });
-    const card = Math.max(1, Math.min(columnsOf(kind, L), list.length));
+    const card = Math.max(1, Math.min(m.columns, list.length));
     const viewH = sectionViewportH(kind, L);
     const step = sectionRowStep(kind, L);
     /**
@@ -633,47 +395,6 @@ export function prepareHitAreas(
   }
   out.push({ kind: 'start', id: 'start', ...startRect(counts, L) });
   return out;
-}
-
-/**
- * 一块的**滚动条**（轨道 + 滑块）该画在哪 — 渲染层只读它。
- *
- * ⚠️ 它从**卡片列的最右侧**那条 `scrollGutter` 里取（`layout.scrollGutter`）：
- * 压在卡片上就与卡片描边叠在一起，"哪一条是滚动条"会看不出来。
- *
- * ⚠️ 只有真能滚时才有意义（`maxPx > 0`）；调用方据此决定画不画 ——
- * "滑块的**出现**"就是"这一块还有内容在下面"的信号。
- *
- * ⚠️ 与 `prepareHitAreas` / 渲染层取**同一个** `rowTopsOf(counts, expanded)`：
- * 轨道必须贴在"这一块现在画在哪儿"上，而不是"它展开时会画在哪儿"。
- */
-export function sectionScrollbar(
-  kind: PrepareSectionKind,
-  counts: PrepareCounts,
-  scroll: SectionScroll = NO_SCROLL,
-  expanded: PrepareSectionKind = 'player',
-  L: PrepareLayout = PREPARE_LAYOUT,
-): {
-  readonly trackX: number;
-  readonly trackTop: number;
-  readonly trackW: number;
-  readonly trackH: number;
-  /** 滑块高（内容不足一屏时 = 轨道高）。 */
-  readonly thumbH: number;
-  /** 滑块顶边。 */
-  readonly thumbTop: number;
-  /** 还能滚多远（0 = 不用滚）。 */
-  readonly maxPx: number;
-} {
-  const view = sectionViewport(kind, counts, scroll, L);
-  const trackX = L.pad + colWOf(kind, L) - 3;
-  const trackTop = rowTopsOf(counts, expanded, L)[kind];
-  const trackH = Math.max(0, view.viewPx);
-  const thumbRatio = scrollThumbRatio(view.countPx, view.viewPx);
-  const thumbH = Math.max(24, Math.round(thumbRatio * trackH));
-  const progress = view.maxPx === 0 ? 0 : view.offsetPx / view.maxPx;
-  const thumbTop = trackTop + Math.round((trackH - thumbH) * progress);
-  return { trackX, trackTop, trackW: 3, trackH, thumbH, thumbTop, maxPx: view.maxPx };
 }
 
 /** 详情区矩形（渲染层只读它，不再自己写数字）。 */

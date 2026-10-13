@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { prepareHintOf } from '../../src/ui/prepareFooter';
 import { zhCN } from '../../src/i18n/locales/zh-CN';
 import { createTranslator } from '../../src/i18n/translator';
+import type { LocaleId, TranslateFn } from '../../src/i18n/translator';
 
 /**
  * ==================================================================
@@ -23,10 +24,26 @@ import { createTranslator } from '../../src/i18n/translator';
  * 了"改键不该改文案"那条结构。
  */
 /**
- * ⚠️ 取词函数取 `translator.t`（`createTranslator` 返回的是一个**对象**：
- * `t` / `number` / `percent` / `plural`）—— 与 `i18n.test.ts` 同一条。
+ * 这一屏的取词函数（`TranslateFn`）。
+ *
+ * ⚠️ 两个形状**不一样**，所以这里写一个**有名字的适配器**（AGENTS.md §1：
+ * 不许用 `as unknown as` 把类型问题按下去）：
+ *
+ * ```
+ *   TranslateFn.key    = string          ← 这一屏的形状（屏幕不认识语言包）
+ *   translator.t.key   = MessageKey      ← 语言包的形状（拼错 key 编译期就报）
+ * ```
+ *
+ * ⚠️ 收窄那一下与 `app/translate.ts` 的 `translateSafe` 是**同一处**写法
+ * （仓库既有先例，见那个函数的说明）：把 `string` 交给语言包，代价是
+ * "拼错的 key 只有运行时才发现" —— 而那是生产路径本来就接受的口径。
  */
-const t = createTranslator('zh-CN').t;
+function translateFnOf(locale: LocaleId): TranslateFn {
+  const { t } = createTranslator(locale);
+  return (key, params) => t(key as Parameters<typeof t>[0], params);
+}
+
+const t = translateFnOf('zh-CN');
 
 describe('键盘那一句：跟着 Tab 的改动更新', () => {
   const text = prepareHintOf(t, { developing: false, showKeyHints: true });
