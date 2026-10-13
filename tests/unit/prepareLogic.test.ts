@@ -5,8 +5,13 @@ import {
   cursorFromSelection,
   cursorTarget,
   cycleCursor,
+  expandSection,
+  focusTarget,
+  hitTestPrepare,
+  initialSelection,
   moveFocus,
   pickOption,
+  pickQiji,
   prepareHitAreas,
   type PrepareOption,
   type PrepareSelection,
@@ -46,6 +51,12 @@ const sel = (over: Partial<PrepareSelection> = {}): PrepareSelection => {
     playerId: 'player',
     bossId: 'meiichiro',
     focus: 'player',
+    /**
+     * ⚠️ 手风琴：**焦点在哪一块，就展开哪一块**（见 `prepareLogic.withFocus`）。
+     * 造状态时若显式换了 `focus`，展开块要跟着它 —— 否则造出"焦点在一处、
+     * 展开的是另一处"这种正常操作到不了的状态。
+     */
+    expanded: over.focus === 'qiji' || over.focus === 'boss' ? over.focus : 'player',
     cursor: { playerId: 'player', bossId: 'meiichiro', qijiId: '' },
     ...over,
   };
@@ -53,9 +64,20 @@ const sel = (over: Partial<PrepareSelection> = {}): PrepareSelection => {
 };
 
 describe('命中区域：渲染与点击共用同一份几何', () => {
-  it('人物 / 对手 / 开始各一块，顺序固定', () => {
+  it('展开的块给卡片、收起的块给「块头」，顺序固定（人物在前）', () => {
+    /**
+     * ⚠️ 手风琴：不传 `expanded` 时默认展开**人物**那一块 —— 于是对手那一块
+     * 只剩一条「块头」（`kind: 'summary'`，`id` = 槽位名）。点它 = 展开它，
+     * 而不是选它（见 `prepareLogic.expandSection`）。
+     */
     const areas = prepareHitAreas(players, bosses);
-    expect(areas.map((a) => a.kind)).toEqual(['player', 'boss', 'start']);
+    expect(areas.map((a) => a.kind)).toEqual(['player', 'summary', 'start']);
+    expect(areas.map((a) => a.id)).toEqual(['player', 'boss', 'start']);
+  });
+
+  it('展开对手那一块时，卡片是它的、人物那一块只剩块头', () => {
+    const areas = prepareHitAreas(players, bosses, [], 'boss');
+    expect(areas.map((a) => a.kind)).toEqual(['summary', 'boss', 'start']);
     expect(areas.map((a) => a.id)).toEqual(['player', 'meiichiro', 'start']);
   });
 
@@ -80,11 +102,13 @@ describe('命中区域：渲染与点击共用同一份几何', () => {
     }
   });
 
-  it('开始键在卡片下方（不重叠）', () => {
-    const areas = prepareHitAreas(players, bosses);
-    const boss = areas.find((a) => a.kind === 'boss');
+  it('开始键在三块下方（不重叠）', () => {
+    /** ⚠️ 最高的一种展开方式是"对手展开"（两张卡 → 2 行）→ 拿它当上界。 */
+    const areas = prepareHitAreas(players, bosses, [], 'boss');
+    const blocks = areas.filter((a) => a.kind !== 'start');
+    const bottom = Math.max(...blocks.map((a) => a.y + a.h));
     const start = areas.find((a) => a.kind === 'start');
-    expect(start?.y).toBeGreaterThan((boss?.y ?? 0) + (boss?.h ?? 0));
+    expect(start?.y).toBeGreaterThan(bottom);
   });
 });
 
@@ -404,5 +428,96 @@ describe('能不能开战：开发中的单位灰掉且**不能开战**', () => 
      * 所以她还灰着（见 `data/roster.ts` 的 `DEVELOPING`）。
      */
     expect(canStartBattle(sel({ playerId: 'daixuan', focus: 'start' }), real)).toBe(false);
+  });
+});
+
+
+/**
+ * ==================================================================
+ * 手风琴：同一时间只展开一块（用户 2026-10-13 第四条）
+ * ==================================================================
+ *
+ * 用户原话："同一时间只展开暂时 3 个选择中的一个，其他的收起来，
+ * 只展示当前选择"。
+ *
+ * ⚠️ 规则只有一条：**焦点在哪一块，就展开哪一块**；焦点走到「开始战斗」
+ * 上时展开块**不动**（否则三块会全收起来，玩家看不见卡片）。这里把这条
+ * 规则连同"点块头 = 只展开、不改选择"一起钉住。
+ */
+describe('手风琴：焦点决定展开哪一块', () => {
+  const three = {
+    players: [{ id: 'player' }, { id: 'kaili' }],
+    bosses: [{ id: 'meiichiro' }],
+    qiji: [{ id: 'vitality' }],
+  };
+
+  it('进场时人物那一块是展开的', () => {
+    expect(initialSelection({ playerId: 'player', bossId: 'meiichiro' }).expanded).toBe('player');
+  });
+
+  it('↓ 依次经过 炁机 → 对手，每一步都跟着换展开块', () => {
+    let sel = initialSelection({ playerId: 'player', bossId: 'meiichiro' }, three.qiji);
+    sel = moveFocus(sel, 1, three);
+    expect(sel.focus).toBe('qiji');
+    expect(sel.expanded).toBe('qiji');
+    sel = moveFocus(sel, 1, three);
+    expect(sel.focus).toBe('boss');
+    expect(sel.expanded).toBe('boss');
+  });
+
+  it('⚠️ 焦点走到「开始战斗」上时，**上一块仍然展开**（不能全收起来）', () => {
+    let sel = initialSelection({ playerId: 'player', bossId: 'meiichiro' }, three.qiji);
+    sel = moveFocus(sel, 1, three);
+    sel = moveFocus(sel, 1, three);
+    sel = moveFocus(sel, 1, three);
+    expect(sel.focus).toBe('start');
+    expect(sel.expanded).toBe('boss');
+  });
+
+  it('移到边界停住时展开块也不乱动', () => {
+    const sel = initialSelection({ playerId: 'player', bossId: 'meiichiro' }, three.qiji);
+    expect(moveFocus(sel, -1, three)).toEqual(sel);
+  });
+
+  it('`focusSlot` / 点卡片 / 点炁机卡都会把展开块带过去', () => {
+    const start = initialSelection({ playerId: 'player', bossId: 'meiichiro' }, three.qiji);
+    expect(focusTarget(start, 'qiji', three).expanded).toBe('qiji');
+    expect(pickOption(start, three.players, three.bosses, 'boss', 'meiichiro').expanded).toBe('boss');
+    expect(pickQiji(start, three.qiji, 'vitality').expanded).toBe('qiji');
+  });
+
+  it('光标在同一块里移动**不改**展开块（← → 不该重排整屏）', () => {
+    const sel = { ...initialSelection({ playerId: 'player', bossId: 'meiichiro' }, three.qiji) };
+    const moved = cycleCursor(sel, three.players, three.bosses, 1, three.qiji);
+    expect(moved.cursor.playerId).toBe('kaili');
+    expect(moved.expanded).toBe('player');
+  });
+
+  it('⚠️ `expandSection` = **只换焦点**（点收起那块的头，不该改选择）', () => {
+    const sel = initialSelection({ playerId: 'player', bossId: 'meiichiro' }, three.qiji);
+    const next = expandSection(sel, 'qiji');
+    expect(next.expanded).toBe('qiji');
+    expect(next.focus).toBe('qiji');
+    /** ⚠️ 已确定的人物 / 对手一个都没变。 */
+    expect(next.playerId).toBe(sel.playerId);
+    expect(next.bossId).toBe(sel.bossId);
+  });
+
+  it('【关键】收起的那一块**只有块头**能被点中（卡片点不到）', () => {
+    const areas = prepareHitAreas(three.players, three.bosses, three.qiji, 'player');
+    const bossSummary = areas.find((a) => a.kind === 'summary' && a.id === 'boss');
+    expect(bossSummary).toBeDefined();
+    /** 点块头正中间 → 命中「块头」（调用方据此展开，而不是选 Boss）。 */
+    const hit = hitTestPrepare(
+      bossSummary!.x + bossSummary!.w / 2,
+      bossSummary!.y + bossSummary!.h / 2,
+      three.players,
+      three.bosses,
+      three.qiji,
+      'player',
+    );
+    expect(hit).toEqual({ kind: 'summary', id: 'boss' });
+    /** 而对手的卡片**不在**命中区里（收起时它没被画出来）。 */
+    expect(areas.some((a) => a.kind === 'boss')).toBe(false);
   });
 });

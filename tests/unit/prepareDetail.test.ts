@@ -72,11 +72,14 @@ describe('内容按类切换，且只取真数据', () => {
     const m = detailModelOf({ kind: 'player', id: 'player' }, ctx);
     expect(m?.kind).toBe('player');
     expect(m?.titleKey).toBe('roster.linWanfeng.name');
+    /**
+     * ⚠️ 顶部那一行**没有 `dim`**：它从"次要小字"升成"关键数值"（用户：
+     * "血量要显眼"）—— 渲染层用亮色 + 加粗画它，见 `prepareDetailPanel`。
+     */
     expect(m?.subtitle).toEqual({
       kind: 'text',
       key: 'roster.ui.detail.hpMax',
       params: { hp: 150 },
-      dim: true,
     });
     /** 头像只有人物 / Boss 会用到的那份配对 id。 */
     expect(m?.portraitId).toBe('player');
@@ -109,20 +112,23 @@ describe('内容按类切换，且只取真数据', () => {
     const m = detailModelOf({ kind: 'qiji', id: 'vitality' }, ctx);
     expect(m?.kind).toBe('qiji');
     expect(m?.titleKey).toBe('qiji.vitality.name');
-    expect(m?.rows[0]).toEqual({ kind: 'text', key: 'roster.ui.detail.qijiOn' });
-    expect(m?.rows[1]).toEqual({
+    /**
+     * ⚠️ 开关 / 层数**挪到了顶部那一行**（`subtitle`）—— 三类顶栏结构一致，
+     * 正文只剩"这一条炁机是干什么的"（说明那一行）。
+     */
+    expect(m?.subtitle).toEqual({
       kind: 'text',
       key: 'roster.ui.detail.qijiStacks',
       params: { stacks: 2, cap: 3 },
-      dim: true,
     });
-    expect(m?.rows[2]?.kind).toBe('skill');
+    expect(m?.rows[0]?.kind).toBe('skill');
   });
 
-  it('没开过的炁机显示"未激活"；`maxStacks` 缺省（=1）用"单层生效"', () => {
+  it('没开过的炁机在顶栏显示"未激活"', () => {
     const m = detailModelOf({ kind: 'qiji', id: 'jieShengJi' }, ctx);
-    expect(m?.rows[0]).toEqual({ kind: 'text', key: 'roster.ui.detail.qijiOff' });
-    expect(m?.rows[1]).toEqual({ kind: 'text', key: 'roster.ui.detail.qijiSingle', dim: true });
+    expect(m?.subtitle).toEqual({ kind: 'text', key: 'roster.ui.detail.qijiOff' });
+    /** 正文只有说明那一行（开关态已经在顶栏了，不重复）。 */
+    expect(m?.rows.map((r) => r.kind)).toEqual(['skill']);
   });
 
   it('不认识的 id → `undefined`（不编一份空详情）', () => {

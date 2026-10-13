@@ -26,6 +26,9 @@
  */
 
 import { cardSkin, qijiSkin, type CardSkin, type QijiSkin } from './prepareRender';
+import type { PrepareHitArea } from './prepareLayout';
+import type { PrepareTarget } from './prepareLogic';
+import type { PrepareSectionKind } from './prepareTypes';
 
 /** 一张卡要画成什么样（**位置除外** —— 位置来自命中区，见 `prepareCards.drawAll`）。 */
 export interface CardAppearance {
@@ -80,6 +83,82 @@ export function cardAppearance(input: CardAppearanceInput): CardAppearance {
     selected: input.selected,
   });
   return { ...skin, badge: false, showPortrait: input.kind === 'player' };
+}
+
+/* ------------------------------------------------------------------ *
+ * 一帧里要画的所有卡（状态 → 一组"画在哪、画成什么样"）
+ * ------------------------------------------------------------------ */
+
+/** 一张卡这一帧的完整画法：**位置 + 名字 + 皮肤**（渲染层照着画）。 */
+export interface CardDraw extends CardAppearance {
+  readonly kind: PrepareSectionKind;
+  readonly id: string;
+  /** **已本地化**的名字。 */
+  readonly name: string;
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+}
+
+export interface CardDrawsArgs {
+  /**
+   * 这一帧的可点区域（`prepareLayout.prepareHitAreas` 的产物）。
+   *
+   * ⚠️ **位置只从这里来**：于是"看到的卡片"与"点中的卡片"结构上是同一个
+   * 矩形。手风琴之后它只含**展开那一块**的卡（收起的两块只有块头），
+   * 所以"看不见的卡片"根本不在这一份里 —— 不会点中幽灵卡。
+   */
+  readonly areas: readonly PrepareHitArea[];
+  /** 取某个选项**已本地化**的名字。 */
+  readonly nameOf: (kind: PrepareSectionKind, id: string) => string;
+  /** 光标此刻指着的那一项（`undefined` = 不在任何卡片上）。 */
+  readonly cursor: PrepareTarget | undefined;
+  /** **已确定**的选择。 */
+  readonly selection: { readonly playerId: string; readonly bossId: string };
+  /** 某条炁机已叠层数（0 = 没开）。 */
+  readonly stacks: (id: string) => number;
+  /** 这个 id 是不是"开发中"。 */
+  readonly developing: (id: string) => boolean;
+}
+
+/**
+ * 把"这一帧要画的每一张卡"算出来（纯函数，不碰 Pixi）。
+ *
+ * ⚠️ 它替代了旧版 `PrepareScreen.draw()` 里那段 `areas.map(...)`：那段
+ * 内联在装配类里，**只能靠截图看对不对**；抽出来之后可以在 node 里断言
+ * "光标在 A、选择在 B 时两张卡各是什么皮肤"（`prepareRender` 那套规则的
+ * 第一个消费者）。
+ *
+ * ⚠️ `'start'` 与 `'summary'` 两种区域**不是卡**，直接跳过
+ * （`PrepareHitArea.kind` 的收窄在这里一次做完，别处不用再判）。
+ */
+export function cardDrawsOf(args: CardDrawsArgs): readonly CardDraw[] {
+  const out: CardDraw[] = [];
+  for (const area of args.areas) {
+    if (area.kind === 'start' || area.kind === 'summary') continue;
+    const kind = area.kind;
+    const appearance = cardAppearance({
+      kind,
+      cursored: args.cursor !== undefined && args.cursor.kind === kind && args.cursor.id === area.id,
+      selected:
+        (kind === 'player' && area.id === args.selection.playerId) ||
+        (kind === 'boss' && area.id === args.selection.bossId),
+      developing: args.developing(area.id),
+      stacks: kind === 'qiji' ? args.stacks(area.id) : 0,
+    });
+    out.push({
+      ...appearance,
+      kind,
+      id: area.id,
+      name: args.nameOf(kind, area.id),
+      x: area.x,
+      y: area.y,
+      w: area.w,
+      h: area.h,
+    });
+  }
+  return out;
 }
 
 /**

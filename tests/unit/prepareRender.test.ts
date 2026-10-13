@@ -7,6 +7,8 @@ import {
   startSkin,
 } from '../../src/ui/prepareRender';
 import { PALETTE } from '../../src/render/theme';
+import { cardDrawsOf } from '../../src/ui/prepareCardState';
+import { prepareHitAreas } from '../../src/ui/prepareGeometry';
 
 /**
  * **备战界面的外观规则**（纯函数）。
@@ -173,5 +175,79 @@ describe('开始键皮肤：它没有"选中"态', () => {
 
   it('常态描边用金色（开始键是可点的主动作），与卡片的"已选中"是同一个色语言', () => {
     expect(ready.strokeColor).toBe(PREPARE_SKIN.selectionLine);
+  });
+});
+
+
+/**
+ * ==================================================================
+ * 一帧要画的每一张卡（`cardDrawsOf`）
+ * ==================================================================
+ *
+ * 它替代了旧版 `PrepareScreen.draw()` 里那段内联 `areas.map(...)`：那段
+ * 只能靠截图看对不对。抽成纯函数之后，"光标在 A、选择在 B 时各张卡是什么
+ * 皮肤"可以在 node 里断言 —— 而手风琴又让"这一帧画哪几张"变成**子集**
+ * （收起的那两块不画卡），所以这里同时钉住"跳过非卡片区域"。
+ */
+describe('一帧要画的卡：状态 → 每张卡的画法', () => {
+  const players = [{ id: 'player', nameKey: 'p0' }, { id: 'kaili', nameKey: 'p1' }];
+  const bosses = [{ id: 'meiichiro', nameKey: 'b0' }];
+  const qiji = [{ id: 'vitality', nameKey: 'q0' }];
+  const areas = prepareHitAreas(players, bosses, qiji, 'player');
+  const base = {
+    areas,
+    nameOf: (_kind: 'player' | 'qiji' | 'boss', id: string) => `名-${id}`,
+    selection: { playerId: 'player', bossId: 'meiichiro' },
+    stacks: () => 0,
+    developing: () => false,
+  };
+
+  it('只画展开那一块的卡（`start` / `summary` 不是卡，被跳过）', () => {
+    const draws = cardDrawsOf({ ...base, cursor: undefined });
+    expect(draws.map((d) => d.id)).toEqual(['player', 'kaili']);
+    expect(draws.every((d) => d.kind === 'player')).toBe(true);
+  });
+
+  it('位置与命中区**逐字相同**（看到的卡 = 点中的卡）', () => {
+    const draws = cardDrawsOf({ ...base, cursor: undefined });
+    const first = areas.find((a) => a.id === 'player')!;
+    expect(draws[0]).toMatchObject({ x: first.x, y: first.y, w: first.w, h: first.h });
+  });
+
+  it('名字由 `nameOf` 给（三块各自一张表，渲染层不自己查）', () => {
+    const draws = cardDrawsOf({ ...base, cursor: undefined });
+    expect(draws.map((d) => d.name)).toEqual(['名-player', '名-kaili']);
+  });
+
+  it('【关键】光标那张与选中那张拿到**不同**的皮肤（两者可分离）', () => {
+    /** 光标在第二张（凯丽）、选择还是第一张（林晚风）。 */
+    const draws = cardDrawsOf({ ...base, cursor: { kind: 'player', id: 'kaili' } });
+    const [selected, cursored] = draws;
+    expect(cursored!.strokeColor).toBe(PREPARE_SKIN.cursorLine);
+    expect(selected!.strokeColor).toBe(PREPARE_SKIN.selectionLine);
+    expect(cursored!.strokeColor).not.toBe(selected!.strokeColor);
+  });
+
+  it('炁机卡：叠了 2 层才画角标；人物卡永远不画', () => {
+    const withQiji = prepareHitAreas(players, bosses, qiji, 'qiji');
+    const draws = cardDrawsOf({
+      ...base,
+      areas: withQiji,
+      cursor: undefined,
+      stacks: (id) => (id === 'vitality' ? 2 : 0),
+    });
+    expect(draws).toHaveLength(1);
+    expect(draws[0]).toMatchObject({ kind: 'qiji', id: 'vitality', badge: true, showPortrait: false });
+  });
+
+  it('人物卡带头像、Boss 卡不带（素材表里只有人物有脸）', () => {
+    const draws = cardDrawsOf({ ...base, cursor: undefined });
+    expect(draws[0]!.showPortrait).toBe(true);
+    const bossDraws = cardDrawsOf({
+      ...base,
+      areas: prepareHitAreas(players, bosses, qiji, 'boss'),
+      cursor: undefined,
+    });
+    expect(bossDraws[0]).toMatchObject({ kind: 'boss', showPortrait: false });
   });
 });

@@ -136,6 +136,13 @@ const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
   /** 色欲的眩晕与印记（不登记就会显示中性兜底「？」）。 */
   'lust-stun': 'buffShort.stunned',
   'lust-mark': 'buffShort.lustMark',
+  /**
+   * 蓄势（「避实击虚」用出「避」之后挂的那一层）。
+   *
+   * ⚠️ **必须登记** —— 它是**会画出来**的 buff（`hidden` 不为真），
+   * 漏了图标上就是一个「？」，而 `viewHelpers.test.ts` 的覆盖率断言会红。
+   */
+  'dodge-charge': 'buffShort.dodgeCharge',
 };
 
 /**

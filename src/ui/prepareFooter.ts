@@ -5,8 +5,8 @@
  * 它是什么（一句话，没有"和"）
  * ==================================================================
  *
- * 它是屏幕**下半部分那一条**的画法：一颗居中的「开始战斗」、它下面一行
- * 随状态变化的提示、以及贴底边的素材声明。
+ * 它是屏幕**下半部分那一条**的画法：一颗「开始战斗」、它下面一行随状态
+ * 变化的提示、以及贴底边的素材声明。
  *
  * ==================================================================
  * 为什么单独一个文件（AGENTS.md §3 的关注分离）
@@ -22,6 +22,27 @@
  * | `PrepareScreen` | 光标与选择怎么走 |
  *
  * ==================================================================
+ * ⚠️⚠️ 2026-10-13：**「开始战斗」四个字与它的按钮错位** —— 修在这里
+ * ==================================================================
+ *
+ * 用户原话："开始战斗和按钮错位了"。
+ *
+ * 量出来的原因（不是猜的）：按钮**矩形**由布局表算出来
+ * （`startRect()`：`pad + (playerColW - startW)/2` = **280**，中心 **328**），
+ * 而按钮上的**文字**画在 `LOGICAL.width / 2` = **480** —— 差 **152px**。
+ * 于是画面上是"一颗空按钮 + 一串飘在它右边 150px 的字"。
+ *
+ * ⚠️ 根因不是"数字写错了"，而是**同一个东西有两个出处**：矩形来自
+ * `prepareLayout`（命中测试读它），文字的位置在这里又算了一遍。所以修法
+ * 是**让文字从矩形推**（`start.x + start.w / 2`），而不是把 480 改成 328
+ * —— 后者下次布局一动手又会漂。
+ *
+ * ⚠️ 同理，下面那行**操作提示**也居中到按钮的中心（它读起来就是按钮的
+ * 说明，旧版把它留在"整张画布的中心"，于是它比按钮偏右 152px）。
+ * 只有最底下的**素材声明**仍然居中于整张画布 —— 那是全屏的版权标示，
+ * 不属于按钮。
+ *
+ * ==================================================================
  * ⚠️ 提示行承担一个**反馈职责**
  * ==================================================================
  *
@@ -34,13 +55,21 @@ import type { Container, Graphics } from 'pixi.js';
 import { FONT, LOGICAL } from './layout';
 import { Label, type PixiCtor } from './primitives';
 import { PALETTE } from '../render/theme';
-import { PREPARE_LAYOUT } from './prepareLayout';
+import type { PrepareCounts } from './prepareLayout';
+import { startCenterX, startRect } from './prepareGeometry';
 import { CARD_RADIUS, PREPARE_SKIN, startSkin } from './prepareRender';
 import type { TranslateFn } from '../i18n/translator';
 
 export interface PrepareFooterOptions {
   readonly pixi: PixiCtor;
   readonly parent: Container;
+  /**
+   * 三块的张数 —— ⚠️ 只用来算「开始战斗」的 y（见 `prepareLayout.startRect`）。
+   *
+   * ⚠️ 它是**构造参数**：按钮的位置在造对象时就要定（文字要摆在按钮中心），
+   * 而张数在运行期不变（名单是静态的）—— 传进来比"每帧重算一遍位置"干净。
+   */
+  readonly counts: PrepareCounts;
   /**
    * 取词函数。
    *
@@ -56,33 +85,47 @@ export class PrepareFooter {
   private readonly startLabel: Label;
   private readonly hint: Label;
   private readonly notice: Label;
+  /**
+   * 「开始战斗」的矩形（**唯一出处**：命中测试也读 `prepareLayout.startRect`）。
+   *
+   * ⚠️ 文字 / 提示的 x **全部从它推**（`rect.x + rect.w / 2`）—— 这是
+   * "错位"那个 bug 的结构性修法，见文件头。
+   */
+  private readonly start: ReturnType<typeof startRect>;
 
   constructor(private readonly options: PrepareFooterOptions) {
     const { pixi, parent } = options;
     this.gfx = new pixi.Graphics();
+    this.start = startRect(options.counts);
+    /**
+     * ⚠️ 中心由 `startCenterX` 给（= 矩形中心，**不是** `LOGICAL.width / 2`）
+     * —— 见文件头：这一条就是"错位"那个 bug 的修法，而且是**可单测**的
+     * （`tests/unit/prepareLayout.test.ts` 断言"文字中心 = 矩形中心"）。
+     */
+    const centerX = startCenterX(options.counts);
 
     this.startLabel = new Label(pixi, {
-      x: LOGICAL.width / 2,
-      y: PREPARE_LAYOUT.startY + PREPARE_LAYOUT.startH / 2,
+      x: centerX,
+      y: this.start.y + this.start.h / 2,
       size: FONT.body,
       color: PALETTE.text,
       anchorX: 0.5,
       anchorY: 0.5,
     });
     this.hint = new Label(pixi, {
-      x: LOGICAL.width / 2,
+      x: centerX,
       /**
-       * ⚠️ 提示行贴在**炁机块下面**（不是按钮下面 —— 按钮已经挪到炁机行
-       * 右侧了，见 `startY`）。它与素材声明之间的间距由布局测试盯着。
+       * ⚠️ 提示行贴在**按钮下面**（它读起来就是那颗按钮的说明）。
        */
-      y: PREPARE_LAYOUT.startY + PREPARE_LAYOUT.startH + 10,
+      y: this.start.y + this.start.h + 10,
       size: FONT.tiny,
       color: PALETTE.textDim,
       anchorX: 0.5,
       anchorY: 0.5,
     });
     /**
-     * 页脚声明：贴屏幕**底边**。
+     * 页脚声明：贴屏幕**底边、居中于整张画布**（它是全屏的版权标示，
+     * 不属于那颗按钮）。
      *
      * ⚠️ 它不是装饰，是**权利归属的标示**（素材取自《炎龍騎士團2》）。
      * 字号用 `FONT.small`(13) 而不是 `FONT.tiny`(11) —— 中文有 13 的
@@ -101,22 +144,6 @@ export class PrepareFooter {
   }
 
   /**
-   * 「开始战斗」的矩形（命中测试与渲染**共用** `PREPARE_LAYOUT` 的推导）。
-   *
-   * ⚠️ x 靠**卡片列右边缘**（不是水平居中）：它要躲开炁机那一行的卡片，
-   * 而"躲到哪儿"由列宽与按钮宽一起决定 —— 见 `startY` 的说明。
-   */
-  static startRect(): { readonly x: number; readonly y: number; readonly w: number; readonly h: number } {
-    const L = PREPARE_LAYOUT;
-    return {
-      x: Math.round(L.pad + (L.playerColW - L.startW) / 2),
-      y: L.startY,
-      w: L.startW,
-      h: L.startH,
-    };
-  }
-
-  /**
    * 画一帧。
    *
    * @param cursored 光标停在「开始战斗」上（只有这一种态 —— 它不是选项，
@@ -125,7 +152,7 @@ export class PrepareFooter {
    */
   draw(cursored: boolean, developing: boolean): void {
     const translate = this.options.translate;
-    const sr = PrepareFooter.startRect();
+    const sr = this.start;
     const skin = startSkin({ developing, cursored });
     this.gfx.clear();
     this.gfx

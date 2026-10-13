@@ -40,6 +40,7 @@ import { logicMs } from '../../core/loopConstants';
 import type { BuffDef, SkillDef } from '../../core/types';
 import type { SkillId } from '../../core/types/ids';
 import { C, S } from '../scale';
+import { DODGE_CHARGE } from './dodgeCharge';
 
 /**
  * 「派生窗口」：**只有这个 buff 在时，派生技能才会被激活**。
@@ -265,6 +266,16 @@ export const STRIKE: SkillDef = {
          * 不这么做的话窗口期内能反复放，派生技会完全取代基础技。
          */
         { kind: 'removeBuff', target: { mode: 'self' }, buffId: 'combo-window' },
+        /**
+         * ⚠️ **「击」也是攻击**，所以它同样要消耗「避实击虚」的蓄势。
+         *
+         * 不写这一条的话，蓄势会**穿过**一次攻击活下来（下一击再翻倍）
+         * —— 与用户说的"下一次攻击"不符。契约在 `kits/dodgeCharge.ts`
+         * 的文件头（含"为什么不能靠 `Ability: 'consume'`"）。
+         *
+         * ⚠️ 与上面那条一样，**没有那条炁机时是空操作**。
+         */
+        { kind: 'removeBuff', target: { mode: 'self' }, buffId: DODGE_CHARGE.id },
       ],
     },
   ],

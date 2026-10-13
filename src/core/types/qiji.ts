@@ -28,7 +28,7 @@ import type { BuffDef } from './buffs';
 import type { BuffId, SkillId } from './ids';
 import type { ResourceKey } from './resources';
 import type { StatKey } from './stats';
-import type { ResourceAbility } from './abilities';
+import type { GrantAbility, ResourceAbility } from './abilities';
 import type { BattleStatQuery as RunStatQuery } from '../run/query';
 
 /* ================================================================== *
@@ -229,14 +229,15 @@ export interface QijiComboWindow {
  *
  * 而用户点名的三条新炁机改的是**某一个技能的定义本身**：
  *
- *   - 「避」用出后**回复 20 缠**（一次性的资源变动，挂在"用出避"这一刻）
+ *   - 「避」用出后**挂一层蓄势**（下一次攻击伤害翻倍，用掉就消耗；
+ *     ⚠️ 第一版是"回复 20 缠"，2026-10-13 被整条换掉了）
  *   - 「凝」的**缠消耗 −20**（改的是那个技能的 `cost`）
  *   - 「凝」的**增伤变成 100%**（改的是那个 buff 的修正值）
  *
  * 这三样都**不是玩家属性**：`passiveModifiers` 加不出"某个技能便宜 20 缠"
- * （代价读的是 `SkillDef.cost`，属性管线碰不到它）；而 `ResourceAbility`
- * （引擎有消费者，`castPipeline` 付账后结算 `kind:'resource'`）只能挂在
- * **技能自己的** `abilities` 上，不在炁机里。
+ * （代价读的是 `SkillDef.cost`，属性管线碰不到它）；而 `GrantAbility` /
+ * `ResourceAbility`（引擎有消费者，`castPipeline` 在 `castFinish` 结算）
+ * 只能挂在**技能自己的** `abilities` 上，不在炁机里。
  *
  * ==================================================================
  * ⚠️ 它属于**既有模型**，不是新开的一套（判据在 AGENTS.md §2）
@@ -267,6 +268,9 @@ export interface QijiComboWindow {
  *   用户原话是"增伤**变成** 100%" —— 那是覆盖，不是 +100%。
  *   与 `passiveModifiers` 里其它来源的 `addPercent` 仍然**相加**：
  *   「凝」贡献 100，装备再给 10，玩家就是 110（符合"增伤百分比层相加"）。
+ * - `onUse`：**用出这个技能时**结算一条能力（`QijiOnUseAbility` 那两支：
+ *   `grant` / `resource`）。它挂在技能 `abilities` 的**末尾**，其余能力
+ *   （技能自己的 `grant` 等）顺序不动。
  */
 export interface QijiSkillTweak {
   /** 被改的那个技能。 */
@@ -277,17 +281,23 @@ export interface QijiSkillTweak {
     readonly delta: number;
   }[];
   /**
-   * **成功用出这个技能时**一次性给资源。
+   * **成功用出这个技能时**结算的那一条能力。
    *
-   * 形状就是引擎已经支持的 `ResourceAbility`（它挂在技能上时由
-   * `castPipeline` 在付账后结算，与 `on: 'castFinish'` 同一时刻）——
-   * 这里复用那个形状，而不是再造一个"回缠"的专属字段。
+   * 形状复用引擎已有的 `Ability`（`QijiOnUseAbility`），而不是再造一个
+   * "回缠" / "挂 buff" 的专属字段 —— 与 `comboWindow` 那边复用
+   * `BuffDef` 是同一种做法。
    *
    * ⚠️ 时点：本仓库今天的"用了 3 次"（`skillUses`）数的是**用出去**
-   * （`skillUsed` 事件），所以"回缠"跟它同一时刻 —— 见
-   * `tests/unit/qijiWiring.test.ts` 的实测。
+   * （`skillUsed` 事件），而这条能力走 `castPipeline` 的
+   * `castFinish`（`grant` 的默认时机）—— 两者对瞬发技能同一时刻。
+   *
+   * 今天内容用到的是 `grant`（「避实击虚」用出「避」→ 挂一层蓄势）。
+   * `resource` 保留，因为它是 `castPipeline` 在技能上**真的会执行**的另一支
+   * （"用出这个技能回一笔资源"那类效果）—— ⚠️ 第一版的「避实击虚」就是它
+   * （回 20 缠），2026-10-13 被整条换掉了；删掉这一支只会让下一个人
+   * 重新加回来。
    */
-  readonly onUse?: ResourceAbility;
+  readonly onUse?: QijiOnUseAbility;
   /**
    * 把某个 buff 的修正值**覆盖**成给定值（按 `stat` 匹配）。
    *
@@ -302,6 +312,33 @@ export interface QijiSkillTweak {
     }[];
   }[];
 }
+
+/**
+ * `onUse` 能写的能力 —— **只有 `castPipeline` 真的会执行的那两种**。
+ *
+ * ==================================================================
+ * 为什么是一个**两成员**的联合，而不是笼统的 `Ability`
+ * ==================================================================
+ *
+ * `castPipeline` 的 `fireCastFinishTriggers` 只认技能 `abilities` 里的
+ * 三类：`grant`、`resource`，以及 `trigger`（`onCastFinish`，且它的
+ * `then` 里又只执行 `grant` / `resource`）。其余各 kind 在**技能**上
+ * 静默无效：
+ *
+ *   - `deal`：技能的伤害走 `hits[]`（`deal` 是"某一刻打一下"的能力，
+ *     但技能表用的是 `hits` + `resolveHit`）—— 写在 `abilities` 里没人执行
+ *   - `modifier` / `derived`：那是**被动**（`passiveModifiers` / 派生表达式）
+ *     的语义，技能装配不读它们
+ *   - `grantSkill` / `consume`：设计过、**还没有执行点**（引擎侧的对账表
+ *     在 `core/content/capabilityAudit.ts`）
+ *   - `trigger`：本期没有内容需要它，所以**故意**不收（要加时连它的
+ *     `then` 白名单一起想清楚）
+ *
+ * 收成 `Ability` 会让"内容写了一条不会生效的 `onUse`"变成**静默无效**
+ * —— 正是 AGENTS.md §2 判据里最坏的一类（用了不报错、结果什么也没发生）。
+ * 收成这两支则让它在**编译期**就被拒。
+ */
+export type QijiOnUseAbility = ResourceAbility | GrantAbility;
 
 /**
  * ⚠️ **引擎尚未校验这个实体**（W8 / 注册表的对账项）。

@@ -5,30 +5,60 @@
  * 需求（本轮，用户原话）
  * ==================================================================
  *
- * > "做完这些开始做 **自由模式，选了人之后，可以激活任意个他的炁机**，
- * >  同时，**右边或者左边 切出一部分区域，显示当前选择框（hover或者
- * >  键盘）所在的人物 or 炁机 or boss 的详情**。
- * >  **选择人物的卡片可以尽量缩小一点，留一个名字** +（去 fd 资源里，
- * >  找到 索尔 凯丽 索菲亚 3 个人的**说话的头像**放在**我们3个角色名字
- * >  的右边**，高度比名字高一点点）"
+ * > "自由选择对的 layout 可以优化"
+ * > "1. 先选炁机 再选 boss"
+ * > "2. 详情页右上角是空的，名字 头像 血量啥的，优化一下布局"
+ * > "3. 开始战斗和按钮错位了，并且所有的角色 boss 选项卡 可以再小一点"
+ * > "4. 同一时间只展开暂时 3 个选择中的一个，其他的收起来，只展示当前选择"
  *
- * 三件事的落点：
+ * 四件事的落点：
  *
  * | 需求 | 落在哪 |
  * |---|---|
- * | 卡片缩小 + 名字右边加头像 | `prepareLayout`（尺寸）+ `prepareRender`（皮肤）+ 本文件的卡片循环 |
- * | 详情区（hover / 键盘驱动） | `prepareDetail`（模型）+ `PrepareDetailPanel`（画）+ 本文件的 `hover()` |
- * | 选人之后激活任意个炁机 | `prepareLogic.cycleQijiStack`（规则）+ `app/freeQijiStore`（存档与生效） |
+ * | ① 顺序：人物 → **炁机** → 对手 | `prepareLayout.SECTION_ORDER` + `rowTopsOf` 的递推顺序（**只改声明顺序**，不再手调 y） |
+ * | ② 详情区顶栏（名字 / 头像 / 血量） | `prepareDetail`（模型）+ `prepareDetailPanel`（画） |
+ * | ③ 「开始战斗」与文字对齐 + 卡片更小 | `prepareLayout.startRect`（按钮唯一出处）+ `prepareFooter`；卡片尺寸见布局表的推导 |
+ * | ④ 手风琴（同时只展开一块） | `prepareLogic.expanded`（状态）+ `prepareLayout`（几何）+ `prepareFold` / `prepareFoldBars`（收起那块显示什么 / 怎么画） |
  *
  * ⚠️ 本文件**只是装配**：几何在 `prepareLayout`、状态机在 `prepareLogic`、
- * 皮肤在 `prepareRender`、详情内容在 `prepareDetail`。这一层负责"把它们的
- * 产物摆到 Pixi 对象上"，以及"输入事件该调哪个纯函数"。
+ * 皮肤在 `prepareRender`、详情内容在 `prepareDetail`、块头文案在
+ * `prepareFold`。这一层负责"把它们的产物摆到 Pixi 对象上"，以及"输入事件
+ * 该调哪个纯函数"。
+ *
+ * ==================================================================
+ * ⚠️ 手风琴：**焦点在哪一块，就展开哪一块**
+ * ==================================================================
+ *
+ * | 输入 | 行为 |
+ * |---|---|
+ * | 键盘方向键 / Tab 移到收起的那一块 | **立刻展开它**（一步，不用先按 Enter） |
+ * | 点 / 点触收起那块「块头」 | 展开它（**不改选择**） |
+ * | **鼠标划过**块头 | **不展开**（划一下就展开太跳 —— 见下） |
+ *
+ * ⚠️ **为什么不给块头做 hover 展开**：这一屏的鼠标划过卡片时详情区会跟着
+ * 切（"hover 优先"），若 hover 也展开手风琴，那么"从卡片划到另一块"的
+ * 路上会连续展开/收起两次，整屏跟着重排 —— 玩家看到的是一屏在抖。所以
+ * **展开只由"焦点"决定**（键盘 / 点击），hover 只管详情区。
+ *
+ * ⚠️ **为什么是"自动展开"而不是"按 Enter 才展开"**：进界面后玩家的第一
+ * 个动作可能是 ↑↓ 换块，而"焦点在一块收起的块上、画面上却没有光标"正是
+ * 本仓库点名过的那种"以为按键坏了"。触屏对等也靠同一条：点块头就是
+ * 一次操作展开它（不需要"选中 → 确认"两步）。
+ *
+ * ==================================================================
+ * ⚠️ 收起的那两块里，**卡片是点不到的**（也就 hover 不到）
+ * ==================================================================
+ *
+ * 命中区里只有**展开那一块**的卡（`prepareLayout.prepareHitAreas`）——
+ * 收起的块里根本没有"看不见却能点中的幽灵卡"。于是详情区恒等于"**当前
+ * 展开那一块**里"的那一项（焦点 / 悬停都落在可见的卡上）。用户明确
+ * 允许这个判断："若不能 → 详情区就只显示当前展开那块里的东西，但要说明"。
  *
  * ==================================================================
  * ⚠️ 每帧只改字符串与可见性，不重建 Text / Graphics
  * ==================================================================
  *
- * `Label` / `Graphics` 全部在构造时建好（含**行池**），`draw()` 只做
+ * `Label` / `Graphics` 全部在构造时建好，`draw()` 只做
  * `set()` / `clear()` / 坐标。加东西时请照这条走 —— 每帧 `new Text()`
  * 会重建 GPU 纹理（本仓库为此专门收窄过 `Label.set`）。
  *
@@ -42,33 +72,27 @@
  * | 确定人物 / Boss | Enter | 点卡片（一步到位） |
  * | 炁机 +1 层 | Enter | 点卡片**右半边** |
  * | 炁机 −1 层 | Shift+Enter | 点卡片**左半边** |
+ * | **展开收起的那一块** | 焦点移过去（自动） | **点那块头** |
  * | 看详情 | 移动焦点 | **点一下**（触屏没有 hover） |
  * | 开战 | Enter（光标在「开始」上） | 点「开始战斗」 |
- *
- * ⚠️ **触屏看详情的路必须有**：触屏没有 hover，而"选人之后"要先看得到
- * 那条炁机是什么 —— 点一下卡片就够了（它同时会把光标移过去，于是详情
- * 跟着换）。这条不是"退而求其次"：桌面上的 hover **也**落在同一段代码上
- * （`hover()`），所以两种输入不会漂。
  */
 
-import type { Container, Graphics } from 'pixi.js';
-import { LOGICAL } from './layout';
-import { Label, type PixiCtor } from './primitives';
-import { ScreenChrome } from './ScreenChrome';
-import { PALETTE } from '../render/theme';
-import { isDeveloping, type RosterEntry } from '../data/roster';
-import type { TranslateFn } from '../i18n/translator';
-import { PREPARE_LAYOUT, prepareHitAreas, prepareLabelY, type PrepareHitArea } from './prepareLayout';
+import type { Container } from 'pixi.js';
+import { isDeveloping } from '../data/roster';
+import type { PrepareHitArea } from './prepareLayout';
+import { prepareHitAreas } from './prepareGeometry';
 import {
   canStartBattle,
   confirmCursor,
   cursorTarget,
   cycleCursor,
   cycleQijiStack,
+  expandSection,
   focusTarget,
   halfOfCard,
   hitTestPrepare,
   initialSelection,
+  isSectionKind,
   moveFocus,
   pickOption,
   pickQiji,
@@ -76,81 +100,19 @@ import {
   stacksIn,
   unstackQiji,
   type FreeQiji,
+  type PrepareSelection,
   type PrepareTarget,
 } from './prepareLogic';
-import { PrepareCards } from './prepareCards';
-import { cardAppearance } from './prepareCardState';
-import { PrepareFooter } from './prepareFooter';
+import { drawPrepareFrame } from './prepareFrame';
 import { detailModelOf, type DetailContext } from './prepareDetail';
 import { PrepareDetailController } from './prepareDetailController';
+import { buildPrepareParts, type PrepareParts } from './prepareParts';
+import type { ScreenChrome } from './ScreenChrome';
+import type { PrepareSectionKind } from './prepareTypes';
 
-/* ------------------------------------------------------------------ *
- * 选项
- * ------------------------------------------------------------------ */
-
-/**
- * 炁机在这一屏需要的最小形状。
- *
- * ⚠️ 与 `core/types/qiji.ts` 的 `QijiEntity` **刻意不同**（结构性类型）：
- * 这一屏只用得到"叫什么 / 能叠几层 / 怎么开"，而 `QijiEntity` 带着
- * `abilities` / `unlock` / `comboWindow` 那些战斗期的知识。收窄之后
- * 单测可以喂 3 个字面量。
- */
-export interface PrepareQijiOption {
-  readonly id: string;
-  readonly nameKey: string;
-  /**
-   * 一局/一次配置里最多生效几层（`QijiEntity.maxStacks`，缺省 1）。
-   *
-   * ⚠️ 自由模式**沿用**它（不另开一套无限叠加的规则）：判据只有内容表
-   * 那一处，见 `prepareLogic` 文件头的长说明。
-   */
-  readonly maxStacks?: number;
-}
-
-export interface PrepareScreenOptions {
-  readonly pixi: PixiCtor;
-  readonly translate: TranslateFn;
-  readonly players: readonly RosterEntry[];
-  readonly bosses: readonly RosterEntry[];
-  /** 可选炁机（**从内容表读**，不写死条数）。 */
-  readonly qiji: readonly PrepareQijiOption[];
-  /**
-   * 详情区的数据装配（`app/prepareDetailContext.prepareDetailContext`）。
-   *
-   * ⚠️ **注入**而不是在这里 import 内容表：本文件是"装配"，而"Boss 的
-   * 招式叫什么、说明里的秒数是多少"是内容层的知识。注入之后这一屏在
-   * 测试里可以喂假上下文（与 `prepareLogic.canStartBattle` 注入
-   * `developing` 同一条纪律）。
-   */
-  readonly detailContext: (free: {
-    readonly stacks: (id: string) => number;
-    readonly cap: (id: string) => number;
-  }) => DetailContext;
-  readonly initial: { readonly playerId: string; readonly bossId: string };
-  /** 上次存下来的炁机激活状态（未开的条目不出现）。 */
-  readonly freeQiji?: FreeQiji | undefined;
-  /** 是否显示键位提示（触屏为假）。见 `HomeScreenOptions.showKeyHints`。 */
-  readonly showKeyHints: () => boolean;
-  /** 点右上角的齿轮（打开设置）。见 `HomeScreenOptions.onGear`。 */
-  readonly onGear: () => void;
-  /** 点左上角的返回箭头（回首页）—— 触屏对等靠它（AGENTS.md §3b）。 */
-  readonly onBack?: (() => void) | undefined;
-  /** `F1` 的显示名（齿轮的键位提示）。 */
-  readonly f1Label: () => string;
-  /** 点了「开始」。 */
-  readonly onStart: (playerId: string, bossId: string) => void;
-  /** 选择变了（用于持久化）。 */
-  readonly onChange?: (playerId: string, bossId: string) => void;
-  /**
-   * 炁机的层数变了（用于持久化）。
-   *
-   * ⚠️ 它**只报层数表**，不报"哪一条变了"：调用方（`app/`）要的是
-   * "存什么"，而"哪一条"是界面的事 —— 多传一个 id 只会让两边都要维护
-   * 一个用不上的字段。
-   */
-  readonly onQijiChange?: (free: FreeQiji) => void;
-}
+/** 选项与构造参数在 `prepareOptions`（本文件只装配，见那里的说明）。 */
+export type { PrepareQijiOption, PrepareScreenOptions } from './prepareOptions';
+import type { PrepareQijiOption, PrepareScreenOptions } from './prepareOptions';
 
 /* ------------------------------------------------------------------ *
  * 组件
@@ -158,36 +120,6 @@ export interface PrepareScreenOptions {
 
 export class PrepareScreen {
   readonly root: Container;
-
-  private readonly bg: Graphics;
-  private readonly title: Label;
-  private readonly playerLabel: Label;
-  private readonly bossLabel: Label;
-  private readonly qijiLabel: Label;
-  /**
-   * 底部那一条：开始按钮 + 操作提示 + 素材声明。
-   * ⚠️ 整块在 `prepareFooter`（本类只喂"光标在不在按钮上 / 能不能开战"）。
-   */
-  private readonly footer: PrepareFooter;
-  /** 详情区（右侧）：悬停 + 光标的合流在这一层（见 `prepareDetailController`）。 */
-  private readonly detailPanel: PrepareDetailController;
-  /** 详情区的数据上下文（探针读 `detailModel()` 要用，见那个方法）。 */
-  private readonly detailContext: DetailContext;
-
-  private readonly cardGfx: Graphics;
-  private readonly players: readonly RosterEntry[];
-  private readonly bosses: readonly RosterEntry[];
-  private readonly qiji: readonly PrepareQijiOption[];
-  private readonly options: PrepareScreenOptions;
-
-  /**
-   * 卡片那支画笔（人物在前、炁机在中、Boss 在后，与 `prepareHitAreas` 同序）。
-   * ⚠️ "怎么画一张卡"整块在 `prepareCards`，本类只负责喂状态。
-   */
-  private readonly cards: PrepareCards;
-
-  private selection: ReturnType<typeof initialSelection>;
-  private free: FreeQiji;
 
   /**
    * 本屏自己的边角控件（右上角齿轮 + 左上角返回箭头）。
@@ -197,6 +129,26 @@ export class PrepareScreen {
    */
   readonly chrome: ScreenChrome;
 
+  /**
+   * 这一屏的全部部件（造一次，永不重建）。
+   *
+   * ⚠️ 造部件那一段在 `prepareParts`（见那里的文件头）：本类只管**输入
+   * 怎么改状态**，画面那一段在 `prepareFrame`。
+   */
+  private readonly parts: PrepareParts;
+  /** 详情区（右侧）：悬停 + 光标的合流在这一层（见 `prepareDetailController`）。 */
+  private readonly detailPanel: PrepareDetailController;
+  /** 详情区的数据上下文（探针读 `detailModel()` 要用，见那个方法）。 */
+  private readonly detailContext: DetailContext;
+
+  private readonly players: readonly { readonly id: string; readonly nameKey: string }[];
+  private readonly bosses: readonly { readonly id: string; readonly nameKey: string }[];
+  private readonly qiji: readonly PrepareQijiOption[];
+  private readonly options: PrepareScreenOptions;
+
+  private selection: PrepareSelection;
+  private free: FreeQiji;
+
   constructor(options: PrepareScreenOptions) {
     this.options = options;
     this.players = options.players;
@@ -205,104 +157,21 @@ export class PrepareScreen {
     this.free = options.freeQiji ?? {};
     this.selection = initialSelection(options.initial, this.qiji);
 
-    const { pixi } = options;
-    this.root = new pixi.Container();
-    this.root.visible = false;
-
-    /** 整屏底色（备战界面要盖住战斗场景）。 */
-    this.bg = new pixi.Graphics();
-    this.bg.rect(0, 0, LOGICAL.width, LOGICAL.height).fill({ color: PALETTE.bgTop });
-    this.root.addChild(this.bg);
-
-    this.title = new Label(pixi, {
-      x: LOGICAL.width / 2,
-      y: 54, // 标题基线（见 `prepareLayout` 的布局表）
-      size: 32,
-      color: PALETTE.text,
-      anchorX: 0.5,
-      anchorY: 0.5,
-      kai: true,
-    });
-
     /**
-     * 栏目标题（「选择人物」/「炁机」/「选择对手」）。
-     * ⚠️ 字号与位置**都来自布局表**，不再是这里的字面量。
+     * ⚠️ 两个取值函数是**活闭包**（读 `this.free` / 静态内容表），而不是
+     * 一份值：层数每点一下就变，传值会让详情区显示上一帧的层数。
      */
-    /**
-     * ⚠️ 行顶是**算出来的**（随张数变），所以标题的 y 也得跟着算 ——
-     * 传当前三块的张数进去（见 `prepareLayout.rowTopsOf`）。
-     */
-    const labelY = prepareLabelY({
-      players: this.players.length,
-      bosses: this.bosses.length,
-      qiji: this.qiji.length,
-    });
-    const label = (y: number): Label =>
-      new Label(pixi, {
-        x: PREPARE_LAYOUT.pad,
-        y,
-        size: PREPARE_LAYOUT.labelSize,
-        color: PALETTE.textDim,
-      });
-    this.playerLabel = label(labelY.player);
-    this.qijiLabel = label(labelY.qiji);
-    this.bossLabel = label(labelY.boss);
-
-    this.cardGfx = new pixi.Graphics();
-    this.root.addChild(
-      this.cardGfx,
-      this.playerLabel.root,
-      this.qijiLabel.root,
-      this.bossLabel.root,
-      this.title.root,
-    );
-
-    /**
-     * 卡片上的文字与头像（人物在前、炁机在中、Boss 在后）。
-     *
-     * ⚠️ 卡片上**只有名字**（+ 人物卡的名字右边一颗说话头像）——
-     * 用户："卡片可以尽量缩小一点，留一个名字"。开发中的状态由**灰色的
-     * 卡片皮肤**表达（见 `prepareRender.cardSkin`），不再占一行字。
-     */
-    /**
-     * ⚠️ 卡片的 id 顺序必须与 `prepareHitAreas` **完全一致**
-     * （人物 → 炁机 → Boss）：两处顺序一漂，卡片上的名字就会画到别人的
-     * 命中区上 —— 而那看起来像"点谁都不对"。
-     */
-    this.cards = new PrepareCards(
-      pixi,
-      this.cardGfx,
-      this.root,
-      [...this.players, ...this.qiji, ...this.bosses].map((e) => e.id),
-    );
-
-    this.footer = new PrepareFooter({ pixi, parent: this.root, translate: options.translate });
-
-    /**
-     * ⚠️ 上下文**只建一次**：它的每个取值函数都接在静态内容表上，而
-     * "此刻几层"由 `qijiStacks` 现取（两个闭包读的是 `this.free`，
-     * 所以层数一变它自己就是新的）。
-     */
-    this.detailContext = options.detailContext({
+    this.parts = buildPrepareParts({
+      options,
+      selection: this.selection,
+      counts: this.counts(),
       stacks: (id) => stacksIn(this.free, id),
       cap: (id) => stackCapOf(this.qijiById(id)?.maxStacks),
     });
-    this.detailPanel = new PrepareDetailController({
-      pixi,
-      translate: options.translate,
-      parent: this.root,
-      context: this.detailContext,
-    });
-
-    /** 齿轮 + 返回箭头（最后加 = 最上层）。 */
-    this.chrome = new ScreenChrome({
-      pixi,
-      showKeyHints: options.showKeyHints,
-      f1Label: options.f1Label,
-      onGear: options.onGear,
-      onBack: options.onBack,
-    });
-    this.root.addChild(this.chrome.root);
+    this.root = this.parts.root;
+    this.chrome = this.parts.chrome;
+    this.detailPanel = this.parts.detailPanel;
+    this.detailContext = this.parts.detailContext;
 
     this.draw();
   }
@@ -316,7 +185,7 @@ export class PrepareScreen {
   }
 
   /** 当前选择（`main.ts` 用它起战斗、也用它持久化）。 */
-  get current(): ReturnType<typeof initialSelection> {
+  get current(): PrepareSelection {
     return this.selection;
   }
 
@@ -350,8 +219,7 @@ export class PrepareScreen {
    *
    * ⚠️ 与 `detail()` 的区别：那个只说"是哪一项"，这个说"面板手里到底是
    * 什么数据"（标题 key、有没有副标题、几行、每行是什么）。截图与
-   * `detail()` 都证明不了"面板收到的是不是它该收到的"——
-   * 实测就是靠它查出"副标题根本没被画出来"的。
+   * `detail()` 都证明不了"面板收到的是不是它该收到的"。
    */
   detailModel(): ReturnType<typeof detailModelOf> {
     return detailModelOf(this.detailed(), this.detailContext);
@@ -361,16 +229,20 @@ export class PrepareScreen {
    * **详情区此刻显示的是哪一项**（给调试探针用）。
    *
    * ⚠️ 它与 `cursor()` / `hovered()` 是**三个不同的读数**：截图能看出
-   * "面板上有字"，但"是**谁的**字"只有这个返回值能钉死。合成一个读数就
-   * 无法区分"hover 生效了"与"只是光标停在那儿"。
+   * "面板上有字"，但"是**谁的**字"只有这个返回值能钉死。
    */
   detail(): PrepareTarget | undefined {
     return this.detailed();
   }
 
+  /** 当前展开的那一块（手风琴；探针与截图脚本读它对账）。 */
+  expandedSection(): PrepareSectionKind {
+    return this.selection.expanded;
+  }
+
   /** 当前布局的可点区域（探针 / 单测读它与渲染对账）。 */
   hitAreas(): readonly PrepareHitArea[] {
-    return prepareHitAreas(this.players, this.bosses, this.qiji);
+    return prepareHitAreas(this.players, this.bosses, this.qiji, this.selection.expanded);
   }
 
   /* ---------------------------------------------------------------- *
@@ -382,8 +254,7 @@ export class PrepareScreen {
    * ⚠️ **不改选择**。要它变成选择得按 Enter（`commit`）。
    */
   cycle(delta: number): void {
-    this.selection = cycleCursor(this.selection, this.players, this.bosses, delta, this.qiji);
-    this.draw();
+    this.apply(cycleCursor(this.selection, this.players, this.bosses, delta, this.qiji));
   }
 
   /**
@@ -392,13 +263,14 @@ export class PrepareScreen {
    * `wrap` 给 Tab / Shift+Tab 用（环绕），方向键不环绕。
    */
   moveFocus(delta: number, wrap = false): void {
-    this.selection = moveFocus(this.selection, delta, {
-      wrap,
-      players: this.players,
-      bosses: this.bosses,
-      qiji: this.qiji,
-    });
-    this.draw();
+    this.apply(
+      moveFocus(this.selection, delta, {
+        wrap,
+        players: this.players,
+        bosses: this.bosses,
+        qiji: this.qiji,
+      }),
+    );
   }
 
   /**
@@ -417,7 +289,7 @@ export class PrepareScreen {
     }
     const next = confirmCursor(this.selection, this.players, this.bosses, this.qiji);
     if (next !== this.selection) {
-      this.applySelection(next);
+      this.apply(next, true);
       return;
     }
     /**
@@ -433,14 +305,16 @@ export class PrepareScreen {
    * 只把**焦点**移到某个槽位（调试入口一步到位）。
    *
    * ⚠️ 与 `moveFocus` 的区别是"直接指定"而不是"相对移动"。
+   * ⚠️ 焦点落到某一块上时**它同时被展开**（手风琴的唯一判据）。
    */
   focusSlot(slot: 'player' | 'qiji' | 'boss' | 'start'): void {
-    this.selection = focusTarget(this.selection, slot, {
-      players: this.players,
-      bosses: this.bosses,
-      qiji: this.qiji,
-    });
-    this.draw();
+    this.apply(
+      focusTarget(this.selection, slot, {
+        players: this.players,
+        bosses: this.bosses,
+        qiji: this.qiji,
+      }),
+    );
   }
 
   /**
@@ -448,7 +322,18 @@ export class PrepareScreen {
    */
   pick(kind: 'player' | 'boss', id: string): void {
     const next = pickOption(this.selection, this.players, this.bosses, kind, id);
-    if (next !== this.selection) this.applySelection(next);
+    if (next !== this.selection) this.apply(next, true);
+  }
+
+  /**
+   * **展开某一块**（点收起态的「块头」；§3b：触屏要能展开）。
+   *
+   * ⚠️ 只换焦点（= 展开那一块），**不改选择** —— 块头显示的正是"当前
+   * 选了什么"，点它不该把它改掉。这一层是**公开方法**，因为调试入口也
+   * 用它（截图脚本要能一步摆出"炁机块展开"的画面）。
+   */
+  expand(slot: PrepareSectionKind): void {
+    this.apply(expandSection(this.selection, slot));
   }
 
   /**
@@ -470,14 +355,24 @@ export class PrepareScreen {
    * ---------------------------------------------------------------- */
 
   /**
-   * **悬停**（鼠标）。只影响详情区，**不动光标**（见 `prepareDetail`）。
+   * **悬停**（鼠标）。只影响详情区，**不动光标、也不展开手风琴**（见文件头）。
    *
    * @returns 悬停落在某一项上（供调用方判"要不要重画"）。
    */
   hover(px: number, py: number): boolean {
-    const at = hitTestPrepare(px, py, this.players, this.bosses, this.qiji);
-    /** ⚠️「开始战斗」不是"一项"，悬停它不该把详情区切走。 */
-    const next = at === undefined || at.kind === 'start' ? undefined : { kind: at.kind, id: at.id };
+    const at = hitTestPrepare(
+      px,
+      py,
+      this.players,
+      this.bosses,
+      this.qiji,
+      this.selection.expanded,
+    );
+    /** ⚠️「开始战斗」与「块头」都不是"一张卡"，悬停它们不该把详情区切走。 */
+    const next =
+      at === undefined || at.kind === 'start' || at.kind === 'summary'
+        ? undefined
+        : { kind: at.kind, id: at.id };
     if (this.detailPanel.hoverAt(next)) this.draw();
     return at !== undefined;
   }
@@ -485,6 +380,11 @@ export class PrepareScreen {
   /** 指针离开画布：清掉悬停（否则详情区会一直停在最后划过的那一项）。 */
   clearHover(): void {
     if (this.detailPanel.clearHover()) this.draw();
+  }
+
+  /** 这个点是不是落在详情区的**可滚视口**里（输入层的拖拽判据）。 */
+  isOnDetail(px: number, py: number): boolean {
+    return this.detailPanel.isOnDetail(px, py);
   }
 
   /**
@@ -495,11 +395,6 @@ export class PrepareScreen {
    *
    * @returns 有没有消费这次滚轮（没消费就让页面自己滚）。
    */
-  /** 这个点是不是落在详情区的**可滚视口**里（输入层的拖拽判据）。 */
-  isOnDetail(px: number, py: number): boolean {
-    return this.detailPanel.isOnDetail(px, py);
-  }
-
   wheelDetail(px: number, py: number, deltaY: number): boolean {
     if (!this.detailPanel.isOnDetail(px, py)) return false;
     /**
@@ -528,10 +423,25 @@ export class PrepareScreen {
   hitTest(px: number, py: number): boolean {
     /** ⚠️ 齿轮 / 返回箭头先于卡片（顺序即优先级）。 */
     if (this.chrome.hitTest(px, py)) return true;
-    const at = hitTestPrepare(px, py, this.players, this.bosses, this.qiji);
+    const at = hitTestPrepare(
+      px,
+      py,
+      this.players,
+      this.bosses,
+      this.qiji,
+      this.selection.expanded,
+    );
     if (at === undefined) return false;
     if (at.kind === 'start') {
       this.start();
+      return true;
+    }
+    /**
+     * ⚠️ **点收起态的块头 = 展开那一块**（不改选择）：触屏没有"Tab 到那一块"
+     * 这条路（AGENTS.md §3b 的功能对等）。
+     */
+    if (at.kind === 'summary') {
+      if (isSectionKind(at.id)) this.expand(at.id);
       return true;
     }
     if (at.kind === 'qiji') {
@@ -545,7 +455,7 @@ export class PrepareScreen {
       return true;
     }
     const next = pickOption(this.selection, this.players, this.bosses, at.kind, at.id);
-    if (next !== this.selection) this.applySelection(next);
+    if (next !== this.selection) this.apply(next, true);
     /**
      * ⚠️ **点一下也要更新详情**（触屏没有 hover，这是它唯一的路）：
      * `pickOption` 已经把光标移到那一项上，所以详情自然跟着换 ——
@@ -595,13 +505,27 @@ export class PrepareScreen {
     return this.qiji.find((q) => q.id === id);
   }
 
-  /** 写入**已经确定**的选择（Enter / 点击）。 */
-  private applySelection(next: ReturnType<typeof initialSelection>): void {
+  private counts(): { readonly players: number; readonly bosses: number; readonly qiji: number } {
+    return { players: this.players.length, bosses: this.bosses.length, qiji: this.qiji.length };
+  }
+
+  /**
+   * 写**已经确定**的选择（Enter / 点击）。
+   *
+   * @param notify 要不要报 `onChange`（选择真的变了才报）。
+   */
+  private apply(next: PrepareSelection, notify = false): void {
     const changed =
       next.playerId !== this.selection.playerId || next.bossId !== this.selection.bossId;
+    /**
+     * ⚠️ **手风琴换了块就清悬停**：上一块被收起之后，鼠标可能还"停在"
+     * 一张已经不在画面上的卡上 —— 留着它会让详情区显示一张看不见的卡。
+     */
+    const expandedChanged = next.expanded !== this.selection.expanded;
     this.selection = next;
+    if (expandedChanged) this.detailPanel.clearHover();
     this.draw();
-    if (changed) this.options.onChange?.(next.playerId, next.bossId);
+    if (notify && changed) this.options.onChange?.(next.playerId, next.bossId);
   }
 
   /**
@@ -628,51 +552,24 @@ export class PrepareScreen {
    * 内部：画
    * ---------------------------------------------------------------- */
 
+  /**
+   * 画一帧。
+   *
+   * ⚠️ 本类**不自己摆每一个部件**：那一段在 `prepareFrame`（一帧的装配
+   * 清单，见那里的文件头）。这里只把"笔"与"当前状态"交出去 —— 于是
+   * "谁能改状态"仍然只有本类一处。
+   */
   private draw(): void {
-    const t = this.options.translate;
-    const developing = !canStartBattle(this.selection, isDeveloping);
-    this.title.set(t('roster.ui.title'));
-    this.playerLabel.set(t('roster.ui.playerLabel'));
-    this.qijiLabel.set(t('roster.ui.qijiLabel'));
-    this.bossLabel.set(t('roster.ui.bossLabel'));
-
-    const all = [...this.players, ...this.qiji, ...this.bosses];
-    const areas = this.hitAreas();
-    const at = this.cursor();
-
-    this.cardGfx.clear();
-    /**
-     * ⚠️ 卡片与命中区**按顺序对齐**（人物 → 炁机 → 对手），而命中区末尾
-     * 还有一块 `start`（它不是卡）。所以这里按 `kind` 收窄 ——
-     * `PrepareHitArea.kind` 的类型里有 `'start'`，靠"它一定在最后"这种
-     * 位置约定去骗类型是本仓库明令禁止的形状（见 AGENTS.md §1）。
-     */
-    const cardAreas = areas.filter((a) => a.kind !== 'start');
-    this.cards.drawAll(
-      cardAreas,
-      all.map((entry, i) => {
-        const area = cardAreas[i];
-        const kind = area?.kind ?? 'player';
-        const appearance = cardAppearance({
-          kind: kind === 'start' ? 'player' : kind,
-          cursored: at !== undefined && at.kind === kind && at.id === entry.id,
-          selected:
-            (kind === 'player' && entry.id === this.selection.playerId) ||
-            (kind === 'boss' && entry.id === this.selection.bossId),
-          developing: isDeveloping(entry.id),
-          stacks: kind === 'qiji' ? stacksIn(this.free, entry.id) : 0,
-        });
-        return { ...appearance, name: t(entry.nameKey) };
-      }),
-    );
-
-    /** 底部那一条（按钮皮肤 + 提示行 + 声明）。 */
-    this.footer.draw(this.selection.focus === 'start', developing);
-    this.drawDetail();
-  }
-
-  private drawDetail(): void {
-    this.detailPanel.update(this.cursor());
+    drawPrepareFrame(this.parts.frameParts, {
+      players: this.players,
+      bosses: this.bosses,
+      qiji: this.qiji,
+      selection: this.selection,
+      cursor: this.cursor(),
+      free: this.free,
+      translate: this.options.translate,
+      developing: isDeveloping,
+    });
   }
 
   /**
@@ -685,10 +582,6 @@ export class PrepareScreen {
     this.options.onStart(this.selection.playerId, this.selection.bossId);
   }
 }
-
-/* ------------------------------------------------------------------ *
- * 小工具
- * ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ *
  * 供 `app/` 造上下文用

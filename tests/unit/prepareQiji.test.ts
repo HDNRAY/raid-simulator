@@ -9,7 +9,7 @@ import {
   unstackQiji,
   type PrepareSelection,
 } from '../../src/ui/prepareLogic';
-import { prepareHitAreas } from '../../src/ui/prepareLayout';
+import { prepareHitAreas } from '../../src/ui/prepareGeometry';
 
 /**
  * ==================================================================
@@ -39,6 +39,8 @@ const sel = (over: Partial<PrepareSelection> = {}): PrepareSelection => ({
   playerId: 'player',
   bossId: 'meiichiro',
   focus: 'qiji',
+  /** 手风琴：焦点在炁机行 → 炁机那一块展开（见 `prepareLogic.withFocus`）。 */
+  expanded: 'qiji',
   cursor: { playerId: 'player', bossId: 'meiichiro', qijiId: 'vitality' },
   ...over,
 });
@@ -161,7 +163,11 @@ describe('点击命中：炁机卡也能被点中（触屏靠它）', () => {
      * ⚠️ 坐标从 **`prepareHitAreas`** 取（与渲染共用同一份几何）——
      * 自己按 `qijiRowY` 再算一遍就会在"行顶是推导出来的"这件事上错位。
      */
-    const area = prepareHitAreas(players, bosses, qiji).find(
+    /**
+     * ⚠️ 炁机卡只画在**炁机那一块展开**的时候（手风琴）—— 所以这里显式
+     * 传 `expanded = 'qiji'`（与 `sel()` 那个状态一致）。
+     */
+    const area = prepareHitAreas(players, bosses, qiji, 'qiji').find(
       (a) => a.kind === 'qiji' && a.id === 'breath',
     );
     expect(area).toBeDefined();
@@ -171,11 +177,12 @@ describe('点击命中：炁机卡也能被点中（触屏靠它）', () => {
       players,
       bosses,
       qiji,
+      'qiji',
     );
     expect(hit).toEqual({ kind: 'qiji', id: 'breath' });
   });
 
   it('点在空白处 → 什么都不命中', () => {
-    expect(hitTestPrepare(2, 2, players, bosses, qiji)).toBeUndefined();
+    expect(hitTestPrepare(2, 2, players, bosses, qiji, 'qiji')).toBeUndefined();
   });
 });

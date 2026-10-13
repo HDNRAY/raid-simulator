@@ -3,9 +3,13 @@ import { BattleEngine } from '../../src/core/combat/battleState';
 import { buildPlayerKit, type PlayerKit } from '../../src/data/kit';
 import { applySkillTweaks } from '../../src/data/skillTweak';
 import { ALL_QIJI } from '../../src/data/qiji';
+import { DODGE_CHARGE } from '../../src/data/kits/dodgeCharge';
+import { LIN_WANFENG_SKILLS } from '../../src/data/kits/linwanfeng';
+import { STRIKE } from '../../src/data/kits/combo';
 import { FOCUS_BUFF } from '../../src/data/kits/shared';
 import { createRunSession } from '../../src/app/runSession';
-import { makeGoldenEngineOptions } from '../golden/fixtures';import type { SkillDef } from '../../src/core/types';
+import { makeGoldenEngineOptions } from '../golden/fixtures';
+import type { Action, SkillDef } from '../../src/core/types';
 import type { EventDef } from '../../src/core/events';
 import type { CreateBattleOptions } from '../../src/core/combat/battleOptions';
 
@@ -14,15 +18,17 @@ import type { CreateBattleOptions } from '../../src/core/combat/battleOptions';
  * 三条「改技能本身」的炁机 —— **真引擎 + 真 `advanceRun` 的实测**
  * ==================================================================
  *
- * 用户 2026-10-13 点名（③）：
- *   - 「避」用 3 次 → **避用出后回 20 缠**
+ * 用户 2026-10-13 点名（③），其中第一条的效果**当天改过一次**：
+ *   - 「避」用 3 次 → ~~避用出后回 20 缠~~ → **挂一层蓄势：
+ *     下一次攻击伤害翻倍，用掉就消耗**（现在的口径）
  *   - 「凝」用 3 次 → **两条一起**解锁（缠消耗 −20 / 增伤变成 100%）
  *
  * 这一份**只测接线与效果**（数据形状在 `tests/unit/qiji.test.ts`）：
  *
  *   1. 解锁：**2 次不出现 / 3 次出现**（正反两面），两条「凝」**一起**出现
- *   2. 效果：拿真 `BattleEngine` 打 —— 避之后缠 +20、凝只扣 20、
- *      凝的增伤是 **100**（不是 160）
+ *   2. 效果：拿真 `BattleEngine` 打 —— 避之后**下一次攻击的伤害数字翻倍**、
+ *      打完那一层就没了（第二刀回到基础值）；凝只扣 20、凝的增伤是
+ *      **100**（不是 160）
  *   3. 范围：本局累计（不跨局），而且**不污染下一次**（同一个注册表
  *      再开一局时技能定义还是 40）
  *
@@ -63,6 +69,29 @@ describe('① 解锁：2 次不出现 / 3 次出现（真 `advanceRun`）', () =
     const s = session();
     s.begin('player', 11);
     s.advance('victory', used('dodge', 3), true);
+    expect(s.candidates().map((c) => c.qiji.id)).toContain('biShiJiXu');
+  });
+
+  /**
+   * ⚠️ 上面两条喂的是**手工事件**。"解锁"这条链的真问题在
+   * "**引擎真的会发 `skillUsed('dodge')` 吗**"——所以这一条从**真引擎**打，
+   * 把它吐出来的事件流原样交给真 `advanceRun`（`runLoop.test.ts` 的写法）。
+   */
+  it('⚠️ 真引擎打一场：按 2 次 → 不出现；按 3 次 → **出现**（事件流不是造的）', () => {
+    const two = dodgeBattleEvents(2);
+    const three = dodgeBattleEvents(3);
+    /** 先证明"引擎真的发了那么多次"（否则下面的断言可能是空转）。 */
+    expect(countSkillUsed(two, 'dodge')).toBe(2);
+    expect(countSkillUsed(three, 'dodge')).toBe(3);
+
+    const early = session();
+    early.begin('player', 11);
+    early.advance('victory', two, true);
+    expect(early.candidates().map((c) => c.qiji.id)).not.toContain('biShiJiXu');
+
+    const s = session();
+    s.begin('player', 11);
+    s.advance('victory', three, true);
     expect(s.candidates().map((c) => c.qiji.id)).toContain('biShiJiXu');
   });
 
@@ -135,6 +164,30 @@ function quietOptions(): CreateBattleOptions {
   };
 }
 
+/**
+ * 真引擎打一场（Boss 不动手），**恰好按 `dodge` `n` 次**，返回这一场的事件流。
+ *
+ * ⚠️ 两次之间隔 **70 tick**：「避」有 1 秒冷却（60 tick），隔得太近会被门禁
+ * 拒掉 —— 那时数出来的 `skillUsed` 会少于 `n`，所以调用方会先断言条数。
+ */
+function dodgeBattleEvents(n: number): readonly EventDef[] {
+  const engine = new BattleEngine(quietOptions());
+  const events: EventDef[] = [];
+  const EVERY = 70;
+  for (let i = 0; i < 700; i += 1) {
+    const actions: readonly Action[] =
+      i % EVERY === 0 && i / EVERY < n ? [{ type: 'useSkill', skillId: 'dodge', atTick: i }] : [];
+    engine.tick(actions);
+    events.push(...engine.drainEvents());
+  }
+  return events;
+}
+
+/** 事件流里某个技能被用了多少次（`core/run/stats.ts` 的同一个判据）。 */
+function countSkillUsed(events: readonly EventDef[], skillId: string): number {
+  return events.filter((event) => event.kind === 'skillUsed' && event.skillId === skillId).length;
+}
+
 /** 玩家开局缠 = `startDouqi`，用出 `skillId` 后读**这一下**的缠变化。 */
 function castDouqiDelta(
   kit: PlayerKit,
@@ -176,34 +229,179 @@ const KIT_BOTH = buildPlayerKit('player', [
   { def: BY_ID.get('ningShenRuDao')!, stacks: 1 },
 ]);
 
-describe('「避实击虚」：用出避之后**回 20 缠**（真引擎）', () => {
-  it('⚠️ 不选它时用「避」不回缠（默认路径不变）', () => {
-    expect(castDouqiDelta(buildPlayerKit('player', []), 'dodge', 0).delta).toBe(0);
+/* ------------------------------------------------------------------ *
+ * 「避实击虚」：避 → 蓄势 → 下一次攻击翻倍 → 用掉就没了
+ * ------------------------------------------------------------------ */
+
+/**
+ * 造一份"玩家满资源、Boss 不动手"的真引擎（判断伤害数字用）。
+ *
+ * ⚠️ Boss 的行为表被清空（`quietOptions`），所以**伤害数字只取决于玩家
+ * 这一下**：没有 Boss 的减伤 / 反伤 / 阶段切换来搅局。
+ */
+function quietEngineWith(kit: PlayerKit): BattleEngine {
+  const base = quietOptions();
+  const playable = base.combatants[0]!;
+  return new BattleEngine(
+    optionsWithKit(
+      {
+        ...base,
+        combatants: [
+          {
+            ...playable,
+            /** 炁 100（斩 15 × n 够用）/ 缠 100（劈 50 够用）。 */
+            resources: { ...playable.resources, energy: 100, douqi: 100 },
+          },
+          base.combatants[1]!,
+        ],
+      },
+      kit,
+    ),
+  );
+}
+
+/** 玩家身上蓄势的层数（没有 = 0）。 */
+function chargeStacks(engine: BattleEngine): number {
+  const ally = engine.snapshot.combatants.find((c) => c.side === 'ally')!;
+  return ally.buffs.find((b) => b.defId === DODGE_CHARGE.id)?.stacks ?? 0;
+}
+
+/** 玩家用出 `skillId`（读条走完）→ **Boss 这一下实际掉的血**。 */
+function hitDamage(engine: BattleEngine, skillId: string): number {
+  const boss = (): number =>
+    engine.snapshot.combatants.find((c) => c.side === 'enemy')!.resources.hp;
+  const before = boss();
+  engine.tick([{ type: 'useSkill', skillId, atTick: 0 }]);
+  /**
+   * ⚠️ 要跑够**最长的那条读条**才会结算到命中：斩 500ms（30 tick）、
+   * 劈 1200ms（72 tick）—— 120 帧有余量。瞬发技能（避）第一帧就结算完。
+   */
+  for (let i = 0; i < 120; i += 1) engine.tick([]);
+  engine.drainEvents();
+  return before - boss();
+}
+
+describe('「避实击虚」：避 → 蓄势 → **下一次攻击伤害翻倍**（真引擎）', () => {
+  it('⚠️ 不选它：用「避」不挂蓄势，斩是**基础 10**（默认路径不变）', () => {
+    const bare = quietEngineWith(buildPlayerKit('player', []));
+    expect(hitDamage(bare, 'dodge')).toBe(0);
+    expect(chargeStacks(bare)).toBe(0);
+    expect(hitDamage(bare, 'attack')).toBe(10);
   });
 
-  it('选了它：用「避」→ 缠 **+20**（代价照付，炁另算）', () => {
-    expect(castDouqiDelta(KIT_DODGE, 'dodge', 0).delta).toBe(20);
+  it('选了它：用「避」→ 蓄势挂上（`damageBoost` = 100）', () => {
+    const engine = quietEngineWith(KIT_DODGE);
+    hitDamage(engine, 'dodge');
+    expect(chargeStacks(engine)).toBe(1);
+    expect(engine.statsOf('player').damageBoost).toBe(100);
   });
 
-  it('⚠️ 它是**回复**不是"减耗"：「避」没花过缠，所以不可能从代价里减出来', () => {
+  it('⚠️ **伤害数字翻倍**：斩 10 → **20**（只差"先避一下"）', () => {
     /**
-     * 这一条把"读法"钉成机器可检查的事实：引擎里「避」的代价只有炁
-     * （`DODGE.cost` 查得到），所以 +20 只能是 `resource` 回缠那条路。
+     * 这是用户要的前后对比：同一个技能、同一条引擎路径、同一个 Boss，
+     * 唯一的差别是身上有没有那一层蓄势。
+     */
+    const withCharge = quietEngineWith(KIT_DODGE);
+    hitDamage(withCharge, 'dodge');
+    const boosted = hitDamage(withCharge, 'attack');
+
+    const withoutCharge = quietEngineWith(KIT_DODGE);
+    const plain = hitDamage(withoutCharge, 'attack');
+
+    expect(plain).toBe(10);
+    expect(boosted).toBe(20);
+    expect(boosted).toBe(plain * 2);
+  });
+
+  it('⚠️ **用掉就消耗**：第一刀 20，第二刀回到 **10**（蓄势没了）', () => {
+    const engine = quietEngineWith(KIT_DODGE);
+    hitDamage(engine, 'dodge');
+    expect(chargeStacks(engine)).toBe(1);
+
+    expect(hitDamage(engine, 'attack')).toBe(20);
+    expect(chargeStacks(engine)).toBe(0);
+
+    expect(hitDamage(engine, 'attack')).toBe(10);
+    expect(hitDamage(engine, 'attack')).toBe(10);
+  });
+
+  it('⚠️ 重击同样吃到翻倍：劈 45 → **90**（不是只有普攻）', () => {
+    const engine = quietEngineWith(KIT_DODGE);
+    hitDamage(engine, 'dodge');
+    expect(hitDamage(engine, 'pi')).toBe(90);
+    expect(chargeStacks(engine)).toBe(0);
+
+    const plain = quietEngineWith(KIT_DODGE);
+    expect(hitDamage(plain, 'pi')).toBe(45);
+  });
+
+  it('⚠️ **没打出去就不会消失**（时长无限：唯一的终止条件是攻击）', () => {
+    /**
+     * 用户的口径里**没有时间维度** —— 所以"闪完站着不动"不该让它悄悄
+     * 过期。这条同时钉住 `duration: POSITIVE_INFINITY` 这个选择。
+     */
+    const engine = quietEngineWith(KIT_DODGE);
+    hitDamage(engine, 'dodge');
+    for (let i = 0; i < 600; i += 1) engine.tick([]);
+    expect(chargeStacks(engine)).toBe(1);
+  });
+
+  it('⚠️ 「避」是**代价只有炁**的技能：这条炁机仍然不改它的代价', () => {
+    /**
+     * 旧效果（回缠）曾经拿这条当"读法的证据"。现在效果换了，**读法变了
+     * 但事实没变** —— 留着它，免得有人以为那条炁机现在改代价。
      */
     const dodge = makeGoldenEngineOptions().skills.get('dodge') as SkillDef;
     expect(dodge.cost.map((c) => c.resource)).toEqual(['energy']);
     expect(KIT_DODGE.skillTweaks[0]?.costDeltas).toBeUndefined();
   });
+});
 
-  it('⚠️ 回缠**受上限钳制**（缠满了就不会溢出 —— 与引擎其它回资源同一条规则）', () => {
-    /**
-     * 上限从 `Combatant.caps.douqi` 来（夹具里是 `PLAYER_CAPS.douqi`）。
-     * "回 20" 超出上限的部分被钳掉是**正确**行为（否则缠会越过上限，
-     * 而界面 / 规则都按"最多 100"写）。
-     */
-    const cap = makeGoldenEngineOptions().combatants[0]!.caps.douqi;
-    expect(castDouqiDelta(KIT_DODGE, 'dodge', cap).delta).toBe(0);
-    expect(castDouqiDelta(KIT_DODGE, 'dodge', cap - 5).delta).toBe(5);
+describe('⚠️ 蓄势的**消耗契约**：每个能造成伤害的技能都要写那一条 `removeBuff`', () => {
+  /**
+   * ==================================================================
+   * 这条测试在防什么
+   * ==================================================================
+   *
+   * "用掉就消耗"在引擎里只能由**消耗方**的命中写 `removeBuff` 表达
+   * （先例是「击」消耗 `combo-window`，见 `kits/dodgeCharge.ts` 的文件头）。
+   * 于是它是一份**跨文件的契约**：将来加一个攻击技能却忘了写那一条，
+   * 蓄势会**穿过**那次攻击活下来（下一击继续翻倍）—— 静默，而且只在
+   * "选了这条炁机"时才发生。
+   *
+   * 所以判据**从技能表推导**（不是手写一份 id 清单）：林晚风能用的、
+   * 带 `damage` 的技能，每一条的 `hits[].effects` 里都必须有它。
+   */
+  const usableByLin = [...LIN_WANFENG_SKILLS, STRIKE];
+
+  it('三条攻击（斩 / 劈 / 击）都写了，且都作用在**自己**身上', () => {
+    const damaging = usableByLin.filter((skill) =>
+      skill.hits.some((hit) => hit.effects.some((e) => e.kind === 'damage')),
+    );
+    /** 至少要有这几条 —— 否则下面的循环可能空转（"测了个寂寞"）。 */
+    expect(damaging.map((s) => s.id).sort()).toEqual(['attack', 'pi', 'strike']);
+
+    for (const skill of damaging) {
+      const consumes = skill.hits
+        .flatMap((hit) => hit.effects)
+        .filter((e) => e.kind === 'removeBuff' && e.buffId === DODGE_CHARGE.id);
+      expect(consumes, `${skill.id} 没有消耗蓄势（漏了 removeBuff）`).toHaveLength(1);
+      expect(consumes[0]?.target?.mode, `${skill.id} 的消耗不是作用在自己身上`).toBe('self');
+    }
+  });
+
+  it('⚠️ 顺序：消耗写在 `damage` **之后**（先吃到翻倍，再用掉它）', () => {
+    for (const skill of usableByLin) {
+      for (const hit of skill.hits) {
+        const kinds = hit.effects.map((e) => e.kind);
+        const damageAt = kinds.indexOf('damage');
+        const consumeAt = hit.effects.findIndex(
+          (e) => e.kind === 'removeBuff' && e.buffId === DODGE_CHARGE.id,
+        );
+        if (damageAt < 0 || consumeAt < 0) continue;
+        expect(damageAt, `${skill.id} 的消耗写在伤害之前`).toBeLessThan(consumeAt);
+      }
+    }
   });
 });
 

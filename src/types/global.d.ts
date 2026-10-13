@@ -146,11 +146,16 @@ declare global {
          *   - `freeQiji()`：**效果叠加**的验收要读"开了几条、各几层"
          *   - `detail()`：截图能看出详情区有字，但"是**谁的**字"读不出来
          *   - `hover()`：headless 下模拟真实指针划过不可靠
+         *
+         * ⚠️ 2026-10-13 第二轮又加了 `expanded` / `expand()`：手风琴
+         * "同时只展开一块"这件事**只拍图看不出来**（三张图各有一块展开，
+         * 但"另外两块收起了吗"要靠这个读数）。
          */
         state(): {
           readonly playerId: string;
           readonly bossId: string;
           readonly focus: 'player' | 'qiji' | 'boss' | 'start';
+          readonly expanded: 'player' | 'qiji' | 'boss';
           readonly cursor: {
             readonly playerId: string;
             readonly bossId: string;
@@ -192,6 +197,8 @@ declare global {
         pick(kind: 'player' | 'boss', id: string): void;
         /** 直接把焦点放到某个槽位（截图用，省掉"按几次方向键"）。 */
         focusSlot(slot: 'player' | 'qiji' | 'boss' | 'start'): void;
+        /** 展开某一块（手风琴；截图脚本一步摆出"炁机块展开"的画面）。 */
+        expand(slot: 'player' | 'qiji' | 'boss'): void;
         /** 同鼠标划过某点：只影响详情区（不动光标）。 */
         hover(px: number, py: number): boolean;
       };

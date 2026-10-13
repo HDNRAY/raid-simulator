@@ -22,8 +22,8 @@
  *    所以下面三条的 `comboWindow` 才是它们的本体：**关系**（源 → 击）
  *    是炁机，`击` 只是那条关系的出口。
  * 5. ⚠️ **三条改"某个技能本身"的炁机**（2026-10-13 新增）：
- *    「避」3 次 → 避用出后回 20 缠；「凝」3 次 → **两条一起**解锁
- *    （凝减耗 −20 / 凝增伤变成 100%）。它们的落点是 `skillTweak`
+ *    「避」3 次 → **用出避之后挂一层蓄势（下一次攻击伤害翻倍，用掉就消耗）**；
+ *    「凝」3 次 → **两条一起**解锁（凝减耗 −20 / 凝增伤变成 100%）。它们的落点是 `skillTweak`
  *    （见 `core/types/qiji.ts` 的 `QijiSkillTweak`），
  *    **不是**继承来的 `abilities` —— 那个只能改玩家属性。
  *
@@ -54,6 +54,7 @@
 
 import type { QijiEntity } from '../core/types/qiji';
 import { COMBO_WINDOW, comboWindowFor } from './kits/combo';
+import { DODGE_CHARGE } from './kits/dodgeCharge';
 import { FOCUS_BUFF } from './kits/shared';
 
 /* ================================================================== *
@@ -167,24 +168,40 @@ export const QIJI_FLASH_STRIKE: QijiEntity = {
  * ================================================================== */
 
 /**
- * 「避」用出后**回复 20 缠**（用户原话："3 次避之后解锁，避回 20 缠"）。
+ * 「避」用出后**获得一层蓄势**：下一次攻击伤害翻倍，用掉就消耗
+ * （用户 2026-10-13 改的效果：**原来的"回 20 缠"整条删掉**）。
  *
  * ==================================================================
- * ⚠️ "避回 20 缠" 的读法 —— 为什么是"回复"而不是"消耗减少"
+ * ⚠️ 效果为什么是"挂 buff"而不是"回缠"（读法的第二次变化）
  * ==================================================================
  *
- * 「避」（`data/kits/linwanfeng.ts` 的 `DODGE`）的代价是 **15 炁**
- * （`cost: [{ resource: 'energy', value: S(15) }]`），**一点缠都不花**。
- * 所以"避的缠消耗 −20"这条读法在本作里**没有意义**（它压根不消耗缠），
- * 只可能是"**用出避之后回 20 缠**"。
+ * 第一版是"避回 20 缠"（`onUse: { kind: 'resource', delta: 20 }`），
+ * 读法依据是「避」的代价只有 15 炁、一点缠都不花（见
+ * `data/kits/linwanfeng.ts` 的 `DODGE.cost`）。用户现在的原话是
+ * **"避实击虚 的效果改为，buff 下一次攻击伤害翻倍"** —— 整条换掉，
+ * 于是 `resource` 那一支不再需要，连那个 delta 一起删（**不留死值**：
+ * 留着它就成了"看起来还在回缠"的第二份真相）。
  *
- * 这是**实测查清的**，不是猜的 —— 依据就是那个 `cost` 字段（见
- * `tests/unit/qijiWiring.test.ts` 里对「避」代价的断言）。
+ * ==================================================================
+ * 它是怎么表达出来的（**没有新引擎机制**）
+ * ==================================================================
  *
- * 「回」= 回复 / 得到：`onUse` 一次性加 20 缠（形状复用引擎已有的
- * `ResourceAbility`，与"基础技产生 18 点炁"是同一条路）。
+ *   ① 挂 buff：`onUse` 写一条 **`grant`**（引擎已有、`castPipeline` 在
+ *      `castFinish` 真的会执行的那两种能力之一，另一种是 `resource`）。
+ *   ② 翻倍：buff 带一条 `damageBoost +100`（累加器；100 = +100%）。
+ *   ③ 消耗：攻击技能的命中里写 `removeBuff`（先例是「击」消耗
+ *      `combo-window`）—— 契约与推导写在
+ *      `data/kits/dodgeCharge.ts` 的文件头。
+ *
+ * ⚠️ **不是** `Ability: 'consume'`：那个能力是"从**资源池**扣资源"，与
+ * buff 无关，而且**它还没有执行点**（`content/capabilityAudit.ts` 的
+ * `UNIMPLEMENTED_ABILITY_KINDS` 会拦下内容里的它）。参见 `onUse` 的类型
+ * 说明（`core/types/qiji.ts`）。
+ *
+ * ⚠️ **解锁条件不变**：仍然是"本局「避」用出 3 次"（下面那条
+ * `statAtLeast`）—— 改的只是效果，不是门槛。
  */
-export const QIJI_DODGE_DOUQI: QijiEntity = {
+export const QIJI_DODGE_CHARGE: QijiEntity = {
   id: 'biShiJiXu',
   kind: 'qiji',
   nameKey: 'qiji.biShiJiXu.name',
@@ -200,7 +217,7 @@ export const QIJI_DODGE_DOUQI: QijiEntity = {
   abilities: [],
   skillTweak: {
     skillId: 'dodge',
-    onUse: { kind: 'resource', target: { mode: 'self' }, resource: 'douqi', delta: 20 },
+    onUse: { kind: 'grant', target: { mode: 'self' }, buff: DODGE_CHARGE },
   },
 };
 
@@ -357,7 +374,7 @@ export const ALL_QIJI: readonly QijiEntity[] = [
   QIJI_JIE_STRIKE,
   QIJI_GUARD_STRIKE,
   QIJI_FLASH_STRIKE,
-  QIJI_DODGE_DOUQI,
+  QIJI_DODGE_CHARGE,
   QIJI_FOCUS_COST,
   QIJI_FOCUS_BOOST,
 ];

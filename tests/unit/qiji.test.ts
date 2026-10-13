@@ -3,6 +3,7 @@ import { ALL_QIJI, QIJI_BREATH, QIJI_JIE_STRIKE, QIJI_VITALITY, qijiById } from 
 import { flattenCatalog } from '../../src/i18n/translator';
 import { zhCN } from '../../src/i18n/locales/zh-CN';
 import { COMBO_WINDOW } from '../../src/data/kits/combo';
+import { DODGE_CHARGE } from '../../src/data/kits/dodgeCharge';
 import { FOCUS_BUFF } from '../../src/data/kits/shared';
 import type { QijiEntity } from '../../src/core/types/qiji';
 
@@ -95,7 +96,7 @@ describe('名字：一律四字（旧名 `截炁·生击` 那套已废）', () =
    *
    * 旧名 `截炁·生击` 是 **5 字 + 中间一个点** —— 它一句话读得出"这是一条
    * 关系"（源技能 + 结果），但不符合"四字"。换成成语之后那半条好处**必须
-   * 由 `desc` 补回来**（见下一条断言），否则玩家只看得到"当机立断"四个字。
+   * 由 `desc` 补回来**（见下一条断言），否则玩家只看得到四个字。
    */
   it('每条名字恰好 4 个字（中文按码点算，`炁` 也算一个）', () => {
     for (const qiji of ALL_QIJI) {
@@ -106,9 +107,14 @@ describe('名字：一律四字（旧名 `截炁·生击` 那套已废）', () =
   });
 
   it('八条的名字就是定稿的那一套（防"顺手改回去"）', () => {
+    /**
+     * ⚠️ 2026-10-13 用户**第二次挑名**（原话："当机立断 改成 后发先至。
+     * 以柔克刚 改成 连消带打。其他的暂时按你的来"）—— 只有前两条变了，
+     * 其余六条（含下面四条）逐字未动，所以这张表就是那次改动的账。
+     */
     const expected: Readonly<Record<string, string>> = {
-      jieShengJi: '当机立断',
-      xieShengJi: '以柔克刚',
+      jieShengJi: '后发先至',
+      xieShengJi: '连消带打',
       shanShengJi: '电光石火',
       vitality: '固本培元',
       breath: '周天运转',
@@ -349,16 +355,40 @@ describe('三条 `skillTweak`：解锁条件 + 效果形状', () => {
     expect(cost.unlock).toEqual(boost.unlock);
   });
 
-  it('「避实击虚」：用出避 → `resource` 一次性 +20 缠（自己）', () => {
+  it('「避实击虚」：用出避 → `grant` 一层蓄势（自己）', () => {
+    /**
+     * ⚠️ 效果 2026-10-13 **整条换掉**：原来是用出避回 20 缠
+     * （`{ kind: 'resource', …, delta: 20 }`），现在是挂一层 buff
+     * （下一次攻击翻倍、用掉就消耗）。
+     */
     expect(dodge.skillTweak?.skillId).toBe('dodge');
     expect(dodge.skillTweak?.onUse).toEqual({
-      kind: 'resource',
+      kind: 'grant',
       target: { mode: 'self' },
-      resource: 'douqi',
-      delta: 20,
+      buff: DODGE_CHARGE,
     });
     /** 它**不**改代价（「避」的代价是炁，见下面那条断言）。 */
     expect(dodge.skillTweak?.costDeltas).toBeUndefined();
+    /** ⚠️ 旧的"回缠"那一支**不许留着**（留着就是"看起来还在回缠"）。 */
+    expect(JSON.stringify(dodge.skillTweak)).not.toContain('douqi');
+  });
+
+  it('「避实击虚」的 buff 是**蓄势**：+100% 增伤，一层，用掉就消耗', () => {
+    /**
+     * "翻倍"= `damageBoost` 加 100 个百分点（累加器约定，见
+     * `kits/dodgeCharge.ts` 文件头）。这一条钉的是**那个数**，因为
+     * 卡片的说明写的是"伤害翻倍"（文案里没有数字，见下面的对账断言）。
+     */
+    const modifier = (DODGE_CHARGE.modifiers ?? []).find((m) => m.stat === 'damageBoost');
+    expect(modifier?.op).toBe('addPercent');
+    expect(modifier?.value).toBe(100);
+    /** 一层 + 刷新：连闪 3 次不是 ×8。 */
+    expect(DODGE_CHARGE.maxStacks).toBe(1);
+    expect(DODGE_CHARGE.stacking).toEqual({ mode: 'refresh' });
+    /** 无限时长：唯一的终止条件是"打出去"（不是因为时间到）。 */
+    expect(DODGE_CHARGE.duration).toBe(Number.POSITIVE_INFINITY);
+    /** 会画出来 —— 所以它必须有短标签（`viewHelpers` 的覆盖率那条钉住）。 */
+    expect(DODGE_CHARGE.hidden).not.toBe(true);
   });
 
   it('「聚气凝神」：`costDeltas` 只有一条 `douqi −20`', () => {
@@ -400,14 +430,23 @@ describe('三条新炁机的说明与内容**对得上**', () => {
     }
   });
 
-  it('说明里的数字与内容一致（避 20 / 凝减耗 20 / 凝增伤 100%）', () => {
+  it('说明里的数字与内容一致（避翻倍 / 凝减耗 20 / 凝增伤 100%）', () => {
     /**
-     * ⚠️ 与 `vitality` / `breath` 同一条口径：数字的家在 `data/qiji.ts`，
-     * 说明只是文案。两处不一致 = 玩家看到的和生效的不是一回事。
+     * ⚠️ 与 `vitality` / `breath` 同一条口径：数字的家在内容里（`data/qiji.ts`
+     * 或它引用的 buff），说明只是文案。两处不一致 = 玩家看到的和生效的
+     * 不是一回事。
+     *
+     * ⚠️「避实击虚」的文案**故意不写数字**（写"伤害翻倍"）：那个 100 住在
+     * `kits/dodgeCharge.ts`，从这里**读出来**再判"它就是翻倍"，而不是
+     * 在文案里抄一遍 `100%`（那会是第二份真相）。
      */
     const dodgeDesc = QIJI_CATALOG.get('qiji.biShiJiXu.desc') ?? '';
-    const delta = qijiById('biShiJiXu')?.skillTweak?.onUse?.delta;
-    expect(dodgeDesc).toContain(`回复 ${String(delta)} 缠`);
+    const charge = (DODGE_CHARGE.modifiers ?? []).find((m) => m.stat === 'damageBoost');
+    const multiplier = 1 + (typeof charge?.value === 'number' ? charge.value : 0) / 100;
+    expect(multiplier).toBe(2);
+    expect(dodgeDesc).toContain('伤害翻倍');
+    /** 旧文案的"回复 20 缠"不许留（它已经不是那条炁机的效果了）。 */
+    expect(dodgeDesc).not.toContain('回复');
 
     const costDesc = QIJI_CATALOG.get('qiji.ningShenJuQi.desc') ?? '';
     const reduction = qijiById('ningShenJuQi')?.skillTweak?.costDeltas?.[0]?.delta;

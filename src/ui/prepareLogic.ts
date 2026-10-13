@@ -72,18 +72,25 @@
  * 想往下退一层用 `Shift+Enter`（或在卡片左半边点一下）。
  */
 
-import type { PrepareFocus, PrepareOption } from './prepareTypes';
-import { prepareHitAreas } from './prepareLayout';
+import type { PrepareFocus, PrepareOption, PrepareSectionKind } from './prepareTypes';
+import { prepareHitAreas } from './prepareGeometry';
 
-export type { PrepareFocus, PrepareOption } from './prepareTypes';
-export type { PrepareHitArea } from './prepareLayout';
+export type { PrepareFocus, PrepareOption, PrepareSectionKind } from './prepareTypes';
+export type { PrepareHitArea, PrepareHitKind } from './prepareLayout';
 /**
  * ⚠️ **转发**命中几何（而不是让每个消费者自己去 `./prepareLayout` 取）：
  * `prepareLogic` 是"备战屏的规则"这一层，而"点在哪一项上"是它的一部分
  * （`hitTestPrepare` 就用它）。转发之后消费者只有**一个**入口，
  * 而几何本身仍然只有 `prepareLayout` 那一份实现。
  */
-export { prepareHitAreas, prepareLabelY, rowTopsOf } from './prepareLayout';
+export {
+  prepareHitAreas,
+  prepareLabelY,
+  rowTopsOf,
+  sectionBlockH,
+  sectionsBottom,
+  startRect,
+} from './prepareGeometry';
 
 /**
  * 光标在各槽位里停的那个选项。
@@ -110,6 +117,24 @@ export interface PrepareSelection {
   readonly bossId: string;
   /** 光标停在哪个槽位（`'start'` = 停在「开始战斗」上）。 */
   readonly focus: PrepareFocus;
+  /**
+   * **手风琴里展开的那一块**（用户 2026-10-13："同一时间只展开 3 个选择中
+   * 的一个，其他的收起来"）。
+   *
+   * ⚠️ 它**不是**第二个"焦点"：判据只有一条 —— **焦点在哪一块，就展开
+   * 哪一块**（`focus` 是三块之一时两者相等）。它之所以要存下来，是因为
+   * 焦点会走到「开始战斗」上，而那时**上一块仍然要展开**（总不能三块
+   * 全收起来，玩家就看不见卡片了）。所以：
+   *
+   * ```
+   *   focus 是某一块  →  expanded === focus（同一个动作里一起写）
+   *   focus === 'start' → expanded 保持上一块不变
+   * ```
+   *
+   * ⚠️ 不许在别处再存一个"当前展开块"（那就成了第二份真相：两处一漂，
+   * 画面展开的是 A、焦点却在 B）。
+   */
+  readonly expanded: PrepareSectionKind;
   /** 光标在各槽位里停的选项（移动它**不改**上面的两个 id）。 */
   readonly cursor: PrepareCursor;
 }
@@ -154,8 +179,23 @@ export function initialSelection(
     playerId: current.playerId,
     bossId: current.bossId,
     focus: 'player',
+    /** ⚠️ 进场时人物那一块是展开的（焦点就在它上面）。 */
+    expanded: 'player',
     cursor: cursorFromSelection(current, qiji),
   };
+}
+
+/**
+ * 换**焦点**，并顺带把手风琴的"展开块"跟上去。
+ *
+ * ⚠️ 这是这条规则**唯一**的实现（`moveFocus` / `focusTarget` / `pickOption`
+ * / `pickQiji` 全走它）：焦点落在某一块上就展开那一块；落在「开始战斗」上
+ * 时展开块**不动**（见 `PrepareSelection.expanded`）。
+ */
+function withFocus(sel: PrepareSelection, focus: PrepareFocus): PrepareSelection {
+  const expanded: PrepareSectionKind = focus === 'start' ? sel.expanded : focus;
+  if (focus === sel.focus && expanded === sel.expanded) return sel;
+  return { ...sel, focus, expanded };
 }
 
 /* ================================================================== *
@@ -270,14 +310,14 @@ export function moveFocus(
     for (let i = 1; i <= order.length; i += 1) {
       const idx = (from + step * i + order.length) % order.length;
       const candidate = order[idx];
-      if (candidate !== undefined && canFocus(candidate)) return { ...sel, focus: candidate };
+      if (candidate !== undefined && canFocus(candidate)) return withFocus(sel, candidate);
     }
     return sel;
   }
 
   for (let idx = from + step; idx >= 0 && idx < order.length; idx += step) {
     const candidate = order[idx];
-    if (candidate !== undefined && canFocus(candidate)) return { ...sel, focus: candidate };
+    if (candidate !== undefined && canFocus(candidate)) return withFocus(sel, candidate);
   }
   return sel;
 }
@@ -308,10 +348,38 @@ export function focusTarget(
    * "焦点进了炁机行，但光标指着一个不存在的 id"，画面上一张卡都不高亮。
    */
   if (slot === 'qiji' && qiji.length > 0 && !qiji.some((q) => q.id === sel.cursor.qijiId)) {
-    return { ...sel, focus: slot, cursor: { ...sel.cursor, qijiId: qiji[0]!.id } };
+    return withFocus({ ...sel, cursor: { ...sel.cursor, qijiId: qiji[0]!.id } }, slot);
   }
-  if (slot === sel.focus) return sel;
-  return { ...sel, focus: slot };
+  return withFocus(sel, slot);
+}
+
+/**
+ * 这个字符串是不是一个**块**（`'player' | 'qiji' | 'boss'`）。
+ *
+ * ⚠️ 用途只有一个：点「块头」时命中区给的是 `{ kind: 'summary', id: <槽位> }`，
+ * 而 `id` 的类型是 `string`。**类型守卫**（而不是 `as PrepareSectionKind`）
+ * 让"命中区给了一个不是槽位的 id"这件事在编译期就不成立
+ * （AGENTS.md §1：不许用断言把类型问题按下去）。
+ */
+export function isSectionKind(id: string): id is PrepareSectionKind {
+  return id === 'player' || id === 'qiji' || id === 'boss';
+}
+
+/**
+ * **展开某一块**（收起态那块「块头」被点/被敲时走它）。
+ *
+ * ⚠️ 它与"点卡片"是**两件事**：点块头**只**换焦点（于是那一块展开），
+ * **不改选择**（块头显示的正是"当前选了什么"，点它不该把它改掉）。
+ * 触屏靠它才能展开收起的块（AGENTS.md §3b 的功能对等）。
+ *
+ * ⚠️ 光标**跟着**焦点走：展开之后"光标停在这一块里"，详情区于是立刻
+ * 显示这一块当前那一项（与点卡片同一条体验）。
+ */
+export function expandSection(
+  sel: PrepareSelection,
+  slot: PrepareSectionKind,
+): PrepareSelection {
+  return withFocus(sel, slot);
 }
 
 /**
@@ -366,8 +434,8 @@ export function pickOption(
       : sel.bossId === id && sel.focus === 'boss' && sel.cursor.bossId === id;
   if (same) return sel;
   return kind === 'player'
-    ? { ...sel, playerId: id, focus: 'player', cursor: { ...sel.cursor, playerId: id } }
-    : { ...sel, bossId: id, focus: 'boss', cursor: { ...sel.cursor, bossId: id } };
+    ? withFocus({ ...sel, playerId: id, cursor: { ...sel.cursor, playerId: id } }, 'player')
+    : withFocus({ ...sel, bossId: id, cursor: { ...sel.cursor, bossId: id } }, 'boss');
 }
 
 /** 把光标移到某张炁机卡上（点它 / 悬停它）。 */
@@ -378,7 +446,7 @@ export function pickQiji(
 ): PrepareSelection {
   if (!qiji.some((e) => e.id === id)) return sel;
   if (sel.focus === 'qiji' && sel.cursor.qijiId === id) return sel;
-  return { ...sel, focus: 'qiji', cursor: { ...sel.cursor, qijiId: id } };
+  return withFocus({ ...sel, cursor: { ...sel.cursor, qijiId: id } }, 'qiji');
 }
 
 /* ================================================================== *
@@ -516,8 +584,12 @@ export function canStartBattle(
  * 对不上"。
  *
  * ⚠️ 顺序即优先级：`start` 会**先**被问（它不是卡片，是一颗按钮，
- * 而按钮叠在整屏之上），然后才轮到卡片。
+ * 而按钮叠在整屏之上），然后才轮到卡片与**收起态的块头**
+ * （`kind === 'summary'`，点它 = 展开那一块，见 `expandSection`）。
+ *
  * ⚠️ **同一次点击只返回一项**（命中即返回）：继续往下找会同时点中底下的卡。
+ * ⚠️ 收起的那两块**只有块头**在命中区里 —— 它们的卡片不画、也点不到
+ * （不会出现"看不见却能点中的幽灵卡片"）。
  */
 export function hitTestPrepare(
   px: number,
@@ -525,13 +597,18 @@ export function hitTestPrepare(
   players: readonly PrepareOption[],
   bosses: readonly PrepareOption[],
   qiji: readonly PrepareOption[] = [],
-): { readonly kind: 'player' | 'qiji' | 'boss' | 'start'; readonly id: string } | undefined {
-  const areas = prepareHitAreas(players, bosses, qiji);
+  expanded: PrepareSectionKind = 'player',
+): { readonly kind: 'player' | 'qiji' | 'boss' | 'start' | 'summary'; readonly id: string } | undefined {
+  const areas = prepareHitAreas(players, bosses, qiji, expanded);
   /** 按钮优先（见上）。 */
   const start = areas.find((a) => a.kind === 'start');
   if (start !== undefined && inRect(px, py, start)) return { kind: 'start', id: start.id };
   for (const area of areas) {
     if (area.kind === 'start') continue;
+    if (area.kind === 'summary') {
+      if (inRect(px, py, area)) return { kind: 'summary', id: area.id };
+      continue;
+    }
     if (inRect(px, py, area)) return { kind: area.kind, id: area.id };
   }
   return undefined;

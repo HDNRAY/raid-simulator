@@ -6,7 +6,19 @@
  * ==================================================================
  *
  * 它把 `prepareDetail.detailModelOf()` 算出来的**清单**画成一块面板：
- * 标题 + 大头像（或图标占位）+ 若干行文字 / 技能说明。
+ * **顶部一条**（名字 + 关键数值 + 头像位）+ 若干行文字 / 技能说明。
+ *
+ * ==================================================================
+ * ⚠️ 2026-10-13：顶部改成**一条**（用户："详情页右上角是空的"）
+ * ==================================================================
+ *
+ * 旧版是"标题在左上、头像在它下面、生命上限夹在中间"—— 于是**右上角整块
+ * 是空的**，而"这个 Boss 多硬"那一行（生命上限）被埋在头像下面。
+ *
+ * 现在三类共用**同一条顶栏**：左边一列文字（名字 + 关键数值），右边一个
+ * **方框**（人物 = 对话头像，炁机 / Boss = 名字首字的程序化占位）。
+ * 于是"右上角"由那个方框占住，而**生命上限就在名字正下方、亮色加粗**
+ * （用户："血量要显眼"）。
  *
  * ==================================================================
  * ⚠️ 每帧只改字符串与可见性，**不重建** Text / Graphics
@@ -43,7 +55,8 @@ import { FONT } from './layout';
 import { Label, type PixiCtor } from './primitives';
 import { PALETTE } from '../render/theme';
 import { PREPARE_SKIN } from './prepareRender';
-import { detailRect, PREPARE_LAYOUT } from './prepareLayout';
+import { PREPARE_LAYOUT } from './prepareLayout';
+import { detailRect } from './prepareGeometry';
 import type { DetailModel, DetailRow } from './prepareDetail';
 import { PORTRAITS, portraitFor } from '../render/portraitAssets';
 import { PortraitSprite } from '../render/portraitSprite';
@@ -68,12 +81,21 @@ const DETAIL_ROW_POOL = 12;
 const METRICS = {
   /** 标题字号（比正文大一号）。 */
   titleSize: 20,
+  /**
+   * **顶部那一行"关键数值"的字号**（人物 / Boss = 生命上限，炁机 = 层数）。
+   *
+   * ⚠️ 从 `FONT.small`(13) 提到 `FONT.title`(17) —— 用户原话"**血量要
+   * 显眼**（那是玩家最想看的）"。它只比标题小一号，并且用亮色（见 `update`）。
+   */
+  valueSize: FONT.title,
   /** 说明字号。 */
   bodySize: FONT.small,
   /** 名字 / 标签字号。 */
   nameSize: FONT.body,
   /** 一行标题的行高。 */
   titleLine: 26,
+  /** 关键数值那一行的行高。 */
+  valueLine: 22,
   /** 一条技能：名字行 + 说明行。 */
   nameLine: 19,
   bodyLine: 17,
@@ -92,6 +114,32 @@ const METRICS = {
  */
 function portraitBoxOf(innerW: number): number {
   return Math.max(48, Math.min(88, Math.floor(innerW * 0.42)));
+}
+
+/**
+ * 顶部那一条的度量（**三类共用**）。
+ *
+ * ```
+ *   ┌──────────────────────┐
+ *   │ 名字（20 金）        │  ┌────┐
+ *   │ 生命上限 420（17 亮）│  │ 脸 │  ← 方框贴右边（`box` 见方）
+ *   └──────────────────────┘  └────┘
+ * ```
+ *
+ * ⚠️ 条高取 `max(方框, 两行文字)`：人物（有 88 方框）时是方框说了算，
+ * 而三类**都走这一条**，所以"炁机 / Boss 没有头像"也不会少一截高度 ——
+ * 它们的方框是程序化占位（同一个位置、同一个尺寸）。
+ */
+function headerBandOf(rect: { readonly y: number; readonly w: number }): {
+  readonly top: number;
+  readonly h: number;
+  readonly box: number;
+  readonly textH: number;
+} {
+  const innerW = rect.w - PREPARE_LAYOUT.detailPad * 2;
+  const box = portraitBoxOf(innerW);
+  const textH = METRICS.titleLine + METRICS.valueLine;
+  return { top: rect.y + PREPARE_LAYOUT.detailPad, h: Math.max(box, textH), box, textH };
 }
 
 /* ------------------------------------------------------------------ *
@@ -152,21 +200,28 @@ export class PrepareDetailPanel {
 
     const innerX = rect.x + PREPARE_LAYOUT.detailPad;
     const innerW = rect.w - PREPARE_LAYOUT.detailPad * 2;
+    const band = headerBandOf(rect);
 
     this.title = new Label(pixi, {
       x: innerX,
-      y: rect.y + PREPARE_LAYOUT.detailPad,
+      /** ⚠️ 文字块在顶栏里**垂直居中**（见 `headerBandOf`）。 */
+      y: band.top + (band.h - band.textH) / 2,
       size: METRICS.titleSize,
       color: PALETTE.text,
       kai: true,
-      wrap: { width: innerW },
+      wrap: { width: innerW - band.box - METRICS.rowGap },
     });
     this.subtitle = new Label(pixi, {
       x: innerX,
-      y: rect.y + PREPARE_LAYOUT.detailPad + METRICS.titleLine,
-      size: METRICS.bodySize,
-      color: PALETTE.textDim,
-      wrap: { width: innerW },
+      y: band.top + (band.h - band.textH) / 2 + METRICS.titleLine,
+      size: METRICS.valueSize,
+      color: PALETTE.text,
+      /**
+       * ⚠️ **加粗**：这一行是"玩家最想看的那个数"（用户："血量要显眼"）。
+       * 字号已经比正文大一档，再加粗与正文拉开层级。
+       */
+      bold: true,
+      wrap: { width: innerW - band.box - METRICS.rowGap },
     });
     this.placeholder = new Label(pixi, {
       x: innerX,
@@ -176,18 +231,22 @@ export class PrepareDetailPanel {
       wrap: { width: innerW },
     });
 
-    /** 人物 / Boss 的大头像（复用卡片上那颗的素材表）。 */
+    /** 人物 / Boss 的大头像（复用卡片上那颗的素材表），摆在顶栏**右端**。 */
     const firstPlayer = PORTRAITS[0];
     this.portrait =
       firstPlayer === undefined
         ? undefined
-        : new PortraitSprite(pixi, this.content, firstPlayer, portraitBoxOf(innerW));
+        : new PortraitSprite(pixi, this.content, firstPlayer, band.box);
 
     this.iconBox = new pixi.Graphics();
     this.iconGlyph = new Label(pixi, {
       x: 0,
       y: 0,
-      size: METRICS.titleSize,
+      /**
+       * ⚠️ 占位方框里那个字（名字首字）随方框大小定：固定的 20px 在一个
+       * 88px 的方框里会显得像"图挂了"，而它**就是**没有素材时的样子。
+       */
+      size: Math.max(METRICS.titleSize, Math.round(band.box * 0.36)),
       color: PALETTE.text,
       anchorX: 0.5,
       anchorY: 0.5,
@@ -272,7 +331,9 @@ export class PrepareDetailPanel {
       this.placeholder.root.visible = true;
       this.title.root.visible = false;
       this.subtitle.root.visible = false;
-      this.setImage(undefined, innerX, innerW);
+      this.portrait?.setVisible(false);
+      this.iconBox.visible = false;
+      this.iconGlyph.root.visible = false;
       for (const row of this.rows) {
         row.name.root.visible = false;
         row.body.root.visible = false;
@@ -286,19 +347,29 @@ export class PrepareDetailPanel {
     this.lastTitleKey = model.titleKey;
     this.title.set(this.translate(model.titleKey));
     this.title.setColor(PREPARE_SKIN.selectionText);
+    /**
+     * ⚠️ 标题 / 关键数值 / 头像位**都摆在顶栏那一条里**（三个类共用，
+     * 见 `headerBandOf`）：文字块垂直居中、方框贴右端。
+     */
+    const band = headerBandOf(rect);
+    this.title.root.x = innerX;
+    this.title.root.y = Math.round(band.top + (band.h - band.textH) / 2);
+    this.subtitle.root.x = innerX;
+    this.subtitle.root.y = this.title.root.y + METRICS.titleLine;
+    this.placeImage(model, innerX, innerW, band);
 
-    const imageBox = this.setImage(model, innerX, innerW);
-    let y = imageBox;
+    let y = band.top + band.h + METRICS.rowGap * 2;
 
     if (model.subtitle === undefined) {
       this.subtitle.root.visible = false;
     } else {
       this.subtitle.root.visible = true;
       this.subtitle.set(this.textOf(model.subtitle));
-      this.subtitle.setColor(PALETTE.textDim);
-      this.subtitle.root.x = innerX;
-      this.subtitle.root.y = y;
-      y += METRICS.bodyLine + METRICS.rowGap;
+      /**
+       * ⚠️ **亮色**（旧版是 `textDim`）：这一行是"血量 / 层数"这类关键
+       * 数值，压暗之后它在一条里读不出重点（用户："血量要显眼"）。
+       */
+      this.subtitle.setColor(PALETTE.text);
     }
 
     /** 分隔线：标题区与正文之间的那道（画在 gfx 上，不新开对象）。 */
@@ -337,24 +408,35 @@ export class PrepareDetailPanel {
    * ---------------------------------------------------------------- */
 
   /**
-   * 画头像（或炁机的图标占位），返回**图片区底边的 y**。
+   * 把头像（或炁机的图标占位）摆到**顶栏的右端**。
    *
    * ⚠️ 人物的头像素材来自 `render/portraitAssets.ts`；**没配对的人**
-   * （将来新加的角色）与**所有炁机**都走程序化占位 —— 炁机的 `icon`
-   * 名（`char_dodge` 那些）今天**不在 `render/icons.ts` 的 SVG 表里**，
-   * 所以不能假装画得出来（那会静默显示成空）。
+   * （将来新加的角色）与**所有炁机 / Boss** 都走程序化占位 —— 炁机的
+   * `icon` 名（`char_dodge` 那些）今天**不在 `render/icons.ts` 的 SVG
+   * 表里**，所以不能假装画得出来（那会静默显示成空）。
+   *
+   * ⚠️ 占位与真头像**同位置、同尺寸**：三类顶栏因此长得一样，而
+   * "这一格没有素材"与"素材还没加载完"也仍然是两件事（方框里那个字是
+   * 名字首字，加载完就换成脸）。
    */
-  private setImage(model: DetailModel | undefined, innerX: number, innerW: number): number {
-    const rect = detailRect();
-    const box = portraitBoxOf(innerW);
-    const top = rect.y + PREPARE_LAYOUT.detailPad + METRICS.titleLine + METRICS.bodyLine + METRICS.rowGap * 2;
-    /** 占位方块：与头像同尺寸的一圈虚线感描边（画在 `content` 里）。 */
+  private placeImage(
+    model: DetailModel | undefined,
+    innerX: number,
+    innerW: number,
+    band: { readonly top: number; readonly h: number; readonly box: number },
+  ): void {
+    const box = band.box;
+    /** 方框**贴右端**（`innerX + innerW` 是面板内区的右边界）。 */
+    const boxX = innerX + innerW - box;
+    const centerY = band.top + band.h / 2;
+    /** 占位方块：与头像同尺寸的一圈描边（画在 `content` 里）。 */
     this.iconBox.clear();
 
     if (model === undefined) {
       this.portrait?.setVisible(false);
       this.iconGlyph.root.visible = false;
-      return top;
+      this.iconBox.visible = false;
+      return;
     }
 
     const asset = model.portraitId === undefined ? undefined : portraitFor(model.portraitId);
@@ -365,11 +447,11 @@ export class PrepareDetailPanel {
        */
       this.portrait.setAsset(asset);
       this.portrait.setVisible(true);
-      this.portrait.root.x = innerX + box / 2;
-      this.portrait.root.y = top + box / 2;
+      this.portrait.root.x = boxX + box / 2;
+      this.portrait.root.y = centerY;
       this.iconBox.visible = false;
       this.iconGlyph.root.visible = false;
-      return top + box + METRICS.rowGap * 2;
+      return;
     }
 
     this.portrait?.setVisible(false);
@@ -379,16 +461,15 @@ export class PrepareDetailPanel {
      */
     this.iconBox.visible = true;
     this.iconBox
-      .roundRect(innerX, top, box, box, 4)
+      .roundRect(boxX, band.top, box, box, 4)
       .fill({ color: PALETTE.bgTop, alpha: 0.6 });
     this.iconBox
-      .roundRect(innerX, top, box, box, 4)
+      .roundRect(boxX, band.top, box, box, 4)
       .stroke({ color: PALETTE.panelLine, width: 1, alpha: 0.9 });
     this.iconGlyph.root.visible = true;
     this.iconGlyph.set(this.translate(model.titleKey).slice(0, 1));
-    this.iconGlyph.root.x = innerX + box / 2;
-    this.iconGlyph.root.y = top + box / 2;
-    return top + box + METRICS.rowGap * 2;
+    this.iconGlyph.root.x = boxX + box / 2;
+    this.iconGlyph.root.y = centerY;
   }
 
   /* ---------------------------------------------------------------- *

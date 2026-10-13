@@ -49,6 +49,9 @@ function toPlainText(metrics: readonly PanelTextMetric[]): PanelTextMetric[] {
  *   - `hover(x, y)`：鼠标悬停（详情区的鼠标那条路）
  *   - `detail()`：详情区**此刻显示的是哪一项** —— 截图能看出"面板上有字"，
  *     但"是**谁的**字"只有这个读数能钉死
+ *   - `current.expanded` / `expand(slot)`：手风琴**展开的是哪一块**
+ *     （2026-10-13 第二轮）—— "同时只展开一块"这件事只拍图看不出来
+ *     （三张图各有一块展开，但"另外两块收起了吗"要靠这个读数）
  *
  * ⚠️ 全部是**只读 + 转调**（同本文件的纪律）：探针不解释规则，
  * 只是把界面已有的状态读出来。
@@ -58,6 +61,8 @@ export interface PrepareDebugTarget {
     readonly playerId: string;
     readonly bossId: string;
     readonly focus: 'player' | 'qiji' | 'boss' | 'start';
+    /** 手风琴里**展开的那一块**（焦点在「开始」上时它保持上一块）。 */
+    readonly expanded: 'player' | 'qiji' | 'boss';
     readonly cursor: { readonly playerId: string; readonly bossId: string; readonly qijiId: string };
   };
   /** 当前开着的炁机（id → 层数；没开的不出现）。 */
@@ -67,6 +72,8 @@ export interface PrepareDebugTarget {
   confirm(back?: boolean): void;
   pick(kind: 'player' | 'boss', id: string): void;
   focusSlot(slot: 'player' | 'qiji' | 'boss' | 'start'): void;
+  /** 展开某一块（手风琴；只换焦点，不改选择）。 */
+  expand(slot: 'player' | 'qiji' | 'boss'): void;
   /** 鼠标悬停到逻辑坐标（返回有没有命中）。 */
   hover(px: number, py: number): boolean;
   /** 详情区此刻显示的是哪一项（`undefined` = 没聚焦任何卡片）。 */
@@ -107,6 +114,7 @@ export function prepareDebugApi(prepare: PrepareDebugTarget): {
     confirm(back?: boolean): void;
     pick(kind: 'player' | 'boss', id: string): void;
     focusSlot(slot: 'player' | 'qiji' | 'boss' | 'start'): void;
+    expand(slot: 'player' | 'qiji' | 'boss'): void;
     hover(px: number, py: number): boolean;
     hitAreas(): ReturnType<PrepareDebugTarget['hitAreas']>;
     detailModel(): unknown;
@@ -117,6 +125,7 @@ export function prepareDebugApi(prepare: PrepareDebugTarget): {
     playerId: prepare.current.playerId,
     bossId: prepare.current.bossId,
     focus: prepare.current.focus,
+    expanded: prepare.current.expanded,
     cursor: { ...prepare.current.cursor },
   });
   return {
@@ -145,6 +154,8 @@ export function prepareDebugApi(prepare: PrepareDebugTarget): {
        * "按几次方向键"这种一改布局就失效的脆弱脚本。
        */
       focusSlot: (slot) => prepare.focusSlot(slot),
+      /** 展开某一块（手风琴；截图脚本一步摆出"炁机块展开"的画面）。 */
+      expand: (slot) => prepare.expand(slot),
       /** 同鼠标划过：只影响详情区（不动光标）。 */
       hover: (px, py) => prepare.hover(px, py),
       /**
@@ -239,6 +250,8 @@ export function characterSelectDebugApi(select: CharacterSelectDebugTarget): {
     playerId: select.current.playerId,
     bossId: select.current.bossId,
     focus: select.current.focus,
+    /** 选角色屏只有人物一行（见 `characterSelectLogic`），展开块恒为它。 */
+    expanded: select.current.expanded,
     cursor: { ...select.current.cursor },
   });
   return {

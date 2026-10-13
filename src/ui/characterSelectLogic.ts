@@ -55,13 +55,8 @@ import {
   type PrepareOption,
   type PrepareSelection,
 } from './prepareLogic';
-import {
-  PREPARE_LAYOUT,
-  cardGrid,
-  rowTopsOf,
-  type PrepareHitArea,
-  type PrepareLayout,
-} from './prepareLayout';
+import { PREPARE_LAYOUT, type PrepareHitArea, type PrepareLayout } from './prepareLayout';
+import { cardGrid, rowTopsOf } from './prepareGeometry';
 
 /**
  * 选角色屏的布局。
@@ -109,7 +104,7 @@ export function characterSelectHitAreas(
    * 炁机行）：选角色屏只有人物卡一行，而"开始"是回车。
    */
   /** ⚠️ 行顶由 `rowTopsOf` 给（与备战屏**同一个**推导，见那边的说明）。 */
-  const top = rowTopsOf({ players: players.length, bosses: 0, qiji: 0 }, L).player;
+  const top = rowTopsOf({ players: players.length, bosses: 0, qiji: 0 }, 'player', L).player;
   return cardGrid(players.length, top, L, {
     colW: L.playerColW,
     columns: L.playerColumns,
@@ -130,6 +125,11 @@ export function characterSelection(playerId: string): PrepareSelection {
     playerId,
     bossId: '',
     focus: 'player',
+    /**
+     * ⚠️ 手风琴的"展开块"在这一屏**只有人物那一个**（没有炁机行、没有 Boss
+     * 行）—— 于是它恒等于 `'player'`，本屏没有"换一块"这回事。
+     */
+    expanded: 'player',
     /**
      * ⚠️ `qijiId` 是空串：这一屏没有炁机行，而 `PrepareCursor` 要求
      * 每个槽位各记一格（见 `prepareLogic` 的 `cursorFromSelection`）。

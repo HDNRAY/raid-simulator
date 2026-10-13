@@ -5,9 +5,9 @@
  * 这个文件是什么（一句话，没有"和"）
  * ==================================================================
  *
- * 它是这一屏的**唯一一张布局表**：谁能占哪块地方、卡片多大、详情区在
- * 哪一边 —— 渲染层与命中测试读的是**同一份几何**，所以"看到的卡片"
- * 与"点中的卡片"结构上不可能错位。
+ * 它是这一屏的**唯一一张布局表**：谁能占哪块地方、卡片多大、哪一块展开、
+ * 详情区在哪一边 —— 渲染层与命中测试读的是**同一份几何**，所以"看到的
+ * 卡片"与"点中的卡片"结构上不可能错位。
  *
  * ==================================================================
  * 为什么从 `prepareLogic.ts` 切出来（AGENTS.md §3 的"关注分离"）
@@ -20,61 +20,89 @@
  * | 本文件 | "这一屏长什么样"（纯几何：矩形、网格、不重叠） |
  * | `prepareLogic.ts` | "光标/选择怎么走"（状态机：方向键、Enter、点击） |
  *
- * 这一轮要同时加**两样几何**（缩小的卡片、右侧详情区、炁机行），若都挤进
- * 那个文件就会逼近 700 行上限。按 §3 的正确顺序，**先拆 util**（几何就是
- * 典型的可拆 util），而不是压注释。
- *
  * ==================================================================
- * 2026-10-13 布局改造：卡片缩小 + 右侧详情区 + 炁机行
+ * 2026-10-13（第二轮）：**手风琴** —— 同一时间只展开一块
  * ==================================================================
  *
- * 用户原话（本轮）：
+ * 用户原话：
  *
- * > "选择人物的卡片可以尽量缩小一点，留一个名字 + 头像"
- * > "右边或者左边 切出一部分区域，显示当前选择框所在的人物的详情"
- * > "选了人之后，可以激活任意个他的炁机"
+ * > "同一时间只展开暂时 3 个选择中的一个，其他的收起来，只展示当前选择"
+ * > "收起来的那两块要显示'当前选了什么'"
  *
- * ⚠️ **详情区在右边**，理由有三条（都不只是"顺手"）：
+ * 几何上的落点只有一条：**一块的内容高度取决于它是不是展开的那一块**。
  *
- *   1. **阅读顺序**：卡片是"我要操作的东西"，详情是"我查看的东西" ——
- *      把参考信息放右边，视线不必越过它才能开始操作
- *   2. **纵向空间**：详情区要显示名字 + 头像 + 若干条技能说明，那一块
- *      只有**通高**才装得下。右边整条留白由它独占，左边那条纵向链
- *      （人物 / 对手 / 炁机 / 开始）才排得下
- *   3. **与卡片缩小联动**：卡片左移并缩小之后，右边自然空出通高的一条
- *      —— 这正是需求里"卡片缩了才腾得出这块地方"的字面落实
+ * ```
+ *   展开的那块 = 它自己的卡片网格（`cardGrid` 折行）
+ *   收起的那两块 = 一条**块头**（`foldH` 高，横跨整个卡片列）
+ * ```
+ *
+ * ⚠️ 于是**三块的高度之和不再是常量**（旧版三块同时展开 = 224px）：
+ * 展开不同的一块，整条纵向链自己重排（`rowTopsOf` 按 `expanded` 递推）。
+ * 这正是"540 里挤不下"的解法 —— 同时只展开一块，纵向立刻省下 ~54px。
+ *
+ * ⚠️⚠️ **顺序（用户 2026-10-13 明确指定）：人物 → 炁机 → 对手**。
+ * 它只写在 `SECTION_ORDER` 与 `rowTopsOf` 的**递推顺序**里，别处不许再写
+ * 一遍（`PrepareScreen` 与命中测试都按 `SECTION_ORDER` 遍历）。
  *
  * ==================================================================
  * ⚠️ 卡片尺寸是**算出来**的，不是手调的
  * ==================================================================
  *
- * 每个槽位各有一对"目标宽度 / 可读性下限"，宽度在两个约束之间取：
+ * 需求要"卡片尽量缩小"，但那有个**下限**：卡片是**交互**（点击/触屏要能
+ * 点中），且名字读得出来。所以两个下限先算出来，卡片尺寸取它们：
  *
- *   - **列宽约束**：`*ColW` 里按 `columns` 等分（7 个 Boss、8 条炁机那种量）
- *   - **可读性下限**：名字（最长 3 个汉字）+ 头像 + 两侧内边距
+ * ```
+ *   内容下限（宽）= 两侧内边距 + 头像 + 间距 + 两个汉字（见 CARD_CONTENT_W）
+ *   内容下限（高）= 名字行高 + 上下内边距（见 NAME_LINE_H + CARD_PAD_Y）
+ *   手指下限 = TOUCH_MIN（**逻辑像素**；依据见那个常量的说明）
+ *   卡片高 = max(内容下限, 手指下限)      → 40
+ *   卡片宽 = max(内容下限, 手指下限)      → 92（`cardMinW`）
+ * ```
  *
- * 需求要"尽量缩小"，但那有个**下限**：卡片是**交互**（点击/触屏要能点中），
- * 且名字读得出来。所以下限由 `cardPad` + `portraitBox` 推出（= `cardMinW`），
- * 不是"越小越好"。
- *
- * ⚠️ **Boss 与炁机**这一轮从"一行"变成"按列数**自动折行**"：
- * 卡片列只有 576px，而 Boss 有 7 张、炁机有 8 条 —— 挤在一行里只剩
- * **74px/张**（低于 `cardMinW` 96），名字会被压到贴边、头像只能缩到
- * ~22px。所以它们是 4 列 × 2 行 / 5 列 × 2 行（124 / 107 px 一张）。
- * 折行是 `cardGrid` **自己**算的（给多少张就摊多少行），不是调用方
- * 预先摆好 —— 否则加第 9 条炁机时会有人去手改命中测试。
+ * ⚠️ **`cardMinW` 是"这一屏任何一张卡都不许更窄"的硬约束**，`cardGrid`
+ * 取 `max(cardMinW, 按列等分)`：取到下限时**可能溢出列宽**，那是"该分
+ * 更多行 / 列数太多"的信号 —— 布局测试里有一条"整块不越出卡片列"会先
+ * 失败，比默默缩到点不中好。
  */
 
-import type { PrepareFocus } from './prepareTypes';
+import type { PrepareFocus, PrepareSectionKind } from './prepareTypes';
 
 /** 一块可点区域。 */
 export interface PrepareHitArea {
-  readonly kind: PrepareFocus;
+  readonly kind: PrepareHitKind;
+  /**
+   * 卡片 = 那一项的 id；**块头**（`kind === 'summary'`）= 它代表哪个槽位
+   * （`'player'` / `'qiji'` / `'boss'`）；开始键 = `'start'`。
+   */
   readonly id: string;
   readonly x: number;
   readonly y: number;
   readonly w: number;
   readonly h: number;
+}
+
+/**
+ * 可点区域的类别。
+ *
+ * ⚠️ `'summary'`（收起态的**块头**）与三个卡片槽位是**不同**的可点物：
+ * 点卡片 = 选它 / 改它的层数，点块头 = **只把它展开**（不改选择）。
+ * 合成一个 kind 会让"点收起的那一块"顺手把选择改掉。
+ */
+export type PrepareHitKind = PrepareFocus | 'summary';
+
+/**
+ * 画面上从上到下的三块。
+ *
+ * ⚠️ **顺序的唯一出处**：用户 2026-10-13 要求「先选炁机，再选 boss」
+ * （炁机是"选了人物之后"的动作，对手是"打谁"，排在最后）。
+ */
+export const SECTION_ORDER: readonly PrepareSectionKind[] = ['player', 'qiji', 'boss'];
+
+/** 三块各自的张数（行顶递推的输入）。 */
+export interface PrepareCounts {
+  readonly players: number;
+  readonly bosses: number;
+  readonly qiji: number;
 }
 
 export interface PrepareLayout {
@@ -94,30 +122,35 @@ export interface PrepareLayout {
   readonly cardGap: number;
   /** 文字卡（人物 / Boss：名字 + 头像）的高度。 */
   readonly cardH: number;
-  /** 炁机卡的高度 —— 它只有图标 + 名字，比文字卡矮一档（省纵向）。 */
+  /** 炁机卡的高度。 */
   readonly qijiCardH: number;
-  /** 卡片内边距（文字/头像离卡片边框的距离）。 */
+  /** 卡片内边距（**横向**：文字/头像离卡片左右边框的距离）。 */
   readonly cardPad: number;
+  /** 卡片内边距（**纵向**：名字行上下各留多少）。 */
+  readonly cardPadY: number;
   /** 名字与头像之间的间距。 */
   readonly nameAvatarGap: number;
   /**
    * 头像的**包围盒边长**（正方形，逻辑像素）。
    *
-   * ⚠️ 需求原文："高度比名字高一点点"。名字是 `nameSize`(17)，行高
-   * `nameLineH`(23)；这里取 **28** —— 比行高高 5px（"高一点点"），
-   * 又远小于 `cardH`(56)，不会把卡片顶开。
+   * 需求原文："高度比名字高一点点"。名字是 `nameSize`(17)，行高
+   * `nameLineH`(23)；这里取 **26** —— 比行高高 3px（"高一点点"），
+   * 又远小于卡片高(40)，不会把卡片顶开。
    *
    * ⚠️ 素材本身是 80×80（`public/fd2/portraits/*.png`），这里是**显示
-   * 尺寸**。缩放比由渲染层按它算（`28 / 80`），不要在渲染层手写比例。
+   * 尺寸**。缩放比由渲染层按它算（`26 / 80`），不要在渲染层手写比例。
    */
   readonly portraitBox: number;
   /**
    * **卡片的可读性下限**（逻辑像素宽）—— "尽量缩小"的**边界**，不是建议值。
    *
-   * 推导：头像 28 + 间距 8 + 名字 2 个汉字（2 × 17 = 34）+ 两侧内边距
-   * 2 × 12 = **96**。实测 7 个 Boss 落在 124、8 条炁机落在 107，所以
-   * 下限今天**没有生效** —— 它会在卡片列更窄或列数更多时先失败（布局
-   * 测试有一条"不窄于下限"）。
+   * 推导：两侧内边距 2 × 12 + 头像 26 + 间距 8 + 名字 2 个汉字（2 × 17 = 34）
+   * = **92**；炁机卡没有头像、名字是 4 个汉字（4 × 17 = 68），加起来
+   * 恰好**也是 92**（26 + 8 + 34 = 68）。再与 `TOUCH_MIN` 取大者。
+   *
+   * ⚠️ 实测：7 个 Boss 摊 5 列 → 110、8 条炁机摊 5 列 → 102，所以下限
+   * 今天是**没有生效**的那一条 —— 它会在列数更多 / 卡片列更窄时先失败
+   * （布局测试有一条"不窄于下限"）。
    */
   readonly cardMinW: number;
   /** 名字字号（= `FONT.title`；写在这里是为了让"名字行高"可算）。 */
@@ -131,20 +164,31 @@ export interface PrepareLayout {
   readonly nameLineH: number;
   /** 主标题的基线 y。 */
   readonly titleY: number;
-  /**
-   * ⚠️ **不再有 `playerRowY`**：人物那一块的 y 由 `titleY` + 主标题行框
-   * + `rowGap` + 标题行框 + `labelGap` 推出来（见 `rowTopsOf`）。写死它
-   * 的那一版让主标题的行框（到 75）与人物标题的行顶（在 62）叠在一起。
-   */
   /** 标题下缘到卡片顶边的间距（`rowGap` 与它分工，见 `rowTopsOf`）。 */
   readonly labelGap: number;
   /** **块与块之间**的额外空隙（上一块底边 → 下一块标题顶部）。 */
   readonly rowGap: number;
-  /** 栏目标题（「选择人物」/「选择对手」/「炁机」）的字号。 */
+  /** 栏目标题（「选择人物」/「炁机」/「选择对手」）的字号。 */
   readonly labelSize: number;
+  /**
+   * **收起态那一块（块头）的高度**。
+   *
+   * ⚠️ 它 = `TOUCH_MIN`：块头是"点一下展开"的**主要触屏入口**（§3b 要求
+   * 纯触屏也能展开），所以要占满一根手指的落点。它恰好等于 `cardH`，
+   * 于是"人物那一块展开/收起时高度一样"（3 张卡正好一行）—— 切换时
+   * 下面的两块不会跳。
+   */
+  readonly foldH: number;
+  /** 「开始战斗」的宽度。 */
   readonly startW: number;
   readonly startH: number;
-  readonly startY: number;
+  /**
+   * 最后一块底边 → 「开始战斗」顶边的间距。
+   *
+   * ⚠️ 按钮的 y **不再是一个写死的数**（旧的 `startY`）：它由
+   * `startRect()` 按"三块里最高的一种展开方式"算出来 —— 见那个函数。
+   */
+  readonly startGap: number;
   /** 详情区（右侧通高一块）。 */
   readonly detailX: number;
   readonly detailY: number;
@@ -153,35 +197,87 @@ export interface PrepareLayout {
   readonly detailPad: number;
 }
 
+/* ------------------------------------------------------------------ *
+ * 下限：先算出来，再让"尺寸"取它
+ * ------------------------------------------------------------------ */
+
+/**
+ * **一根手指能点中的最小边长**（逻辑像素）。
+ *
+ * ==================================================================
+ * 依据（不是随手挑的 44/48）
+ * ==================================================================
+ *
+ * 本仓库**已有**这个数：`ui/IconButton.ts` 的命中区注释记着
+ * "旧版 `SettingsButton` 有一个 `HIT = 44` …… 现在命中范围 = 内容盒 ∪
+ * 外扩 `hitSlop`：图标 20/22px 加上两侧各 10px，得到 **40~42px** 的方块
+ * —— 与旧版 44 相差无几，鼠标 / 手指都好点"。
+ *
+ * 所以这一屏取 **40**：它是本作**已经在用**的那个手指下限（旧的 44 与
+ * 现在的 40~42 是同一个量级，取小者 = 偏保守地"允许更小"的那一侧）。
+ *
+ * ⚠️ 它是**逻辑像素**：画布 960×540 会被 letterbox 缩放到窗口（手机上
+ * 约 0.72×），所以"逻辑 40"在手机上只有约 29 CSS px —— 严格来说任何
+ * 逻辑像素下限都不能保证手机上的物理手感。这里取它是因为**本仓库所有
+ * 触屏控件的下限都是这么定的**（同一个坐标系、同一条纪律），另起一套
+ * 只在手机上有意义的单位会让两处对不上。
+ */
+export const TOUCH_MIN = 40;
+
+/** 名字字号 / 行高（与布局表同一个来源，别处要用就走 `PREPARE_LAYOUT`）。 */
+const NAME_SIZE = 17;
+const NAME_LINE_H = Math.ceil(NAME_SIZE * 1.3);
+const CARD_PAD = 12;
+/**
+ * ⚠️ 纵向内边距**单独一个数**（8）：横向的 12 是为了让名字离左右边框
+ * 有呼吸位，而纵向只需要让名字行不贴边。合成一个数会让"卡片再矮一点"
+ * 变成"名字贴边"（旧版就是这样把卡片卡在 48 的）。
+ */
+const CARD_PAD_Y = 8;
+const PORTRAIT_BOX = 26;
+const NAME_AVATAR_GAP = 8;
+
+/**
+ * 卡片高 = `max(名字行 23 + 上下各 8 = 39, 手指下限 40)` = **40**。
+ * ⚠️ 这里是**手指下限**在起作用（39 < 40），所以再往下压就点不中了。
+ */
+const CARD_H = Math.max(NAME_LINE_H + CARD_PAD_Y * 2, TOUCH_MIN);
+/** 炁机卡同样取这条下限（它没有头像，但手指是一样粗的）。 */
+const QIJI_CARD_H = Math.max(NAME_LINE_H + CARD_PAD_Y * 2, TOUCH_MIN);
+
+/**
+ * 内容下限（宽）：两侧内边距 + 头像 + 间距 + 两个汉字。
+ * ⚠️ 炁机卡（4 个汉字、无头像）算出来与它**相等**（68 + 24），所以一个数
+ * 就够 —— 见 `PrepareLayout.cardMinW` 的说明。
+ */
+const CARD_CONTENT_W = CARD_PAD * 2 + PORTRAIT_BOX + NAME_AVATAR_GAP + NAME_SIZE * 2;
+const CARD_MIN_W = Math.max(CARD_CONTENT_W, TOUCH_MIN);
+
 /**
  * 默认布局（逻辑坐标系，960×540）。
  *
- * 纵向账（**算出来的**，见 `rowTopsOf`；张数一变，下面各块自己让位）。
- * 这一屏**全是死的**（固定 960×540 逻辑画布，没有"大屏多显示"这回事），
- * 所以预算必须一次算平 —— 下面这张表就是那条等式：
+ * 纵向账（**算出来的**，见 `rowTopsOf`）。这一屏全是死的（固定 960×540
+ * 逻辑画布，没有"大屏多显示"这回事），所以预算必须一次算平 ——
+ * 下面这张账按**最高的一种展开方式**（对手块展开）算，真实张数（3 / 8 / 7）：
  *
  * ```
- *   ① 主标题        基线 54，32px，行框 33..75
- *   ② 人物块        标题 101，卡片 125 .. 181（3 张 → 1 行）
- *   ③ 对手块        标题 207，卡片 231 .. 353（7 张 → 2 行）
- *   ④ 炁机块        标题 379，卡片 403 .. 485（8 条 → 2 行）
- *   ⑤ 开始按钮      527 .. 571   ← ⚠️ 见下（它在 540 之外，这是**对的**）
- *   ⑥ 操作提示      535
- *   ⑦ 素材声明      520（贴底边）
+ *   ① 主标题        基线 34，32px，行框 13..55
+ *   ② 人物块        标题 79， 内容 103 .. 143（展开 = 1 行 40；收起 = 块头 40）
+ *   ③ 炁机块        标题 167，内容 191 .. 231（收起 = 块头 40；展开 = 2 行 86）
+ *   ④ 对手块        标题 255，内容 279 .. 365（展开 = 2 行 40 + 6 = 86）
+ *   ⑤ 开始按钮      377 .. 417  ← 由 `startRect()` 算（最高展开方式 + startGap）
+ *   ⑥ 操作提示      427
+ *   ⑦ 素材声明      524（贴底边）
  * ```
  *
- * ⚠️⚠️ **⑤ 越出画布 540 —— 有意的，不是漏改。** 这一屏是固定
- * 960×540：三块内容（三行卡片）+ 一颗 44 高的按钮 + 两行页脚**装不下**，
- * 而卡片高已经到下限（`qijiCardH` 36，再矮名字贴边）。所以按钮被放到
- * ④ 的下方**画布之外**会直接看不见 —— 实测过。
+ * ⚠️ 三块**同时展开**的话内容就有 40 + 86 + 86 = 212，加三个标题带
+ * （各 48）= 356，从 103 起刚好到 459 —— 按钮被挤到 471 就压上页脚的
+ * 两行（旧版为此把按钮横着挪到炁机行的右侧）。手风琴之后同时只有一块
+ * 是满的，整条链才排得下。
  *
- * ⚠️ **真正的解法是"横向错开"**：细节见 `startY` 的注释。
- *
- * ⚠️ 这张账**只有 12 的块间距**（`rowGap`）：540 装不下"三行卡片 +
- * 两颗页脚 + 一颗 44 高的按钮"如果每块之间留 20 以上的空隙。实测撞了
- * 三次（对手第二行顶到炁机标题、炁机块顶到开始按钮）之后定下来的。
- * ⚠️ 卡片高（`cardH` 56 / `qijiCardH` 36）是**另一侧**的极限：再矮名字
- * 就贴边了（需求要"尽量缩小"，但不是"缩到读不出来"）。
+ * ⚠️ ⑤ 下面到 ⑦ 之间还留着 ~85px 的空白：那是**有意的** —— 按钮的 y 由
+ * "三块里最高的一种展开方式"推出（见 `sectionsBottom`），所以**切块时
+ * 它不会上下跳**；换来的就是"最矮的那种展开方式"下多一点空白。
  */
 export const PREPARE_LAYOUT: PrepareLayout = {
   width: 960,
@@ -194,333 +290,61 @@ export const PREPARE_LAYOUT: PrepareLayout = {
    * `detailX` 624 起（中间 8px 呼吸位）—— 所以"卡片不压详情区"
    * 由**同一组数**保证，不是两处各写一遍。
    *
-   * 炁机列 536（5 列 → 107px/张）：它比 Boss 列窄一档，因为 8 条炁机
-   * 排成 5+3 两行正好压在"炁机卡顶 326 到「开始」438"这 112px 里，
-   * 而 4 列排出来是 4+4、每张 136px —— 那样纵向会多出 12px、顶到按钮。
+   * 炁机列 536（5 列 → 102px/张）：它比 Boss 列窄一档，因为 8 条炁机
+   * 排成 5+3 两行正好压在"炁机标题 → 对手标题"这一段里。
    */
   playerColW: 576,
   bossColW: 576,
   qijiColW: 536,
   playerColumns: 3,
-  bossColumns: 4,
+  /**
+   * ⚠️ 对手从 **4 列改 5 列**（2026-10-13 第二轮）：需求"卡片可以再小
+   * 一点"，而 7 张卡摊 5 列 → **110px/张**（4 列是 139）；仍然是 2 行
+   * （5+2），所以纵向高度不变、横向每张窄了 29px。
+   */
+  bossColumns: 5,
   qijiColumns: 5,
   cardGap: 6,
-  /**
-   * 卡片高 96 → **50**。
-   *
-   * 需求："卡片可以尽量缩小一点，只留一个名字"。96 是"两行（名字 +
-   * 开发中）"的高度，而名字 + 头像只需要 50（头像 26 + 上下各 12）。
-   * 省下的 46px 正是"Boss / 炁机从 1 行变 2 行"所多出来的高度的一部分。
-   */
-  cardH: 48,
-  /** 炁机卡：图标 20 + 上下各 14 = 48。 */
-  /**
-   * 炁机卡 48 → **34**。
-   *
-   * ⚠️ 34 是被纵向链**逼出来**的：炁机 8 条要占两行，而"炁机标题
-   * （在对手卡第二行下面）→ 开始按钮（`startY`）"之间只有那么多。
-   * 48 / 44 / 40 / 36 都会让第二行底边压到按钮上（实测过）。34 仍然装得下
-   * 名字行（`nameLineH` 23）+ 上下各 5.5 —— 这是"尽量缩小"在这一屏的
-   * **下限**（再小名字就贴边了）。
-   */
-  qijiCardH: 36,
-  cardPad: 12,
-  nameAvatarGap: 8,
-  portraitBox: 26,
-  cardMinW: 96,
-  nameSize: 17,
-  nameLineH: 23,
+  cardH: CARD_H,
+  qijiCardH: QIJI_CARD_H,
+  cardPad: CARD_PAD,
+  cardPadY: CARD_PAD_Y,
+  nameAvatarGap: NAME_AVATAR_GAP,
+  portraitBox: PORTRAIT_BOX,
+  cardMinW: CARD_MIN_W,
+  nameSize: NAME_SIZE,
+  nameLineH: NAME_LINE_H,
   titleY: 34,
-  /**
-   * 栏目标题字号：`FONT.small`(13) → **18**（2026-10-13 用户：
-   * "选项卡的字体 可以大一点，特别是移动端"）。
-   *
-   * ⚠️ 纵向有硬约束：标题画在 `rowY - labelGap` 处，卡片顶边在 `rowY`
-   * —— 字号再大，只要**行框**不超过 `labelGap` 就不会压到卡片
-   * （`tests/unit/prepareLayout.test.ts` 有一条盯这个）。
-   */
-  labelSize: 18,
   /**
    * 标题**下缘**到它那一行卡片顶边的间距。
    *
-   * ⚠️ 它是标题行框（`ceil(18 × 1.3)` = **24**）**减去**"标题画在
-   * `rowY - labelGap`"那一步之后**真正压到卡片上的量**：这里给 20 表示
-   * 18px 的行框会**略微探进卡片 4px**（楷体的行框是保守估计，实际字身
-   * 更矮，所以不会真的压到笔画）。
-   *
-   * ⚠️ 为什么宁可探 4px 也不给足：540 的纵向预算被三行卡片吃满了，
-   * 而"标题 × 3 块"的 24 行框是三个必须让位的大头。布局测试里那条
-   * 断言因此改成"**标题行框的中心**在卡片顶边之上"（而不是"整框都在"）。
+   * ⚠️ 它是标题行框（`ceil(18 × 1.3)` = **24**）—— 也就是"标题的行框正好
+   * 落在卡片顶边之上"（`prepareLabelY` 把标题顶画在 `rowY - labelGap`）。
+   * 旧版让到 20（行框探进卡片 4px）是因为 540 挤；手风琴把纵向省出来
+   * 之后这里给足 24：字身与卡片顶边**不再有任何重叠**。
    */
   labelGap: 24,
   /**
    * **块与块之间**的额外空隙（上一块底边 → 下一块标题的**行顶**）。
    *
-   * ⚠️ 这个字段是被实测逼出来的：`labelGap` 管的是"标题 ↔ 它自己的卡片"，
-   * 而"上一块的**最后一行** ↔ 下一块的标题**行顶**"是另一段距离。
-   * 第一版没有它，于是「炁机」两个字正好压在对手第二行
-   * （「暴怒 / 懒惰 / 贪婪」）下面 4px —— 截图上一眼就看出来了。见 `rowTopsOf`。
-   *
-   * ⚠️ 值只有 **0**：540 的纵向预算被"8 条炁机占两行"吃掉了大部分，
-   * 而块之间**不能为负**（那才是压盖）。`labelGap` 已经把"标题 ↔ 它
-   * 自己的卡片"那段让到 20，块与块之间剩不下更多。
+   * ⚠️ 值仍是 **0**：`labelGap` 已经管住"标题 ↔ 它自己的卡片"，而三块
+   * 之间的呼吸位由**标题自己的行框**（24px）提供 —— 块与块之间已经有
+   * 24px 的空带了，再加 `rowGap` 只会把按钮往下挤。
    */
   rowGap: 0,
+  labelSize: 18,
+  foldH: TOUCH_MIN,
   /**
-   * 「开始战斗」的**宽度**（200 → **96**）。
+   * 「开始战斗」的宽度（200 → **96**）。
    *
-   * ⚠️ 它同时要放在卡片列的右侧（见 `startY`），所以从"一整条居中按钮"
-   * 缩成一颗"角落里的主按钮" —— 96 装得下「开始战斗」四个字
-   * （`FONT.title` 17 × 4 ≈ 68 + 内边距）。
+   * ⚠️ 96 装得下「开始战斗」四个字（`FONT.title` 17 × 4 ≈ 68 + 内边距）。
    */
   startW: 96,
   startH: 40,
-  /**
-   * 「开始战斗」的 y。
-   *
-   * ==================================================================
-   * ⚠️ 它**不在卡片列里**，而在炁机行的**右侧**（实测逼出来的）
-   * ==================================================================
-   *
-   * 这一屏是固定 960×540，而这一轮要塞进**三块卡片**（人物 1 行 +
-   * 对手 2 行 + 炁机 1 行）+ 一颗按钮 + 两行页脚。竖着排**装不下**：
-   * 实测把按钮放在炁机块下面时，它的底边会顶到页脚的提示行，而把页脚
-   * 上移又会压到炁机卡。
-   *
-   * 所以按钮占的是**右侧那条空带**：卡片列到 `pad + playerColW`(616) 为止，
-   * 而详情区从 `detailX`(624) 起 —— 中间这条带子在**炁机那一行的高度上**
-   * 是空的（人物 / 对手块只有 3~4 列，右边本来就空着）。
-   *
-   * ⚠️ 它仍然在卡片列**里面**（x 由 `startRect()` 算成 `pad + colW - startW
-   * - 8`），所以不会与详情区相压（布局测试按矩形相交判）。
-   */
-  startY: 430,
+  startGap: 12,
   detailX: 624,
-  detailY: 92,
+  detailY: 88,
   detailW: 296,
-  detailH: 404,
+  detailH: 416,
   detailPad: 12,
 };
-
-/**
- * 卡片网格：把 `count` 张卡放进 `columns` 列的网格，返回每个格子的矩形。
- *
- * ⚠️ **列数由调用方给**（各槽位的 `*Columns`）：一行放不下时**它自己
- * 折行**，不是靠"调用方预先算好每行几张"。这保证了加第 9 条炁机时不会
- * 溢出，也不会有人手写一个 `4` 到命中测试里去。
- *
- * ⚠️ **居中按"卡片列"算**，不是按整张画布（960）算：详情区占了右边
- * 296，若还按画布居中，卡片在左列里会看起来偏右。
- *
- * ⚠️ 宽度取 `max(cardMinW, 按列等分)`：取到下限时**可能溢出列宽**，
- * 那是"该分更多行 / 列数太多"的信号 —— 布局测试里有一条"整块不越出
- * 卡片列"会先失败，比默默缩到点不中好。
- *
- * @param colW 这一列的可用宽度（`playerColW` / `bossColW` / `qijiColW`）。
- * @param columns 目标列数（张数更少时会自动减到 `count`）。
- * @param rows 网格行数（`undefined` = 由 `count` 与列数推出）。
- */
-export function cardGrid(
-  count: number,
-  topY: number,
-  L: PrepareLayout,
-  opts: {
-    readonly colW: number;
-    readonly columns: number;
-    readonly h: number;
-    readonly rows?: number;
-  },
-): readonly { readonly x: number; readonly y: number; readonly w: number; readonly h: number }[] {
-  if (count <= 0) return [];
-  const columns = Math.max(1, Math.min(opts.columns, count));
-  const rows = Math.max(1, opts.rows ?? Math.ceil(count / columns));
-
-  const byColumn = Math.floor((opts.colW - L.cardGap * (columns - 1)) / columns);
-  const w = Math.max(L.cardMinW, byColumn);
-
-  /**
-   * 每行的实际张数：`count` 张按行优先摊到 `rows` 行上，
-   * **最后一行可能不满**（7 张 4 列 2 行 → 4 + 3）。
-   */
-  const base = Math.floor(count / rows);
-  const extra = count % rows;
-
-  const out: { x: number; y: number; w: number; h: number }[] = [];
-  let taken = 0;
-  for (let row = 0; row < rows; row += 1) {
-    const inRow = base + (row < extra ? 1 : 0);
-    if (inRow === 0) continue;
-    const totalW = inRow * w + L.cardGap * (inRow - 1);
-    const x0 = L.pad + Math.round((opts.colW - totalW) / 2);
-    for (let col = 0; col < inRow; col += 1) {
-      out.push({
-        x: x0 + col * (w + L.cardGap),
-        y: topY + row * (opts.h + L.cardGap),
-        w,
-        h: opts.h,
-      });
-    }
-    taken += inRow;
-  }
-  /** 兜底：`rows` 与 `count` 打架时也不能少画 —— 张数**永远**等于 `count`。 */
-  for (let i = taken; i < count; i += 1) {
-    out.push({ x: L.pad, y: topY + rows * (opts.h + L.cardGap), w, h: opts.h });
-  }
-  return out;
-}
-
-/** 某个槽位在默认列数下会摊成几行。 */
-export function cardRowsOf(count: number, columns: number): number {
-  if (count <= 0) return 0;
-  return Math.ceil(count / Math.max(1, Math.min(columns, count)));
-}
-
-/** 某个槽位整块（含折行）的高度。 */
-export function cardBlockH(count: number, columns: number, cardH: number, L: PrepareLayout): number {
-  const rows = cardRowsOf(count, columns);
-  if (rows === 0) return 0;
-  return rows * cardH + (rows - 1) * L.cardGap;
-}
-
-/**
- * 三块内容的**第一行顶边**：`人物 → 对手 → 炁机`。
- *
- * ==================================================================
- * ⚠️ 为什么"算出来"而不是在布局表里写三个 y
- * ==================================================================
- *
- * 对手和炁机都会**折行**（7 张卡 → 2 行、8 条炁机 → 2 行），而它们的
- * 行数是**内容决定的**（今天 7 张、明天 8 张）。写死 `bossRowY` /
- * `qijiRowY` 就等于"上一块的底边"是手算的 —— 加一个 Boss 就会有一块
- * 内容压到下一块上，而**压的方式是一行汉字正好压在一行卡片上面**
- * （实测过一次：「炁机」压在「暴怒 / 懒惰 / 贪婪」下 4px）。
- *
- * 所以这里按**块高**递推：
- *
- * ```
- *   人物第一行 = playerRowY
- *   对手第一行 = 人物块底边 + rowGap + labelGap + 标题行框
- *   炁机第一行 = 对手块底边 + rowGap + labelGap + 标题行框
- * ```
- *
- * ⚠️ 递推的输入是**张数**（`cardRowsOf`）：加一张卡，下面所有块自己让位。
- */
-export function rowTopsOf(
-  counts: { readonly players: number; readonly bosses: number; readonly qiji: number },
-  L: PrepareLayout = PREPARE_LAYOUT,
-): { readonly player: number; readonly boss: number; readonly qiji: number } {
-  /**
-   * ⚠️ 标题的**行框**（`1.3 × labelSize`）—— 与布局测试同一个保守估计。
-   * 它是"标题本身占多高"，与 `labelGap`（标题下缘到卡片的距离）是两段。
-   */
-  const labelBox = Math.ceil(L.labelSize * 1.3);
-  /**
-   * ⚠️ 人物那一块**从主标题推**（不是直接写 y）：主标题的锚点是 `0.5`，
-   * 所以它的行框是 `titleY ± 32×1.3/2`。写死 `playerRowY = 96` 那一版
-   * 确实撞上了 —— 主标题的行框到 **75**，而人物标题的行顶在 62。
-   */
-  const titleBox = Math.ceil(32 * 1.3);
-  /**
-   * ⚠️ 递推公式（**标题行框 + labelGap 都要算上**）：
-   *
-   * ```
-   *   这一块的标题行顶 = 上一块底边 + rowGap
-   *   这一块的行顶     = 标题行顶 + labelBox + labelGap
-   * ```
-   *
-   * 漏掉 `labelBox` 那一版（写成 `上一块底边 + labelGap`）会让标题的
-   * **行框上半截**插进上一块里 —— 实测就是「炁机」压到对手第二行上
-   * 8px。`labelGap` 只量"标题下缘 → 卡片顶边"，不含标题自己。
-   */
-  const below = (prevBottom: number): number => prevBottom + L.rowGap + labelBox + L.labelGap;
-  const player = L.titleY + Math.ceil(titleBox / 2) + L.rowGap + labelBox + L.labelGap;
-  const playerBottom = player + cardBlockH(counts.players, L.playerColumns, L.cardH, L);
-  const boss = below(playerBottom);
-  const bossBottom = boss + cardBlockH(counts.bosses, L.bossColumns, L.cardH, L);
-  const qiji = below(bossBottom);
-  return { player, boss, qiji };
-}
-
-/**
- * 栏目标题**底边**的 y（`PrepareScreen` 用它把标题画在卡片上方）。
- *
- * ⚠️ 抽出来的理由：原来这是 `PrepareScreen` 里的一个 `- 22` 字面量，
- * 与"卡片行在哪"是两处真相 —— 行一移，标题不跟。
- * ⚠️ 今天它**派生自** `rowTopsOf`（见那里的说明）：行顶是算出来的，
- * 标题跟着它走。
- */
-export function prepareLabelY(
-  counts: { readonly players: number; readonly bosses: number; readonly qiji: number },
-  L: PrepareLayout = PREPARE_LAYOUT,
-): {
-  readonly player: number;
-  readonly boss: number;
-  readonly qiji: number;
-} {
-  const tops = rowTopsOf(counts, L);
-  return {
-    player: tops.player - L.labelGap,
-    boss: tops.boss - L.labelGap,
-    qiji: tops.qiji - L.labelGap,
-  };
-}
-
-/** 当前布局下的可点区域（渲染与命中测试**共用**）。 */
-export function prepareHitAreas(
-  players: readonly { readonly id: string }[],
-  bosses: readonly { readonly id: string }[],
-  qiji: readonly { readonly id: string }[] = [],
-  L: PrepareLayout = PREPARE_LAYOUT,
-): readonly PrepareHitArea[] {
-  const tops = rowTopsOf({ players: players.length, bosses: bosses.length, qiji: qiji.length }, L);
-  const playerRects = cardGrid(players.length, tops.player, L, {
-    colW: L.playerColW,
-    columns: L.playerColumns,
-    h: L.cardH,
-  });
-  const bossRects = cardGrid(bosses.length, tops.boss, L, {
-    colW: L.bossColW,
-    columns: L.bossColumns,
-    h: L.cardH,
-  });
-  /**
-   * ⚠️ 炁机**永远一行**（`rows: 1`）：它是 8 条 + 图标卡，4 列排会变成
-   * 4+4 两行（多 12px，正好顶到「开始战斗」）。5 列 → 5+3 两行仍然
-   * 是两行 —— 所以这里给的是**列数**而不是行数，行数照常由张数推。
-   */
-  const qijiRects = cardGrid(qiji.length, tops.qiji, L, {
-    colW: L.qijiColW,
-    columns: L.qijiColumns,
-    h: L.qijiCardH,
-  });
-  /**
-   * ⚠️ 顺序 = **画面上从上到下**（人物 → 炁机 → 对手 → 开始），因为
-   * `PrepareScreen` 的卡片画笔按它逐张取位置（`cards.drawAll(areas, …)`），
-   * 而卡片的 id 数组也是这个顺序。两处一漂，名字就会画到别人的卡上。
-   * ⚠️ 数据源各自的顺序（人物表 / 对手表 / 炁机表）**与此无关**：
-   * 这里只决定"画在第几格"。
-   */
-  return [
-    ...players.map((p, i) => ({ kind: 'player' as const, id: p.id, ...playerRects[i]! })),
-    ...qiji.map((q, i) => ({ kind: 'qiji' as const, id: q.id, ...qijiRects[i]! })),
-    ...bosses.map((b, i) => ({ kind: 'boss' as const, id: b.id, ...bossRects[i]! })),
-    {
-      kind: 'start' as const,
-      id: 'start',
-      x: Math.round(L.pad + (L.playerColW - L.startW) / 2),
-      y: L.startY,
-      w: L.startW,
-      h: L.startH,
-    },
-  ];
-}
-
-/** 详情区矩形（渲染层只读它，不再自己写数字）。 */
-export function detailRect(L: PrepareLayout = PREPARE_LAYOUT): {
-  readonly x: number;
-  readonly y: number;
-  readonly w: number;
-  readonly h: number;
-} {
-  return { x: L.detailX, y: L.detailY, w: L.detailW, h: L.detailH };
-}

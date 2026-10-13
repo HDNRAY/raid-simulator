@@ -31,6 +31,16 @@
  */
 export type PrepareFocus = 'player' | 'qiji' | 'boss' | 'start';
 
+/**
+ * **画面上那三块**里的一块（焦点槽位去掉「开始」就是它）。
+ *
+ * ⚠️ 单独一个类型（而不是复用 `PrepareFocus` 再到处 `!== 'start'`）：
+ * 手风琴要的是"哪一块展开"，而「开始」**不是一块**（它不展开、不收起的
+ * 块头）。用 `PrepareFocus` 表达它就会在每个几何函数里多一个不可能的分支。
+ * 顺序由 `prepareLayout.SECTION_ORDER` 给（**人物 → 炁机 → 对手**）。
+ */
+export type PrepareSectionKind = 'player' | 'qiji' | 'boss';
+
 /** 可选项（只要 id —— 显示名由渲染层按 i18n 取）。 */
 export interface PrepareOption {
   readonly id: string;

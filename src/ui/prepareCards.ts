@@ -10,29 +10,25 @@
  * 的角标。
  *
  * ==================================================================
- * 为什么从 `PrepareScreen` 切出来（AGENTS.md §3 的关注分离）
+ * ⚠️ 2026-10-13 第二轮：按 **(kind, id) 查表**，不再按下标对齐
  * ==================================================================
  *
- * 这一轮给卡片加了**四样东西**：缩小的尺寸、名字右边的头像、炁机卡的开关
- * 态、炁机卡的层数角标。它们全是"一张卡怎么画"，而 `PrepareScreen` 里
- * 还有**输入状态机 / 详情区 / 边角控件**三件不相干的职责 —— 混在一起
- * 就是"一个文件装了整个屏幕的所有小区域"（§3 点名的那个形状，
- * `BattleScene` 为此拆过一轮）。
+ * 旧版靠"命中区域数组的下标 = 卡片对象数组的下标"对齐，而那个约定的
+ * 代价写在旧注释里："两处顺序一漂，卡片上的名字就会画到别人的命中区上
+ * —— 而那看起来像'点谁都不对'"。
  *
- * 切出来之后两边各自能用一句话说清：
- *
- * | 文件 | 一句话 |
- * |---|---|
- * | 本文件 | 卡片怎么画（尺寸 / 皮肤 / 名字 / 头像 / 角标） |
- * | `PrepareScreen` | 光标与选择怎么走、每帧把状态喂给谁 |
+ * 手风琴让这个约定**直接不成立**：收起的那两块不画卡，于是"这一帧要画的
+ * 卡"只是全部卡的一个**子集**（展开那一块的那些）。按下标就会把炁机的
+ * 名字画到对手的卡上。所以现在按 `${kind}:${id}` 查表 —— 顺序漂移这个
+ * 失效模式**从结构上消失**（不是"记住了别漂"）。
  *
  * ==================================================================
  * ⚠️ 每帧只改字符串与可见性，**不重建** Text / Graphics
  * ==================================================================
  *
- * 全部对象在 `rebuild()` 里建一次（含"行池"式的卡片数组），`drawOne()`
- * 只做 `set()` / `clear()` / 坐标。这是 `Label` / `primitives` 的契约，
- * 也是本仓库的硬约束。
+ * 全部对象在构造时建一次（每人一张卡一份），`drawOne()` 只做 `set()` /
+ * `clear()` / 坐标。这是 `Label` / `primitives` 的契约，也是本仓库的
+ * 硬约束（每帧 `new Text()` 会重建 GPU 纹理）。
  */
 
 import type { Container, Graphics } from 'pixi.js';
@@ -42,38 +38,8 @@ import { PREPARE_LAYOUT } from './prepareLayout';
 import { CARD_RADIUS, CARD_STROKE, CURSOR_RING_GAP, PREPARE_SKIN } from './prepareRender';
 import { portraitFor } from '../render/portraitAssets';
 import { PortraitSprite } from '../render/portraitSprite';
-
-/** 命中区里要用到的那几个数（`PrepareHitArea` 满足它）。 */
-export interface CardRect {
-  readonly x: number;
-  readonly y: number;
-  readonly w: number;
-  readonly h: number;
-}
-
-/** 一张卡每帧要画的样子（由 `PrepareScreen` 算好）。 */
-export interface CardState extends CardRect {
-  /** 要显示的名字（**已本地化**）。 */
-  readonly name: string;
-  readonly nameColor: number;
-  readonly fillColor: number;
-  readonly fillAlpha: number;
-  readonly strokeColor: number;
-  readonly strokeWidth: number;
-  /** 要不要在卡片外面套一圈光标环（见 `prepareRender.CardSkin.ring`）。 */
-  readonly ring: boolean;
-  readonly ringColor: number;
-  /** 画"已开"角标（炁机卡；只在超过 1 层时为真）。 */
-  readonly badge: boolean;
-  /**
-   * **名字右边那颗对话头像要不要画**。
-   *
-   * ⚠️ 只有"这一格有头像素材"的卡才有意义（素材表在
-   * `render/portraitAssets`）—— 传 `true` 而那一格没有素材时会被忽略
-   * （`drawOne` 里 `portrait === undefined` 那一支）。
-   */
-  readonly showPortrait: boolean;
-}
+import type { CardDraw } from './prepareCardState';
+import type { PrepareSectionKind } from './prepareTypes';
 
 /** 一张卡持有的 Pixi 对象（构造时建好，永不重建）。 */
 interface CardParts {
@@ -81,18 +47,18 @@ interface CardParts {
   readonly portrait: PortraitSprite | undefined;
 }
 
-/**
- * 每张卡"要画成什么样"（`PrepareScreen` 算好之后逐项传进来）。
- *
- * ⚠️ 它是 `CardState` 去掉**位置**（位置来自命中区，见 `drawAll`）——
- * 于是"卡片画在哪"只有一处真相。
- */
-export type CardPaint = Omit<CardState, 'x' | 'y' | 'w' | 'h'>;
+/** 卡片在表里的键（画与查都用它 —— 顺序不再参与）。 */
+function cardKey(kind: PrepareSectionKind, id: string): string {
+  return `${kind}:${id}`;
+}
 
 export class PrepareCards {
-  private readonly parts: CardParts[] = [];
+  private readonly parts = new Map<string, CardParts>();
 
   /**
+   * @param keys 每个卡位的 `(kind, id)`（决定有没有头像素材）。
+   *   ⚠️ 传**全部**卡位（三块的都传），因为它们随时可能变成"展开那一块"；
+   *   "这一帧画哪几张"由 `drawAll` 的入参决定。
    * @param parents 标签与头像要挂上的容器（同一个 root；顺序即层序）。
    *   ⚠️ 头像挂在 `parents` 上而**不是**挂在卡片自己的 Graphics 上：
    *   Graphics 是一整层（所有卡片画在同一层），Sprite 挂进去会被那一层
@@ -102,10 +68,9 @@ export class PrepareCards {
     pixi: PixiCtor,
     private readonly gfx: Graphics,
     private readonly parents: Container,
-    /** 每个卡位一个 id（决定有没有头像素材；没有素材的卡不建 Sprite）。 */
-    ids: readonly string[],
+    keys: readonly { readonly kind: PrepareSectionKind; readonly id: string }[],
   ) {
-    for (const id of ids) {
+    for (const key of keys) {
       const name = new Label(pixi, {
         x: 0,
         y: 0,
@@ -118,41 +83,39 @@ export class PrepareCards {
        * 与 Boss 都没有对话头像 —— 那两类不建 Sprite（少一个对象，也少
        * 一次无谓的贴图请求）。
        */
-      const asset = portraitFor(id);
+      const asset = portraitFor(key.id);
       const portrait =
         asset === undefined
           ? undefined
           : new PortraitSprite(pixi, this.parents, asset, PREPARE_LAYOUT.portraitBox);
-      this.parts.push({ name, portrait });
+      this.parts.set(cardKey(key.kind, key.id), { name, portrait });
       this.parents.addChild(name.root);
     }
   }
 
-  /** 卡片张数（`PrepareScreen` 用它把"卡片 ↔ 命中区"对齐）。 */
+  /** 卡片张数（构造时登记了几个卡位）。 */
   get count(): number {
-    return this.parts.length;
+    return this.parts.size;
   }
 
   /**
-   * 画**全部**卡片。
+   * 画**这一帧要画的那几张卡**（手风琴里 = 展开那一块的全部卡）。
    *
-   * ⚠️ 位置取自 `areas`（命中区）而**不是**另算一遍几何：这是"看到的卡片
-   * 与点中的卡片是同一个矩形"的结构保证（两处各算一遍必然在改布局时错位）。
-   * ⚠️ `paints[i]` 与 `areas[i]` 必须同序（都由 `PrepareScreen` 按
-   * 人物 → 炁机 → Boss 拼出来）。
+   * ⚠️ 每张卡的矩形取自入参（**命中区域的同一份几何**，见 `cardDrawsOf`）。
+   * ⚠️ 不在入参里的卡**先全部藏起来**：收起那两块的卡不能"留在上一帧的
+   * 位置上"（那既画错了，也不该还能被点中 —— 命中区里已经没有它们）。
    */
-  drawAll(areas: readonly CardRect[], paints: readonly CardPaint[]): void {
-    for (let i = 0; i < this.parts.length; i += 1) {
-      const area = areas[i];
-      const paint = paints[i];
-      if (area === undefined || paint === undefined) continue;
-      this.drawOne(i, { ...paint, x: area.x, y: area.y, w: area.w, h: area.h });
+  drawAll(cards: readonly CardDraw[]): void {
+    for (const part of this.parts.values()) {
+      part.name.root.visible = false;
+      part.portrait?.setVisible(false);
     }
+    for (const card of cards) this.drawOne(card);
   }
 
-  /** 全部隐藏（详情区替换整屏内容时用不到，但显隐要一致）。 */
+  /** 全部隐藏（显隐要一致，见 `PrepareScreen.setVisible`）。 */
   setVisible(visible: boolean): void {
-    for (const part of this.parts) {
+    for (const part of this.parts.values()) {
       part.name.root.visible = visible;
       part.portrait?.setVisible(visible);
     }
@@ -166,8 +129,8 @@ export class PrepareCards {
    * （三个字）的头像不在同一列。`Text.width` 是 Pixi 算好的测量值，
    * 只在文字变化后才变，所以这里每帧读它是安全的。
    */
-  drawOne(index: number, state: CardState): void {
-    const part = this.parts[index];
+  private drawOne(state: CardDraw): void {
+    const part = this.parts.get(cardKey(state.kind, state.id));
     if (part === undefined) return;
     const { x, y, w, h } = state;
 
@@ -180,6 +143,7 @@ export class PrepareCards {
 
     part.name.set(state.name);
     part.name.setColor(state.nameColor);
+    part.name.root.visible = true;
     part.name.root.y = y + h / 2 - PREPARE_LAYOUT.nameLineH / 2;
 
     const portrait = part.portrait;

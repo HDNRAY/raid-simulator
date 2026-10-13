@@ -61,6 +61,20 @@
  * ⚠️ **对话头像只给人物**（这一轮的需求是"**我们 3 个角色**名字右边的
  * 说话头像"）：Boss 没有配对的头像，所以 `bossDetail` **不设
  * `portraitId`** —— 它走程序化占位（见渲染层）。
+ *
+ * ==================================================================
+ * ⚠️ 2026-10-13：三类详情都走**同一条顶栏**（标题 + 关键数值 + 头像位）
+ * ==================================================================
+ *
+ * 用户原话："详情页右上角是空的，名字 头像 血量啥的，优化一下布局" +
+ * "三类的顶部结构要一致 ✗（人物 / 炁机 / 对手 —— 别三类三个样子）" +
+ * "血量要显眼"。
+ *
+ * 于是模型这一层保证**三类的 `subtitle` 都有值**（人物 / Boss = 生命上限，
+ * 炁机 = 开没开 / 叠了几层），渲染层负责把"标题 + 这一行 + 头像位"摆成
+ * 同一条（见 `ui/prepareDetailPanel.ts`）。**炁机没有头像、Boss 也没有**
+ * —— 它们用**同一个位置**的程序化占位方块，所以顶栏不会留洞
+ * （用户："炁机没有头像 → 那一条怎么排，你判断；别留一个空洞"）。
  */
 
 import type { PrepareTarget } from './prepareLogic';
@@ -110,11 +124,24 @@ export interface DetailModel {
   readonly id: string;
   /** 标题（人物 / Boss 就是它的名字）。 */
   readonly titleKey: string;
-  /** 小字（人物 / Boss = 生命上限；炁机不用它 —— 见 `qijiDetail`）。 */
+  /**
+   * 标题下面那一行**关键数值**（与标题、头像一起占详情区**顶部那一条**）。
+   *
+   * ⚠️ 三类**都**要给这一行（用户 2026-10-13："三类的顶部结构要一致"）：
+   *
+   * | 类 | 这一行 |
+   * |---|---|
+   * | 人物 / Boss | 生命上限（玩家最想看的那个数） |
+   * | 炁机 | 开没开 / 已叠几层（它没有"血量"，这一行就是它的关键数值） |
+   *
+   * ⚠️ 它是**关键数值**，不是"次要信息"：渲染层用**亮色 + 大一号**画它
+   * （不再是旧的 13px 暗灰）。所以这里**不设 `dim`**。
+   */
   readonly subtitle?: DetailTextRow;
   /**
    * **对话头像**的素材 id（`render/portraitAssets` 的配对键）。
-   * 只有人物有 —— Boss 没有配对的对话头像（见文件头）。
+   * 只有人物有 —— Boss / 炁机没有配对的对话头像，它们走**同一个位置**的
+   * 程序化占位方块（见渲染层），所以三类的顶部结构仍然一模一样。
    */
   readonly portraitId?: string;
   /** 正文（技能列表 / 说明）。 */
@@ -223,11 +250,11 @@ function playerDetail(id: string, ctx: DetailContext): DetailModel | undefined {
     kind: 'player',
     id,
     titleKey: unit.nameKey,
+    /** 顶部那一行的关键数值：生命上限（见 `DetailModel.subtitle`）。 */
     subtitle: {
       kind: 'text',
       key: 'roster.ui.detail.hpMax',
       params: { hp: ctx.playerHp(id) },
-      dim: true,
     },
     /** 头像：与卡片上那颗是**同一份素材表**（`render/portraitAssets`）。 */
     portraitId: id,
@@ -248,11 +275,11 @@ function bossDetail(id: string, ctx: DetailContext): DetailModel | undefined {
     kind: 'boss',
     id,
     titleKey: unit.nameKey,
+    /** 顶部那一行与人物**同一条**（生命上限）—— 三类结构一致。 */
     subtitle: {
       kind: 'text',
       key: 'roster.ui.detail.hpMax',
       params: { hp: ctx.bossHp(id) },
-      dim: true,
     },
     /** ⚠️ 不设 `portraitId`：Boss 没有配对的对话头像（见文件头）。 */
     rows: soon
@@ -265,26 +292,26 @@ function qijiDetail(id: string, ctx: DetailContext): DetailModel | undefined {
   const qiji = ctx.qijiById(id);
   if (qiji === undefined) return undefined;
   const { stacks, cap } = ctx.qijiStacks(id);
-  const rows: DetailRow[] = [];
   /**
-   * ⚠️「开 / 关」与层数**分两行**：层数是"这一条开了几层"，而"可叠几层"
-   * 是**内容**的事（`maxStacks`）。合成一行之后，"上限 3、现在 0"会读成
-   * "开了 0/3 层"，看不出它其实**没开**。
+   * ⚠️ **开关 / 层数挪到顶部那一行**（原来是正文的头两行）。
+   *
+   * 理由有两条：
+   *   1. **结构一致**（用户要求三类的顶栏一样）：人物 / Boss 的顶栏那一行
+   *      是"生命上限"，炁机没有血量，它的**关键数值**就是开没开 / 叠了几层
+   *      —— 放在同一个位置，三类的顶部才是同一种东西。
+   *   2. **不重复**：同一件事（开没开）画两遍会让"这一行是状态还是说明"
+   *      变含糊，而详情区最上面一条是**一眼扫过**的位置。
+   *
+   * ⚠️ 三种取值仍按旧规则分（没开 / 可叠多层 `stacks / cap` / 单层生效）：
+   * 合成一句会让"上限 3、现在 0"读成"开了 0/3 层"（看不出它其实没开）。
    */
-  rows.push({
-    kind: 'text',
-    key: stacks > 0 ? 'roster.ui.detail.qijiOn' : 'roster.ui.detail.qijiOff',
-  });
-  rows.push(
-    cap > 1
-      ? {
-          kind: 'text',
-          key: 'roster.ui.detail.qijiStacks',
-          params: { stacks, cap },
-          dim: true,
-        }
-      : { kind: 'text', key: 'roster.ui.detail.qijiSingle', dim: true },
-  );
+  const subtitle: DetailTextRow =
+    stacks <= 0
+      ? { kind: 'text', key: 'roster.ui.detail.qijiOff' }
+      : cap > 1
+        ? { kind: 'text', key: 'roster.ui.detail.qijiStacks', params: { stacks, cap } }
+        : { kind: 'text', key: 'roster.ui.detail.qijiOn' };
+  const rows: DetailRow[] = [];
   if (qiji.descKey !== undefined) {
     /**
      * ⚠️ 这一行的 `nameKey` 仍填 qi 机自己的名字，但**渲染层不画它**
@@ -299,13 +326,13 @@ function qijiDetail(id: string, ctx: DetailContext): DetailModel | undefined {
     kind: 'qiji',
     id,
     titleKey: qiji.nameKey,
+    subtitle,
     /**
-     * ⚠️ 这里**没有副标题**（稀有度 / 分类不上界面）：那两个词是
-     * `QijiEntity.rarity` / `.category` 的枚举值（`'uncommon'` /
-     * `'offense'` …），而它们的中文显示名**今天不在语言包里**。
-     * 编一套（"稀有 / 进攻"）就是**替内容作者定词** —— 本仓库为这件事
-     * 纠正过一次（`data/roster.ts` 的"不要顺手编称号"）。
-     * 要显示应当由内容作者往 `qiji.*` 里加键（那是另一个领域）。
+     * ⚠️ 这里**没有**稀有度 / 分类：那两个词是 `QijiEntity.rarity` /
+     * `.category` 的枚举值（`'uncommon'` / `'offense'` …），而它们的中文
+     * 显示名**今天不在语言包里**。编一套（"稀有 / 进攻"）就是**替内容作者
+     * 定词** —— 本仓库为这件事纠正过一次（`data/roster.ts` 的"不要顺手编
+     * 称号"）。要显示应当由内容作者往 `qiji.*` 里加键（那是另一个领域）。
      */
     rows,
   };

@@ -46,6 +46,12 @@
 import type { BuffDef, SkillDef } from '../core/types';
 import { LUST_BUFFS, LUST_SKILLS } from './lustBoss';
 import { COMBO_WINDOW, STRIKE } from './kits/combo';
+/**
+ * ⚠️ 蓄势（「避实击虚」的 buff）来自它**自己的文件** —— 它是
+ * `kits/linwanfeng` / `kits/combo` / `data/qiji` 三方共用的叶子，
+ * 放哪一边都会造出方向不对的 import（推导在 `kits/dodgeCharge.ts` 的文件头）。
+ */
+import { DODGE_CHARGE } from './kits/dodgeCharge';
 import {
   FLASH_IFRAME,
   KAILI_SKILLS,
@@ -101,6 +107,16 @@ export {
   JIE,
   STRIKE,
 } from './kits/combo';
+export {
+  /**
+   * 「避实击虚」的蓄势（下一次攻击伤害翻倍、用掉就消耗）。
+   *
+   * ⚠️ 它**只**由那条炁机的 `skillTweak.onUse`（`grant`）授予 ——
+   * 基础技能表里没有任何东西挂它，但每个攻击技能都会**尝试消耗**它
+   * （`removeBuff`，见 `kits/dodgeCharge.ts` 的文件头）。
+   */
+  DODGE_CHARGE,
+} from './kits/dodgeCharge';
 
 export { C, S } from './scale';
 import { BOSS_ENRAGE, BOSS_TELEGRAPH, KNOCKDOWN } from './bossShared';
@@ -368,6 +384,15 @@ export const ALL_BUFFS: readonly BuffDef[] = [
    * "共享"边界），所以它由 `bossShared.ts` 定义、在这里单独列出。
    */
   KNOCKDOWN,
+  /**
+   * 蓄势（「避实击虚」的 buff）。
+   *
+   * ⚠️ **必须注册**：攻击技能的 `hits[].effects` 里写了
+   * `removeBuff: 'dodge-charge'`，而校验器对 hit 效果里的 buff 引用查表
+   * （`MISSING_BUFF`，见 `core/content/validate.ts`）—— 漏注册 = **启动
+   * 即失败**（这是好事：它比"引擎认识、校验器看不见"响亮）。
+   */
+  DODGE_CHARGE,
   /**
    * 派生窗口。
    *
