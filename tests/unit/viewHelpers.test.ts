@@ -133,16 +133,16 @@ describe('buff 短标签：覆盖率（判据是"会显示的都要有"）', () 
      * 钉的是"**结构**"而不是"今天画面上有没有它"：哪天内容接回终结技，
      * 这里已经有一条短标签等着，不会突然冒出一个「？」。
      *
-     * ⚠️ 语言包那一行曾经是「炁满」——**上一次资源对调留下的旧字**。
-     * 已按仓库自己写明的映射规则（`energy` = 炁 / `douqi` = 缠）改成
-     * 「缠满」，沿革记在 `zh-CN.ts` 的 `douqiFull` 上。
+     * ⚠️⚠️ **这里原来还钉了字面值** `expect(...get('buffShort.douqiFull')).toBe('缠满')`
+     * —— **已删**（用户 2026-10-13）。原话："判断 素材来源 啥的这些判断
+     * 是开发过程····不要写进ut"。那个字是**开发时挑的词**（沿革见
+     * `zh-CN.ts` 的 `douqiFull` 注释），改一个同义词不影响任何机制 ——
+     * 钉它只是在"逼下一个人改两处"。
      *
-     * ⚠️ 这里**顺手把字面也钉住**（与下面 `buffShort.unknown` = '？'
-     * 同一种钉法）：这个字是"按资源名映射规则推导出来的"结论，不是随手
-     * 挑的词 —— 钉住它，改回去（或改错）时会红。
+     * 留下的是**有真实后果**的那两条：键必须在语言包里（缺了玩家看到
+     * `buffShort.douqiFull` 这个 key 本身或「？」）。
      */
     expect(shortLabelKeyOf('douqi-full')).toBe('buffShort.douqiFull');
     expect(CATALOG_KEYS.has('buffShort.douqiFull')).toBe(true);
-    expect(flattenCatalog(zhCN).get('buffShort.douqiFull')).toBe('缠满');
   });
 });

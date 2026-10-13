@@ -1,6 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { assetUrl } from '../../src/render/assetUrl';
 import { backdropBossIds, bossBackdropUrl } from '../../src/render/bossBackdrops';
@@ -8,132 +5,44 @@ import { SPRITES, animUrls, frameUrl, spriteFor } from '../../src/render/spriteA
 import { BOSS_ROSTER, PLAYER_ROSTER, isDeveloping } from '../../src/data/roster';
 
 /**
- * **素材表 ↔ 权威清单（`manifest.json`）的核对**。
+ * **素材表（`spriteAssets.ts`）的自证**。
  *
- * 需求："`public/fd2/rgba/manifest.json` ← 先读它，它是权威清单"。
+ * ==================================================================
+ * ⚠️⚠️ 这一组**不读 `public/fd2/` 的素材**（用户 2026-10-13 拍板）
+ * ==================================================================
  *
- * 为什么要有这一组测试：表现层的帧数/权重**写死在代码里**（不是启动时
- * fetch，理由见 `spriteAssets.ts` 的文件头）。写死就有"与素材脱节"的风险，
- * 而脱节的表现是**静默的**：多出来的帧文件没人用（无所谓），少算的帧
- * 永远播不到（"人物动作少一截"）。所以由测试来对账。
+ * 原先这里有一组"素材表 ↔ 权威清单（`public/fd2/rgba/manifest.json`）"
+ * 的逐项核对（帧数 + 每帧 delay + 每张路径）。它读的是**磁盘上的素材**，
+ * 而 `public/fd2/`（54MB 第三方素材，汉堂 1995，见
+ * `THIRD-PARTY-NOTICES.md`）是 **gitignore** 的、**不随仓库分发** ——
+ * 于是：
+ *
+ *   1. **本地有 ≠ 仓库有。** CI 是**全新检出**，那里没有这个文件。
+ *   2. 更根本的：**"素材里到底有几帧、从哪来"不是这个仓库该保证的事。**
+ *      用户原话："**他不应该读 没进的**，**他甚至都不应该做这个判断**
+ *      —— **不需要判断 那个头像是否来自哪里**"（原话针对头像，
+ *      判据是同一套）。
+ *
+ * ⚠️ 中途一度用 `try/catch + describe.skipIf(素材不在)` 兜着（本地跑、
+ * CI 跳过）。那是"**承认它该读、只是这次读不到**"—— 用户明确否掉了
+ * 这个前提。所以那份核对**整体删除**，**不是**改成跳过。
+ *
+ * 这里留下的全部是**仓库内部能自证**的东西：出战名单 ↔ 素材表 ↔
+ * 背景表（都是仓库里的常量），以及**算出来的帧 URL 的形状**（常量契约）。
+ *
+ * ⚠️ 代价（有意接受、记在这里）：写死的帧数/权重**不再与素材自动对账**
+ * （这笔账也记在 `src/render/spriteAssets.ts` 文件头）。理由是另一条路
+ * 更糟：单测依赖 gitignored 素材 → 要么 **CI 必红**（模块顶层读就抛）、
+ * 要么**整组静默跳过**（"没测"伪装成"测了"）。
  */
 
-/** manifest 里的一段动画（`{ frames, delays }`）。 */
-interface ManifestAnim {
-  readonly frames: readonly string[];
-  readonly delays: readonly number[];
-}
-
-/**
- * 把 JSON 当**未经验证的数据**收窄成已知形状。
- *
- * ⚠️ 这不是绕过类型检查：它把"这里确实是一份外部数据"写在了名字上
- * （AGENTS.md §1 允许"有名字的解析器"）。
- */
-function asManifest(value: unknown): Record<string, { idle: ManifestAnim; attack: ManifestAnim }> {
-  const out: Record<string, { idle: ManifestAnim; attack: ManifestAnim }> = {};
-  const anim = (raw: unknown): ManifestAnim => {
-    if (typeof raw !== 'object' || raw === null) return { frames: [], delays: [] };
-    const frames = (raw as { frames?: unknown }).frames;
-    const delays = (raw as { delays?: unknown }).delays;
-    return {
-      frames: Array.isArray(frames) ? frames.filter((x): x is string => typeof x === 'string') : [],
-      delays: Array.isArray(delays) ? delays.filter((x): x is number => typeof x === 'number') : [],
-    };
-  };
-  if (typeof value !== 'object' || value === null) return out;
-  for (const [slot, raw] of Object.entries(value)) {
-    const node = raw as { idle?: unknown; attack?: unknown };
-    out[slot] = { idle: anim(node.idle), attack: anim(node.attack) };
-  }
-  return out;
-}
-
-/**
- * ⚠️⚠️ **运行时读，不用静态 `import`** —— 这一条踩着过 CI。
- *
- * `public/fd2/` 是 **gitignore 的**（54MB 的第三方素材，见
- * `THIRD-PARTY-NOTICES.md`），所以**仓库里没有这个文件**。
- *
- * 原本这里写的是 `import manifest from '.../manifest.json'`：本地有素材
- * 所以一切正常，但 **CI 上 `vite build` 会直接失败**
- * （`TS2307: Cannot find module`）—— 编译期解析一个不存在的模块。
- *
- * 改成运行期读 + 守卫之后：
- *   - 本地（有素材）→ 这一组照常跑，对账仍然有效
- *   - CI（无素材）  → **显式 skip**，而不是"悄悄少测一组"
- *
- * ⚠️ **不要把它改回静态 import。** 那样 build 会在 CI 上挂。
- */
-function loadManifest(): ReturnType<typeof asManifest> | undefined {
-  try {
-    /**
-     * ⚠️ **不能用 `new URL('…', import.meta.url)`** —— 踩过。
-     *
-     * Vite 把那个写法当成**资源引用**并重写它：在 jsdom 环境下它被解析成
-     * `http://localhost:3000/fd2/rgba/manifest.json`，于是 `readFileSync`
-     * 抛 "The URL must be of scheme file"，**守卫把它静默变成"跳过"** ——
-     * 本地有素材也照样跳过 6 条，看起来"没事"。
-     *
-     * `fileURLToPath` 不做资源解析，拿到的就是真实的文件路径。
-     */
-    const here = dirname(fileURLToPath(import.meta.url));
-    const file = join(here, '..', '..', 'public', 'fd2', 'rgba', 'manifest.json');
-    return asManifest(JSON.parse(readFileSync(file, 'utf8')));
-  } catch {
-    return undefined;
-  }
-}
-
-const MANIFEST = loadManifest();
-/**
- * 收窄用的常量。
- *
- * ⚠️ `describe.skipIf` 只影响**运行期是否注册用例**，TypeScript 的控制流
- * 分析看不到它 —— 所以里面直接用 `MANIFEST` 会报"possibly undefined"。
- * 这里回落成一个空清单：素材缺失时 `skipIf` 会把整组跳过，
- * 所以那个空值**永远不会被用到**；它只是让类型收敛，不是兜底逻辑。
- */
-const M = MANIFEST ?? asManifest({});
-
-/** 把 `assetUrl()` 拼出来的 base 前缀去掉，与 manifest 的相对路径比。 */
+/** 把 `assetUrl()` 拼出来的 base 前缀去掉，与"相对 `public/`"的路径比。 */
 function stripBase(url: string): string {
   return url.replace(assetUrl(''), '');
 }
 
-/**
- * ⚠️ **没有素材就整组跳过**（CI）。`skipIf` 会在报告里标成 skipped，
- * 而不是假装通过 —— 那样等于把"没测"伪装成"测了"。
- */
-describe.skipIf(MANIFEST === undefined)('素材表与 manifest.json 一致', () => {
-  it('manifest 读到了 10 个 slot（素材备好了）', () => {
-    expect(Object.keys(M)).toHaveLength(10);
-  });
-
-  it('⚠️ 每个 slot 的帧数、每帧权重都与 manifest 逐项相等', () => {
-    for (const sprite of SPRITES) {
-      const slot = M[sprite.slot];
-      expect(slot, `manifest 里没有 slot ${sprite.slot}`).toBeDefined();
-      expect(sprite.idle, `${sprite.slot} 的 idle 权重`).toEqual(slot?.idle.delays);
-      expect(sprite.attack, `${sprite.slot} 的 attack 权重`).toEqual(slot?.attack.delays);
-    }
-  });
-
-  it('⚠️ 生成的帧 URL 与 manifest 里的路径逐张相等', () => {
-    /**
-     * 这是"帧数"之外的第二道对账：编号规则（`f00` 两位补零）与目录结构。
-     * 素材换成 `f1.png` 或 `frame-000.png` 时，权重断言仍然通过，
-     * 只有这条会红。
-     */
-    for (const sprite of SPRITES) {
-      const slot = M[sprite.slot];
-      if (slot === undefined) continue;
-      expect(animUrls(sprite).idle.map(stripBase)).toEqual([...slot.idle.frames]);
-      expect(animUrls(sprite).attack.map(stripBase)).toEqual([...slot.attack.frames]);
-    }
-  });
-
-  it('⚠️ 路径与 manifest 一样**相对 `public/`**（开头是 fd2/，没有二次前缀）', () => {
+describe('帧 URL 的形状（仓库内自证，不读素材）', () => {
+  it('⚠️ 路径相对 `public/`（开头是 fd2/，没有二次前缀）', () => {
     for (const sprite of SPRITES) {
       for (const url of animUrls(sprite).idle) {
         expect(stripBase(url).startsWith('fd2/rgba/')).toBe(true);

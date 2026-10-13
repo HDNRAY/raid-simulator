@@ -35,7 +35,7 @@ import type { Container, Graphics } from 'pixi.js';
 import { Label, type PixiCtor } from './primitives';
 import { PALETTE } from '../render/theme';
 import { PREPARE_LAYOUT } from './prepareLayout';
-import { CARD_RADIUS, CARD_STROKE, CURSOR_RING_GAP, PREPARE_SKIN } from './prepareRender';
+import { CARD_RADIUS, CARD_STROKE, CURSOR_RING_GAP, PREPARE_SKIN, centeredTextTopY } from './prepareRender';
 import { portraitFor } from '../render/portraitAssets';
 import { PortraitSprite } from '../render/portraitSprite';
 import type { CardDraw } from './prepareCardState';
@@ -149,7 +149,15 @@ export class PrepareCards {
     part.name.set(state.name);
     part.name.setColor(state.nameColor);
     part.name.root.visible = true;
-    part.name.root.y = y + h / 2 - PREPARE_LAYOUT.nameLineH / 2;
+    /**
+     * ⚠️ 名字**垂直居中要按实测盒高算**（`centeredTextTopY`）：原来减的是
+     * `nameLineH / 2`（= 11.5，一个**排版预算**），而文字盒只有 16~18px
+     * —— 于是整行被推高 2.4~3.5px（用户报的"字没有在卡片中居中"，实测
+     * 一屏 8 张炁机卡都偏高 3px）。理由与实测数字写在那个函数上。
+     *
+     * ⚠️ 顺序不能换：`set()` 必须在读 `height` **之前**（盒高跟着文本变）。
+     */
+    part.name.root.y = centeredTextTopY(y, h, part.name.root.height);
 
     const portrait = part.portrait;
     if (!state.showPortrait || portrait === undefined) {

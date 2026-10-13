@@ -149,6 +149,41 @@ describe('命中区（`qijiHitAreas`）：几何是算出来的，卡片与命�
   it('区域的 `index` 与候选下标一一对应（顺序 = 画出来的顺序）', () => {
     expect(qijiHitAreas(SIX).map((a) => a.index)).toEqual([0, 1, 2, 3, 4, 5]);
   });
+
+  /**
+   * ==================================================================
+   * 【关键】公布的矩形 == 命中矩形（逐张 / 四条边 / 不越界）
+   * ==================================================================
+   *
+   * ⚠️ 这一屏的卡片是 `QijiSelectScreen.redraw` **照着 `qijiHitAreas` 的
+   * `x/y/w/h` 画的**（同一个数组、同一份几何），而"点哪张"走
+   * `qijiAtPoint` → 还是那个数组。所以"画出来的矩形"与"命中矩形"是
+   * **同一个表达式** —— 这里钉的是它**没有在某一侧被悄悄收窄 / 外扩**：
+   *
+   *   - 四条边（含右下角那两个闭区间端点）点得中**它自己**
+   *   - 左缘外 1px 点不中任何卡（不能因为"手指友好"偷偷外扩 —— 那会让
+   *     邻卡互相抢）
+   *
+   * ⚠️ 候选张数 1..6 全跑一遍：这一屏的行数/每行张数都是**内容决定**的
+   * （`qijiRows`），只测一个张数等于只测了一条排布。
+   */
+  it('【关键】每一张卡的四条边都点得中它自己（命中矩形 == 公布矩形）', () => {
+    for (let n = 1; n <= 6; n += 1) {
+      const set = Array.from({ length: n }, (_, i) => candidate(`c${i}`));
+      const areas = qijiHitAreas(set);
+      expect(areas).toHaveLength(n);
+      for (const area of areas) {
+        const id = set[area.index]?.qiji.id;
+        const at = (px: number, py: number) => qijiAtPoint(set, px, py)?.qiji.id;
+        expect(at(area.x, area.y + area.h / 2)).toBe(id);
+        expect(at(area.x + area.w, area.y + area.h / 2)).toBe(id);
+        expect(at(area.x + area.w / 2, area.y)).toBe(id);
+        expect(at(area.x + area.w / 2, area.y + area.h)).toBe(id);
+        /** 左缘外 1px：不该再算这张（否则命中区比画出来的宽）。 */
+        expect(at(area.x - 1, area.y + area.h / 2)).toBeUndefined();
+      }
+    }
+  });
 });
 
 describe('命中判定（`qijiAtPoint` / `pickQiji`）', () => {

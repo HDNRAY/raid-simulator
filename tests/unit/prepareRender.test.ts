@@ -4,11 +4,14 @@ import {
   CURSOR_RING_GAP,
   PREPARE_SKIN,
   cardSkin,
+  centeredTextTopY,
   startSkin,
 } from '../../src/ui/prepareRender';
 import { PALETTE } from '../../src/render/theme';
 import { cardDrawsOf } from '../../src/ui/prepareCardState';
 import { prepareHitAreas } from '../../src/ui/prepareGeometry';
+import { sectionRowStep } from '../../src/ui/prepareCardGrid';
+import type { PrepareSectionKind } from '../../src/ui/prepareTypes';
 
 /**
  * **备战界面的外观规则**（纯函数）。
@@ -249,5 +252,106 @@ describe('一帧要画的卡：状态 → 每张卡的画法', () => {
       cursor: undefined,
     });
     expect(bossDraws[0]).toMatchObject({ kind: 'boss', showPortrait: false });
+  });
+});
+
+/**
+ * ==================================================================
+ * 【关键】"画出来的矩形 == 命中矩形"逐张钉住（含滚动偏移）
+ * ==================================================================
+ *
+ * 上面那条只对了**一张**人物卡。而"看到的卡"与"点中的卡"必须对**每一张、
+ * 每一种展开方式、每一种滚动位置**都成立 —— 这是本屏最容易静默坏掉的一条
+ * （两处各算一遍几何 = 点到的卡与看到的卡差一个滚动量，而那看起来像
+ * "点击乱跳"，光看截图看不出来）。
+ *
+ * ⚠️ 判据不是"某个数等于某个值"，而是**两份几何逐字段相等**：
+ * `cardDrawsOf` 的产物就是渲染层 `roundRect` 的入参（`prepareCards.drawAll`），
+ * 所以这一条等于"渲染入参 == 命中入参"。
+ */
+describe('【关键】画出来的卡 == 命中区（逐张 / 每种展开 / 含滚动）', () => {
+  /** 真实张数：3 人物 / 8 炁机 / 7 对手（与内容表一致）。 */
+  const three = Array.from({ length: 3 }, (_, i) => ({ id: `p${i}`, nameKey: `p${i}` }));
+  const seven = Array.from({ length: 7 }, (_, i) => ({ id: `b${i}`, nameKey: `b${i}` }));
+  const eight = Array.from({ length: 8 }, (_, i) => ({ id: `q${i}`, nameKey: `q${i}` }));
+  /** 20 张 = 4 行 > 视口 2 行 → 这一块**真的会滚**（命中区要被裁剪 + 上移）。 */
+  const twenty = Array.from({ length: 20 }, (_, i) => ({ id: `q${i}`, nameKey: `q${i}` }));
+
+  const drawsOf = (
+    areas: ReturnType<typeof prepareHitAreas>,
+  ): ReturnType<typeof cardDrawsOf> =>
+    cardDrawsOf({
+      areas,
+      nameOf: (_kind, id) => id,
+      cursor: undefined,
+      selection: { playerId: 'p0', bossId: 'b0' },
+      stacks: () => 0,
+      developing: () => false,
+    });
+
+  it('三种展开方式：每一张画出来的卡都能在命中区里找到**同一个矩形**', () => {
+    const sections: readonly PrepareSectionKind[] = ['player', 'qiji', 'boss'];
+    for (const expanded of sections) {
+      const areas = prepareHitAreas(three, seven, eight, expanded);
+      const draws = drawsOf(areas);
+      /** 画出来的张数 == 命中区里"是卡"的那几条（`start` / `summary` 不是卡）。 */
+      expect(draws).toHaveLength(
+        areas.filter((a) => a.kind !== 'start' && a.kind !== 'summary').length,
+      );
+      for (const d of draws) {
+        const area = areas.find((a) => a.kind === d.kind && a.id === d.id);
+        expect(area).toBeDefined();
+        expect([d.x, d.y, d.w, d.h]).toEqual([area!.x, area!.y, area!.w, area!.h]);
+      }
+    }
+  });
+
+  it('滚过一行之后仍然逐字段相等（偏移没有算两遍）', () => {
+    const scroll = { player: 0, qiji: sectionRowStep('qiji'), boss: 0 };
+    const areas = prepareHitAreas(three, seven, twenty, 'qiji', scroll);
+    const draws = drawsOf(areas);
+    /** 第一行被滚掉 → 命中区里第一张是下标 5（5 列）。 */
+    expect(draws[0]!.id).toBe('q5');
+    for (const d of draws) {
+      const area = areas.find((a) => a.kind === d.kind && a.id === d.id);
+      expect(area).toBeDefined();
+      expect([d.x, d.y, d.w, d.h]).toEqual([area!.x, area!.y, area!.w, area!.h]);
+    }
+  });
+});
+
+/**
+ * ==================================================================
+ * 【关键】一行字在盒子里垂直居中（用**实测盒高**，不用行高估计）
+ * ==================================================================
+ *
+ * 用户报的"炁机卡的字没有在卡片中居中"。原来的写法是
+ * `中心 y − nameLineH / 2`，而 `nameLineH`(23) 是**卡片高度的预算**、
+ * 不是画出来的文字盒高（15 号字实测 16.05、17 号字 18.19）—— 于是整行字
+ * 被推高 2.4~3.5px。
+ *
+ * ⚠️ 这一条只能在 node 里钉**规则**：真正的盒高由 Pixi 给（jsdom 里
+ * 量不准）。所以断言写成"文字盒的中心 == 盒子中心"，与字号无关。
+ */
+describe('【关键】文字在盒子里垂直居中（按实测盒高）', () => {
+  it('文字盒中心 == 盒子中心（15 号 / 17 号 / 任意盒高都成立）', () => {
+    const cases: readonly (readonly [number, number, number])[] = [
+      /** [盒顶, 盒高, 实测文字盒高] —— 后两个是实测值（卡片 / 块头）。 */
+      [191, 40, 16.05],
+      [103, 40, 18.19],
+      [55, 88, 18.19],
+      [0, 40, 16.05],
+    ];
+    for (const [top, boxH, textH] of cases) {
+      const y = centeredTextTopY(top, boxH, textH);
+      expect(y + textH / 2).toBeCloseTo(top + boxH / 2, 6);
+    }
+  });
+
+  it('用一个"行高估计值"去算会偏（这就是修之前的那条）', () => {
+    /** 卡片高 40、文字盒 16.05：减 `nameLineH / 2`(11.5) 会把字**推高** 3.475px。 */
+    const correct = centeredTextTopY(0, 40, 16.05);
+    const old = 0 + 40 / 2 - 23 / 2;
+    expect(correct - old).toBeCloseTo(3.475, 3);
   });
 });

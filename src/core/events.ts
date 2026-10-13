@@ -70,6 +70,29 @@ export type EventDef =
       readonly skillId: SkillId;
       /** 是**反伤**（由触发器产出）。日志要据此标注"反伤"。 */
       readonly reflect?: boolean;
+      /**
+       * **是哪个 buff 的阈值磨掉了这一击的一部分**（观测字段，不参与判定）。
+       *
+       * ==================================================================
+       * 为什么必须补这一个键（用户 2026-10-13 的口径）
+       * ==================================================================
+       *
+       * 「卸」的阈值有两半：`≤N` **完全卸掉**（走 `avoided`，`thinned` 为 0）、
+       * `>N` **只减 N**（走这里，`thinned = N`）。而炁机的"吸收了一部分
+       * 也算成功"要问的是"**是谁**磨掉的"：`thinned > 0` 只有量、没有"是谁"
+       * —— 只看量的话，将来任何一个带 `damageThreshold` 的东西（别的 buff /
+       * Boss 的霸体）都会被算成「卸」。
+       *
+       * ⚠️ 所以它与 `avoided.viaBuffId` 是**同一件事的两个出口**：
+       * "这一击被哪个 buff 的阈值吸收了多少"。只在 `thinned > 0` 时才有值
+       * （`''` 会与"id 恰好是空串"混淆，宁可缺键）。
+       *
+       * ⚠️ **它不动 `REPLAY_FORMAT_VERSION`**：由 `hitResolution` 在事件产出
+       * **之后**补（`avoidedSource.withAbsorbedByBuffId`），不改伤害 / 命中的
+       * 任何判定 —— 与 `avoided.viaBuffId`（同一份先例）、
+       * `interruptSuccess.sourceSkillId` 同一条纪律。
+       */
+      readonly viaBuffId?: BuffId;
     }
   | {
       readonly kind: 'heal';

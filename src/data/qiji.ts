@@ -104,10 +104,12 @@ export const QIJI_JIE_STRIKE: QijiEntity = {
 /**
  * 「卸」→「击」。
  *
- * 成功定义：**阈值挡下了整击**（`avoided.viaBuffId === 'guard'`）。
+ * 成功定义（**2026-10-13 放宽过一次**）：**阈值吸收了 > 0 的伤害** ——
+ * 完全卸掉（`≤N`，走 `avoided.viaBuffId === 'guard'`）✓
+ * 只减伤（`>N` 的平减，走 `damage.thinned > 0` + `damage.viaBuffId === 'guard'`）✓
+ * 用户原话："**卸不需要完全卸掉，吸收了一部分也能派生「击」**"。
  * 「卸」是按住型、从不发 `interruptSuccess`，所以它走**第二条通道**
- * （`viaBuffId`）。没挡住（`>N` 的平减）**不开窗** —— 那只是"减伤"，
- * 不是"卸掉了"。
+ * （`viaBuffId`）。没按卸 / 一点都没吸收 → 不开窗。
  */
 export const QIJI_GUARD_STRIKE: QijiEntity = {
   id: 'xieShengJi',
@@ -127,7 +129,7 @@ export const QIJI_GUARD_STRIKE: QijiEntity = {
     sourceSkillId: 'guard',
     derivedSkillId: 'strike',
     buff: comboWindowFor('guard'),
-    /** 「卸」的阈值 buff：它挡下整击时算"用成功了"。 */
+    /** 「卸」的阈值 buff：它**吸收 ≥1 点**（完全卸掉或部分减伤）就算"用成功了"。 */
     viaBuffId: 'guard',
   },
 };

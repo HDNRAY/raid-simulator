@@ -35,7 +35,7 @@ import { Label, type PixiCtor } from './primitives';
 import { PALETTE } from '../render/theme';
 import { PREPARE_LAYOUT, SECTION_ORDER } from './prepareLayout';
 import type { Rect } from './prepareGeometry';
-import { CARD_RADIUS } from './prepareRender';
+import { CARD_RADIUS, centeredTextTopY } from './prepareRender';
 import { portraitFor } from '../render/portraitAssets';
 import { PortraitSprite } from '../render/portraitSprite';
 import type { PrepareSectionKind } from './prepareTypes';
@@ -121,7 +121,12 @@ export class PrepareFoldBars {
       label.set(bar.text);
       label.setColor(PALETTE.text);
       label.root.x = x + pad + (hasPortrait ? box + gap : 0);
-      label.root.y = centerY - PREPARE_LAYOUT.nameLineH / 2;
+      /**
+       * ⚠️ 与卡片同一条：**按实测盒高**垂直居中（不是 `nameLineH / 2`）。
+       * 块头这一行比卡片上的字更明显 —— 它两边都是空的，偏 3px 一眼看得出。
+       * ⚠️ `set()` 在**前**（盒高跟着文本变）。
+       */
+      label.root.y = centeredTextTopY(y, h, label.root.height);
       label.root.visible = true;
     }
     /** 没画的两块：连字带脸一起藏掉（否则会停在上一帧的位置）。 */

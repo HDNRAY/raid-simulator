@@ -413,23 +413,32 @@ describe('取词函数：不许用"只收一个参数"的类型', () => {
 
 /**
  * ==================================================================
- * 测试**不许静态 import 被 gitignore 的素材**
+ * 测试**不许 import / 读 gitignore 的第三方素材**
  * ==================================================================
  *
  * 这一条防的是一个**本地全绿、CI 必红**的坑（真实发生过）：
  *
  *   `tests/web/spriteAssets.test.ts` 写了一句
  *   `import manifest from '../../public/fd2/rgba/manifest.json'` ——
- *   而 `public/fd2/`（54MB 第三方素材）是 **gitignore** 的，仓库里没有。
- *   本地有素材所以 `typecheck` / `test` / `build` 全过，
+ *   而 `public/fd2/`（54MB 第三方素材，汉堂 1995）是 **gitignore** 的，
+ *   仓库里没有。本地有素材所以 `typecheck` / `test` / `build` 全过，
  *   推到 CI 上 `vite build` 直接挂：
  *   `TS2307: Cannot find module '.../manifest.json'`。
  *
- * ⚠️ **判据只针对"静态 import"**：那是**编译期**解析，文件不在就必然报错。
- * 运行期带守卫地读（`readFileSync` + try/catch）是**允许**的 ——
- * 素材在就跑、不在就显式 skip，这正是修好之后的做法。
+ * ⚠️ **这条规则的判据比它曾经的样子更窄、也更严**（2026-10-13 用户拍板）：
+ *   要求"素材不在就显式 skip"是**不够**的 —— 那等于承认"这个测试该读
+ *   没进仓库的东西，只是这次读不到"。用户的判据是**根本不该读、也不该
+ *   判断素材从哪来**（素材是第三方，`local 有 ≠ 仓库有`；单测不是素材的
+ *   质检员）。所以现在只扫**静态 import**（编译期解析，文件不在必炸），
+ *   而真正读素材的那几处断言是**整体删除**的 —— 见
+ *   `tests/web/spriteAssets.test.ts` 文件头与 `src/render/portraitAssets.ts`
+ *   顶部记的那两笔账（`tests/unit/preparePortraits.test.ts` 整个文件已删）。
+ *
+ * ⚠️ **为什么这条扫描仍然留着**：静态 import 是**编译期**的事，
+ * 它不只让 test 红，还会让 CI 的 `vite build` 挂 —— 这是"本地绿、线上红"
+ * 最容易复发的形状，值得一条机器检查盯着。
  */
-describe('测试不许静态 import 被 gitignore 的素材', () => {
+describe('测试不许 import 被 gitignore 的素材', () => {
   it('tests/ 下没有指向 public/fd2 的静态 import', async () => {
     const { readFileSync, globSync } = await import('node:fs');
     /** 静态 import / require 一个 public/fd2 下的路径。 */
@@ -445,7 +454,7 @@ describe('测试不许静态 import 被 gitignore 的素材', () => {
     expect(
       offenders,
       `这些静态 import 会在没有素材的 CI 上让 build 失败（public/fd2 是 gitignore 的）：\n` +
-        `改成"运行期带守卫地读"——素材在就跑、不在就 skipIf。\n${offenders.join('\n')}`,
+        `删掉对素材的依赖（单测不该读不进仓库的素材），不要改成"素材在才跑"。\n${offenders.join('\n')}`,
     ).toEqual([]);
   });
 });

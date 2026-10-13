@@ -39,7 +39,7 @@ import type {
 } from '../types';
 import { aggregateFlags, applyBuff } from '../buffs';
 import { runTriggers } from './triggers';
-import { blockBuffIdOf, withViaBuffId } from './avoidedSource';
+import { absorbedByOf, withAbsorbedByBuffId } from './avoidedSource';
 import { casterGainsDouqiFromDamage } from './holds';
 import {
   applyDamage,
@@ -179,23 +179,16 @@ export function resolveHit(
     const avoided = victimFlags.invulnerable === true || guardBlocked;
 
     /**
-     * **是哪个 buff 挡下的**（`avoided.viaBuffId` 的来源）。
+     * **是谁吸收的这一击**（`avoided.viaBuffId` / `damage.viaBuffId` 的来源）。
      *
-     * ⚠️ 在**结算之前**读一次并留着：`avoided` 事件由 `applyDamage` 发出，
-     * 而那时挨打者的 buff 可能已经被同一击的效果改过（"命中附带一个
-     * debuff"是很常见的写法）—— 事后回读会指向一个刚挂上去的 buff，
-     * 而"是谁挡下这一击的"是**命中那一刻**的事实。
-     *
-     * 两个来源与 `avoided` 的判据一一对应：
-     *   - 无敌 → 挂着 `invulnerable` 的那个 buff（「闪」/「避」）
-     *   - 阈值 → `damageThreshold` **最大**的那个（`aggregateFlags` 取最大
-     *     值，所以这里也必须取最大才同源）
-     *
-     * ⚠️ 它**不参与判定**（挡没挡住上一行已经定了），只写进事件给统计 /
-     * 日志 / 炁机读 —— 与 `interruptSuccess.sourceSkillId` 同一条纪律：
+     * ⚠️ 两个出口一次算好、而且**必须在结算之前**读 —— 理由（"命中附带的
+     * buff 会改掉挨打者的 buff 列表"、"两个出口为什么用两个解析器"）写在
+     * `avoidedSource.absorbedByOf` 上，这里不再抄第二遍。
+     * ⚠️ 它**不参与判定**（挡没挡住上面已经定了），只写进事件给统计 / 日志 /
+     * 炁机读 —— 与 `interruptSuccess.sourceSkillId` 同一条纪律：
      * 不动确定性语义、不动 `REPLAY_FORMAT_VERSION`。
      */
-    const viaBuffId = avoided ? blockBuffIdOf(target) : undefined;
+    const absorbedBy = absorbedByOf(target, avoided);
 
     /** 本次命中实际扣掉的血（用于判断"是否算受伤"，见函数末尾）。 */
     let taken = 0;
@@ -236,7 +229,7 @@ export function resolveHit(
               skill.id,
               ctx.state.tick,
             );
-            ctx.events.push(...withViaBuffId(blocked.events, viaBuffId));
+            ctx.events.push(...withAbsorbedByBuffId(blocked.events, absorbedBy));
             break;
           }
           /**
@@ -270,7 +263,7 @@ export function resolveHit(
             ctx.state.tick,
           );
           ctx.replaceCombatant(applied.combatant);
-          ctx.events.push(...withViaBuffId(applied.events, viaBuffId));
+          ctx.events.push(...withAbsorbedByBuffId(applied.events, absorbedBy));
           taken += Math.max(0, result.amount);
 
           /**

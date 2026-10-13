@@ -31,8 +31,14 @@
  * | 源技能 | 什么叫成功 | 依据事件 |
  * |---|---|---|
  * | 「截」 | **真的打断了**一个读条 | `interruptSuccess.sourceSkillId === 'jie'` |
- * | 「卸」 | 阈值**挡下了整击**（`≤N`） | `avoided.viaBuffId === 'guard'` |
+ * | 「卸」 | 阈值**吸收了 > 0 的伤害**（完全卸掉 ✓ 部分减伤 ✓） | `avoided.viaBuffId === 'guard'` **或** `damage.viaBuffId === 'guard'`（`thinned > 0`） |
  * | 「闪」 | 无敌窗口**真的吃掉了一击** | `avoided.viaBuffId === 'flash-iframe'` |
+ *
+ * ⚠️ 「卸」那一条**2026-10-13 放宽过一次**：旧口径是"阈值**完全**卸掉
+ * （`≤N`）才算"，于是"只减伤"（`>N` 的平减）不开窗 —— 而用户的口径是
+ * **"卸不需要完全卸掉，吸收了一部分也能派生「击」"**。两半现在都算，
+ * 依据分别是 `avoided` 与 `damage.thinned > 0` 那两个出口（见
+ * `avoidedSource.withAbsorbedByBuffId`）。
  *
  * 三个都是"玩家做成了某件事"才开的窗口 —— 打空 / 没挨打都不开。
  * 这与用户在 §5.2 反复强调的"**有代价的选择**"是同一条：
@@ -69,11 +75,17 @@ export interface ComboWindowSpec {
   /** **哪个技能**成功时开窗口（「截」= `'jie'` / 「卸」= `'guard'` / 「闪」= `'flash'`）。 */
   readonly sourceSkillId: string;
   /**
-   * 可选的"第二条成功通道"：**这个 buff 挡下整击**时也算成功。
+   * 可选的"第二条成功通道"：**这个 buff 吸收了这一击**时也算成功。
    *
    * 用途：「卸」的阈值（`buff id = 'guard'`）与「闪」的无敌
    * （`buff id = 'flash-iframe'`）都不是"打断"，它们从来没有
-   * `interruptSuccess` 事件 —— 它们的成功证据是 `avoided.viaBuffId`。
+   * `interruptSuccess` 事件 —— 它们的成功证据在**伤害 / 免疫事件**上。
+   *
+   * ⚠️ 两个出口都认（`avoided` 与 `damage.thinned > 0`）：
+   *   - **完全卸掉**（`≤N`）→ `avoided.viaBuffId`
+   *   - **只减伤**（`>N`）→ `damage.viaBuffId`（且 `thinned > 0`）
+   * 「闪」的无敌只会走前者（它没有阈值，`thinned` 恒为 0），所以放宽
+   * 第二条**不会**让闪误开。
    *
    * ⚠️ 不给这个字段的窗口**只认打断**（「截」就是这种）：
    * 它不该因为"挨打时恰好挂着别的无敌"而开窗。
@@ -119,14 +131,24 @@ export function comboWindowsFor(
         return event.sourceSkillId === spec.sourceSkillId;
       }
       /**
-       * 通道 2（可选）：**某个 buff 挡下了整击**。
+       * 通道 2（可选）：**这个 buff 吸收了这一击**。
+       *
+       * 两个出口与「卸」的两半一一对应：
+       *   - `avoided`：**完全挡下**（`≤N` 整击作废）
+       *   - `damage`：**只减伤**（`>N` 的平减，`thinned > 0`）
        *
        * ⚠️ 只认 `viaBuffId` 指定的那一个：`invulnerable` 这个 flag 被
        * 「闪」与「避」共用，而它们属于不同角色 —— 按 flag 认会让
        * "闪 派生 击"因为玩家按了「避」而开窗。
+       * ⚠️ `damage` 那一条必须看 `thinned > 0`：`viaBuffId` 只在真被
+       * 阈值磨过时才写进事件，但这个判断放在这里，读代码的人不必去追
+       * `withAbsorbedByBuffId` 就知道"普通挨打不算"。
        */
       if (event.kind === 'avoided' && spec.viaBuffId !== undefined) {
         return event.viaBuffId === spec.viaBuffId;
+      }
+      if (event.kind === 'damage' && spec.viaBuffId !== undefined) {
+        return event.thinned > 0 && event.viaBuffId === spec.viaBuffId;
       }
       return false;
     });

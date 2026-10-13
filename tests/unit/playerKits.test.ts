@@ -256,6 +256,39 @@ describe('「卸」：阈值抵消（≤N 整击作废 / >N 平减 N）', () => 
     );
   });
 
+  /**
+   * ⚠️ **实测**：`>N` 的平减**不发 `avoided`**（它是一条 `damage` 事件）。
+   *
+   * 这一条是"卸吸收了多少"能不能被观测到的**全部依据**：旧口径只看
+   * `avoided`，于是"只减伤"在事件流里看起来与"什么都没发生"一样
+   * （只有 `damage.thinned` 这一个量）。所以：
+   *
+   *   1. 断言它**真的没有** `avoided` —— 免得下一个人以为"改判据"是不必要的
+   *   2. 断言它带着 `damage.viaBuffId = 'guard'`（本轮加的观测字段，
+   *      见 `avoidedSource.withAbsorbedByBuffId`）—— 只靠 `thinned > 0`
+   *      分不出"是谁磨的"
+   */
+  it('⚠️ `>N`（只减伤）**不发 `avoided`**，但 `damage` 事件带 `viaBuffId`（指向 guard）', () => {
+    const r = bossHits([GUARD_THRESHOLD_BUFF], GUARD_THRESHOLD + 20);
+    expect(r.events.some((e) => e.kind === 'avoided'), '平减不是整击作废').toBe(false);
+    expect(r.damageEvent?.kind === 'damage' ? r.damageEvent.viaBuffId : undefined).toBe('guard');
+  });
+
+  it('⚠️ `≤N` 的整击作废带 `avoided.viaBuffId`（指向 guard，与上一半的出口不同）', () => {
+    const r = bossHits([GUARD_THRESHOLD_BUFF], GUARD_THRESHOLD);
+    const avoided = r.events.find((e) => e.kind === 'avoided');
+    expect(avoided?.kind === 'avoided' ? avoided.viaBuffId : undefined).toBe('guard');
+    /** 整击作废那一半**没有** `damage` 事件（`thinned` 无处可写）。 */
+    expect(r.damageEvent).toBeUndefined();
+  });
+
+  it('⚠️ 没按卸（没有阈值 buff）→ 伤害照吃，且**不带** `viaBuffId`', () => {
+    const r = bossHits([], GUARD_THRESHOLD + 20);
+    expect(r.dealt).toBe(GUARD_THRESHOLD + 20);
+    expect(r.damageEvent?.kind === 'damage' ? r.damageEvent.thinned : undefined).toBe(0);
+    expect(r.damageEvent?.kind === 'damage' ? r.damageEvent.viaBuffId : undefined).toBeUndefined();
+  });
+
   it('`≤N` 时**连效果一起免**（如眩晕）—— 这是"整击作废"的含义', () => {
     const r = bossHits([GUARD_THRESHOLD_BUFF], GUARD_THRESHOLD - 1, [
       { kind: 'stun', target: { mode: 'primaryEnemy' }, buff: STUN_BUFF },

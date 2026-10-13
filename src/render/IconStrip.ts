@@ -80,6 +80,22 @@ export class IconStrip {
     square: Graphics;
     label: Label;
     timer: Label;
+    /**
+     * **叠层数**（层数角标）。
+     *
+     * ⚠️ 与 `timer` **同时显示**（用户："层数 + 倒计时**都要**"）。
+     *
+     * 20px 的方块里塞两个数字，靠的是**对角**摆：
+     *   - `stacks` 在**左上**（`anchorX: 0`）
+     *   - `timer` 在**右下**（`anchorX: 1`）
+     * 两个都是 11px（`FONT.tiny`，数字的下限）+ 黑描边，互不遮挡。
+     *
+     * ⚠️ **`stacks === 1` 时是空串**（见 `update`）——
+     * "独立叠层"是**多个实例、每个 1 层**，那时每个方块**只该有倒计时**，
+     * 不该出现一个"1"的角标；只有 `stack` / `stackRefresh`（**1 个实例、
+     * N 层**）才画这个角标。两者因此**一眼能分开**。
+     */
+    stacks: Label;
   }> = [];
   private readonly pixi: PixiCtor;
   /** UI 缩放系数（默认 1）—— 只在 Boss buff 条上用到 */
@@ -128,6 +144,7 @@ export class IconStrip {
       item.square.destroy({ children: true });
       item.label.root.destroy({ children: true });
       item.timer.root.destroy({ children: true });
+      item.stacks.root.destroy({ children: true });
     }
     this.items.length = 0;
   }
@@ -153,8 +170,26 @@ export class IconStrip {
         stroke: 0x000000,
         strokeWidth: 2,
       });
-      this.root.addChild(square, label.root, timer.root);
-      this.items.push({ square, label, timer });
+      /**
+       * **叠层数**：方块**右上角**的小角标（与右下的倒计时同一条右边缘，
+       * 上下排开）。
+       *
+       * ⚠️ 位置在 `update` 里按方块左缘重算；这里只给字号 / 描边 ——
+       * 与 `timer` 同款（白字 + 黑描边），所以压在**任何**色块上都读得清。
+       * 字号只能到 `FONT.tiny`（11）—— 再小数字就糊了，而 20px 的方块
+       * 里两个 11px 数字**只能上下排**才放得下。
+       */
+      const stacks = new Label(this.pixi, {
+        x: 0,
+        y: this.strip.y,
+        size: FONT.tiny,
+        color: 0xffffff,
+        anchorX: 1,
+        stroke: 0x000000,
+        strokeWidth: 2,
+      });
+      this.root.addChild(square, label.root, timer.root, stacks.root);
+      this.items.push({ square, label, timer, stacks });
     }
   }
 
@@ -191,6 +226,7 @@ export class IconStrip {
         item.square.clear();
         item.label.set('');
         item.timer.set('');
+        item.stacks.set('');
         item.square.visible = false;
         labelTotals[i] = 0;
         continue;
@@ -204,15 +240,32 @@ export class IconStrip {
        * （0.2 秒）与「避」（0.5 秒）都显示成 `1`，而且窗口缩短看不出来。
        * 那条规则（10 秒以下一位小数、以上整秒、都向上取整、不显示尾零）
        * 只在 `formatCountdown` 里写一次，buff 条 / 两条读条 / 预警提示共用。
+       *
+       * ⚠️ `remainingMs >= 100_000` 时是空串：那是**永久的** buff
+       * （`Infinity`），不是"很久"—— 显示 `Infinity` 或一个巨大的秒数
+       * 都只会占满整块。
        */
-      const seconds =
-        view.stacks > 1
-          ? `${view.stacks}`
-          : view.remainingMs < 100_000
-            ? formatCountdown(view.remainingMs)
-            : '';
+      const seconds = view.remainingMs < 100_000 ? formatCountdown(view.remainingMs) : '';
       item.timer.set(seconds);
       item.timer.setColor(edge > 0x808080 ? 0x101014 : 0xffffff);
+      /**
+       * **层数角标**：`stacks > 1` 才有。
+       *
+       * ⚠️ 用户 2026-10-13："层数 + 倒计时**都要**"。
+       *
+       * ⚠️ 原来这里是 `view.stacks > 1 ? stacks : 倒计时` —— **层数顶掉了
+       * 倒计时**，于是叠起来的 buff **看不到还剩几秒**。那不是排版问题，
+       * 是**丢信息**；现在两个都画（层数在**右上角**、倒计时在**右下角**，
+       * 上下排在同一列，见定位那一段的实测数字）。
+       *
+       * ⚠️ `stacks === 1` **不画**（用户点名："不要画 1"）：
+       * `refresh` / `independent` 的模式下 `stacks` 恒为 1 —— 前者不需要
+       * 角标，后者是**多个方块各 1 层**（每个只有倒计时）。
+       * 于是一个方块带角标 = "1 个实例、N 层"；一排方块都不带角标 =
+       * "N 个实例、各 1 层"。两种**一眼能分开**。
+       */
+      item.stacks.set(view.stacks > 1 ? `${view.stacks}` : '');
+      item.stacks.setColor(edge > 0x808080 ? 0x101014 : 0xffffff);
       item.label.set(this.translate(view.shortLabelKey));
       item.label.setColor(0xd0d0dc);
 
@@ -279,6 +332,23 @@ export class IconStrip {
 
       // 剩余时间：叠在方块内右下角（白字 + 黑描边，压在纯色上也读得清）
       item.timer.root.x = boxX + size - 2;
+      /**
+       * **层数**：叠在方块**右上角**，与右下的倒计时**同一条右边缘**。
+       *
+       * 量出来的坐标（`fs = 11`）：Pixi 的 `Text` 框高 **14.8**，而数字字形
+       * 只占框内的 `[+3.6, +11.6]`（上方是行距空白）。所以：
+       *   - 角标的 `y = 方块顶 − 3` → 字形落在 `[顶+0.6, 顶+8.6]**（在方块内）
+       *   - 倒计时的 `y = 方块底 − 11 − 1` → 字形落在 `[顶+11.6, 顶+19.6]`
+       * 两者字形之间留 **3px**；`Text` 框虽然交叠，但画出来的像素不碰。
+       *
+       * ⚠️ 为什么两个都**右对齐**：倒计时带小数时是 3 个字（`7.8` = 21.9px）
+       * —— 比 20px 的方块**宽**，会向左溢出约 4px（左右各留 6px 间隙，
+       * 所以**压不到相邻方块**，是既有行为）。角标若放左上角，正好撞在
+       * 那段溢出上（实测："3" 与 "7" 挤在一起）；放右上角则溢出部分
+       * 上方是空的。这是**量出来的**，不是偏好。
+       */
+      item.stacks.root.x = boxX + size - 2;
+      item.stacks.root.y = y - 3;
       /** ⚠️ 标签始终在方块**右边**（两种对齐一致）。 */
       item.label.root.x = boxX + size + labelGap;
     }

@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { BattleEngine } from '../../src/core/combat/battleState';
 import { comboWindowsFor, type ComboWindowSpec } from '../../src/core/combat/comboWindow';
+import { applyBuff } from '../../src/core/buffs';
 import { createRegistry } from '../../src/core/content/registry';
 import { ALL_BUFFS, ALL_SKILLS } from '../../src/data/content';
+import { GUARD_THRESHOLD } from '../../src/data/balance';
 import { COMBO_WINDOW } from '../../src/data/kits/combo';
-import type { BuffDef, Combatant, EventDef, StatKey } from '../../src/core/types';
-import { makeCombatant } from './helpers';
+import { GUARD_THRESHOLD_BUFF } from '../../src/data/kits/linwanfeng';
+import { FLASH_IFRAME } from '../../src/data/kits/kaili';
+import type { BuffDef, Combatant, EventDef, SkillDef, StatKey } from '../../src/core/types';
+import { makeCombatant, makeSkillDef } from './helpers';
 
 /**
  * **派生窗口的产出者**（P3）：`core/combat/comboWindow.ts` 的判定 +
@@ -108,6 +112,87 @@ describe('comboWindowsFor：纯判定（事件 → 该开哪些窗口）', () =>
     const opened = comboWindowsFor(
       [{ kind: 'avoided', tick: 1, sourceId: 'boss', targetId: 'player', skillId: 'x', reason: 'immune', viaBuffId: 'guard' }],
       [spec()],
+    );
+    expect(opened).toEqual([]);
+  });
+
+  /* ---------------------------------------------------------------- *
+   * 「卸」的第二半：只减伤（`>N` 的平减）也算
+   * ---------------------------------------------------------------- */
+
+  /** 一条 `damage` 事件（`thinned` = 被阈值磨掉的量，见 `computeDamage`）。 */
+  function damageEvent(overrides: Partial<Extract<EventDef, { kind: 'damage' }>> = {}): EventDef {
+    return {
+      kind: 'damage',
+      tick: 1,
+      sourceId: 'boss',
+      targetId: 'player',
+      amount: 30,
+      crit: false,
+      absorbed: 0,
+      thinned: 0,
+      overkill: 0,
+      skillId: 'boss-cleave',
+      ...overrides,
+    };
+  }
+
+  it('⚠️ 用户放宽的那条：**只减伤**（`thinned > 0`）也算「卸」吸收到了 → 开窗', () => {
+    const opened = comboWindowsFor(
+      [damageEvent({ amount: 15, thinned: 15, viaBuffId: 'guard' })],
+      [spec({ sourceSkillId: 'guard', viaBuffId: 'guard' })],
+    );
+    expect(opened).toEqual(['combo-window']);
+  });
+
+  it('⚠️ 普通挨打（`thinned` 为 0 / 没有 `viaBuffId`）→ **不开**（"没按卸不算"）', () => {
+    expect(
+      comboWindowsFor([damageEvent({ amount: 30 })], [
+        spec({ sourceSkillId: 'guard', viaBuffId: 'guard' }),
+      ]),
+    ).toEqual([]);
+  });
+
+  it('⚠️ `thinned > 0` 但**不是**那个 buff 磨的 → 不开（"是谁吸收的"必须对得上）', () => {
+    const opened = comboWindowsFor(
+      [damageEvent({ amount: 15, thinned: 15, viaBuffId: 'boss-plating' })],
+      [spec({ sourceSkillId: 'guard', viaBuffId: 'guard' })],
+    );
+    expect(opened).toEqual([]);
+  });
+
+  it('⚠️ 只有 `thinned > 0`、**没有** `viaBuffId` → 不开（量对不上人，不能猜）', () => {
+    expect(
+      comboWindowsFor([damageEvent({ amount: 15, thinned: 15 })], [
+        spec({ sourceSkillId: 'guard', viaBuffId: 'guard' }),
+      ]),
+    ).toEqual([]);
+  });
+
+  it('`thinned` 为 0 却带着 `viaBuffId` → **不开**（`> 0` 是判据的一半）', () => {
+    const opened = comboWindowsFor(
+      [damageEvent({ amount: 30, thinned: 0, viaBuffId: 'guard' })],
+      [spec({ sourceSkillId: 'guard', viaBuffId: 'guard' })],
+    );
+    expect(opened).toEqual([]);
+  });
+
+  it('⚠️ 「截」那条 spec（没写 `viaBuffId`）不认 `damage`（挨打不该给截开窗）', () => {
+    const opened = comboWindowsFor(
+      [damageEvent({ amount: 15, thinned: 15, viaBuffId: 'guard' })],
+      [spec()],
+    );
+    expect(opened).toEqual([]);
+  });
+
+  it('⚠️ 「闪」吸收的那一击不该给「卸」开窗（两套 flags 别混）', () => {
+    /** 「闪」= 无敌 → 只会发 `avoided`（`thinned` 恒 0）。 */
+    const opened = comboWindowsFor(
+      [
+        { kind: 'avoided', tick: 1, sourceId: 'boss', targetId: 'player', skillId: 'x', reason: 'immune', viaBuffId: 'flash-iframe' },
+        damageEvent({ amount: 0, thinned: 0 }),
+      ],
+      [spec({ sourceSkillId: 'guard', viaBuffId: 'guard' })],
     );
     expect(opened).toEqual([]);
   });
@@ -233,6 +318,160 @@ describe('引擎接线：打断成功 → 窗口真的开出来（「击」可�
     engine.drainEvents();
     const player = engine.snapshot.combatants.find((c) => c.side === 'ally');
     expect(player?.buffs.some((b) => b.defId === 'combo-window')).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * 引擎接线②：「卸」吸收了伤害 → 窗口真的开出来
+ * ------------------------------------------------------------------ */
+
+/**
+ * ==================================================================
+ * 「卸」的成功定义（**2026-10-13 放宽**）
+ * ==================================================================
+ *
+ * 用户原话："**卸不需要完全卸掉，吸收了一部分也能派生「击」**"。
+ *
+ * ```
+ *   伤害 ≤ GUARD_THRESHOLD（15）  → 完全卸掉（avoided）        → 开窗
+ *   伤害 >  GUARD_THRESHOLD      → 只减伤（damage.thinned>0） → **也开窗**（新）
+ *   没按卸（没有 guard buff）     → 一点都没吸收              → 不开
+ * ```
+ *
+ * ⚠️ 这一组**必须走真引擎**（不是 `comboWindowsFor` 的手工事件）：
+ * "只减伤"那一半的依据是 `damage.thinned` 与 `damage.viaBuffId`，
+ * 而那两个字段是 `resolveHit` 在真结算里补的 —— 手工造事件会把这个
+ * 恰恰最该验的接线（`withAbsorbedByBuffId`）跳过去。
+ *
+ * ⚠️ 阈值取 `GUARD_THRESHOLD`（不是字面的 15）：用户说过会调参
+ * （"太强就改成 10"），写死会让调参变成改测试。
+ */
+describe('引擎接线：「卸」吸收了伤害 → 窗口开出来（完全卸掉 / 只减伤都算）', () => {
+  const GUARD_SPEC: ComboWindowSpec = {
+    buffId: COMBO_WINDOW.id,
+    sourceSkillId: 'guard',
+    viaBuffId: 'guard',
+  };
+
+  /** 一条只会"打一下"的 Boss 技能（伤害可调，与 `playerKits` 同形）。 */
+  function hitSkill(damage: number): SkillDef {
+    return makeSkillDef({
+      id: 'test-hit',
+      nameKey: 'skill.attack.name',
+      castTime: 0,
+      hits: [
+        { at: 0, effects: [{ kind: 'damage', damage: { base: damage, canCrit: false, countsAsHit: true } }] },
+      ],
+    });
+  }
+
+  /**
+   * 打一下并返回**这一 tick 的事件**与玩家的 buff。
+   *
+   * ⚠️ `playerBuffs` 用 `applyBuff` 挂（不是手写实例字面量）：实例的形状
+   * （`def` / `expiresAtTick` / `instanceId`）只该由那个函数决定。
+   */
+  function guardHit(
+    damage: number,
+    playerBuffs: readonly BuffDef[],
+    comboWindows: readonly ComboWindowSpec[] = [GUARD_SPEC],
+  ): { readonly events: readonly EventDef[]; readonly player: Combatant | undefined } {
+    const registry = createRegistry(
+      { entities: [], skills: [...ALL_SKILLS, hitSkill(damage)], buffs: [...ALL_BUFFS] },
+      { localeKeys: i18nKeys },
+    );
+    const bare = makeCombatant({
+      id: 'player',
+      side: 'ally',
+      caps: { hp: 10_000, energy: 120, douqi: 100 },
+      resources: { hp: 10_000, energy: 120, douqi: 0 },
+    });
+    const player = playerBuffs.reduce(
+      (c, def) => ({ ...c, buffs: applyBuff(c, def, c.id, 0).buffs }),
+      bare,
+    );
+    const boss = makeCombatant({
+      id: 'boss',
+      side: 'enemy',
+      caps: { hp: 10_000, energy: 120, douqi: 100 },
+      resources: { hp: 10_000, energy: 120, douqi: 0 },
+    });
+    const engine = new BattleEngine({
+      combatants: [player, boss],
+      seed: 12345,
+      bossId: 'boss',
+      timeLimitMs: 60_000,
+      buffs: registry.buffs,
+      skills: registry.skills,
+      baseStats: new Map<string, Partial<Record<StatKey, number>>>([
+        ['player', {}],
+        ['boss', {}],
+      ]),
+      passiveModifiers: new Map(),
+      comboWindows,
+    });
+    engine.tick([{ type: 'useSkill', skillId: 'test-hit', atTick: 0 }], 'boss');
+    const events = engine.drainEvents();
+    return { events, player: engine.snapshot.combatants.find((c) => c.id === 'player') };
+  }
+
+  it('伤害 = 阈值 → **完全卸掉**（`avoided`）→ 开窗（旧行为不变）', () => {
+    const { events, player } = guardHit(GUARD_THRESHOLD, [GUARD_THRESHOLD_BUFF]);
+    const avoided = events.find((e) => e.kind === 'avoided');
+    expect(avoided?.kind === 'avoided' ? avoided.viaBuffId : undefined).toBe('guard');
+    expect(player?.buffs.some((b) => b.defId === COMBO_WINDOW.id)).toBe(true);
+  });
+
+  it('⚠️【新】伤害 = 阈值 + 1 → **只减伤**（`damage.thinned > 0`）→ **也开窗**', () => {
+    const { events, player } = guardHit(GUARD_THRESHOLD + 1, [GUARD_THRESHOLD_BUFF]);
+    const damage = events.find((e) => e.kind === 'damage');
+    expect(damage?.kind === 'damage' ? damage.thinned : undefined).toBe(GUARD_THRESHOLD);
+    expect(damage?.kind === 'damage' ? damage.viaBuffId : undefined).toBe('guard');
+    expect(
+      player?.buffs.some((b) => b.defId === COMBO_WINDOW.id),
+      '只减伤也该开窗（用户 2026-10-13 放宽的那条）',
+    ).toBe(true);
+  });
+
+  it('伤害远高于阈值 → 也只减 N，仍然开窗', () => {
+    const { events, player } = guardHit(GUARD_THRESHOLD + 20, [GUARD_THRESHOLD_BUFF]);
+    const damage = events.find((e) => e.kind === 'damage');
+    expect(damage?.kind === 'damage' ? damage.thinned : undefined).toBe(GUARD_THRESHOLD);
+    expect(player?.buffs.some((b) => b.defId === COMBO_WINDOW.id)).toBe(true);
+  });
+
+  it('⚠️ 没按卸 → 一点都没吸收 → **不开窗**（反面验收）', () => {
+    const { events, player } = guardHit(GUARD_THRESHOLD + 20, []);
+    const damage = events.find((e) => e.kind === 'damage');
+    expect(damage?.kind === 'damage' ? damage.thinned : undefined).toBe(0);
+    expect(damage?.kind === 'damage' ? damage.viaBuffId : undefined).toBeUndefined();
+    expect(player?.buffs.some((b) => b.defId === COMBO_WINDOW.id)).toBe(false);
+  });
+
+  it('⚠️ 阈值恰好没被触发（`thinned = 0`）→ 不开窗', () => {
+    /** 没有 guard buff 时阈值是 0 → 没有平减，`thinned` 恒 0（上面已验）。 */
+    const { player } = guardHit(GUARD_THRESHOLD, []);
+    expect(player?.buffs.some((b) => b.defId === COMBO_WINDOW.id)).toBe(false);
+  });
+
+  it('⚠️「闪」的无敌吃掉一击**不该**给「卸」开窗（两套 flags 别混）', () => {
+    const { events, player } = guardHit(GUARD_THRESHOLD + 20, [FLASH_IFRAME]);
+    const avoided = events.find((e) => e.kind === 'avoided');
+    expect(avoided?.kind === 'avoided' ? avoided.viaBuffId : undefined).toBe('flash-iframe');
+    expect(
+      player?.buffs.some((b) => b.defId === COMBO_WINDOW.id),
+      '「闪」吸收的那一击只该给「闪 派生 击」开窗',
+    ).toBe(false);
+  });
+
+  it('⚠️「闪」的 spec 同样只认自己那一半（反向：卸挡住不给闪开窗）', () => {
+    const flashSpec: ComboWindowSpec = {
+      buffId: COMBO_WINDOW.id,
+      sourceSkillId: 'flash',
+      viaBuffId: 'flash-iframe',
+    };
+    const { player } = guardHit(GUARD_THRESHOLD + 20, [GUARD_THRESHOLD_BUFF], [flashSpec]);
+    expect(player?.buffs.some((b) => b.defId === COMBO_WINDOW.id)).toBe(false);
   });
 });
 

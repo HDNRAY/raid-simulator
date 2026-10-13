@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   activeInputLayer,
   battleExitOnPointer,
+  dragExceedsTapSlop,
   pointInRect,
   reviewConsumesPointer,
   reviewScrollable,
@@ -242,5 +243,37 @@ describe('几何小工具', () => {
      */
     const dy = reviewRowsAt(100, 0, 16) - reviewRowsAt(68, 0, 16);
     expect(dy).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * ==================================================================
+ * 【关键】可滚区里"点一下"与"拖一下"的分界
+ * ==================================================================
+ *
+ * 备战屏的卡片视口能滚时，按下不能立刻判"点了哪张卡"（那一下可能是在
+ * 滚动），所以路由先占住手势、松手才决定。**"松手时算不算点了这一下"**
+ * 就是这条判据 —— 它错了的表现是"整块卡片点不动"（用户报的"点了没反应"）。
+ *
+ * ⚠️ 这里只钉**判定**（边界含不含、方向、slop 由调用方给）；"占住 → 松手
+ * 补一次 hitTest"那段接线在 `app/canvasInput.ts`（Pixi / DOM 层），靠截图
+ * 与真指针探针验（见 `prepareDragMoved` 的说明）。
+ */
+describe('【关键】手势位移 = 点还是拖（dragExceedsTapSlop）', () => {
+  it('没动 / 抖动在 slop 内 → **不是**拖动（那一下要当点击处理）', () => {
+    expect(dragExceedsTapSlop(200, 200, 6)).toBe(false);
+    expect(dragExceedsTapSlop(200, 206, 6)).toBe(false);
+    expect(dragExceedsTapSlop(200, 194, 6)).toBe(false);
+  });
+
+  it('超过 slop（向上或向下都算）→ 是拖动（滚动，不补点击）', () => {
+    expect(dragExceedsTapSlop(200, 206.1, 6)).toBe(true);
+    expect(dragExceedsTapSlop(200, 193.9, 6)).toBe(true);
+    expect(dragExceedsTapSlop(200, 260, 6)).toBe(true);
+  });
+
+  it('slop 是参数（不是散落在调用处的魔数）', () => {
+    expect(dragExceedsTapSlop(0, 10, 20)).toBe(false);
+    expect(dragExceedsTapSlop(0, 10, 4)).toBe(true);
   });
 });

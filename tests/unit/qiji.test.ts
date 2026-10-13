@@ -87,45 +87,26 @@ describe('文案：每个 key 都在语言包里（否则卡片上是一串 key�
 });
 
 /* ------------------------------------------------------------------ *
- * 2026-10-13：名字改成**四字成语**，于是"源技能"只能由 desc 点明
+ * ⚠️ 名字的**字数 / 字面值不测**（用户 2026-10-13 拍板）
+ * ------------------------------------------------------------------ *
+ *
+ * 这里原有两条断言：
+ *   1. "每条名字恰好 4 个字（中文按码点算）"
+ *   2. "八条的名字就是定稿的那一套"（逐条对表）
+ *
+ * 两条都**删掉了** —— 它们是**开发过程里挑过的词与命名风格**，不代表任何
+ * 游戏 / 引擎必须成立的事：名字改一个字、少一个字，玩家看到的就是另一个
+ * 名字，**没有任何静默错误**。
+ *
+ * 用户原话："判断 素材来源 啥的这些判断 是开发过程····不要写进ut"、
+ * "**恰好四个字 也不需要ut啊····**"。
+ *
+ * ⚠️ 下面留下的两条与上面相反：它们断的是**从内容 / 语言包推导出来的
+ * 关系**（源技能名从 `skill.<id>.name` 反查、说明里的行与内容对应），
+ * 改错了会红 —— 那是"契约"，不是"当时挑的词"。
  * ------------------------------------------------------------------ */
 
-describe('名字：一律四字（旧名 `截炁·生击` 那套已废）', () => {
-  /**
-   * ⚠️ 用户 2026-10-13 的改口原话是"四字成语、文雅一点点"。
-   *
-   * 旧名 `截炁·生击` 是 **5 字 + 中间一个点** —— 它一句话读得出"这是一条
-   * 关系"（源技能 + 结果），但不符合"四字"。换成成语之后那半条好处**必须
-   * 由 `desc` 补回来**（见下一条断言），否则玩家只看得到四个字。
-   */
-  it('每条名字恰好 4 个字（中文按码点算，`炁` 也算一个）', () => {
-    for (const qiji of ALL_QIJI) {
-      const name = QIJI_CATALOG.get(qiji.nameKey);
-      expect(name, `${qiji.id} 的 name 不在语言包`).toBeDefined();
-      expect([...(name ?? '')].length, `${qiji.id} 的名字不是四字：${String(name)}`).toBe(4);
-    }
-  });
-
-  it('八条的名字就是定稿的那一套（防"顺手改回去"）', () => {
-    /**
-     * ⚠️ 2026-10-13 用户**第二次挑名**（原话："当机立断 改成 后发先至。
-     * 以柔克刚 改成 连消带打。其他的暂时按你的来"）—— 只有前两条变了，
-     * 其余六条（含下面四条）逐字未动，所以这张表就是那次改动的账。
-     */
-    const expected: Readonly<Record<string, string>> = {
-      jieShengJi: '后发先至',
-      xieShengJi: '连消带打',
-      shanShengJi: '电光石火',
-      vitality: '固本培元',
-      breath: '周天运转',
-      biShiJiXu: '避实击虚',
-      ningShenJuQi: '聚气凝神',
-      ningShenRuDao: '凝神入道',
-    };
-    for (const qiji of ALL_QIJI) {
-      expect(QIJI_CATALOG.get(qiji.nameKey), qiji.id).toBe(expected[qiji.id]);
-    }
-  });
+describe('说明与内容的推导关系（名字的字数 / 字面值不测）', () => {
 
   it('⚠️ 三条派生的说明**点明源技能**，且那个名字是从内容里取的', () => {
     /**
@@ -152,13 +133,37 @@ describe('名字：一律四字（旧名 `截炁·生击` 那套已废）', () =
     }
   });
 
-  it('⚠️ 兜底两条的说明保留**结构化行**（数值 + 叠层），别被文案挤掉', () => {
+  it('⚠️ 兜底两条的说明里的**数值与内容一致**（不钉文案，只钉数字）', () => {
     /**
-     * 用户点名："卡片上已有的 '+30 生命上限。可叠 3 层。' 那类结构化行要在"。
-     * 这两条不是派生，说明本身就是结构化信息 —— 所以逐条钉住它的两行。
+     * ⚠️ 原来这条是**逐字钉住说明文案**（`'生命上限 +30。\n可叠 3 层。'`）。
+     * 那是"当时挑的词"，按用户 2026-10-13 的判据已删（UT 不测开发过程）。
+     *
+     * 但留了一半**有真实后果**的：卡片上就这一行说明，玩家看到的数字只有
+     * 这里。说明里的数值一旦与内容的 `modifier.value` / `maxStacks` 漂移，
+     * 玩家会被**静默误导**（"写着 +30，实际 +20"，不报错）。所以这里改成
+     * **从内容推导**：说明里必须出现内容真正用的那两个数。
+     *
+     * ⚠️ 断言的是 `desc.includes(String(value))`，不是抄一句文案 ——
+     * 改词、改标点、改语序都不会红；**只有数值对不上才红**。
      */
-    expect(QIJI_CATALOG.get('qiji.vitality.desc')).toBe('生命上限 +30。\n可叠 3 层。');
-    expect(QIJI_CATALOG.get('qiji.breath.desc')).toBe('炁回复速度 +10/秒。\n（基础 10/秒）可叠 2 层。');
+    const modifierValueOf = (id: string): number | undefined => {
+      const qiji = ALL_QIJI.find((q) => q.id === id);
+      const ability = qiji?.abilities.find((a) => a.kind === 'modifier');
+      if (ability === undefined || ability.kind !== 'modifier') return undefined;
+      const value: unknown = ability.modifier.value;
+      return typeof value === 'number' ? value : undefined;
+    };
+    const maxStacksOf = (id: string): number | undefined => ALL_QIJI.find((q) => q.id === id)?.maxStacks;
+
+    for (const id of ['vitality', 'breath']) {
+      const desc = QIJI_CATALOG.get(`qiji.${id}.desc`) ?? '';
+      const value = modifierValueOf(id);
+      const maxStacks = maxStacksOf(id);
+      expect(value, `${id} 没有 modifier 数值`).toBeDefined();
+      expect(maxStacks, `${id} 没有 maxStacks`).toBeDefined();
+      expect(desc, `${id} 的说明里没有内容用的数值 ${String(value)}：${desc}`).toContain(`+${String(value)}`);
+      expect(desc, `${id} 的说明里没有内容用的叠层 ${String(maxStacks)}：${desc}`).toContain(`可叠 ${String(maxStacks)} 层`);
+    }
   });
 });
 

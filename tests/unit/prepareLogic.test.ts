@@ -561,6 +561,43 @@ describe('⚠️ 点击的**意图**（`pointerIntentOf`：把"点了什么"从 
     expect(left).toEqual({ kind: 'qiji', id: 'q1', back: true });
   });
 
+  /**
+   * ⚠️ 左右半的**分界**要钉住（而不是"左边一点 / 右边一点"）。
+   *
+   * 用户报过"点左半边没反应"，所以"中线在哪"必须是可执行的断言：中线是
+   * **卡片自己的** `x + w / 2`（逻辑坐标，与画出来的那一张同一个矩形）。
+   * 若哪天有人把卡片宽度（110）或滚动偏移在这里算第二遍，这条会先红。
+   */
+  it('【关键】左右半的分界 = 卡片中线（正好落在中线上算**右半**）', () => {
+    const card = prepareHitAreas(players, bosses, qiji, 'qiji').find((a) => a.kind === 'qiji' && a.id === 'q1')!;
+    const mid = card.x + card.w / 2;
+    const at = (px: number) => pointerIntentOf(px, card.y + 2, players, bosses, qiji, 'qiji');
+    expect(at(mid - 0.5)).toEqual({ kind: 'qiji', id: 'q1', back: true });
+    expect(at(mid)).toEqual({ kind: 'qiji', id: 'q1', back: false });
+    /** 两条边也算卡内（`inRect` 是闭区间）—— 贴着边框点得中。 */
+    expect(at(card.x)).toEqual({ kind: 'qiji', id: 'q1', back: true });
+    expect(at(card.x + card.w)).toEqual({ kind: 'qiji', id: 'q1', back: false });
+  });
+
+  /**
+   * ⚠️ **每一张**炁机卡的两半都要可点（不只是第一张）。
+   *
+   * 用户报的"点左半边没反应"如果真在渲染上，逐张比对才会露出来 ——
+   * 只看第一张的话，"第二行 / 第 5 列用旧宽度"这类错位看不出来。
+   */
+  it('【关键】逐张炁机卡：左半 = 退、右半 = 加（第二行也要）', () => {
+    const cards = prepareHitAreas(players, bosses, qiji, 'qiji').filter((a) => a.kind === 'qiji');
+    expect(cards.length).toBeGreaterThan(1);
+    for (const card of cards) {
+      expect(pointerIntentOf(card.x + 1, card.y + card.h / 2, players, bosses, qiji, 'qiji')).toEqual(
+        { kind: 'qiji', id: card.id, back: true },
+      );
+      expect(
+        pointerIntentOf(card.x + card.w - 1, card.y + card.h / 2, players, bosses, qiji, 'qiji'),
+      ).toEqual({ kind: 'qiji', id: card.id, back: false });
+    }
+  });
+
   it('点人物 / 对手卡 → `pick`（移光标 + 确定一步到位）', () => {
     const card = prepareHitAreas(players, bosses, qiji, 'player').find((a) => a.kind === 'player')!;
     expect(pointerIntentOf(card.x + 2, card.y + 2, players, bosses, qiji, 'player')).toEqual({

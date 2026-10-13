@@ -34,6 +34,7 @@ import type { SettingsPanel } from '../ui/settings/SettingsPanel';
 import {
   activeInputLayer,
   battleExitOnPointer,
+  dragExceedsTapSlop,
   reviewConsumesPointer,
   type CanvasInputReviewSource,
 } from './inputRouter';
@@ -170,13 +171,44 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
   let detailDragId: number | null = null;
 
   /**
-   * **备战屏详情区**拖拽占住的指针 id 与上一帧的 y。
+   * **备战屏卡片区**拖拽占住的指针 id / 上一帧的 y / 按下点与"是否拖过"。
    *
    * ⚠️ 与设置页那个 `detailDragId` 分开记账：两者**不在同一屏**，合成
    * 一个就会出现"手指从设置拖到备战屏还在滚"的串台。
+   *
+   * ==================================================================
+   * ⚠️ 为什么还要记"按下点"与"拖过没有"（2026-10-13）
+   * ==================================================================
+   *
+   * 卡片视口**能滚**时，这一层会先把这次手势**整个占住**（`hitTest` 一次都
+   * 不调）—— 因为"按住拖动"是一次手势，而"点一下"是另一次。但旧代码把
+   * **松手**那一步漏了：`pointerup` 只是把 id 清掉，于是
+   * **在可滚区里点一下卡片什么都不会发生**（既不选卡也不改层数）。
+   *
+   * 今天三块都排得下（3 / 8 / 7 张 → 视口 2 行）所以碰不到；只要炁机或
+   * Boss 涨到要滚，**整块卡片区立刻变成点不动**（用户报的"点了没反应"）。
+   *
+   * 现在按**手势**分：按下记下起点 → 移动超过 `PREPARE_TAP_SLOP` 才算拖 →
+   * 松手时若**没拖过**就补一次 `hitTest`（= 那一下是"点击"）。
+   * 设置页那条路（先 `hitTest` 再占手势）不适用于这里：卡片上的按下**不能**
+   * 立刻生效，否则"想滚动"会顺手把层数改了。
    */
   let prepareDetailDragId: number | null = null;
   let prepareDetailLastY = 0;
+  /** 这次手势的**按下** y（判"点"还是"拖"的基准）。 */
+  let prepareDragStartY = 0;
+  /** 这次手势**移动过**吗（超过 `PREPARE_TAP_SLOP` 就是拖）。 */
+  let prepareDragMoved = false;
+
+  /**
+   * "点一下"与"拖一下"的**分界**（逻辑像素）。
+   *
+   * 取 6：手指按下的抖动通常在几个像素内，而真正的滚动会一路超过它。
+   * 偏向"算作点击"是**有意**的（与浏览器 / 系统的手势识别同一条）：
+   * 把一次抖动误判成拖动的代价是"点了没反应"（这次要修的那个 bug），
+   * 而把一次极小的拖动误判成点击的代价只是"滚动少了一点 / 顺带选了一张卡"。
+   */
+  const PREPARE_TAP_SLOP = 6;
 
   /**
    * 复盘拖拽**占住了这次手势**的指针 id。
@@ -265,10 +297,16 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
          *
          * ⚠️ 判据用 `isOnScrollable`（卡片视口 ∪ 详情区）：两块都能拖之后
          * 这里只问一次，而"哪一块吃下这次滚动"在 `dragDetail` 里按坐标分。
+         *
+         * ⚠️ **占住 ≠ 吃掉**：占手势只是"先不下结论"，松手时若没拖过还要
+         * 补一次 `hitTest`（见 `prepareDragMoved` 的说明）—— 否则可滚区里
+         * **点一下卡片完全没反应**。
          */
         if (t.prepare.isOnScrollable(px, py)) {
           prepareDetailDragId = event.pointerId;
           prepareDetailLastY = py;
+          prepareDragStartY = py;
+          prepareDragMoved = false;
         } else {
           t.prepare.hitTest(px, py);
         }
@@ -361,13 +399,17 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
       return;
     }
     /**
-     * 备战屏详情区的拖拽（触屏滚说明 —— 与设置页那条同源）。
+     * 备战屏卡片区 / 详情区的拖拽（触屏滚说明 —— 与设置页那条同源）。
      * ⚠️ 用**上一帧的 y** 算位移：`scrollBy` 要的是增量，而指针事件给的
      * 是绝对坐标。
+     *
+     * ⚠️ `prepareDragMoved` 一旦为真就**不再变回假**：一次手势中间抖回去
+     * （拖下去又拖回原点）仍然算"拖过"，松手时不该再补一次点击。
      */
     if (prepareDetailDragId === event.pointerId) {
       const dy = py - prepareDetailLastY;
       prepareDetailLastY = py;
+      if (dragExceedsTapSlop(prepareDragStartY, py, PREPARE_TAP_SLOP)) prepareDragMoved = true;
       if (t.prepare.dragDetail(px, py, dy)) return;
     }
     /**
@@ -395,8 +437,23 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
     endDetailDrag(event);
   };
 
+  /**
+   * 松手：备战屏那一次手势若**没拖过**，就补一次 `hitTest`。
+   *
+   * ⚠️ 这一步是"可滚区里的点击"唯一的实现（见 `prepareDragMoved` 的说明）：
+   * 按下时不敢下结论（可能是想滚动），松手才知道。
+   * ⚠️ 补的是**松手那一刻**的坐标：手指几乎没动，两者等价；而用松手的
+   * 那一个与浏览器的手势语义一致（点中的是"抬起时"那一张）。
+   */
   const onUp = (event: PointerEvent): void => {
-    if (prepareDetailDragId === event.pointerId) prepareDetailDragId = null;
+    if (prepareDetailDragId === event.pointerId) {
+      prepareDetailDragId = null;
+      if (!prepareDragMoved) {
+        const { px, py } = at(event);
+        t.prepare.hitTest(px, py);
+      }
+      prepareDragMoved = false;
+    }
     endReviewDrag(event);
     t.touch.onPointerUp(event.pointerId);
     endDrag(event);
@@ -405,9 +462,15 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
   /**
    * ⚠️ `pointercancel` 必须转发：手指划出画布 / 系统手势打断时，
    * 不释放会让引擎一直按那个技能的代价扣资源。
+   *
+   * ⚠️ 与 `onUp` 的区别是**不补 `hitTest`**：手指划出画布那次不该算"点了一下"
+   * （否则"想滚却滑出去了"会顺手改掉层数）。`pointerleave` 也走这一条。
    */
   const onCancel = (event: PointerEvent): void => {
-    if (prepareDetailDragId === event.pointerId) prepareDetailDragId = null;
+    if (prepareDetailDragId === event.pointerId) {
+      prepareDetailDragId = null;
+      prepareDragMoved = false;
+    }
     endReviewDrag(event);
     t.touch.onPointerCancel(event.pointerId);
     endDrag(event);

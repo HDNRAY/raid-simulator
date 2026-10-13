@@ -901,6 +901,7 @@ export function buildPlayerKit(
 | **档位 → `Behavior[]` / `caps` 的装配** | `src/data/intensity.ts` + `units.ts` 的 `behaviorsFor(id, tier)`（纯数据） | ❌ 不是新机制：`Behavior[]` 本来就是构造战斗时的输入 |
 | **炁机的数据模型与规范化** | `core/types/qiji.ts` + `core/loadout/`（**W7 / W8**） | ⚠️ 新增（但继承 `GameEntity`，不是另起一套） |
 | **`interruptSuccess.sourceSkillId`**（打断者用的招式） | `core/events.ts` + `core/combat/hitResolution.ts` | ❌ 不是新机制：**已有事件的观测字段**，不参与判定 |
+| **`damage.viaBuffId`**（`>N` 的平减是谁磨的） | `core/events.ts` + `core/combat/avoidedSource.ts`（`absorbedByOf` / `withAbsorbedByBuffId`）+ `hitResolution.ts` 两处 emit | ❌ 不是新机制：与上一条同一个形状（**观测字段**）。⚠️ 它服务的判据放宽（「卸」吸收 > 0 也算）写在 §7.2 的表里 |
 | ~~计数器 + 计数器条件~~ | ~~`core/combat`（W1 / W2）~~ | ❌ **不需要**（解锁改走事件流归约；W1 等战斗内机制的真实消费者） |
 | ~~`onInterruptSuccess` 派发~~ | ~~`core/combat/triggers.ts`~~ | ❌ **不需要**（归约读已有事件即可，见 §5.2） |
 | **`grantSkill` / `maxHp` / `consume` 真正生效** | `core/combat`（**W4 / W5 / W6**） | ⚠️ 新增（补活已有声明） |
@@ -1001,6 +1002,7 @@ RUN_FORMAT_VERSION      我们**自己的记录格式**（加了字段就该 +1�
 | **W6 `maxHp` 钳制改走结算值** | ⚠️ **理论上会**（钳制口径变了）。今天没有任何内容加 `maxHp` 修正 → 实际应逐位不变 | **必须由黄金测试证明**；若变了 → **+1**，并改 `tests/golden/replay.test.ts:86` 与 `GOLDEN_OUTCOME` |
 | W12 `core/run/` | ❌ 不碰引擎 | 不必 |
 | **③ `interruptSuccess.sourceSkillId`** | ❌ **不参与任何判定**：`core/` 里唯一消费事件的引擎侧代码是 `buffHookDispatch.ts` 的 `drain`，它只认 `buffApplied` / `buffExpired`；而事件流**不进** `BattleState`（快照里没有事件字段）。黄金重放逐位不变（已实测） | **不必**（仍为 2） |
+| **④ `damage.viaBuffId` +「卸」放宽为"吸收 > 0"**（2026-10-13） | ⚠️ **两半分开看**：<br>① **字段**：`damage` 加可选 `viaBuffId`（`>N` 平减是**谁**磨的）—— 由 `hitResolution` 在事件产出**之后**补，**不碰伤害 / 命中的任何算式**（`amount` / `thinned` 一个数都没动）→ 与上面两条同一条纪律<br>② **判据**：「连消带打」从"**完全**卸掉才算"放宽为"**吸收 ≥1 点**就算"（`comboWindow.ts` 的 `viaBuffId` 通道多认一个出口）。它只在**带了炁机**的一局里有效（`comboWindows` 为空时是空操作），而 `RecordedRun` **不携带炁机**（`{version, seed, ticks, input}`）→ 版本号**观察不到这个维度**，+1 也保护不了任何一份旧文件<br>黄金重放（夹具按了卸、但**没有炁机**）**逐位不变** → 已实测 | **不必**（仍为 2）。⚠️ 若哪天炁机进了重放文件 / 存档，这条要**重新算** |
 
 ⚠️ **"一局肉鸽"的边界不在引擎里**：一个 `BattleEngine` 永远是**一场战斗**。
 一局肉鸽是 `RunState` + 依次构造的 7 个 `BattleEngine`。这正是为什么

@@ -54,7 +54,7 @@ import type { Container, Graphics } from 'pixi.js';
 import { FONT } from './layout';
 import { Label, type PixiCtor } from './primitives';
 import { PALETTE } from '../render/theme';
-import { PREPARE_SKIN } from './prepareRender';
+import { PREPARE_SKIN, centeredTextTopY } from './prepareRender';
 import { PREPARE_LAYOUT } from './prepareLayout';
 import { detailRect } from './prepareGeometry';
 import type { DetailModel, DetailRow } from './prepareDetail';
@@ -264,7 +264,13 @@ export class PrepareDetailPanel {
     if (model === undefined) {
       this.placeholder.set(this.translate('roster.ui.detail.empty'));
       this.placeholder.root.x = innerX;
-      this.placeholder.root.y = rect.y + rect.h / 2 - 12;
+      /**
+       * ⚠️ 原来这里是一个手调的 `- 12`（"半个行框"），而占位那行字号是
+       * `FONT.body`(17) → 实测盒高 18.19，于是它比面板中心高约 3px。
+       * 顶栏标题一直是用实测盒高算的（见 `update` 里的 `band.textH`），
+       * 这里统一到同一条（`centeredTextTopY`）。
+       */
+      this.placeholder.root.y = centeredTextTopY(rect.y, rect.h, this.placeholder.root.height);
       this.placeholder.root.visible = true;
       this.title.root.visible = false;
       this.subtitle.root.visible = false;
