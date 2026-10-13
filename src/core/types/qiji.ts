@@ -24,6 +24,8 @@
  */
 
 import type { GameEntity } from './skills';
+import type { BuffDef } from './buffs';
+import type { BuffId, SkillId } from './ids';
 import type { BattleStatQuery as RunStatQuery } from '../run/query';
 
 /* ================================================================== *
@@ -139,23 +141,17 @@ export type QijiCategory = 'offense' | 'defense' | 'tempo' | 'utility' | 'generi
  *   - `requires` → 战斗内条件
  *   - `pool` → 奇物类炁机的使用次数 / 充能（要靠 **W5** 才活）
  *
- * ⚠️ **`kind` 是 `GameEntity['kind']`，还不是字面量 `'qiji'`** —— 这是
- * **W8 没做**的直接后果，写清楚以免下一个人以为是笔误：
+ * ⚠️ **`kind` 在 P3 收窄成了 `'qiji'`**（`EntityKind` 同时加了那个值）——
+ * 这是 W8 的**类型那一半**。P0 时它只能是 `GameEntity['kind']`，于是内容里
+ * 只能填 `'passive'` 这种假值；现在类型系统会逼着"炁机就是炁机"。
  *
- *   `GameEntity.kind` 的类型是 `EntityKind`（`core/types/skills.ts`），
- *   而 `'qiji'` **还不在**那个联合里。把这里写成 `readonly kind: 'qiji'`
- *   会让 `QijiEntity` **不再满足 `GameEntity`** —— 而"继承 `GameEntity`"
- *   正是这个设计选它的理由。所以要么真的做 W8（加值 + 校验器 + 注册表，
- *   **P6**），要么就只能在这里如实写 `GameEntity['kind']`。
- *
- *   P0 没有任何炁机内容，`core/run/` 也**不读 `kind`**，所以这个宽化
- *   不产生任何静默行为。做 W8 时把 `EntityKind` 加上 `'qiji'`，
- *   然后把这一行收窄成 `readonly kind: 'qiji'` —— 类型系统会**逼着**
- *   那一刻发生，而不是让它悄悄漂。
+ * ⚠️ **W8 的另一半（校验器 / 注册表）仍然没做**（P6）：`data/qiji.ts` 的
+ * 内容**不进 `ContentBundle.entities`**，所以它今天不会被内容校验器读到。
+ * 这不产生静默行为（炁机的效果走 `BattleKit` / `comboWindow` 两条明路），
+ * 但"一个炁机引用了不存在的 buff / 技能"要等 P6 才有人拦。
  */
 export interface QijiEntity extends GameEntity {
-  /** ⚠️ W8 之后收窄成 `'qiji'`；现在只能是 `GameEntity['kind']`（见上）。 */
-  readonly kind: GameEntity['kind'];
+  readonly kind: 'qiji';
   /** 只用于 UI 分组与排序。 */
   readonly category: QijiCategory;
   /** 解锁条件（**一局肉鸽**维度）。 */
@@ -168,6 +164,43 @@ export interface QijiEntity extends GameEntity {
    * 玩家被迫看向机制炁机（§11 风险 #2 的缓解）。
    */
   readonly maxStacks?: number;
+  /**
+   * **它接回的那条派生关系**（P3；§5.2 的「炁机接回产出者」）。
+   *
+   * 用户 2026-10-13 的定调：「**这个整体是一个炁机，不是 击 是炁机**」——
+   * 所以这里存的是"**源技能 → 派生技**"这条关系，不是"一个叫击的道具"：
+   *
+   *   - `sourceSkillId`：**哪个技能成功时开窗口**（「截」= `jie`）
+   *   - `derivedSkillId`：**窗口开着时哪个技能可用**（「击」= `strike`）
+   *   - `buff`：要挂的窗口 buff。它的 `flags.comboWindowSource` 就是
+   *     `sourceSkillId`（渲染层靠它把派生技画在源技能上方）
+   *   - `viaBuffId`（可选）：**第二条成功通道** ——
+   *     这个 buff 挡下整击时也算"用成功了"。「卸」（`guard`）与
+   *     「闪」（`flash-iframe`）走它，因为它们从不发 `interruptSuccess`。
+   *
+   * ⚠️ 它是**内容字段**（`data/qiji.ts` 写它），而引擎侧的消费者是
+   * `app/kit.ts` 的 `buildPlayerKit` → `CreateBattleOptions.comboWindows`。
+   * `core/run/`（解锁那一条线）**不读它** —— 解锁只看统计。
+   */
+  readonly comboWindow?: QijiComboWindow;
+}
+
+/**
+ * 一个炁机接回的派生关系（见 `QijiEntity.comboWindow`）。
+ *
+ * ⚠️ 单独一个接口而不是内联对象：`app/kit.ts` 的 `buildPlayerKit` 与
+ * `data/qiji.ts` 的内容作者都要写它，而"这两个 id + 一个 buff"是三处
+ * 必须一起对上的东西（少一个就是"窗口开了但派生技不出现"）。
+ */
+export interface QijiComboWindow {
+  /** **哪个技能**成功时开窗口。 */
+  readonly sourceSkillId: SkillId;
+  /** **窗口开着时哪个技能可用**（派生技）。 */
+  readonly derivedSkillId: SkillId;
+  /** 要挂的窗口 buff（`flags.comboWindowSource` 应当等于 `sourceSkillId`）。 */
+  readonly buff: BuffDef;
+  /** 第二条成功通道：这个 buff 挡下整击时也算成功（「卸」/「闪」）。 */
+  readonly viaBuffId?: BuffId;
 }
 
 /**

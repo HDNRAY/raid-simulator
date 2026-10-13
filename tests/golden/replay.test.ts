@@ -191,12 +191,48 @@ describe('对内容改动的敏感度（回归保护）', () => {
     expect(noDodge.ticks).toBeLessThan(withDodge.ticks);
   });
 
-  it('缠回复砍半会改变"能躲几次"，但不会改击杀用时（这是个有价值的负面结论）', () => {
-    // 这条断言记录了当前平衡的一个性质：击杀用时由输出循环决定，
-    // 防御资源不参与 DPS。写下来是为了让"以后它变了"能被注意到。
+  it('⚠️ 炁回复速度**会**改变击杀用时（P3 接线之后，这条结论反过来了）', () => {
+    /**
+     * ================================================================
+     * ⚠️【作废 · 2026-10-13】"炁回复不影响击杀用时" —— 整段保留
+     * ================================================================
+     *
+     * **旧断言（现在这句话是错的，留着是为了记住它当时为什么是对的）：**
+     *
+     * > 缠回复砍半会改变"能躲几次"，但**不会**改击杀用时
+     * > （这是个有价值的负面结论）
+     * >
+     * > `const starved = runWith(withPlayerStats(opts, { energyRegen: 11 }))`
+     * > `expect(starved.ticks).toBe(base.ticks)`   // 4136 === 4136
+     *
+     * **当时为什么成立**：不是因为"平衡里炁不影响 DPS"，而是因为
+     * **`energyRegen` 根本没有消费者** —— `core/combat/index.ts` 的
+     * `regenerate()` 只回固定的 `ENERGY_PER_LOGIC_TICK`（10 炁/秒），
+     * 那个属性**算出来没人读**。也就是说这条断言当时**保护的正是那个
+     * 死属性**（一个"看起来会生效、实际什么也不做"的属性，正是
+     * AGENTS.md §2 说的最坏一类）。
+     *
+     * **实测为什么不再成立**：P3 给肉鸽的兜底炁机「炁回复速度」接线
+     * （`regenerate` 里每逻辑步多加 `floor(energyRegen / 10)`），于是
+     * 这个对照组真的回得更快（`floor(11/10) = 1` ⇒ **20 炁/秒**）⇒
+     * 玩家能多打几次「斩」⇒ 用时明显变短：**4136 → 2010** tick。
+     *
+     * ⚠️ **这不是"平衡被动了"**：默认路径（没有任何东西设 `energyRegen`
+     * 时，它 = 0 ⇒ 加 0）**逐位不变** —— `GOLDEN_OUTCOME` 仍是
+     * 4136 / 125 血 / 炁 5 / 缠 33，本文件那条黄金断言照旧通过。
+     *
+     * ⚠️ 而且"回炁快 ⇒ DPS 上升"是**设计上必须成立**的：炁同时是
+     * **攻击资源**（「斩」15 炁、「劈」也耗炁）与**防御资源**（「卸」按住
+     * 15 炁/秒、「避」15 炁）—— 如果炁回复不影响输出，用户点名的那个
+     * 炁机就是个假选项。
+     *
+     * `energyRegen: 11` 而不是 10：故意取一个"每步 1.1 ⇒ 向下取整 1"
+     * 的值，顺带钉住"取整方向是 floor"（见 `regenerate` 的口径说明）。
+     */
     const base = runGolden();
-    const starved = runWith(withPlayerStats(makeGoldenEngineOptions(), { energyRegen: 11 }));
-    expect(starved.ticks).toBe(base.ticks);
+    const boosted = runWith(withPlayerStats(makeGoldenEngineOptions(), { energyRegen: 11 }));
+    expect(boosted.ticks).toBeLessThan(base.ticks);
+    expect(boosted.status).toBe('victory');
   });
 
   it('Boss 不还手时玩家必定获胜 —— AI 也在保护范围内', () => {

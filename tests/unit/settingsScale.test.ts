@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  MIN_DETAIL_ROWS,
   PANEL_SCALE_MAX,
   computeSettingsMetrics,
   currentSettingsMetrics,
@@ -7,10 +8,15 @@ import {
   gridCapacityFor,
   gridMetricsFor,
   panelScaleFor,
+  panelScaleBoundFor,
   resetSettingsMetrics,
   scaledFont,
   setSettingsScale,
+  touchPreviewArcBox,
+  touchPreviewMinArcH,
 } from '../../src/ui/settings/settingsScale';
+import { previewSlotRadius } from '../../src/ui/settings/touchPreview';
+import { TOUCH_PREVIEW } from '../../src/ui/settings/settingsGeometry';
 import { KEY_GRID_CAPACITY, keyCellRect } from '../../src/ui/settings/keyGridLayout';
 import { FONT } from '../../src/ui/layout';
 
@@ -34,10 +40,53 @@ describe('面板缩放模型（UI 缩放 → 面板能用多少）', () => {
     expect([a.panelX, a.panelY]).toEqual([160, 10]);
   });
 
-  it('系数被**规则**钳在 1.2（200% 也不会溢出画布）', () => {
+  it('系数被**规则**钳在 `PANEL_SCALE_MAX`（200% 也不会溢出画布）', () => {
     expect(panelScaleFor(2)).toBe(PANEL_SCALE_MAX);
     expect(panelScaleFor(1.5)).toBe(PANEL_SCALE_MAX);
     expect(panelScaleFor(1)).toBe(1);
+  });
+
+  it('⚠️ 上限由**详情区行数**这条规则给出：拉满正好 = `MIN_DETAIL_ROWS`', () => {
+    setSettingsScale(PANEL_SCALE_MAX);
+    expect(detailRowsAt(currentSettingsMetrics().k)).toBe(MIN_DETAIL_ROWS);
+    /**
+     * ⚠️ 规则本身是**算出来的**（不是写死 1.35）：`panelScaleBoundFor(6)`
+     * 解出约 1.378，上限压在它之内、又贴着它 —— 两条合起来才说明
+     * "钳位是规则给的"，而不是"随手取了个保守数"。
+     */
+    const bound = panelScaleBoundFor(MIN_DETAIL_ROWS);
+    expect(bound).toBeGreaterThanOrEqual(PANEL_SCALE_MAX);
+    expect(bound - PANEL_SCALE_MAX).toBeLessThan(0.05);
+    /**
+     * 而它**低于 1.5 / 2** → UI 缩放的 150% / 200% 两档确实会被钳住
+     * （分别走 `panelScaleFor` 的第二重上限），不是"滑块没生效"。
+     */
+    expect(bound).toBeLessThan(1.5);
+  });
+
+  it('⚠️ 键位预览：等比缩小有**下限**（圆钮直径 ≥ 44px），1× 不动', () => {
+    /** 1×：老的几何一个字都不变（弧高 = 190 − 16）。 */
+    setSettingsScale(1);
+    const baseArc = touchPreviewArcBox().h;
+    expect(baseArc).toBe(174);
+    expect(previewSlotRadius() * 2).toBeGreaterThanOrEqual(44);
+    /** 拉满：块高不变、说明行变高 → 双弧那块缩了，但仍在可点下限之上。 */
+    setSettingsScale(PANEL_SCALE_MAX);
+    const maxArc = touchPreviewArcBox().h;
+    expect(maxArc).toBeLessThan(baseArc);
+    expect(maxArc).toBeGreaterThanOrEqual(touchPreviewMinArcH());
+    expect(previewSlotRadius() * 2).toBeGreaterThanOrEqual(44);
+  });
+
+  it('⚠️ 键位预览**不跟 k 往下滑**（块顶钉死 —— 旧值 1.2 就是它滑出来的）', () => {
+    setSettingsScale(1);
+    const topAt1 = touchPreviewArcBox().y;
+    setSettingsScale(PANEL_SCALE_MAX);
+    /** 只下移"说明行变高"的那一点点（captionH × (k−1)），不是整块 ×k。 */
+    expect(touchPreviewArcBox().y - topAt1).toBeCloseTo(
+      TOUCH_PREVIEW.captionH * (PANEL_SCALE_MAX - 1),
+      6,
+    );
   });
 
   it('⚠️ 缩放**不吞功能**：桌面容量恒为 8、触屏恒为 6', () => {
@@ -100,7 +149,7 @@ describe('面板缩放模型（UI 缩放 → 面板能用多少）', () => {
     expect(rows).toBeGreaterThanOrEqual(6);
   });
 
-  it('详情区一屏行数：1× 是 8 行，拉满是 7 行（少一行、可滚）', () => {
+  it('详情区一屏行数：1× 是 8 行，拉满是 6 行（少两行、可滚）', () => {
     setSettingsScale(1);
     const a = detailRowsAt(currentSettingsMetrics().k);
     setSettingsScale(2);
@@ -108,11 +157,12 @@ describe('面板缩放模型（UI 缩放 → 面板能用多少）', () => {
     expect(a).toBe(8);
     /**
      * ⚠️ 这一条是**取舍的证据**（不是"越小越好"）：面板外框固定 520，
-     * 行距按 k 放大（22 → 26）之后一屏少两行 —— 换来的是字号 11 → 13。
-     * `SkillDetail` 可滚，所以少的那两行**滚得到**。
+     * 行距按 k 放大（22 → 30）之后一屏少两行 —— 换来的是字号 11 → 15。
+     * `SkillDetail` 可滚，所以少的那两行**滚得到**，而"一屏 6 行"是用户
+     * 明确划下的下限（5 行被否掉，见 `MIN_DETAIL_ROWS`）。
      */
-    expect(b).toBe(7);
-    expect(currentSettingsMetrics().lineH).toBe(26);
+    expect(b).toBe(6);
+    expect(currentSettingsMetrics().lineH).toBe(30);
     /**
      * ⚠️ 详情区底边永远在提示区上沿**之上**（16×k 的间隙）——缩放不许
      * 让说明文字压到提示行上（这一条是实测撞出来的）。

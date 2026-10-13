@@ -195,7 +195,8 @@ export interface TouchControls {
  * 创建触屏控件。
  *
  * 非触屏方式下 `layer` 仍然是可用的空层（调用方不必到处判空）：
- * `layer.root.visible` 每帧都会按**当前操作方式**重新判一次。
+ * `layer.root.visible` 每帧都由 `frame()` 按**操作方式 + phase + 设置面板 +
+ * 有没有按钮**重新判一次（见那里的"显隐的唯一写入点"）。
  */
 export function createTouchControls(options: TouchControlsOptions): TouchControls {
   /**
@@ -243,7 +244,13 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
    * 后者会把空洞压掉，第 3 个键位上的技能就跑到第 2 个位置去了。
    */
   layer.setButtons(slotsFromButtons(layout.current()));
-  layer.root.visible = caps().touch;
+  /**
+   * ⚠️ **构造期不写 `layer.root.visible`**（2026-10-13 收口）：显隐的
+   * **唯一写入点**是下面的 `frame()` —— 它每帧都会跑到（`loopWiring` 的
+   * 非战斗分支同样调它，见那里的说明），所以"构造 → 第一帧"之间没有
+   * 需要补的窗口。按钮层自己的初值是 `visible = false`，第一帧就会按
+   * 当前 phase / 操作方式算对。
+   */
 
   /**
    * 命中区域由**按钮层**的几何算出来 —— 因为"按钮画在哪"只有它知道。
@@ -329,9 +336,21 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
 
     frame(view) {
       /**
-       * ⚠️ 切回键盘方式时要**主动隐藏**（早退不能省掉这一句）：按钮层
-       * 的显隐是每帧算的，切方式没有事件 —— 这里漏一次，双弧就会一直
-       * 留在屏幕上，而键盘方式下它们既不该看也点不动。
+       * ⚠️ **显隐的唯一写入点**（2026-10-13 收口）。
+       *
+       * 收口之前这里写"按 phase 判"，而 `TouchButtonLayer.update()` 末尾
+       * 又自己写了一句 `visible = buttons.size > 0` —— 两处各管一半。
+       * 现在"该不该显示"**只在这里**判一次，按钮层只提供事实
+       * （`layer.hasButtons()`），不再自己改 `visible`。
+       *
+       * 判据 = **四件事同时成立**：
+       *   1. 当前是**触屏方式**（`caps().touch`；切回键盘要主动隐藏，
+       *      因为切方式没有事件 —— 这一句删掉双弧就会一直留在屏幕上）
+       *   2. 不在设置面板里（否则扇形会画在面板**上面**，实测穿透）
+       *   3. **在战斗中**（首页 / 选角色 / 自由模式都是整屏界面，
+       *      浮在上面会与卡片重叠）
+       *   4. **真的有按钮**（这一条原先在 `update()` 里 —— 空的时候
+       *      要隐藏，而不是画一个空的容器）
        */
       if (!caps().touch) {
         layer.root.visible = false;
@@ -357,7 +376,7 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
        * `phase` 都没有变更事件，每帧读一次是最省事且不会漏的写法。
        */
       const hidden = options.isSettingsOpen() || !options.isBattleActive();
-      layer.root.visible = !hidden;
+      layer.root.visible = !hidden && layer.hasButtons();
       if (hidden) return;
       /** 非战斗阶段不会有快照；真发生了就只更新显隐（防一手崩溃）。 */
       if (view === undefined) return;

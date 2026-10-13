@@ -17,6 +17,7 @@ import { ViewAdapter, DEFAULT_SLOTS, slotsFromBindings, type SlotBinding } from 
 import { LogFormatter, type LogEntry } from './logFormat';
 import type { BattleSnapshotView, SkillSlotView } from '../render/viewModel';
 import type { Action } from '../core/types';
+import type { EventDef } from '../core/events';
 
 /** 单帧最多补多少 tick（防止标签页休眠后一次性补几千帧）。 */
 const MAX_CATCHUP_TICKS = 5;
@@ -75,6 +76,13 @@ export class BattleLoop {
   private engine: BattleEngine;
   private readonly adapter: ViewAdapter;
   private readonly logFormatter: LogFormatter;
+  /**
+   * 这一场的**全部事件**（肉鸽结算的输入，见 `battleEvents` 的说明）。
+   *
+   * ⚠️ 与 `logFormatter` 一样在 `requestRestart` 里清空 —— 两个消费者
+   * 共用同一个生命周期，否则重开一局会拿着两场混在一起的事件去统计。
+   */
+  private readonly allEvents: EventDef[] = [];
   private input: InputSource | undefined;
   private accumulator = 0;
   /**
@@ -377,10 +385,33 @@ export class BattleLoop {
     });
     this.logFormatter.consume(events);
     /**
+     * **第三个消费者：这一场战斗的完整事件流**（肉鸽的结算用）。
+     *
+     * ⚠️ 它是 `core/run/stats.ts` 的输入 —— 用户明确要求"从 log 判断，
+     * 不要又加一层记录"（§5.2 的方向修正），所以一局肉鸽的统计**不是**
+     * 引擎里的计数器，而是"这一场的事件数组"归约出来的。
+     *
+     * ⚠️ 为什么存在这里（而不是让 app 另外接一个 drain）：`drainEvents`
+     * 是**排空**语义，一个 tick 只能调一次（见上面那段注释）——
+     * 再加一个消费者就必须在同一处收集。清空时机由 `requestRestart`
+     * 负责（与 `logFormatter.clear()` 同一处）。
+     */
+    this.allEvents.push(...events);
+    /**
      * 取本次事件带来的顿帧（取**最大**而不是累加：同一 tick 里被打两下
      * 不该冻两倍时长，那会明显卡住）。
      */
     this.hitStopMs = Math.max(this.hitStopMs, this.adapter.pendingHitStopMs());
+  }
+
+  /**
+   * 这一场从开战到现在的**全部事件**（肉鸽结算用；只读）。
+   *
+   * ⚠️ 单场 / 自由模式**不读它**（没有消费者）—— 收集本身是 O(1) 的
+   * push，不会让那些路径的行为变一个字。
+   */
+  get battleEvents(): readonly EventDef[] {
+    return this.allEvents;
   }
 
   /** 当前战斗日志（只读，供渲染层画右侧面板）。 */
@@ -460,6 +491,8 @@ export class BattleLoop {
   /** 请求重开（下一帧生效）。 */
   requestRestart(): void {
     this.logFormatter.clear();
+    /** ⚠️ 事件流也要清（见 `allEvents`）：否则统计会把两场混在一起。 */
+    this.allEvents.length = 0;
     this.restartRequested = true;
   }
 

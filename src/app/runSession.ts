@@ -1,49 +1,50 @@
 /**
- * **一局肉鸽的持有者**（app 层）—— P2 只有"**一场**"。
+ * **一局肉鸽的持有者**（app 层）—— P3：**N 场 + 每场之后的炁机选择**。
  *
  * ==================================================================
- * ⚠️⚠️ 这是一个**临时的桩**，不要把它当成最终形态
+ * 演进：P2 的"只跑一场"桩已经拆掉了
  * ==================================================================
  *
- * 用户 2026-10-12 定的流程（P2 第一半）：
+ * P2 时这里**刻意**只打一场（打完就 `clear()`），理由是"炁机选择是 P3"。
+ * P3 把桩接真：
  *
  * ```
- * 选角色 → 打一场 → 结算 →（按 Enter）回选角色
+ * 选角色 → 第 1 场 → 结算 →（选炁机）→ 第 2 场 → … → 通关 / 失败 → 摘要
  * ```
  *
- * 之所以只打一场：**炁机选择是 P3**（设计稿 §10 的 P3 行）。所以这里
- * **刻意**不把一局肉鸽推进下去 —— `RunState` 只用来"洗出 Boss 顺序、
- * 取第 1 场是谁"，战斗一结束就整个丢掉（`clear()`）。
- *
- * **P3 会把它接成"N 场 + 炁机选择"**：
- *   - 保留 `RunState` 跨场（而不是一场就丢）
- *   - 每场结束喂 `advanceRun(state, { events, outcome, flawless }, pool)`（P0 已实现）
- *   - 接上 `QijiSelect` 与 `nextCandidates`
- *   - 每场战斗的种子改用 `battleSeed(runSeed, position)`（§7.1）
- *
- * ⚠️ **不要**为了"看起来完整"而在这里假装有炁机选择 / 多场推进。
+ * ⚠️ **"第一场打完了才有炁机选择"**（用户 2026-10-13 的规则第 3 条）：
+ * 开局**不**进选择屏，所以 `startRoguelikeRun` 直接 `enterBattle`；
+ * 选择屏只从 `advance()` 的返回值 `'selectQiji'` 进来。
  *
  * ==================================================================
- * 为什么这层单独一个文件（设计稿 §9.1 的 `app/runSession.ts`）
+ * ⚠️ 它只做三件事（一条线，都是纯状态转移）
  * ==================================================================
  *
- * `RunState` 是**跨场**的状态，而 `BattleLoop` 每场重建。两者都不该
- * 持有对方：`BattleLoop` 是"一场战斗"，`RunState` 是"一局肉鸽"。
- * 所以由这里当转接点：谁要打下一场，先问它"这一场打谁、是第几场"。
+ *   1. **持有** `RunState`（跨场；`BattleLoop` 每场重建，两者都不该持有对方）
+ *   2. 每场打完把"这一场的事件流 + 胜负 + 满血"喂给 `advanceRun`（P0 已实现）
+ *   3. 回答"下一步去哪"（`BattleAdvance`）与"现在能选什么"（`candidates`）
+ *   4. **`continueRun()`**：一局结束屏确认之后"丢掉这一局、回选角色"
+ *      （与 `backToHome` 的"放弃"是**两条**路，见那里的说明）
  *
- * ⚠️ **随机流独立**（§7.1）：洗牌只吃 `begin()` 传进来的 `runSeed`，
- * 绝不碰 `BattleState.rngSeed` / `aiRngSeed` —— 否则"一局肉鸽的随机"
- * 会同时改掉玩家侧的概率判定，黄金重放会因此变红（见 `core/run/shuffle.ts`）。
+ * ⚠️ **统计不在这里算**：`RunState.battleStats` 的**唯一写入路径**是
+ * `core/run/lifecycle.ts` 的 `advanceRun`（它内部调 `stats.ts` 的归约）。
+ * 本文件一个加法都不写 —— 那会造出第二份真相（"截数了几次"两个答案）。
  *
  * ⚠️ **种子由调用方给**（`begin(playerId, runSeed)`），这一层不调
- * `Date.now()`：`src/app/` 允许它，但把它留在调用方让本模块**纯函数化** ——
- * 可以在 node 里单测"同一 runSeed → 同一 Boss"（`core/` 里不许有
- * `Date.now`，这是 lint C2 的硬约束）。
+ * `Date.now()`：`src/app/` 允许它，但留在调用方让本模块**纯函数化**，
+ * 于是能在 node 里单测"同一 runSeed → 同一 Boss 顺序 + 同一推进序列"。
+ *
+ * ⚠️ **随机流独立**（§7.1）：洗牌只吃传进来的 `runSeed`，绝不碰
+ * `BattleState.rngSeed` / `aiRngSeed` —— 否则"一局肉鸽的随机"会同时改掉
+ * 玩家侧的概率判定，黄金重放会因此变红（见 `core/run/shuffle.ts`）。
  */
 
-import { shuffle, startRun } from '../core/run/index';
-import type { RunState } from '../core/run/index';
+import { advanceRun, nextCandidates, shuffle, startRun } from '../core/run/index';
+import { runLengthOf, type RunState } from '../core/run/index';
+import type { Candidate } from '../core/run/index';
 import type { EntityId } from '../core/types/ids';
+import type { EventDef } from '../core/events';
+import type { QijiEntity } from '../core/types/qiji';
 
 /** 创建时的依赖。 */
 export interface RunSessionOptions {
@@ -53,9 +54,40 @@ export interface RunSessionOptions {
    * 生产路径传 `data/roster.ts` 的 `BOSS_POOL`（已实现的那些）。
    */
   readonly bossPool: readonly EntityId[];
+  /**
+   * 全部炁机（`data/qiji.ts` 的 `ALL_QIJI`）。
+   *
+   * ⚠️ 它是**唯一**的解锁 / 候选来源：两份池子必然漂，而漂的样子是
+   * "解锁了一个不在候选里的东西"。P0 的 `advanceRun` / `nextCandidates`
+   * 都把 `pool` 当参数收，就是为此。
+   */
+  readonly qijiPool: readonly QijiEntity[];
+  /**
+   * 这一局一共打几场（`?runlen=N` 的落点）。
+   *
+   * ⚠️ 缺省 = 池子长度（**不是** `MAX_RUN_POSITION` = 7）：设计稿 §2.3 的
+   * `?runlen=7` 是**正式形态**（7 个 Boss 都做完之后），而今天只有 2 个
+   * Boss 能打 —— 拿 7 当缺省会让一局永远通不了关（"7 是终点、`len` 是现实"，
+   * 见 `core/run/types.ts` 的 `MAX_RUN_POSITION`）。
+   *
+   * ⚠️ 会**夹到 `1..池子长度`**：`?runlen=99` 就是"打完全部"。
+   */
+  readonly runLength?: number;
 }
 
-/** 一局肉鸽的持有者（P2 只有一场，见文件头的桩说明）。 */
+/**
+ * 一场打完之后的去向。
+ *
+ * ⚠️ 它把"下一步"做成**返回值**而不是让调用方去问几个布尔：
+ * `phaseFlow` 里那一串 `if (state.status === 'active') …` 会散在多处，
+ * 而"该不该进选择屏"的判据（有候选）只有这里知道。
+ */
+export type BattleAdvance =
+  | { readonly kind: 'runOver' }
+  | { readonly kind: 'selectQiji' }
+  | { readonly kind: 'battle'; readonly bossId: EntityId };
+
+/** 一局肉鸽的持有者（P3：N 场 + 炁机选择）。 */
 export interface RunSession {
   /** 现在是否有**没结束**的一局（= 当前战斗属于肉鸽模式）。 */
   readonly active: boolean;
@@ -63,14 +95,46 @@ export interface RunSession {
   begin(playerId: string, runSeed: number): void;
   /** 丢掉当前这一局（回选角色 / 离开肉鸽时调）。 */
   clear(): void;
+  /**
+   * **一局结束屏的确认**：丢掉这一局（开新的一局从选角色开始）。
+   *
+   * ⚠️ 与 `clear()` 是同一个动作，分开命名是**为了调用点能读**：
+   * `continueRun` 出现在"玩家点了继续"，而 `clear` 出现在"这一局作废了"。
+   * 肉鸽的失败/通关代价都是"全丢"（§2.4 / §12 决议 #1）—— **不做**
+   * 任何跨局保留（那会让"一局内的解锁"与"跨局解锁"两套状态打架）。
+   */
+  continueRun(): void;
   /** 这一场打谁（没有进行中的一局、或位置越界时 `undefined`）。 */
   bossId(): EntityId | undefined;
   /** 这是第几场（1-based；没有进行中的一局时 `undefined`）。 */
   position(): number | undefined;
-  /** 这一局一共几场（= `bossPool.length`；没有进行中的一局时 `undefined`）。 */
+  /** 这一局一共几场（`?runlen` 生效之后的长度；没有进行中的一局时 `undefined`）。 */
   length(): number | undefined;
-  /** 当前状态（调试 / P3 的 `advanceRun` 会用；只读引用，别改它）。 */
+  /** 当前状态（调试 / 只读引用，别改它）。 */
   state(): RunState | undefined;
+  /**
+   * 一场打完之后推进一局肉鸽（P0 的 `advanceRun` + 候选判定）。
+   *
+   * @param outcome 这一场的胜负（`snapshot.status`）
+   * @param events 这一场的**全部**事件（`BattleLoop.battleEvents`）
+   * @param flawless 这一场是不是满血赢的（事件流里没有血量上限，推不出来）
+   */
+  advance(
+    outcome: 'victory' | 'defeat',
+    events: readonly EventDef[],
+    flawless: boolean,
+  ): BattleAdvance;
+  /** 现在能选什么（`[]` 表示没有候选）。⚠️ 未开局时也是 `[]`。 */
+  candidates(): readonly Candidate[];
+  /**
+   * 选一个炁机生效。
+   *
+   * ⚠️ **只在是候选时成功**（判定复用 `nextCandidates`，不在这里重写一遍
+   * "能不能选"）—— 否则会出现"界面上没有它、代码却能选它"。
+   *
+   * @returns 选上了没有
+   */
+  chooseQiji(qijiId: EntityId): boolean;
 }
 
 export function createRunSession(options: RunSessionOptions): RunSession {
@@ -82,25 +146,58 @@ export function createRunSession(options: RunSessionOptions): RunSession {
    */
   let run: RunState | undefined;
 
+  /** 这一局的总场数（起局时定死；缺省 = 池子长度，夹到 `1..len`）。 */
+  const lengthOf = (orderLength: number): number => {
+    const cap = options.runLength ?? orderLength;
+    return Math.max(1, Math.min(Math.trunc(cap), orderLength));
+  };
+
+  /**
+   * 现在能选什么。**提成局部函数**（而不是依赖 `this`）：`advance` 里也要
+   * 读它，而"方法之间用 `this` 互相调用"会在 `const { advance } = session`
+   * 这种解构下静默失绑 —— 本文件的调用方（`phaseFlow`）正是解构的。
+   */
+  const candidates = (): readonly Candidate[] => {
+    if (run === undefined) return [];
+    /**
+     * ⚠️ 两份统计传的是**同一个** `run.battleStats`（这不是偷懒）：
+     * 在"这一场刚打完"这一刻，这一场的统计**已经被并进整局了**
+     * （`advanceRun` 的先累加后判定），所以 `scope: 'battle'` 与
+     * `scope: 'run'` 读到同一个值。原因与分叉点写在 `core/run/lifecycle.ts`
+     * 的 `unlockStatsOf` 里（那是**唯一**允许这样传的地方）。
+     */
+    return nextCandidates(
+      options.qijiPool,
+      { battleStats: run.battleStats, runStats: run.battleStats },
+      run.chosen,
+    );
+  };
+
   return {
     get active(): boolean {
       return run !== undefined && run.status === 'active';
     },
 
     begin(playerId: string, runSeed: number): void {
+      const shuffled = shuffle(options.bossPool, runSeed);
+      const length = lengthOf(shuffled.length);
       run = startRun({
         runSeed,
         playerId,
         /**
-         * 顺序由 `runSeed` 决定（纯函数、同一 seed 同一顺序）。
-         * 空池子会得到空 `order` —— `bossId()` 因此返回 `undefined`，
-         * 调用方据此不开战（而不是打一个不存在的 Boss）。
+         * ⚠️ **按 `?runlen` 截断顺序**（而不是另洗一次）：这一局的场数就是
+         * 玩家要打的那几场，而"最后一个位置最难"由 `tierForPosition(k, len)`
+         * 保证 —— 截断之后 `len` 更小，最后一个位置自动取更硬的档。
          */
-        order: shuffle(options.bossPool, runSeed),
+        order: shuffled.slice(0, length),
       });
     },
 
     clear(): void {
+      run = undefined;
+    },
+
+    continueRun(): void {
       run = undefined;
     },
 
@@ -115,11 +212,69 @@ export function createRunSession(options: RunSessionOptions): RunSession {
     },
 
     length(): number | undefined {
-      return run?.order.length;
+      return run === undefined ? undefined : runLengthOf(run);
     },
 
     state(): RunState | undefined {
       return run;
+    },
+
+    advance(
+      outcome: 'victory' | 'defeat',
+      events: readonly EventDef[],
+      flawless: boolean,
+    ): BattleAdvance {
+      if (run === undefined) return { kind: 'runOver' };
+      /**
+       * ⚠️ **先累加、后判定**（`advanceRun` 内部就是这个顺序，见 §2.2）：
+       * 这一场刚数够的"用了 3 次截"必须**这一场结束**就解锁 —— 顺序反了
+       * 的表现是"最后一场打完才解锁的东西永远选不到"。
+       */
+      run = advanceRun(run, { outcome, events, flawless }, options.qijiPool);
+      if (run.status !== 'active') return { kind: 'runOver' };
+
+      /**
+       * **有候选 → 进选择屏**（每场之后选 1 个生效）。
+       *
+       * ⚠️ 候选里**恒有**两条 `unlock: always` 的兜底炁机（除非都叠满了），
+       * 所以正常情况下一定会进选择屏 —— 用户要的"每场战斗完了有炁机选择"
+       * 就是这一行。`candidates().length === 0` 只会出现在"能选的都叠满了"。
+       */
+      if (candidates().length > 0) return { kind: 'selectQiji' };
+
+      const bossId = run.order[run.position - 1];
+      /**
+       * 越界只可能发生在"顺序空 / 长度算错"，那是程序错误：
+       * 给 `runOver` 而不是打一个不存在的 Boss（静默失败更难查）。
+       */
+      if (bossId === undefined) return { kind: 'runOver' };
+      return { kind: 'battle', bossId };
+    },
+
+    candidates,
+
+    chooseQiji(qijiId: EntityId): boolean {
+      if (run === undefined) return false;
+      const candidate = candidates().find((c) => c.qiji.id === qijiId);
+      if (candidate === undefined) return false;
+
+      /**
+       * ⚠️ 叠层而不是追加一条：同一个炁机选两次是**同一项**的 2 层
+       * （`maxStacks` 是"最多叠几层"，见 §5.3），两份条目会让"我叠了几层"
+       * 有两个答案。
+       *
+       * ⚠️ 这里**不检查 `remainingStacks`**：`candidates()` 已经用它过滤过
+       * （`remaining <= 0` 的不出现），再判一次就是同一个判据的第二份实现。
+       */
+      const existing = run.chosen.find((c) => c.qijiId === qijiId);
+      const chosen =
+        existing === undefined
+          ? [...run.chosen, { qijiId, stacks: 1 }]
+          : run.chosen.map((c) =>
+              c.qijiId === qijiId ? { qijiId, stacks: c.stacks + 1 } : c,
+            );
+      run = { ...run, chosen };
+      return true;
     },
   };
 }

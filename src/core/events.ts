@@ -88,6 +88,23 @@ export type EventDef =
       readonly targetId: CombatantId;
       readonly skillId: SkillId;
       readonly reason: 'dodged' | 'immune';
+      /**
+       * **是哪个 buff 挡下的**（观测字段，不参与任何判定）。
+       *
+       * 两种来源（见 `hitResolution` 的 `avoided` 判据）：
+       *   - 无敌（`flags.invulnerable`）→ 挂着它的那个 buff
+       *     （「闪」= `flash-iframe` / 「避」= `dodge-iframe`）
+       *   - 「卸」的阈值（`flags.damageThreshold`）→ `guard`
+       *
+       * ⚠️ 为什么必须区分：`invulnerable` 这个 flag 被两个**不同角色**的
+       * 技能共用（闪 / 避），而肉鸽的炁机要问的是"**这一次是「闪」挡的吗**"。
+       * 只看 flag 会让"闪 派生 击"因为玩家按了「避」而开窗。
+       *
+       * ⚠️ 可选：触发器等来源的免伤没有"哪个 buff"可写（写 `''` 会与
+       * "buff id 恰好是空串"混淆）。与 `interruptSuccess.sourceSkillId`
+       * 同一条纪律：**不参与判定 → 不动 `REPLAY_FORMAT_VERSION`**。
+       */
+      readonly viaBuffId?: BuffId;
     }
   | {
       readonly kind: 'buffApplied' | 'buffExpired' | 'buffRefreshed' | 'buffStackChanged';

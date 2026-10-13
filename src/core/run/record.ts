@@ -353,6 +353,12 @@ function parseBattleStats(raw: unknown): BattleStats | undefined {
   const skillDamage = parseSkillCounts(source['skillDamage'], true);
   const skillHits = parseSkillCounts(source['skillHits'], true);
   const skillInterrupts = parseSkillCounts(source['skillInterrupts'], true);
+  /**
+   * ⚠️ `skillAvoids` 与 `dodges` 一样是**可选**的（`required = false`）：
+   * 它是 P3 才加的一张表，缺了补 `{}`（旧记录读得回来）；而上面四张是
+   * **结构必需**的技能表 —— 缺一张说明这份数据不是本版本写的，整条丢弃。
+   */
+  const skillAvoids = parseSkillCounts(source['skillAvoids'], false);
   // ⚠️ `dodges` 是**可选**的（`required = false`）：它是"同一批事件里顺手
   // 拿到的一个桶"，缺了补 `{}`；而上面四张是**结构必需**的技能表 ——
   // 缺一张说明这份数据不是本版本写的，整条丢弃。
@@ -364,6 +370,7 @@ function parseBattleStats(raw: unknown): BattleStats | undefined {
   if (skillDamage === undefined) return undefined;
   if (skillHits === undefined) return undefined;
   if (skillInterrupts === undefined) return undefined;
+  if (skillAvoids === undefined) return undefined;
   if (dodges === undefined) return undefined;
   if (typeof ticks !== 'number' || !Number.isFinite(ticks) || ticks < 0) return undefined;
   if (battles === undefined) return undefined;
@@ -376,6 +383,7 @@ function parseBattleStats(raw: unknown): BattleStats | undefined {
     skillDamage,
     skillHits,
     skillInterrupts,
+    skillAvoids,
     dodges,
     ticks,
     battles,

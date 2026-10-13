@@ -10,6 +10,7 @@
  */
 
 import type { CastBar } from '../../ui/CastBar';
+import { formatCountdown } from '../viewModel';
 import type { FrameContext, FramePart } from '../sceneTypes';
 
 /** 玩家读条部件。 */
@@ -25,7 +26,7 @@ export class PlayerCastBarPart implements FramePart {
     if (!playerCast) return;
     this.castBar.setContent(
       translate(playerCast.nameKey),
-      `${(playerCast.remainingMs / 1000).toFixed(1)}s`,
+      `${formatCountdown(playerCast.remainingMs)}s`,
     );
     this.castBar.update(playerCast.progress);
     // 边框恒为金色，不随进度变色（见 `bossCastBar` 的同名说明）

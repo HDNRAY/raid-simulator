@@ -47,13 +47,13 @@ export interface SettingsProbes {
    * **面板当前的缩放状态**（玩家设的倍数 + 面板实际用的系数）。
    *
    * ⚠️ 两个数**都必须有**：它们现在是**两个**值（竖向预算把面板钳在
-   * `PANEL_SCALE_MAX`），只报一个会让"我调了 200%、面板为什么只大了 1.6 倍"
+   * `PANEL_SCALE_MAX`），只报一个会让"我调了 200%、面板为什么只大了 1.35 倍"
    * 变成一句没有数字的争论。见 `settingsScale` 文件头。
    */
   panelScale(): { readonly uiScale: number; readonly panelScale: number };
   /**
    * **面板里的可见文字**（字号 / 世界坐标 / 前 24 字）——
-   * "字到底变大了没有"的唯一硬证据（截图看不出 1.2 与 1.6 的差别）。
+   * "字到底变大了没有"的唯一硬证据（截图看不出 1 与 1.35 的差别）。
    */
   panelText(): readonly PanelTextMetric[];
   /**

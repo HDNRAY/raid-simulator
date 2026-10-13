@@ -4,6 +4,7 @@ import { ALL_SKILLS, PLAYER_SKILL_IDS } from '../../src/data/content';
 import { FONT, LAYOUT } from '../../src/ui/layout';
 import {
   formatClock,
+  formatCountdown,
   isTightWindow,
   ratioOf,
   telegraphHint,
@@ -78,6 +79,87 @@ describe('formatClock', () => {
   it('负数与 Infinity 安全', () => {
     expect(formatClock(-500)).toBe('0:00');
     expect(formatClock(Number.POSITIVE_INFINITY)).toBe('--:--');
+  });
+});
+
+describe('formatCountdown —— 倒计时的显示规则（一处）', () => {
+  /**
+   * 用户报的 bug（原话）："闪 和 避 的buff，现在显示的1s？"
+   *
+   * 根因是 `Math.ceil(ms / 1000)`（整秒进位）：0.2 秒与 0.5 秒都变成 `1`，
+   * 既分不出「闪」和「避」，也看不出窗口在缩短。
+   *
+   * 这里卡的是**规则本身**的三条判据（见 `formatCountdown` 顶部）：
+   *   1. 0.2 与 0.5 能区分
+   *   2. 窗口缩短看得出来
+   *   3. 长 buff（30 秒）不变成 `30.0 → 29.9 → 29.8` 那种噪声
+   */
+  it('【核心】「闪」0.2 秒与「避」0.5 秒**显示不同**', () => {
+    expect(formatCountdown(200)).toBe('0.2');
+    expect(formatCountdown(500)).toBe('0.5');
+  });
+
+  it('【核心】窗口缩短看得见（0.5 → 0.4 → 0.3 → 0.2 → 0.1）', () => {
+    expect([500, 400, 300, 200, 100].map(formatCountdown)).toEqual([
+      '0.5',
+      '0.4',
+      '0.3',
+      '0.2',
+      '0.1',
+    ]);
+  });
+
+  it('【核心】长 buff 用整秒，不是 `30.0`、也不会 `29.9 → 29.8` 地抖', () => {
+    expect(formatCountdown(30_000)).toBe('30');
+    expect(formatCountdown(29_900)).toBe('30');
+    expect(formatCountdown(29_000)).toBe('29');
+    expect(formatCountdown(28_900)).toBe('29');
+    /** 同一秒之内只变一次，不是每 0.1 秒变一次。 */
+    const oneSecond = [30_000, 29_900, 29_800, 29_100].map(formatCountdown);
+    expect(new Set(oneSecond).size).toBe(1);
+  });
+
+  it('边界：0 / 0.1 / 0.9 / 1 / 9.9 / 10 / 30', () => {
+    expect(formatCountdown(0)).toBe('0');
+    expect(formatCountdown(1)).toBe('0.1');
+    expect(formatCountdown(900)).toBe('0.9');
+    expect(formatCountdown(1000)).toBe('1');
+    expect(formatCountdown(9900)).toBe('9.9');
+    expect(formatCountdown(10_000)).toBe('10');
+    expect(formatCountdown(30_000)).toBe('30');
+  });
+
+  it('向上取整：窗口还活着就**不显示 0**（`0.2` 秒的最后一刻仍是 `0.1`）', () => {
+    expect(formatCountdown(100)).toBe('0.1');
+    expect(formatCountdown(1)).toBe('0.1');
+    /** 与 `formatClock` 同一个口径：剩 0.1 秒也显示 1 秒，不提前显示 0。 */
+    expect(formatCountdown(0)).toBe('0');
+  });
+
+  it('尾零不显示（与 `displaySeconds` 同一条口径）', () => {
+    expect(formatCountdown(1000)).toBe('1');
+    expect(formatCountdown(2000)).toBe('2');
+    expect(formatCountdown(2000)).not.toBe('2.0');
+    expect(formatCountdown(30_000)).not.toBe('30.0');
+  });
+
+  it('9.9 秒与 10 秒之间**不出现 `10.0`**（阈值在折好的 0.1 秒刻度上判）', () => {
+    expect(formatCountdown(9950)).toBe('10');
+    expect(formatCountdown(9999)).toBe('10');
+    expect(formatCountdown(9900)).toBe('9.9');
+  });
+
+  it('永久 buff / 脏数据安全（`Infinity` / `NaN` / 负数 → 空串或 0）', () => {
+    expect(formatCountdown(Number.POSITIVE_INFINITY)).toBe('');
+    expect(formatCountdown(Number.NaN)).toBe('');
+    expect(formatCountdown(-500)).toBe('0');
+  });
+
+  it('不出浮点尾数（整数 ÷ 10 的最短表示是一位小数）', () => {
+    for (const ms of [200, 300, 700, 1100, 1900, 5400, 9900]) {
+      expect(formatCountdown(ms).length, `${ms}`).toBeLessThanOrEqual(3);
+      expect(formatCountdown(ms), `${ms}`).not.toMatch(/0{4,}|9{4,}/);
+    }
   });
 });
 

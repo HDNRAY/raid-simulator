@@ -63,6 +63,10 @@ export interface CanvasInputTargets {
   readonly select: ScreenHitTarget;
   /** 自由模式（原备战界面；含它自己的齿轮与返回箭头）。 */
   readonly prepare: ScreenHitTarget;
+  /** 选炁机屏（P3；含它自己的齿轮与返回箭头）。 */
+  readonly qijiSelect: ScreenHitTarget;
+  /** 一局结束屏（P3；含它自己的齿轮与返回箭头）。 */
+  readonly runOver: ScreenHitTarget;
   /**
    * **战斗场景**（含战斗界面自己的齿轮）。
    *
@@ -103,6 +107,14 @@ export interface CanvasInputTargets {
   battleEnded(): boolean;
   /** 离开战斗（按模式分流：肉鸽 → 选角色；自由 → 自由模式界面）。 */
   backFromBattle(): void;
+  /**
+   * **一局结束屏的确认**（回选角色）。
+   *
+   * ⚠️ 与 `backFromBattle` 分开：那条是"战斗结算面板按 Enter / 点屏幕"
+   * （相位 `battle`），这条是"摘要屏点屏幕"（相位 `runOver`）——
+   * 两个相位的"点屏幕"都要能继续，所以本层需要两个回调。
+   */
+  continueRun(): void;
 }
 
 /**
@@ -218,7 +230,9 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
        */
       if (t.phase() === 'home') t.home.hitTest(px, py);
       else if (t.phase() === 'characterSelect') t.select.hitTest(px, py);
-      else t.prepare.hitTest(px, py);
+      else if (t.phase() === 'prepare') t.prepare.hitTest(px, py);
+      else if (t.phase() === 'qijiSelect') t.qijiSelect.hitTest(px, py);
+      else t.runOver.hitTest(px, py);
       return;
     }
 

@@ -470,6 +470,39 @@ export function regenerate(
     events.push(...result.events);
   }
 
+  /**
+   * **炁回复速度**（`energyRegen`，口径 = **每秒**，见 `stats/aggregate.ts`）。
+   *
+   * ==================================================================
+   * ⚠️ 这一条是 P3 才接上的（2026-10-13）—— 在那之前它"写了没人读"
+   * ==================================================================
+   *
+   * `energyRegen` 从数据模型第一天就在 `StatKey` 里（`STAT_RULES` 也有它的
+   * 聚合规则），但**没有任何引擎分支读它**：上面那条固定回复是唯一来源。
+   * 肉鸽的兜底炁机「炁回复速度」（`data/qiji.ts` 的 `QIJI_BREATH`）就是靠
+   * 这个属性，所以这里把它接上。
+   *
+   * 换算与 `hpRegen` 同一条：属性是**每秒**，而结算按**逻辑步** ——
+   * 用 `LOGIC_TICKS_PER_SECOND`，不写字面量 `10`（否则"一步多长"就有了
+   * 第二份真相，那正是「卸」那次 10 倍偏差的形状）。
+   *
+   * ⚠️ **取整方向是"向下"**（`Math.floor`），故意的：
+   *   `energyRegen = 5/秒` ⇒ 每步 0.5 ⇒ 被吃掉。这不是 bug，而是
+   *   "内容里写 `energyRegen` 时必须是每步至少 1 点（= 每秒 ≥10）的量级"
+   *   这条口径 —— 所以 `data/qiji.ts` 用的是 **+10/秒**，那张表里记着原因。
+   *
+   *   为什么不做「卸」那种小数欠账累加器：`holdDrain` 有欠账是因为内容作者
+   *   会写任意小数；而 `energyRegen` 的推荐值是整十。多一个**随战斗推进的
+   *   字段**去救一个没人会写的配置不划算 —— 而那种字段会动确定性语义
+   *   （`REPLAY_FORMAT_VERSION` 的账）。
+   */
+  const energyPerLogicTick = Math.floor((stats.energyRegen ?? 0) / LOGIC_TICKS_PER_SECOND);
+  if (energyPerLogicTick > 0) {
+    const result = changeResource(current, 'energy', energyPerLogicTick, tick);
+    current = result.combatant;
+    events.push(...result.events);
+  }
+
   // 生命回复仍走属性（内容可以给回血装备）
   /**
    * ⚠️ `hpRegen` 这个 stat 的口径是**每秒**（见 `stats/aggregate.ts` 的

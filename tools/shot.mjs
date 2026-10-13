@@ -41,6 +41,28 @@
  * ⚠️ 仍属于"拍一张图"的范畴：只按键 / 只注入一次指针 / 只截图，不做断言。
  *
  * ==================================================================
+ * `RAID_SHOT_EVAL*`：截图前跑一段页面脚本（顺序见下）
+ * ==================================================================
+ *
+ * 两个变量，**都在按键之前**跑，顺序是（2026-10-13 实测确认）：
+ *
+ *   1. `RAID_SHOT_EVAL`        —— **驱动**脚本：把界面推到某个状态再拍，
+ *                                 可以有副作用（调 `__raidBattle.*`）
+ *   2. `RAID_SHOT_EVAL_PROBE`  —— **探针**：读一个值当基准，供与按键后
+ *                                 的 `RAID_SHOT_TEXT` 对比（滚动位置这类
+ *                                 量只拍一张图看不出来）
+ *
+ * 完整流水线（每一步都按这个顺序）：
+ *
+ *   act(技能) → RAID_SHOT_EVAL → RAID_SHOT_EVAL_PROBE → RAID_SHOT_KEYS
+ *            → RAID_SHOT_POINTER → RAID_SHOT_DRAG → 截图 → RAID_SHOT_TEXT
+ *
+ * ⚠️ **旧名 `RAID_SHOT_EVAL_BEFORE`（仍兼容）的含义是反的**：它读起来像
+ * "在 `RAID_SHOT_EVAL` 之前"，实际是在它**之后**（两者都在按键之前）。
+ * 两个 subagent 都踩过这个坑，所以改成了 `_PROBE`（按**角色**命名，
+ * 不再暗示与另一个变量的先后）。
+ *
+ * ==================================================================
  * `RAID_SHOT_POINTER=x,y`：截图前注入一次**真实指针事件**
  * ==================================================================
  *
@@ -377,6 +399,9 @@ try {
    * 用途与 `settings.open()` 那类调试入口同源：把界面推到某个状态再拍。
    * 它只能调页面已经暴露的调试 API（`window.__raidBattle.*`），
    * 不是一个通用的求值后门。
+   *
+   * ⚠️ 它在**按键之前**跑，而且是两个 eval 里的**第一个** —— 全流程的
+   * 顺序写在文件头 `RAID_SHOT_EVAL*` 那一节（实测确认过）。
    */
   if (process.env.RAID_SHOT_EVAL) {
     const r = await ev(process.env.RAID_SHOT_EVAL);
@@ -385,18 +410,24 @@ try {
   }
 
   /**
-   * 可选：**按键之前**再跑一段驱动脚本（`RAID_SHOT_EVAL_BEFORE`）。
+   * 可选：**按键之前**读一个基准值（`RAID_SHOT_EVAL_PROBE`）。
    *
-   * ⚠️ 与 `RAID_SHOT_EVAL` 分成两个变量，是为了"**前后对比**"：
+   * ⚠️ **旧名 `RAID_SHOT_EVAL_BEFORE` 仍兼容，但它的含义是反的** ——
+   * 旧名读起来像"在 `RAID_SHOT_EVAL` 之前"，实测是在它**之后**跑
+   * （两个都在按键之前）。按**角色**改名成 `_PROBE` 之后，名字不再暗示
+   * 与另一个变量的先后顺序。
+   *
+   * 与 `RAID_SHOT_EVAL` 分成两个变量，是为了"**前后对比**"：
    * 滚动位置这类量只拍一张图看不出来（"滚了"和"重排了"长得一样），
    * 需要按键前读一次、按键后再读一次（后者由 `RAID_SHOT_TEXT` 打）。
    * 只有一个变量时，"按键后"拿不到对比基准。
    *
    * 与 `RAID_SHOT_EVAL` 同源：只能调页面已暴露的调试 API，不是求值后门。
    */
-  if (process.env.RAID_SHOT_EVAL_BEFORE) {
-    const r = await ev(process.env.RAID_SHOT_EVAL_BEFORE);
-    if (r !== undefined) console.log(`[eval-before] ${r}`);
+  const evalProbe = process.env.RAID_SHOT_EVAL_PROBE ?? process.env.RAID_SHOT_EVAL_BEFORE;
+  if (evalProbe) {
+    const r = await ev(evalProbe);
+    if (r !== undefined) console.log(`[eval-probe] ${r}`);
     await sleep(200);
   }
 

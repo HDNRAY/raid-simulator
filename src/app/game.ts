@@ -234,6 +234,15 @@ export function createGame(o: CreateGameDeps): GameHandle {
     noAi: url.noAi,
     timeLimitMs: TIME_LIMIT_MS,
     touchInput: () => state.touch?.input,
+    /**
+     * ⚠️ **这一场带哪些炁机**（肉鸽的 P3 接线）—— 延迟引用 `flow`
+     * （它在本函数下面才构造）：箭头体只在**开一场战斗**时执行，那时
+     * `flow` 早就有了。
+     *
+     * 这与 `touchInput: () => state.touch?.input` 是同一种"延迟取值"：
+     * 装配顺序不是依赖顺序（见文件头"顺序即正确性"）。
+     */
+    getPlayerKit: (playerId) => flow.playerKit(playerId),
   });
 
   /**
@@ -277,6 +286,8 @@ export function createGame(o: CreateGameDeps): GameHandle {
     screens.home.setUiScale(scale);
     screens.select.setUiScale(scale);
     screens.prepare.setUiScale(scale);
+    screens.qijiSelect.setUiScale(scale);
+    screens.runOver.setUiScale(scale);
   };
 
   const flow = createPhaseFlow({
@@ -286,8 +297,27 @@ export function createGame(o: CreateGameDeps): GameHandle {
     selection,
     scene,
     startBattle,
+    /**
+     * ⚠️ **`?runlen=N` 的接线点**（P2 的调试入口）：这一局打几场。
+     * 不传（`null`）时 `runSession` 用 Boss 池的长度 —— 不是 7（见
+     * `urlParams.ts` 的 `runLength`）。
+     */
+    runLength: url.runLength ?? undefined,
   });
-  const { applyPhase, enterBattle, switchTo, backFromBattle, backToHome, startRoguelikeRun } = flow;
+  const {
+    applyPhase,
+    enterBattle,
+    switchTo,
+    backFromBattle,
+    backToHome,
+    continueRun,
+    startRoguelikeRun,
+    qijiCandidates,
+    chooseQiji,
+    runSummary,
+    runState,
+    phaseHistory,
+  } = flow;
 
 
   /* ---------- 整屏界面（首页 / 选角色 / 自由模式 / 返回箭头） ---------- */
@@ -311,11 +341,18 @@ export function createGame(o: CreateGameDeps): GameHandle {
     onPrepareStart: (playerId, bossId) => enterBattle(playerId, bossId),
     rememberPick: (playerId, bossId) => d.settingsStore.savePick(playerId, bossId),
     backToHome,
+    /** P3 的两屏（选炁机 / 一局结束）：回调整块由 `phaseFlow` 提供。 */
+    qijiCandidates,
+    chooseQiji,
+    runSummary,
+    continueRun,
     initial: { playerId: selection.playerId, bossId: selection.bossId },
   });
   state.home = screens.home;
   state.select = screens.select;
   state.prepare = screens.prepare;
+  state.qijiSelect = screens.qijiSelect;
+  state.runOver = screens.runOver;
 
   /**
    * **当前这一屏的边角控件**（齿轮 / 返回箭头）—— 键盘焦点与调试入口
@@ -329,6 +366,8 @@ export function createGame(o: CreateGameDeps): GameHandle {
     if (state.phase === 'home') return screens.home.chrome;
     if (state.phase === 'characterSelect') return screens.select.chrome;
     if (state.phase === 'prepare') return screens.prepare.chrome;
+    if (state.phase === 'qijiSelect') return screens.qijiSelect.chrome;
+    if (state.phase === 'runOver') return screens.runOver.chrome;
     return scene.chrome;
   };
 
@@ -464,6 +503,8 @@ export function createGame(o: CreateGameDeps): GameHandle {
     home: screens.home,
     select: screens.select,
     prepare: screens.prepare,
+    qijiSelect: screens.qijiSelect,
+    runOver: screens.runOver,
     scene,
     settings,
     touch,
@@ -479,7 +520,8 @@ export function createGame(o: CreateGameDeps): GameHandle {
     openSettings: () => settingsToggle.open('keys'),
     battleEnded: () => state.loop?.engineState.snapshot.status !== 'running',
     backFromBattle,
-  });
+    continueRun,
+  } /* canvasInput */);
 
   /* ---------- 设置界面的键盘 ---------- */
   /**
@@ -536,6 +578,8 @@ export function createGame(o: CreateGameDeps): GameHandle {
           home: screens.home,
           select: screens.select,
           prepare: screens.prepare,
+          qijiSelect: screens.qijiSelect,
+          runOver: screens.runOver,
           /**
            * ⚠️ **边角控件按相位取**（`getChrome()`）：每帧只更新**当前这一屏**
            * 的齿轮 / 返回箭头（键位提示跟着唯一 flag 走）。四屏各自的
@@ -575,6 +619,13 @@ export function createGame(o: CreateGameDeps): GameHandle {
         home: screens.home,
         select: screens.select,
         prepare: screens.prepare,
+        qijiSelect: screens.qijiSelect,
+        runOver: screens.runOver,
+        /**
+         * ⚠️ 一局肉鸽的账本（`?runlen=N` 的验收探针）：`state` 给场次 / 顺序 /
+         * 胜负序列，`phases` 给相位序列。两者都是**只读观测**。
+         */
+        run: { state: runState, phases: phaseHistory },
         touch,
         /**
          * ⚠️ **输入归属**（调试 / 验证用）：一份纯函数的结果，脚本据此

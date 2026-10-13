@@ -37,6 +37,8 @@ import type { TouchControls } from './touchControls';
 import type { PrepareScreen } from '../ui/PrepareScreen';
 import type { HomeScreen } from '../ui/HomeScreen';
 import type { CharacterSelectScreen } from '../ui/CharacterSelectScreen';
+import type { QijiSelectScreen } from '../ui/QijiSelectScreen';
+import type { RunOverScreen } from '../ui/RunOverScreen';
 import type { KeyBinding } from '../input/keyboard';
 import type { OperationMode } from '../render/platform';
 
@@ -80,6 +82,17 @@ export interface GameState {
 
   /** 备战界面（自由模式；进战斗时隐藏，回来时显示）。 */
   prepare: PrepareScreen | undefined;
+
+  /**
+   * **选炁机屏**（P3；每场战斗打完之后选 1 个生效）。
+   *
+   * ⚠️ 与另外三个整屏界面一样是**先声明、后回填**（`applyPhase` 定义得比
+   * 界面早），所有访问点都容忍 `undefined`。
+   */
+  qijiSelect: QijiSelectScreen | undefined;
+
+  /** **一局结束屏**（P3；通关 / 失败之后的摘要）。同样是先声明、后回填。 */
+  runOver: RunOverScreen | undefined;
 
   /**
    * 键位表是**可变状态**，由设置界面修改。
@@ -191,6 +204,8 @@ export function createGameState(
     home: undefined,
     select: undefined,
     prepare: undefined,
+    qijiSelect: undefined,
+    runOver: undefined,
     bindings,
     touchButtons,
     operationMode,

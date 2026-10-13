@@ -36,6 +36,19 @@ export interface UrlParams {
   readonly boss: string | null;
   /** `?noai=1` —— 对手不行动（用来拍"我先手"那类画面）。 */
   readonly noAi: boolean;
+  /**
+   * **`?runlen=N` —— 这一局肉鸽打几场**（开发期跑短局用；设计稿 §2.3）。
+   *
+   * ⚠️ **不传时是"池子多长就打几场"**（`null`），而**不是 7**：
+   * 7 是满编的**终点**，今天只有 2 个 Boss 能打 —— 拿 7 当缺省会让一局
+   * 永远通不了关（见 `core/run/types.ts` 的 `MAX_RUN_POSITION`）。
+   *
+   * 解析规则：**正整数**才认；`0` / 负数 / 小数 / 非数字一律当**没传**
+   * （回落到池子长度）。⚠️ 这是调试入口，"写错了当作没写"比"抛错/夹到一个
+   * 意外的小值"更好排查 —— 而真正的越界（比池子长）由
+   * `app/runSession.ts` 的 `lengthOf` 夹到池子长度。
+   */
+  readonly runLength: number | null;
 }
 
 export function readUrlParams(search: string): UrlParams {
@@ -44,5 +57,20 @@ export function readUrlParams(search: string): UrlParams {
     skipPrepare: params.get('prepare') === 'skip',
     boss: params.get('boss'),
     noAi: params.get('noai') === '1',
+    runLength: parseRunLength(params.get('runlen')),
   };
+}
+
+/**
+ * 解析 `?runlen=` 的值（见 `UrlParams.runLength` 的口径）。
+ *
+ * ⚠️ 用 `Number(...)` 而不是 `parseInt(...)`：`parseInt('2abc')` 会给 2
+ * （把拼错的参数当成合法值），而 `Number('2abc')` 是 `NaN` —— 后者才是
+ * "这个参数不是个数字"。调试入口宁可**当没写**。
+ */
+function parseRunLength(raw: string | null): number | null {
+  if (raw === null || raw.trim() === '') return null;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) return null;
+  return value;
 }

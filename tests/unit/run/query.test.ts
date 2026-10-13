@@ -281,8 +281,17 @@ describe('sumCounts / skillStatValue —— 派生量现算', () => {
 });
 
 describe('SkillStatId 的联合与运行期清单一致', () => {
-  it('4 个维度，恰好是这 4 个', () => {
+  /**
+   * ⚠️ **5 个维度**（P3 加了 `skillAvoids`）。
+   *
+   * `skillAvoids` 与另外四个的区别写在 `query.ts` 的类型注释里：
+   * 它按 `avoided.viaBuffId` 分（"是哪个 buff 挡下的"），而不是按技能 id。
+   * 这一条断言的作用是"加维度必须同时改这里"—— 而它**已经**在 P3 生效过一次
+   * （加 `skillAvoids` 时这条先红，逼着人确认"运行期清单与联合一致"）。
+   */
+  it('5 个维度，恰好是这 5 个', () => {
     expect([...SKILL_STAT_IDS].sort()).toEqual([
+      'skillAvoids',
       'skillDamage',
       'skillHits',
       'skillInterrupts',

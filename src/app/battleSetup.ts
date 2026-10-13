@@ -33,11 +33,12 @@
 
 import { BattleLoop } from './battleLoop';
 import { slotsFromBindings } from './viewAdapter';
-import { makeBoss, makePlayer, PLAYER_BASE } from '../data/units';
+import { makeBoss, makePlayer } from '../data/units';
+import { buildPlayerKit, type PlayerKit } from '../data/kit';
 import { playerSkillIdsFor } from '../data/content';
 import type { ContentRegistry } from '../core/content/registry';
 import type { KeyBinding } from '../input/keyboard';
-import type { StatKey } from '../core/types';
+import type { StatKey, StatModifier } from '../core/types';
 import type { InputSource } from '../input/keyboard';
 import { translateSafe } from './translate';
 
@@ -55,6 +56,16 @@ export interface StartBattleDeps {
   readonly getBindings: () => readonly KeyBinding[];
   /** 当前选中的出战单位（备战界面的选择，进战斗时读到）。 */
   readonly getSelection: () => { readonly playerId: string; readonly bossId: string };
+  /**
+   * **这一局生效的炁机装配**（肉鸽的 P3 接线；自由模式返回"没有炁机"）。
+   *
+   * ⚠️ 传 getter 而不是一张算好的：每开一局都要读**当前**的 `chosen`
+   * （打一场 → 选一个炁机 → 下一场要带上它），快照一份就会永远停在开局。
+   *
+   * ⚠️ 默认不传 = `buildPlayerKit(playerId)`（等价于空 `chosen`）——
+   * 单场 / 自由模式因此**逐字不变**。
+   */
+  readonly getPlayerKit?: (playerId: string) => PlayerKit;
   /** `?noai=1` 时为真（对手不行动）。 */
   readonly noAi: boolean;
   /** 每场战斗的时限。超时判负。与 Boss 的 enrage 阈值一致。 */
@@ -120,6 +131,14 @@ export function createStartBattle(d: StartBattleDeps): () => BattleLoop {
     const { playerId, bossId } = d.getSelection();
     const registry = d.registryFor(playerId);
     const bindings = bindingsForPlayer(d.getBindings(), playerId);
+    /**
+     * 这一场玩家的装配（炁机在这里生效）。
+     *
+     * ⚠️ **在 `getSelection()` 之后立刻读**：与它同一条"只读一次"的理由
+     * —— 分开两次调用可能在两次之间换了人，那会造出"技能是凯丽的、
+     * 血量是林晚风的"这种不可能解释的状态。
+     */
+    const kit = d.getPlayerKit?.(playerId) ?? buildPlayerKit(playerId);
 
     return new BattleLoop({
       // 飘字要"闪躲"这种本地化文案 —— 注入取词函数，而不是让
@@ -146,7 +165,7 @@ export function createStartBattle(d: StartBattleDeps): () => BattleLoop {
          * 名字与血上限都由 `makePlayer(id)` 按角色取值（林晚风 150 /
          * 凯丽 120），见 `data/units.ts` 的 `PLAYER_HP_BY_ID`。
          */
-        combatants: [makePlayer(playerId), makeBoss(bossId, { noAi: d.noAi })],
+        combatants: [makePlayer(playerId, { kit }), makeBoss(bossId, { noAi: d.noAi })],
         // 用真实时钟做种子：每次开局不同，但仍可复现（记录 seed 即可）
         seed: Date.now() >>> 0,
         bossId,
@@ -160,10 +179,24 @@ export function createStartBattle(d: StartBattleDeps): () => BattleLoop {
         buffs: registry.buffs,
         skills: registry.skills,
         baseStats: new Map<string, Partial<Record<StatKey, number>>>([
-          [playerId, PLAYER_BASE],
+          [playerId, kit.base],
           [bossId, {}],
         ]),
-        passiveModifiers: new Map(),
+        /**
+         * ⚠️ **这一场玩家身上的被动修正**（炁机的 `modifier` 走这里）。
+         *
+         * 原先传的是 `new Map()`（空）—— 因为当时没有任何东西产生被动修正。
+         * 现在它是 `buildPlayerKit` 的产物之一；空 `chosen` 时又是空数组，
+         * 所以单场路径逐字不变。
+         */
+        passiveModifiers: new Map<string, readonly StatModifier[]>([[playerId, kit.modifiers]]),
+        /**
+         * ⚠️ **派生窗口的产出者**（「截 / 卸 / 闪」成功时开窗 → 「击」可用）。
+         *
+         * 引擎侧的唯一消费者在 `core/combat/comboWindowHandler.ts`；
+         * 空数组 = 没有炁机 = **完全的空操作**（黄金重放因此逐位不变）。
+         */
+        comboWindows: kit.comboWindows,
       },
       /**
        * ⚠️ **现读键位表**（`d.getBindings()`），不能在工厂创建时快照一份：

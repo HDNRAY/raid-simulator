@@ -84,7 +84,23 @@ export type StatScope = 'battle' | 'run';
  * 加一张表 + 在这里加一个成员 + 在 `readSkillCounts` 的 `switch` 加一行。
  * **不碰 `QijiUnlock`。**
  */
-export type SkillStatId = 'skillUses' | 'skillDamage' | 'skillHits' | 'skillInterrupts';
+export type SkillStatId =
+  | 'skillUses'
+  | 'skillDamage'
+  | 'skillHits'
+  | 'skillInterrupts'
+  /**
+   * **成功用出来的防御**次数（按 `avoided.viaBuffId` 分：`guard` / `flash-iframe`）。
+   *
+   * ⚠️ 它不是"用了几次这个技能"（那是 `skillUses`）：「卸」按住 10 秒也只算
+   * 1 次 `skillUses`，而本维度数的是"真的挡下了几击"。
+   *
+   * P3 那三条解锁**不走它** —— 用户 2026-10-13 的原话是「**用了 3 次**」，
+   * 所以「截 / 卸 / 闪」三条都读 `skillUses`（最直白、最可复现）。
+   * 本维度的存在理由是**将来**那种"挡住 3 次才解锁"的炁机，以及
+   * `QijiSelect` 卡片能显示"已挡 N 次"。
+   */
+  | 'skillAvoids';
 
 /**
  * 全部技能级维度，**运行期**的一份。
@@ -99,6 +115,7 @@ export const SKILL_STAT_IDS: readonly SkillStatId[] = [
   'skillDamage',
   'skillHits',
   'skillInterrupts',
+  'skillAvoids',
 ];
 
 /** 类型守卫：这个字符串是不是一个合法的 `SkillStatId`。 */
@@ -173,6 +190,8 @@ function readSkillCounts(stats: BattleStats, field: SkillStatId): SkillCounts {
       return stats.skillHits;
     case 'skillInterrupts':
       return stats.skillInterrupts;
+    case 'skillAvoids':
+      return stats.skillAvoids;
   }
 }
 
@@ -224,6 +243,7 @@ export function readBattleStat(
     case 'skillDamage':
     case 'skillHits':
     case 'skillInterrupts':
+    case 'skillAvoids':
       return skillStatValue(readSkillCounts(stats, query.s), query.skillId);
     case 'dodges':
       /**

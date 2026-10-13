@@ -29,21 +29,30 @@
 import { type CombatContext } from './index';
 import { createAiState, type AiState } from '../ai';
 import type { StatBreakdown } from '../stats/pipeline';
+import type { CreateBattleOptions } from './battleOptions';
+
+/**
+ * 转发：输入契约的形状定义在 `./battleOptions.ts`（见那里的文件头）。
+ * 调用方一直是从本模块取它，转发让那些 import **一字不动**。
+ */
+export type { CreateBattleOptions };
 import type { HitResolutionContext } from './hitResolution';
 import {
   clampStart,
   createWorkSet,
   defaultActorIdOf,
+  opponentOf,
+  resolveCombatantIn,
   toMutable,
   type MutableCombatant,
 } from './battleStateTypes';
 import { endHold, gainDouqiFromDamage, startHold, tickHolds, type HoldsContext } from './holds';
 import {
-  runAbilities,
   runAi,
   type AbilitiesContext,
   type AiContext,
 } from './runAi';
+import { buildAiContext } from './aiContext';
 import {
   advanceCasts,
   tryUseSkill,
@@ -58,6 +67,7 @@ import {
 import { nextRandom, type RngState } from '../rng';
 import { triggerContextFor } from './triggerContext';
 import { runTriggers } from './triggers';
+import { settleComboWindows } from './comboWindowHandler';
 import { BuffHookDispatch } from './buffHookDispatch';
 import {
   checkDeaths,
@@ -74,25 +84,9 @@ import type {
   EventDef,
   SkillDef,
   StatKey,
-  StatModifier,
   DamageSpec,
 } from '../types';
 
-/** 起始初始状态需要的输入。 */
-export interface CreateBattleOptions {
-  readonly combatants: readonly Combatant[];
-  readonly seed: number;
-  /** 时间限制（ms）。超时判负。 */
-  readonly timeLimitMs?: number;
-  /** 谁是 Boss（AI 驱动方）。不给则没有 AI。 */
-  readonly bossId?: string;
-  readonly buffs: ReadonlyMap<string, BuffDef>;
-  readonly skills: ReadonlyMap<string, SkillDef>;
-  /** 每个 combatant 的基础属性（内容定义） */
-  readonly baseStats: ReadonlyMap<string, Partial<Record<StatKey, number>>>;
-  /** 每个 combatant 身上的被动修正（装备 / 天赋） */
-  readonly passiveModifiers: ReadonlyMap<string, readonly StatModifier[]>;
-}
 
 /** 引擎实例：持有不可变的内容定义 + 可变的战斗状态。 */
 export class BattleEngine {
@@ -209,33 +203,23 @@ export class BattleEngine {
    * 借出去，状态还是引擎的。
    */
   private aiContext(): AiContext {
-    return {
+    return buildAiContext({
       state: this.state,
       events: this.events,
-      tick: this.state.tick,
-      combatants: this.state.combatants,
       aiState: this.aiState,
-      /**
-       * ⚠️ 唯一的 AI 状态写回路径 —— 见 `AiContext.updateAiState` 的说明。
-       * 没有它，`ctx.aiState = next` 只会改一个被丢弃的临时对象，
-       * 引擎的 `lastUsedAt` 永远是空的（`gapMs` 与保底同时失效）。
-       */
+      buffs: this.options.buffs,
+      skills: this.options.skills,
+      bossId: this.options.bossId,
+      current: (id) => this.current(id),
+      replaceCombatant: (updated) => this.replaceCombatant(updated),
+      opponentOf: (id) => opponentOf(this.state.combatants, id),
+      applyEnrage: (boss) => this.applyEnrage(boss),
+      abilitiesContext: () => this.abilitiesContext(),
+      applyActions: (actions, actorId) => this.applyActions(actions, actorId),
       updateAiState: (next) => {
         this.aiState = next;
       },
-      buffs: this.options.buffs,
-      skills: this.options.skills,
-      options: {
-        ...(this.options.bossId === undefined ? {} : { bossId: this.options.bossId }),
-        skills: this.options.skills,
-      },
-      current: (id) => this.current(id),
-      replaceCombatant: (updated) => this.replaceCombatant(updated),
-      opponentOf: (id) => this.opponentOf(id),
-      applyEnrage: (boss) => this.applyEnrage(boss),
-      runAbilities: (actorId, abilities) => runAbilities(this.abilitiesContext(), actorId, abilities),
-      applyActions: (actions, actorId) => this.applyActions(actions, actorId),
-    };
+    });
   }
 
   /** 能力执行器需要的引擎能力。 */
@@ -248,7 +232,7 @@ export class BattleEngine {
       events: this.events,
       current: (id) => this.current(id),
       replaceCombatant: (updated) => this.replaceCombatant(updated),
-      opponentOf: (id) => this.opponentOf(id),
+      opponentOf: (id) => opponentOf(this.state.combatants, id),
     };
   }
 
@@ -287,7 +271,7 @@ export class BattleEngine {
       buffs: this.options.buffs,
       current: (id) => this.current(id),
       replaceCombatant: (updated) => this.replaceCombatant(updated),
-      opponentOf: (id) => this.opponentOf(id),
+      opponentOf: (id) => opponentOf(this.state.combatants, id),
       statsOf: (id) => this.statsOf(id),
       hit: () => this.hitContext(),
       combatContext: this.ctx,
@@ -301,7 +285,7 @@ export class BattleEngine {
       events: this.events,
       current: (id) => this.current(id),
       replaceCombatant: (updated) => this.replaceCombatant(updated),
-      opponentOf: (id) => this.opponentOf(id),
+      opponentOf: (id) => opponentOf(this.state.combatants, id),
       statsOf: (id) => this.statsOf(id),
       rollCrit: (stats, damage) => this.rollCrit(stats, damage),
       /**
@@ -384,19 +368,12 @@ export class BattleEngine {
     this.replaceCombatant(updated);
   }
 
-  /** 把 `who` 解析成实际的 combatant（单挑场景下 target 就是对手）。 */
+  /**
+   * 把 `who` 解析成实际的 combatant。⚠️ 实现搬到 `battleStateTypes.ts`
+   * （纯函数），本文件顶在 700 行上限上 —— AGENTS.md §3 要"拆 util"。
+   */
   private resolveCombatant(selfId: string, who: string): Combatant {
-    if (who === 'self' || who === 'caster') {
-      return this.state.combatants.find((c: Combatant) => c.id === selfId) ?? this.state.combatants[0]!;
-    }
-    const self = this.state.combatants.find((c: Combatant) => c.id === selfId);
-    const opponent = this.state.combatants.find((c: Combatant) => c.side !== self?.side);
-    return opponent ?? self ?? this.state.combatants[0]!;
-  }
-
-  private opponentOf(id: string): Combatant | undefined {
-    const self = this.state.combatants.find((c: Combatant) => c.id === id);
-    return this.state.combatants.find((c: Combatant) => c.side !== self?.side);
+    return resolveCombatantIn(this.state.combatants, selfId, who);
   }
 
   /* ---------------------------------------------------------------- *
@@ -521,6 +498,21 @@ export class BattleEngine {
 
     // 2. 读条推进
     advanceCasts(this.castPipeline());
+
+    /**
+     * 2b. **派生窗口**：这一 tick 里"成功用出来的招式"开窗 —— 整块在
+     * `./comboWindowHandler.ts`（含为什么必须在 `advanceCasts` 之后、
+     * 为什么 `current` 必须 work-aware、以及"没有炁机时是空操作"）。
+     */
+    settleComboWindows({
+      windows: this.options.comboWindows,
+      combatants: this.state.combatants,
+      tick: this.state.tick,
+      buffs: this.options.buffs,
+      events: this.events,
+      current: (id) => this.current(id),
+      replaceCombatant: (updated) => this.replaceCombatant(updated),
+    });
 
     // ⚠️ 原 `tickOverTimeEffects()`（"DoT 到点触发"）循环体是**空的**，只看名字会
     // 以为 DoT 已支持。DoT 应由 `onTick` 触发器表达（见 `triggers.ts`），别恢复空壳。

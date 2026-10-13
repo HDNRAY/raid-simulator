@@ -30,6 +30,7 @@ import {
   characterSelectDebugApi,
   homeDebugApi,
   prepareDebugApi,
+  qijiDebugApi,
   settingsDebugApi,
 } from './debugApi';
 import { clampUiScale } from '../render/scaling';
@@ -41,8 +42,11 @@ import type { SettingsToggle } from './settingsToggle';
 import type { HomeScreen } from '../ui/HomeScreen';
 import type { CharacterSelectScreen } from '../ui/CharacterSelectScreen';
 import type { PrepareScreen } from '../ui/PrepareScreen';
+import type { QijiSelectScreen } from '../ui/QijiSelectScreen';
+import type { RunOverScreen } from '../ui/RunOverScreen';
 import type { ScreenChrome } from '../ui/ScreenChrome';
 import type { TouchControls } from './touchControls';
+import type { RunState } from '../core/run/index';
 
 /**
  * `window.__raidBattle` 的精确形状。
@@ -104,6 +108,25 @@ export interface DebugApiDeps {
    * （见下面 `api.back` 与文件头那段"为什么按相位查"）。
    */
   readonly prepare: PrepareScreen;
+  /**
+   * **选炁机屏**（P3）与**一局结束屏**（P3）。
+   *
+   * ⚠️ 它们进调试入口的理由与另外三屏一样：`?runlen=2` 那条路径要能被
+   * **脚本读状态**（"现在这一屏有几个候选、光标在哪"），而 headless 下
+   * 模拟点击不可靠 —— 只拍一张图分不清"没有候选"和"候选没画出来"。
+   */
+  readonly qijiSelect: QijiSelectScreen;
+  readonly runOver: RunOverScreen;
+  /**
+   * **一局肉鸽的账本 + 相位序列**（`?runlen=N` 的验收探针）。
+   *
+   * ⚠️ 传**取值函数**（不是快照）：账本每场都在变，快照一份会永远停在
+   * 起局那一刻。
+   */
+  readonly run: {
+    state(): RunState | undefined;
+    phases(): readonly string[];
+  };
   /** 触屏按钮几何的唯一真相（`touchButtonCenter` 从它反查）。 */
   readonly touch: TouchControls;
   /** 重开一局（`restart` 从它走 `enterBattle`）。 */
@@ -195,6 +218,33 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
     ...homeDebugApi(d.home),
     ...characterSelectDebugApi(d.select),
     ...prepareDebugApi(d.prepare),
+    ...qijiDebugApi(d.qijiSelect, d.runOver),
+    /**
+     * **一局肉鸽的账本**（只读观测）。
+     *
+     * ⚠️ 这里是**唯一**把 `RunState` 摊平成纯数据的地方（`crossJson`）：
+     * `Runtime.evaluate` 的 `returnByValue` 只认对象自己的属性，所以
+     * 不能直接把手写的 `RunState` 交出去（`debugApi.ts` 的 `toPlainText`
+     * 记着同一个坑）。摊平也让脚本读到的字段名是稳定的。
+     */
+    run: {
+      state: () => {
+        const run = d.run.state();
+        if (run === undefined) return null;
+        const outcomes = run.battleStats.battles ?? [];
+        return {
+          runSeed: run.runSeed,
+          playerId: run.playerId,
+          order: [...run.order],
+          position: run.position,
+          status: run.status,
+          unlocked: [...run.unlocked],
+          chosen: run.chosen.map((c) => ({ qijiId: c.qijiId, stacks: c.stacks })),
+          battles: outcomes.map((b) => ({ won: b.won, flawless: b.flawless })),
+        };
+      },
+      phases: () => [...d.run.phases()],
+    },
     /**
      * 返回箭头（截图 / 触屏验证用）。
      *

@@ -109,6 +109,33 @@ export interface BattleStats {
   /** **成功打断**的次数（按 `interruptSuccess.sourceSkillId` 分）。 */
   readonly skillInterrupts: SkillCounts;
   /**
+   * **成功用出来的防御**次数（按 `avoided.viaBuffId` 分：`guard` / `flash-iframe`…）。
+   *
+   * ==================================================================
+   * 为什么它是"按 buff 分"，而不是复用 `dodges`
+   * ==================================================================
+   *
+   * 用户 2026-10-13 要的三条解锁里有两条**不是打断**：
+   *
+   * | 源技能 | 什么叫"用出来了" | 事件 |
+   * |---|---|---|
+   * | 「截」 | 真的打断了一个读条 | `interruptSuccess.sourceSkillId` |
+   * | 「卸」 | 阈值**挡下了整击**（`≤N`） | `avoided.viaBuffId === 'guard'` |
+   * | 「闪」 | 无敌窗口**真的吃掉了一击** | `avoided.viaBuffId === 'flash-iframe'` |
+   *
+   * `dodges` 那张表**按 `reason` 分**（`dodged` / `immune`），拿不到"是哪个
+   * buff"—— 而 `invulnerable` 这个 flag 被「闪」与「避」**两个角色**的技能
+   * 共用。用它去回答"闪用了几次"会把「避」的次数算进去。
+   *
+   * ⚠️ 与 `skillInterrupts` 是**两个**维度，不要合并：一个技能可以既是打断
+   * 又是防御（将来的设计），而两者的事件来源完全不同（`interruptSuccess`
+   * vs `avoided`）。合并会让"截数了几次"有两个口径。
+   *
+   * ⚠️ 缺键 = 0：`viaBuffId` 是**可选**字段，没有它的 `avoided`
+   * （触发器产的免伤）不记账 —— 那种事件的真实语义是"不知道是什么挡的"。
+   */
+  readonly skillAvoids: SkillCounts;
+  /**
    * `avoided` 事件的次数（按 `reason` 分：`dodged` 是真闪避，`immune` 是免疫）。
    *
    * ⚠️ 不分技能：`avoided.skillId` 是**被闪掉的那个招式**（攻击者的），
@@ -152,6 +179,7 @@ export const EMPTY_BATTLE_STATS: BattleStats = {
   skillDamage: {},
   skillHits: {},
   skillInterrupts: {},
+  skillAvoids: {},
   dodges: {},
   ticks: 0,
   battles: [],
@@ -220,6 +248,7 @@ export function reduceBattleStats(
   const skillDamage: Record<string, number> = {};
   const skillHits: Record<string, number> = {};
   const skillInterrupts: Record<string, number> = {};
+  const skillAvoids: Record<string, number> = {};
   const dodges: Record<string, number> = {};
   let ticks = 0;
 
@@ -268,6 +297,20 @@ export function reduceBattleStats(
       case 'avoided': {
         if (event.targetId !== scope.actorId) break;
         dodges[event.reason] = (dodges[event.reason] ?? 0) + 1;
+        /**
+         * ⚠️ 另记一张表（`skillAvoids`），按 **`viaBuffId`** 分。
+         *
+         * 这是 P3 的三条"用了 3 次"里**非打断**那两条的来源：「卸」与「闪」
+         * 从来不发 `interruptSuccess`，它们的成功证据就是"这一击被自己
+         * 挡下了"。用 `reason` 分不出来是哪个 buff（见 `BattleStats.skillAvoids`
+         * 的说明），所以用 `viaBuffId`。
+         *
+         * ⚠️ 没有 `viaBuffId` 的 `avoided` **不记**（触发器产的免伤没有
+         * "哪个技能"可写）—— 与 `skillInterrupts` 对缺 `sourceSkillId` 的
+         * 处理同一条。
+         */
+        if (event.viaBuffId === undefined) break;
+        skillAvoids[event.viaBuffId] = (skillAvoids[event.viaBuffId] ?? 0) + 1;
         break;
       }
       default:
@@ -287,6 +330,7 @@ export function reduceBattleStats(
     skillDamage,
     skillHits,
     skillInterrupts,
+    skillAvoids,
     dodges,
     ticks,
   };
@@ -306,6 +350,7 @@ export function mergeBattleStats(a: BattleStats, b: BattleStats): BattleStats {
     skillDamage: addCounts(a.skillDamage, b.skillDamage),
     skillHits: addCounts(a.skillHits, b.skillHits),
     skillInterrupts: addCounts(a.skillInterrupts, b.skillInterrupts),
+    skillAvoids: addCounts(a.skillAvoids, b.skillAvoids),
     dodges: addCounts(a.dodges, b.dodges),
     ticks: a.ticks + b.ticks,
     battles: [...(a.battles ?? []), ...(b.battles ?? [])],

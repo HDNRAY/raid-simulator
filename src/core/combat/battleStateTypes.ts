@@ -98,3 +98,59 @@ export function defaultActorIdOf(combatants: readonly Combatant[]): string {
   const ally = combatants.find((c) => c.side === 'ally' && c.alive);
   return (ally ?? combatants[0])?.id ?? 'player';
 }
+
+/**
+ * 把 `who`（`'self'` / `'caster'` / 其它 id）解析成实际的 combatant。
+ *
+ * ⚠️ 从 `battleState.ts` 搬出来（纯函数，只看 `combatants`；那个文件顶在
+ * 700 行上限上，AGENTS.md §3 要求"拆 util"而不是压注释）。
+ *
+ * 兜底顺序是 `对手 → 自己 → 第一个单位 → undefined`：调用点都在 tick
+ * 热路径上，宁可给出一个可解释的结果，也不要抛错。
+ */
+export function resolveCombatantIn(
+  combatants: readonly Combatant[],
+  selfId: string,
+  who: string,
+): Combatant {
+  if (who === 'self' || who === 'caster') {
+    return combatants.find((c) => c.id === selfId) ?? nonNull(combatants[0]);
+  }
+  const self = combatants.find((c) => c.id === selfId);
+  const opponent = combatants.find((c) => c.side !== self?.side);
+  return opponent ?? self ?? nonNull(combatants[0]);
+}
+
+/**
+ * 把"数组下标取出来的 `T | undefined`"收成 `T`。
+ *
+ * ⚠️ 与 AGENTS.md §1 不冲突：那条禁的是 `as any` / `as unknown as`
+ * （**关闭**类型检查的断言）。这里用的是 `!`，它只让编译器"相信调用方
+ * 的不变量"——而这个不变量（`combatants` 非空）由引擎的构造保证，
+ * 旧代码在同样位置用的也是 `!`。名字写出来是为了让"这里有一个未经验证的
+ * 假设"在调用点上是**可见的**，而不是一个散落的标点。
+ */
+function nonNull<T>(value: T | undefined): T {
+  if (value === undefined) {
+    throw new Error('resolveCombatantIn: combatants is empty');
+  }
+  return value;
+}
+
+/**
+ * **对手**（另一侧的第一个单位）。单挑场景里就是那唯一一个敌人。
+ *
+ * ⚠️ 从 `battleState.ts` 搬出来（AGENTS.md §3：拆 util，**不压注释**）：
+ * 它是**纯函数**（只看 `combatants`），而那个文件顶在 700 行上限上。
+ *
+ * 判据是 `side !== self.side` —— 找不到自己时 `self` 是 `undefined`，
+ * 于是取第一个单位（与 `defaultActorIdOf` 的兜底同一条：宁可给出一个
+ * 可解释的结果，也不要抛错 —— 调用点都在 tick 热路径上）。
+ */
+export function opponentOf(
+  combatants: readonly Combatant[],
+  id: string,
+): Combatant | undefined {
+  const self = combatants.find((c) => c.id === id);
+  return combatants.find((c) => c.side !== self?.side);
+}

@@ -42,13 +42,14 @@
  * ```
  * 首页（新，默认入口）
  *   ├─ 「肉鸽模式」 → 选角色屏（新）→ 一局肉鸽
+ *   │     └─ 每场打完 → 选炁机（P3）→ 下一场 … → 一局结束（P3）
  *   └─ 「自由模式」 → 现在的备战界面（标题改成「自由模式」）
  *        └─ Esc / 点左上角返回 → 回首页
  * ```
  *
  * ⚠️ **首页是安全的默认入口**（它只是路由，不通向半成品）；
  * 而"选角色屏直接当正门"**不安全** —— 肉鸽那条路还不完整
- * （炁机选择是 P3、强度曲线是 P4/P5、7 个 Boss 只有 2 个能打）。
+ * （强度曲线是 P4/P5、7 个 Boss 只有 2 个能打）。
  * ⚠️ 这句话是**判断**不是细节，设计稿 §3.1 里也重复了一遍。
  *
  * ⚠️ **不要新增 `'result'`**：结算面板本来就画在 `BattleScene` 里
@@ -60,7 +61,20 @@
  *   指针路由的 `phase` / 设置焦点）、`loopWiring.ts`（每帧分发 + 键盘分发）、
  *   `canvasInput.ts`（指针路由）、`debugApiSetup.ts`（补一次界面摆位）。
  */
-export type Phase = 'home' | 'characterSelect' | 'prepare' | 'battle';
+export type Phase =
+  | 'home'
+  | 'characterSelect'
+  | 'prepare'
+  | 'battle'
+  /**
+   * **选炁机**（P3；每场战斗打完之后选 1 个生效）。
+   *
+   * ⚠️ 它**只在第一场打完之后**才会出现（用户 2026-10-13 的规则第 3 条）：
+   * 开局那一条路（`startRoguelikeRun`）直接进战斗，不经过这里。
+   */
+  | 'qijiSelect'
+  /** **一局肉鸽结束**（通关 / 失败）的摘要屏（P3）。 */
+  | 'runOver';
 
 /**
  * ⚠️ **类型**导入（编译期擦除，不构成循环依赖）：`ui/settings/tabs.ts`
@@ -69,13 +83,18 @@ export type Phase = 'home' | 'characterSelect' | 'prepare' | 'battle';
 import type { SettingsOrigin } from '../ui/settings/tabs';
 
 /**
- * **返回能去哪**（目前只有首页）。
+ * **返回能去哪**。
  *
- * ⚠️ 单独给出这个类型是为了让"返回目标"是 `Phase` 的**真子集**：
- * `switchTo` 只接受"整屏界面"那三个相位，而 `Phase` 还包含 `battle` ——
+ * ⚠️ 单独给出这个类型是为了让"返回目标"是"整屏界面"那几个相位的**真子集**：
+ * `switchTo` 只接受可以整屏切换的相位，而 `Phase` 还包含 `battle` ——
  * 返回 `Phase` 的话调用方要么断言、要么再判一次（两份判据）。
+ *
+ * ⚠️ P3 起了**第二个**目标（`'characterSelect'`）：选炁机屏与"一局结束"
+ * 屏都回**选角色**，而不是首页 —— 因为"这一局还没完"（选炁机）与
+ * "这一局刚完，要不要再来"（结束屏）都该回到"开一局"的起点。
+ * 首页是"我不想玩了"的意思，那是 `Esc` 在自由模式 / 选角色屏上的语义。
  */
-export type BackTarget = 'home';
+export type BackTarget = 'home' | 'characterSelect';
 
 /**
  * 键位表里 `Esc` 的键名（`normalizeKey` 归一化之后的形状）。
@@ -93,10 +112,17 @@ export const ESCAPE_KEY = 'escape';
  * | `home` | ✗ | 首页就是返回的目标，再画一个就自指了 |
  * | `characterSelect` | ✅ | 回首页 |
  * | `prepare` | ✅ | 回首页 |
+ * | `qijiSelect` | ✅ | 回**选角色**（放弃这一局；见 `BackTarget` 的说明） |
+ * | `runOver` | ✅ | 回**选角色**（"再来一局"的起点，与 Enter 同一个目标） |
  * | `battle` | ✗ | 战斗中没有"返回"——见 `phaseFromEscape` 的说明 |
  */
 export function backVisibleIn(phase: Phase): boolean {
-  return phase === 'characterSelect' || phase === 'prepare';
+  return (
+    phase === 'characterSelect' ||
+    phase === 'prepare' ||
+    phase === 'qijiSelect' ||
+    phase === 'runOver'
+  );
 }
 
 /**
@@ -116,15 +142,24 @@ export function backVisibleIn(phase: Phase): boolean {
  * | `home` | 无目标（首页就是目标本身） |
  * | `characterSelect` | → `'home'` |
  * | `prepare` | → `'home'` |
+ * | `qijiSelect` | → `'characterSelect'`（这一局还没完，但可以放弃重开） |
+ * | `runOver` | → `'characterSelect'` |
  * | `battle` | 无目标 |
  *
  * ⚠️ 返回是**又一次相位转移**，调用方必须走 `game.ts` 的 `switchTo` /
  * `applyPhase`（显隐的唯一写入点）—— **不要**在这里或别处手写 `setVisible`。
  *
+ * ⚠️ 选炁机屏的返回**不等价于"跳过选择"**：它把这一局丢掉（回选角色）。
+ * 之所以不做"跳过"（保留这一局、不选炁机直接打下一场），是因为那会让
+ * "选 1 个生效"这条节拍有一个静默的旁路，而玩家点返回时的心理预期是
+ * "离开"。**不选也行**的做法是提供一条明确的"跳过"按钮 —— 那是以后的事。
+ *
  * @returns 该去的相位；`undefined` = 这次 `Esc` 不该有反应
  */
 export function phaseFromEscape(phase: Phase): BackTarget | undefined {
-  return backVisibleIn(phase) ? 'home' : undefined;
+  if (phase === 'characterSelect' || phase === 'prepare') return 'home';
+  if (phase === 'qijiSelect' || phase === 'runOver') return 'characterSelect';
+  return undefined;
 }
 
 /**
@@ -151,7 +186,13 @@ export const CONTROL_VISIBILITY = {
  * 拆开之后，"两个相位共用一屏"这种设计是**表里多写一行**，而不是一个
  * 必须先改类型才能表达的东西。
  */
-export type ScreenKey = 'home' | 'characterSelect' | 'prepare' | 'battle';
+export type ScreenKey =
+  | 'home'
+  | 'characterSelect'
+  | 'prepare'
+  | 'battle'
+  | 'qijiSelect'
+  | 'runOver';
 
 /**
  * **哪个相位点亮哪一屏** —— 这是"谁该可见"的**唯一判据**。
@@ -189,6 +230,8 @@ const STAGE_SCREEN: Readonly<Record<Phase, ScreenKey>> = {
   characterSelect: 'characterSelect',
   prepare: 'prepare',
   battle: 'battle',
+  qijiSelect: 'qijiSelect',
+  runOver: 'runOver',
 };
 
 /**
@@ -210,6 +253,8 @@ export function screenVisibilityOf(phase: Phase): Readonly<Record<ScreenKey, boo
     characterSelect: onStage === 'characterSelect',
     prepare: onStage === 'prepare',
     battle: onStage === 'battle',
+    qijiSelect: onStage === 'qijiSelect',
+    runOver: onStage === 'runOver',
   };
 }
 
@@ -240,6 +285,10 @@ export function settingsOriginOf(phase: Phase): SettingsOrigin {
   /**
    * ⚠️ **选角色屏也没有「按键」页**（用户 2026-10-12："肉鸽选人界面的设置
    * 也是没有按键的"）—— 那一刻还没决定用谁，技能表还没定。
+   *
+   * ⚠️ P3 的 `qijiSelect` **不算这里**：它已经在肉鸽那一局里、角色已经定了，
+   * 所以照旧显示「按键」页（走下面的 `'gameplay'`）。`runOver` 同理 ——
+   * 它虽然"这一局结束了"，但玩家马上要回选角色，没有"当前角色"可变。
    */
   if (phase === 'characterSelect') return 'characterSelect';
   return 'gameplay';

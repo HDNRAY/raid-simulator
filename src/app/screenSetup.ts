@@ -37,9 +37,13 @@ import { Container, Graphics, Sprite, Text, type Application } from 'pixi.js';
 import { CharacterSelectScreen } from '../ui/CharacterSelectScreen';
 import { HomeScreen } from '../ui/HomeScreen';
 import { PrepareScreen } from '../ui/PrepareScreen';
+import { QijiSelectScreen } from '../ui/QijiSelectScreen';
+import { RunOverScreen } from '../ui/RunOverScreen';
 import { translateSafe } from './translate';
 import { CONTROL_VISIBILITY } from './phaseLogic';
 import { BOSS_ROSTER, PLAYER_ROSTER } from '../data/roster';
+import type { QijiCandidateView } from '../ui/qijiSelectLogic';
+import type { RunOverSummary } from '../ui/RunOverScreen';
 import type { SettingsToggle } from './settingsToggle';
 
 export interface ScreenSetupDeps {
@@ -66,6 +70,14 @@ export interface ScreenSetupDeps {
   readonly rememberPick: (playerId: string, bossId: string) => void;
   /** 左上角返回箭头（与键盘 `Esc` 走**同一个**闭包）。 */
   readonly backToHome: () => void;
+  /** 选炁机屏的候选（`phaseFlow.qijiCandidates`）。 */
+  readonly qijiCandidates: () => readonly QijiCandidateView[];
+  /** 选了某个炁机（**当场生效、进下一场**）。 */
+  readonly chooseQiji: (qijiId: string) => void;
+  /** 一局结束屏的摘要（`phaseFlow.runSummary`）。 */
+  readonly runSummary: () => RunOverSummary;
+  /** 一局结束屏的确认（回选角色）。 */
+  readonly continueRun: () => void;
   /** 备战界面进屏时的初始选择。 */
   readonly initial: { readonly playerId: string; readonly bossId: string };
 }
@@ -74,6 +86,8 @@ export interface Screens {
   readonly home: HomeScreen;
   readonly select: CharacterSelectScreen;
   readonly prepare: PrepareScreen;
+  readonly qijiSelect: QijiSelectScreen;
+  readonly runOver: RunOverScreen;
 }
 
 export function buildScreens(d: ScreenSetupDeps): Screens {
@@ -127,8 +141,9 @@ export function buildScreens(d: ScreenSetupDeps): Screens {
    * 一层"到底传没传"的猜测。`ScreenChromeOptions.onBack` 是可选的，
    * 传 `undefined` 就等于"这一屏没有返回"。
    */
-  const backIn = (phase: 'characterSelect' | 'prepare'): (() => void) | undefined =>
-    CONTROL_VISIBILITY.back(phase) ? d.backToHome : undefined;
+  const backIn = (
+    phase: 'characterSelect' | 'prepare' | 'qijiSelect' | 'runOver',
+  ): (() => void) | undefined => (CONTROL_VISIBILITY.back(phase) ? d.backToHome : undefined);
 
   /* ---------- 选角色屏（肉鸽模式的第一屏） ---------- */
   const select = new CharacterSelectScreen({
@@ -160,5 +175,37 @@ export function buildScreens(d: ScreenSetupDeps): Screens {
   });
   d.app.stage.addChild(prepare.root);
 
-  return { home, select, prepare };
+  /* ---------- 选炁机屏（P3；每场战斗打完之后） ---------- */
+  /**
+   * ⚠️ **返回箭头指向 `backToHome`**（而不是"跳过选择"）：按了它 =
+   * 放弃这一局、回选角色。见 `phaseLogic.phaseFromEscape` 的说明 ——
+   * 不做"跳过"是为了不给"每场选 1 个"留一条静默旁路。
+   */
+  const qijiSelect = new QijiSelectScreen({
+    pixi,
+    translate: translateSafe,
+    getCandidates: d.qijiCandidates,
+    showKeyHints: d.showKeyHints,
+    f1Label: d.f1Label,
+    onGear,
+    onBack: backIn('qijiSelect'),
+    onChoose: (qijiId) => d.chooseQiji(qijiId),
+  });
+  d.app.stage.addChild(qijiSelect.root);
+
+  /* ---------- 一局结束屏（P3） ---------- */
+  const runOver = new RunOverScreen({
+    pixi,
+    translate: translateSafe,
+    getSummary: d.runSummary,
+    showKeyHints: d.showKeyHints,
+    f1Label: d.f1Label,
+    onGear,
+    /** ⚠️ 返回箭头与"点屏幕 / Enter"**同一个去向**（"再来一局"的起点）。 */
+    onBack: backIn('runOver'),
+    onContinue: d.continueRun,
+  });
+  d.app.stage.addChild(runOver.root);
+
+  return { home, select, prepare, qijiSelect, runOver };
 }

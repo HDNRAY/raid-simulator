@@ -38,6 +38,7 @@
 
 import { logicMs } from '../../core/loopConstants';
 import type { BuffDef, SkillDef } from '../../core/types';
+import type { SkillId } from '../../core/types/ids';
 import { C, S } from '../scale';
 
 /**
@@ -92,6 +93,33 @@ export const COMBO_WINDOW: BuffDef = {
   /** UI 靠它把派生技画在源技能上方。见上面的说明。 */
   flags: { comboWindowSource: 'jie' },
 };
+
+/**
+ * **一局肉鸽的炁机**给出来的派生窗口：与 `COMBO_WINDOW` 只差
+ * `flags.comboWindowSource`。
+ *
+ * ==================================================================
+ * 用户 2026-10-13 的定调：「**这个整体是一个炁机，不是 击 是炁机**」
+ * ==================================================================
+ *
+ * 炁机 = **「源技能 → 派生技」这条关系本身**。所以：
+ *   - 它是「截 派生 击」/「卸 派生 击」/「闪 派生 击」，不是"一个叫击的道具"
+ *   - 源技能决定了窗口开在哪 —— 而"画在谁上方"读的正是
+ *     `flags.comboWindowSource`（`viewAdapter` / `deriveSlots` 都在读它）
+ *   - 同一个 `combo-window` buff id 反复刷新是**有意的**：同一个时间点
+ *     只可能有一个窗口开着，而"后派生的顶掉先派生的"正是 `refresh` 语义
+ *     （AGENTS.md §3b 的"唯一真相"同一条思路：窗口只有一份，源是它的字段）
+ *
+ * ⚠️ 于是**不需要**给「卸派生击」「闪派生击」各造一个派生技 ——
+ * 派生技是同一个「击」（`STRIKE`），变的只是**它从谁那儿派出来**。
+ * 这与 §5.2 的设计一致：窗口是那个关系，技能只是它的出口。
+ */
+export function comboWindowFor(sourceSkillId: SkillId): BuffDef {
+  return {
+    ...COMBO_WINDOW,
+    flags: { comboWindowSource: sourceSkillId },
+  };
+}
 
 /**
  * 「截」：**瞬发强打断** —— 成功则冷却归零，失败进入完整冷却。

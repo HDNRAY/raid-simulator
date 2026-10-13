@@ -29,6 +29,21 @@
  *
  * 这一层订阅 `TouchLayout`（唯一真相），所以布局一变就重画。
  * 它同时导出**命中区域**给输入层 —— 因为"按钮画在哪"只有它知道。
+ *
+ * ==================================================================
+ * ⚠️ **显隐不在这里写**（2026-10-13 收口）
+ * ==================================================================
+ *
+ * 原先 `update()` 末尾自己写了一句 `root.visible = buttons.size > 0`，
+ * 而 `app/touchControls.ts` 的 `frame()` 又宣称是"显隐的唯一写入点" ——
+ * 两处各管一半（本仓库最常出的一类病）。
+ *
+ * 收口到 **`frame()` 一处**（它是**语义/输入**层：它每帧都知道
+ * phase / 设置面板开没开 / 操作方式，而 `update()` **只在战斗且有快照时
+ * 才被调**，隐藏时根本不会被调到 → 它没资格当写入点）。
+ *
+ * 本层只**提供事实**："我现在有几个按钮"（`hasButtons()`）—— 那是它
+ * 自己持有的状态，不是副本；"该不该显示"由 `frame()` 一家说了算。
  */
 
 import type { BattleSnapshotView, ResourceKeyName, SkillSlotView } from './viewModel';
@@ -152,6 +167,18 @@ export class TouchButtonLayer {
     }
   }
 
+  /**
+   * 现在有没有**可画的**按钮（空键位不算）。
+   *
+   * ⚠️ 这是"显隐"那条判据的**一个输入**，不是判据本身：本层只报告
+   * "我手里有几个按钮"（这是它自己持有的状态），
+   * 由 `app/touchControls.ts` 的 `frame()` 结合 phase / 设置面板 / 操作
+   * 方式一起判 —— 见文件头"显隐不在这里写"。
+   */
+  hasButtons(): boolean {
+    return this.buttons.size > 0;
+  }
+
   /** 画一个槽位的按钮（**位置只来自 `touchButtonCenter`**）。 */
   private buildButton(index: number, skillId: string): ButtonView | undefined {
     const center = touchButtonCenter(index);
@@ -257,9 +284,8 @@ export class TouchButtonLayer {
     };
   }
 
-  /** 每帧按快照更新文本。 */
+  /** 每帧按快照更新文本（⚠️ **不碰 `root.visible`** —— 见文件头）。 */
   update(view: BattleSnapshotView): void {
-    this.root.visible = this.buttons.size > 0;
     /**
      * **派生技不进扇形**：它作为"环"挂在**源按钮**上（见 `ButtonView.ring`）。
      * 所以这里先从快照里挑出派生技，再把它配给源按钮。

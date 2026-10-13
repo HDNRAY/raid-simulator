@@ -6,6 +6,7 @@
  */
 
 import type { CastBar } from '../../ui/CastBar';
+import { formatCountdown } from '../viewModel';
 import { PALETTE } from '../theme';
 import type { FrameContext, FramePart } from '../sceneTypes';
 
@@ -36,7 +37,7 @@ export class BossCastBarPart implements FramePart {
     const tagLabel = (cast.hintTags ?? []).map((key) => translate(key)).join(' · ');
     this.castBar.setContent(
       translate(cast.nameKey),
-      `${(cast.remainingMs / 1000).toFixed(1)}s`,
+      `${formatCountdown(cast.remainingMs)}s`,
       tagLabel,
     );
     /**

@@ -40,11 +40,14 @@ describe('QijiEntity —— 真的满足 GameEntity（§5.1 选继承的全部�
    */
   const VITALITY: QijiEntity = {
     id: 'vitality',
-    // ⚠️ P0 只能填 `GameEntity['kind']` 里已有的值：`'qiji'` 还不在
-    // `EntityKind` 里（**W8**，P6 才做）。若这里填 `'qiji'`，`tsc` 会报
-    // `Type '"qiji"' is not assignable to type 'EntityKind'` —— 而那条
-    // 报错就是这条测试存在的意义：它把"继承关系现在是断的"写在编译期。
-    kind: 'passive',
+    /**
+     * ⚠️ **P3 起这里填 `'qiji'`**（原先填 `'passive'`）。
+     *
+     * P0 时 `'qiji'` 还不在 `EntityKind` 里，只能填一个别的 kind —— 那是
+     * **用假值绕过类型**。P3 把 `'qiji'` 加进了联合（W8 的类型那一半），
+     * 所以现在填真值；`QijiEntity.kind` 也跟着收窄成 `'qiji'`。
+     */
+    kind: 'qiji',
     nameKey: 'qiji.vitality.name',
     descKey: 'qiji.vitality.desc',
     icon: 'char_guard',
@@ -119,7 +122,7 @@ describe('QijiEntity —— 真的满足 GameEntity（§5.1 选继承的全部�
   it('maxStacks 是可选的（缺省 = 1 的语义在 unlock.ts 里）', () => {
     const noStacks: QijiEntity = {
       id: 'breath',
-      kind: 'passive',
+      kind: 'qiji',
       nameKey: 'qiji.breath.name',
       icon: 'char_focus',
       category: 'generic',
@@ -134,18 +137,22 @@ describe('QijiEntity —— 真的满足 GameEntity（§5.1 选继承的全部�
   });
 });
 
-describe('EntityKind 的现状（P0 的一条**有意**的缺口，写成断言以免被误改）', () => {
-  it('`"qiji"` 还不能作为 EntityKind —— 那是 W8，P6 才做', () => {
+describe('EntityKind 的现状（P3 起 `"qiji"` 进了联合 —— 但 W8 只做了一半）', () => {
+  it('`"qiji"` **已经**是合法的 EntityKind（W8 的类型那一半）', () => {
     /**
-     * ⚠️ 这条测试断言的是**当前缺失**，不是"正确性"。
+     * ⚠️ 这条测试在 P0/P2 断言的是**相反的事实**（"`"qiji"` 还不能用，
+     * 那是 W8、P6 才做"），而且它当时就写明了改法：
      *
-     * 它存在的理由：`QijiEntity.kind` 写成 `GameEntity['kind']` 这件事
-     * 看起来像笔误（"继承的类当然该声明自己的 kind"）。这条测试 + 那段
-     * 注释一起说明"这是 W8 没做的直接后果，不是疏漏"。
+     *   > 做 W8 时：把 `'qiji'` 加进 `EntityKind`、把这里的断言改成
+     *   > `toContain('qiji')`、把 `QijiEntity.kind` 收窄成 `'qiji'`
+     *   > —— 三处一起，编译器会逼着全部发生。
      *
-     * 做 W8 时：把 `'qiji'` 加进 `EntityKind`、把这里的断言改成
-     * `toContain('qiji')`、把 `QijiEntity.kind` 收窄成 `'qiji'` ——
-     * 三处一起，编译器会逼着全部发生。
+     * P3 需要 `QijiEntity.kind` 收窄（否则 `data/qiji.ts` 只能填假值），
+     * 于是这三处在同一轮里一起改了。
+     *
+     * ⚠️ **但 W8 的另一半仍然没做**（P6）：校验器不认识 `kind: 'qiji'`
+     * 的实体、注册表也没有它的位置。所以 `QIJI_ENTITY_VALIDATED` 仍是
+     * `false`，而 `data/qiji.ts` 的内容**不进 `ContentBundle.entities`**。
      */
     const kinds: readonly GameEntity['kind'][] = [
       'equipment',
@@ -153,10 +160,11 @@ describe('EntityKind 的现状（P0 的一条**有意**的缺口，写成断言�
       'passive',
       'buffTemplate',
       'activeSkill',
+      'qiji',
       'encounter',
     ];
-    expect(kinds).not.toContain('qiji');
-    expect(kinds).toHaveLength(6);
+    expect(kinds).toContain('qiji');
+    expect(kinds).toHaveLength(7);
   });
 });
 

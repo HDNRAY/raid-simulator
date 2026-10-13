@@ -106,9 +106,7 @@ function evalRun(unlock: QijiUnlock, events: readonly EventDef[]): boolean {
 function qiji(id: string, unlock: QijiUnlock, maxStacks?: number): QijiEntity {
   return {
     id,
-    // ⚠️ P0 只能用 `GameEntity['kind']` 里已有的值：`'qiji'` 还不在
-    // `EntityKind` 里（**W8**，P6 才做）。详见 `QijiEntity.kind` 的说明。
-    kind: 'passive',
+    kind: 'qiji',
     nameKey: `qiji.${id}.name`,
     descKey: `qiji.${id}.desc`,
     icon: 'char_break',

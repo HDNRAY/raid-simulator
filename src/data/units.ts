@@ -128,9 +128,25 @@ export const BOSS_CAPS = { hp: BOSS_HP_DISPLAY, energy: 0, douqi: 0 };
  * 内容），所以这里只出"这个人是谁、多少血、什么属性"。技能由
  * `app/battleSetup.ts` 用 `skillsForPlayer(id)` 交给引擎 ——
  * 一个装载点，不是两处。
+ *
+ * ==================================================================
+ * 2026-10-13：**炁机改上限的那一半走 `options.kit`**
+ * ==================================================================
+ *
+ * 肉鸽里"选了「加血上限」"必须真的加在下一场战斗上，而 `caps` 是**这里**
+ * 写的（引擎的钳制读 `combatant.caps.hp`，见 `changeResource`）。所以
+ * `options.kit` 让调用方把 `data/kit.ts` 算好的 `caps` / `base` 传进来 ——
+ * 而不是让本文件去 import `data/kit`（那会造出 `units ↔ kit` 的环：
+ * `kit` 本来就要读 `playerCapsFor`）。
+ *
+ * ⚠️ **不传 `kit` 时逐字等于今天**（`playerCapsFor(id)` + `PLAYER_BASE`）：
+ * 单场 / 自由模式 / 黄金重放走的都是这一支。
  */
-export function makePlayer(id: string): Combatant {
-  const caps = playerCapsFor(id);
+export function makePlayer(
+  id: string,
+  options?: { readonly kit?: { readonly caps: { readonly hp: number; readonly energy: number; readonly douqi: number } } },
+): Combatant {
+  const caps = options?.kit?.caps ?? playerCapsFor(id);
   return {
     id,
     /** 显示名来自 roster（需求："这个人物目前就叫 林晚风"）。 */

@@ -93,7 +93,7 @@ declare global {
         /**
          * 面板里的**可见文字**（字号 / 世界坐标 / 前 24 字）。
          *
-         * ⚠️ 这是"字到底变大了没有"的唯一硬证据：截图上 1.2 与 1.6 的差别
+         * ⚠️ 这是"字到底变大了没有"的唯一硬证据：截图上 1 与 1.35 的差别
          * 看不出来，而源码里那个 `scaledFont(...)` 也证明不了这一帧真的
          * 落成了那个值（字号是各部件在 `relayout()` 时写进 Pixi 的）。
          */
@@ -188,6 +188,58 @@ declare global {
         confirm(): void;
         /** 同点击卡片：移光标 + 确定 + 开始（一步到位）。 */
         pick(id: string): void;
+      };
+      /**
+       * **选炁机屏 + 一局结束屏**（P3；调试用）。
+       *
+       * ⚠️ 存在的理由（截图证明不了的两件事）：
+       *   1. "候选集合对不对"（解锁了哪些、叠满了没有）—— 尤其那条**反面**
+       *      验收"没到 3 次时它【不】出现"：截图上"少一张卡"与"画漏了一张"
+       *      完全一样。
+       *   2. "一局结束屏是哪一局"—— 通关 / 失败的文案长得像，位置与装备
+       *      必须能从状态读。
+       *
+       * ⚠️ 一律**转调界面自己的方法**（与键盘 / 点击同一条路），不另写一套。
+       */
+      qiji: {
+        /** 候选的炁机 id 列表（顺序 = 画出来的顺序）。 */
+        candidates(): readonly string[];
+        /** 光标下标。 */
+        cursor(): number;
+        /** 同 ← →：移光标。 */
+        cycle(delta: number): void;
+        /** 同 ↑ ↓ / Tab：换行（`wrap` 为真时环绕）。 */
+        moveFocus(delta: number, wrap?: boolean): void;
+        /** 同 Enter：选光标处那一个（**会真的生效并进下一场**）。 */
+        confirm(): void;
+        /** 一局结束屏此刻是否可见。 */
+        overviewOpen(): boolean;
+      };
+      /**
+       * **一局肉鸽的账本**（P3；验收 `?runlen=N` 用）。
+       *
+       * ⚠️ 只读**观测**：`state()` 给的是 `RunState` 的一份 JSON 化拷贝
+       *   （`order` / `position` / `status` / `unlocked` / `chosen` /
+       *   `battleStats.battles`），`phases()` 给的是**相位序列**。
+       *
+       * 为什么需要它：`?runlen=2` 的验收要"贴出每场的相位 / 结果序列"，
+       * 而截图只能证明"某一瞬间画了什么"——"走进过哪几屏、第几场赢了"
+       * 只有这两份数据能回答。
+       */
+      run: {
+        /** 当前一局的账本快照（没有进行中的一局时 `null`）。 */
+        state(): {
+          readonly runSeed: number;
+          readonly playerId: string;
+          readonly order: readonly string[];
+          readonly position: number;
+          readonly status: string;
+          readonly unlocked: readonly string[];
+          readonly chosen: readonly { readonly qijiId: string; readonly stacks: number }[];
+          readonly battles: readonly { readonly won: boolean; readonly flawless: boolean }[];
+        } | null;
+        /** 相位序列（每次 `applyPhase` 追加一条；**不清理**）。 */
+        phases(): readonly string[];
       };
       /**
        * **返回箭头**（自由模式 / 选角色屏左上角；调试用）。

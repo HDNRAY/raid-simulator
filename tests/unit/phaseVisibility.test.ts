@@ -34,11 +34,34 @@ import { screenVisibilityOf, type Phase, type ScreenKey } from '../../src/app/ph
  * 最后一条断言防的就是"有人把它们也塞进这张表"造成两份真相。
  */
 
-/** 四个相位（列出来而不是从类型遍历：`Phase` 是编译期的，运行期数不出来）。 */
-const PHASES: readonly Phase[] = ['home', 'characterSelect', 'prepare', 'battle'];
+/**
+ * 全部相位（列出来而不是从类型遍历：`Phase` 是编译期的，运行期数不出来）。
+ *
+ * ⚠️ **加一个相位就要在这里加一个**，而且 `Phase` / `ScreenKey` 的类型
+ * 会让漏掉的地方**编译不过**（`screenVisibilityOf` 的返回值是
+ * `Record<ScreenKey, boolean>`）。这张表是那个编译期检查的**运行期**对照面：
+ * 少了它，"6 个相位"与"6 个界面根"就有可能各说各话。
+ *
+ * P3 加了两个：`qijiSelect`（选炁机）与 `runOver`（一局结束）。
+ */
+const PHASES: readonly Phase[] = [
+  'home',
+  'characterSelect',
+  'prepare',
+  'battle',
+  'qijiSelect',
+  'runOver',
+];
 
-/** 四个整屏界面根。 */
-const SCREENS: readonly ScreenKey[] = ['home', 'characterSelect', 'prepare', 'battle'];
+/** 全部整屏界面根（每个相位恰好点亮一个）。 */
+const SCREENS: readonly ScreenKey[] = [
+  'home',
+  'characterSelect',
+  'prepare',
+  'battle',
+  'qijiSelect',
+  'runOver',
+];
 
 /**
  * 剥掉注释（保留换行，行号对得上）。
@@ -54,14 +77,14 @@ function stripComments(source: string): string {
 }
 
 describe('相位 → 整屏界面：每个相位恰好一屏在场', () => {
-  it('每个相位都给出了完整的显隐向量（四个界面一个不落）', () => {
+  it('每个相位都给出了完整的显隐向量（每个界面一个不落）', () => {
     for (const phase of PHASES) {
       const show = screenVisibilityOf(phase);
       expect(Object.keys(show).sort()).toEqual([...SCREENS].sort());
     }
   });
 
-  it('【逐屏扫描】每个相位下恰有一个整屏界面可见，其余三个一律 false', () => {
+  it('【逐屏扫描】每个相位下恰有一个整屏界面可见，其余一律 false', () => {
     for (const phase of PHASES) {
       const show = screenVisibilityOf(phase);
       const onStage = SCREENS.filter((screen) => show[screen]);
@@ -71,7 +94,7 @@ describe('相位 → 整屏界面：每个相位恰好一屏在场', () => {
        */
       expect(onStage, `相位 ${phase} 在场的整屏界面`).toHaveLength(1);
       /**
-       * 再钉一遍"其余三个**显式为 false**"：`setVisible(false)` 必须被
+       * 再钉一遍"其余**显式为 false**"：`setVisible(false)` 必须被
        * 显式执行 —— 只写可见的那一个，其余会停在上一屏的状态上。
        */
       for (const screen of SCREENS) {
@@ -81,7 +104,7 @@ describe('相位 → 整屏界面：每个相位恰好一屏在场', () => {
     }
   });
 
-  it('四个整屏界面**都**被某个相位点亮（没有永远不显示的孤儿屏）', () => {
+  it('每个整屏界面**都**被某个相位点亮（没有永远不显示的孤儿屏）', () => {
     const lit = new Set<ScreenKey>();
     for (const phase of PHASES) {
       for (const screen of SCREENS) if (screenVisibilityOf(phase)[screen]) lit.add(screen);
@@ -112,15 +135,19 @@ describe('"谁该可见"只有一处判据（不许在 applyPhase 里再判一�
     const { readFileSync, globSync } = await import('node:fs');
     /**
      * ⚠️ 扫的是"对**整屏界面根**调 `setVisible`"这件事。
-     * `state.home` / `state.select` / `state.prepare` 三个字段是
-     * `GameState` 上整屏界面根的唯一入口（见 `flow.ts`）。
+     * `state.home` / `state.select` / `state.prepare` / `state.qijiSelect` /
+     * `state.runOver` 是 `GameState` 上整屏界面根的唯一入口（见 `flow.ts`）。
+     *
+     * ⚠️ P3 加了最后两个：**不补进这条扫描**的话，新屏的显隐就可能被
+     * 别处偷偷写一次 —— 而那正是"两个界面同时可见"的形状（本文件的整个
+     * 存在理由）。
      */
     const offenders: string[] = [];
     for (const file of globSync('src/app/**/*.ts')) {
       if (file.endsWith('phaseFlow.ts')) continue;
       const code = stripComments(readFileSync(file, 'utf8'));
       code.split('\n').forEach((line, i) => {
-        if (/state\.(home|select|prepare)\?\.setVisible\(/.test(line)) {
+        if (/state\.(home|select|prepare|qijiSelect|runOver)\?\.setVisible\(/.test(line)) {
           offenders.push(`${file}:${i + 1} → ${line.trim().slice(0, 80)}`);
         }
       });

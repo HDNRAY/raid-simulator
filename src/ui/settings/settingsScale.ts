@@ -56,27 +56,20 @@
  * 用户明确要求过这条，本仓库已有一个先例：`ui/iconHint` 的 `MIN_HINT_FONT`
  * ——那句"**下限由规则给出**，不是算完再夹一下"。这里同一条纪律。
  *
- * 规则是**竖向预算**。面板高 520，其中 **tab 行那 70px 钉死**
- * （`TAB_BAR_BOTTOM`），剩下的 450px 要装下三块：
+ * 规则是**竖向预算**，解出来的上限写在 `PANEL_SCALE_MAX` 那一段
+ * （连同"旧的 1.2 是怎么来的、为什么变了"）。结论只有一句：
  *
- *   格阵    2 行 × 44k + 1 × 8k      ← 跟 k 走
- *   详情区  由"剩下的"决定（它可滚，压不死，但也有下限 —— 见下）
- *   底部    提示 2 行 40 + 间隙 8 + 按钮 26 = **74**（固定）
+ *   外框 640×520 **固定** → k 只放大字号 + 详情区的行距/留白
+ *   → k 的唯一代价是**详情区一屏少行** → "一屏 ≥ `MIN_DETAIL_ROWS` 行"
+ *   这一步给出 k 的上限。
  *
- * 解一次不等式得到 k 的上限（取 `minDetail = 220` = 详情区当前高度，
- * 即"缩放**不许从信息最密的地方抢地方**"）：
- *
- *   k ≤ (450 − 74 − 220) / 96 = 156 / 96 = 1.625 → 收成 **1.6**
- *
- * 收成 1.6 之后 2 行格阵 + 间隙占 147px（预算给它的 156px 之内），
- * 详情区仍然是 **220px**（不缩水）—— 所以这一版**不是**
- * "把说明挤掉换大字号"。
- *
- * ⚠️ 1.6 **必须**是这一步算出来的，不许改成"先乘完再看有没有溢出"：
- * 那样在缩放 1.5 / 1.7 时的表现（字大了、格子越界了）会随布局微调静默变化。
+ * ⚠️ **不许**改成"先乘完再看有没有溢出"：那样在缩放 1.5 / 2 时的表现
+ * （字大了、格子越界了、说明压到提示行上）会随布局微调**静默**变化 ——
+ * 而"静默"正是最难查的那一类（见 `settingsGeometry` 文件头记的那两次）。
  */
 
 import { LOGICAL } from '../layout';
+import { TOUCH_BUTTON_DIAMETER, touchLayoutBounds } from '../../render/touchGeometry';
 import {
   CLOSE_BUTTON,
   DETAIL_BOTTOM,
@@ -114,34 +107,115 @@ export const FOOTER_BLOCK_H = HINT_BLOCK_H + HINT_LINE.gap + RESET_BUTTON.h;
 export const DETAIL_BASE_H = DETAIL_BOTTOM - DETAIL_TOP;
 
 /**
- * 面板内容能用的最大系数（**1.2**）。
- *
- * ==================================================================
- * ⚠️ 为什么上限这么小 —— 实测的硬约束（不是保守）
- * ==================================================================
- *
- * 面板底座 **640×520**，画布 **960×540**（`settingsGeometry.SETTINGS_PANEL`
- * / `ui/layout.LOGICAL`）—— 上下各只剩 **10px**。也就是说：
- *
- *   - **外框整体乘 2** = 1280×1040 → 横向超 320、纵向超 500 ✗（画布外）
- *   - **里面那几行整体乘 k**：面板总高固定 520，多占的空间只能从详情区抢
- *     —— `96k + 10k + 85k` 一乘上去，详情区立刻从 210px 掉到 167px
- *     （k=1.2 实测：**8 行 → 5 行**）✗ 字大了但一句话读不完
- *
- * 所以本版**不动任何行高**（格阵格子 / 详情区外框 / 提示行 / 按钮全保持
- * 1× 的几何），只把**字号 + 详情区的行距与留白**按 k 放大：
- *
- *   优点：容量、命中区、面板高度**逐位不变**（8 个技能仍一屏配得到，
- *         详情区仍是 210px、滚动条照旧）
- *   代价：详情区行距变成 `22k`，一屏行数 `floor(194 / 22k)`
- *         （k=1 → 8 行，k=1.2 → 7 行）—— **少一行**，而它可滚
- *
- * ⚠️ 1.2 是**设计取值**（不是"先乘完再看有没有溢出"）：再大就会撞到
- * `SKILL_DETAIL.padding` / 格子里那三个角标的位置（它们按 1× 摆）。
- * 想真正把面板做大，前提是**先把内容做小**（面板只剩 10px 边）——
- * 那是另一件事，见 `docs/specs/2026-10-09-architecture.md` §10。
+ * 预览里键位圆的**可点下限**（与触屏那套同一条物理约束：44px 手指可点）。
  */
-export const PANEL_SCALE_MAX = 1.2;
+export const PREVIEW_MIN_DIAMETER = 44;
+
+/**
+ * 「等比装进去之后圆钮直径 ≥ 44px」反算出的**双弧那块的最小高度**。
+ *
+ * 预览是**等比**装进去的（`touchPreview.ts` 取 `min(区域宽/外接宽, 区域高/外接高)`），
+ * 而当前外接矩形**高度那一维是紧的**，于是
+ * `直径 = TOUCH_BUTTON_DIAMETER × 区域高 / 外接高`，
+ * "直径 ≥ 44" 等价于 "区域高 ≥ 44/D × 外接高"。
+ *
+ * ⚠️ **由规则算出来**（不是写死一个"够大"的数）：外接矩形一变
+ * （`render/touchGeometry` 调了弧半径 / 按钮直径），这个下限跟着变。
+ * 它给 k 上了一条 `k ≤ 1.75` 的约束 —— 见 `PANEL_SCALE_MAX`。
+ */
+export function touchPreviewMinArcH(): number {
+  return Math.ceil((PREVIEW_MIN_DIAMETER / TOUCH_BUTTON_DIAMETER) * touchLayoutBounds().h);
+}
+
+/**
+ * 详情区**一屏至少**要放得下几行 —— 缩放的上限就是"别把它挤到读不下去"。
+ *
+ * ==================================================================
+ * ⚠️ 6 是**用户否掉 5 行**之后的下限
+ * ==================================================================
+ *
+ * 详情区是可滚的，所以"少几行"不会丢内容 —— 但**一屏**必须读得下
+ * "名字 + 一句说明 + 代价"。上一轮排查时 k=1.2 曾把详情区压到 5 行，
+ * 用户的原话是"**字大了但一句话读不完**"
+ * （`docs/specs/2026-10-09-architecture.md` §10.7.1 记着那次取舍）。
+ * 所以 5 行是**被否掉**的那一档，6 是它的下一档。
+ */
+export const MIN_DETAIL_ROWS = 6;
+
+/**
+ * 面板内容能用的最大系数（**1.35**）。
+ *
+ * ==================================================================
+ * 竖向预算（规则，不是"算完再夹一下"）
+ * ==================================================================
+ *
+ * 面板外框固定 640×520（画布 960×540，外面只剩 10px）——**外框不能乘
+ * 系数**（×2 就是 1280×1040，一半画到画布外）。所以 k 只放大
+ * **字号 + 详情区的行距/留白**：外框、格阵、提示两行、按钮一个都不动。
+ *
+ * 于是 k 唯一的代价是**详情区一屏少行**（它可滚，所以这不是"丢内容"，
+ * 只是"一屏能同时看到几行"）：
+ *
+ *   详情区底边（面板相对） = HINT_BLOCK_TOP − 16k
+ *   内框（去掉上下 padding） = 详情区高 − 2×8k
+ *   一屏行数               = floor(内框 / 22k)
+ *
+ * 要求 `一屏行数 ≥ MIN_DETAIL_ROWS`，代入当前几何解一次不等式：
+ *
+ *   (430 − 16k) − 204 = 226 − 16k     ← 详情区高（沿用本文件现有的坐标口径）
+ *   226 − 16k − 2×8k = 226 − 32k      ← 内框
+ *   226 − 32k ≥ 6 × 22k = 132k
+ *   →  k ≤ 226 / 164 = **1.378**  → 收成 **1.35**
+ *
+ * ⚠️ 向下取到 1.35 而不是 1.37：行高与留白都是 **`Math.round`** 的，
+ * k=1.39 时 `lineH` 从 30 跳到 31、行数当场掉到 5 —— 留一档给取整的台阶。
+ *
+ * 同时复核其余三条约束（1.35 下**都成立**，所以不是它们说了算）：
+ *
+ *   | 约束 | 规则 | 允许的 k |
+ *   |---|---|---|
+ *   | 底部提示两行 | `round(13k) ≤ HINT_LINE.height = 20`（两行是**固定** 20px 行高） | ≤ 1.57 |
+ *   | 触屏技能面 | `4 行 × round(44k) + 3×8 ≤ 详情区底 − 格阵上沿`（44 = 手指可点下限） | ≤ 1.65 |
+ *   | 键位预览 | 弧高 `TOUCH_PREVIEW.h − 16k ≥ touchPreviewMinArcH()`（等比装进去后圆钮直径 ≥ 44px） | ≤ 1.75 |
+ *
+ * ⚠️ 想再往上，最近的拦路虎是**底部提示的固定行高**（`HINT_LINE.height`
+ * 不跟 k 走）—— 那是"提示行高也要跟缩放走"的另一件事，不在这一轮。
+ *
+ * ==================================================================
+ * ⚠️ 旧的 **1.2** 是怎么来的、为什么现在变了（2026-10-13）
+ * ==================================================================
+ *
+ * 旧的 1.2 **不是**详情区定的，而是**右下角键位预览那一列**定的：
+ * 预览块的 y 原先写成 `TOUCH_PREVIEW.top × k`，而它**上面**的格阵
+ * 一个字都不随 k 变 —— 于是 k 一大，预览就独自往下滑：
+ *
+ *   `234k + 190(块高) + 8k(间隙) + 26(按钮) ≤ 520 − 16(底边距)`
+ *   → k ≤ 1.19  → 记成 1.2
+ *
+ * 键位预览是**交互**（"点键位 → 点技能"的第一步，见 AGENTS.md §3b），
+ * 不能挪走；用户 2026-10-13 允许"**等比缩小**"它。收口时查清的却是：
+ *
+ *   1. **真正把 k 卡在 1.2 的不是"预览太大"，是"预览跟着 k 往下滑"** ——
+ *      它上面那一列没动，它却越滑越低，最后撞到面板底边。所以第一件事是
+ *      把块的位置**钉住**（`TOUCH_PREVIEW.top`，不再 ×k）。
+ *   2. 块高不跟 k 变，只有里面的**说明行**跟 k 长 → 双弧那块按
+ *      `TOUCH_PREVIEW.h − captionH·k` 缩小；而"装进去"本来就是**等比**
+ *      变换（`touchPreview.ts` 取 min(宽比, 高比)），所以这是**等比缩小**，
+ *      不是压扁。
+ *   3. 缩小的**下限由规则给出**：等比装完之后键位圆的直径必须 ≥ 44px
+ *      （触屏可点下限）→ `touchPreviewMinArcH()` 反算弧高 → k ≤ 1.75。
+ *
+ * ⚠️ **1× 下预览一个字都不动**（k=1 时新几何逐位等于旧几何）。而且
+ * **在 1.35 这个上限下预览只缩了一点点**（弧高 174 → 168，圆钮直径
+ * 47 → 46）：真正让面板能变大的不是"把它缩多少"，而是**不让它跟着 k
+ * 滑下去**。这一条是这次排查的结论，写在这里免得下一个人再去"缩预览"
+ * 找空间（右边那一列根本不与左列的详情区抢高度 —— 见下）。
+ *
+ * ⚠️ **左右两列不共享竖直空间**：预览在 x 428..624，详情区在 x 16..416。
+ * 所以"缩预览"**结构上不可能**给详情区腾地方 —— 它能腾的只有它自己
+ * 那一列的底边。真正决定 k 的始终是**左列**（详情区 / 提示行 / 技能面）。
+ */
+export const PANEL_SCALE_MAX = 1.35;
 
 /**
  * 详情区在当前系数下一屏放得下几行（纯函数）。
@@ -199,7 +273,13 @@ export interface SettingsMetrics {
   readonly buttonY: number;
   readonly buttonW: number;
   readonly buttonH: number;
-  /** 触屏键位预览那块的高度（它跟着 k 走，圆钮才不至于相对变小）。 */
+  /**
+   * 触屏键位预览**整块**（说明行 + 双弧）的高度。
+   *
+   * ⚠️ 它**不跟 k 变**（1× 设计值 = `TOUCH_PREVIEW.h`）：跟 k 走的是块里
+   * 那个说明行，于是**双弧那块**被挤小而**等比缩小** —— 见
+   * `touchPreviewArcBox` 与 `PANEL_SCALE_MAX` 里"旧值 1.2"那一段。
+   */
   readonly touchPreviewH: number;
   /** 「通用」页两行的位置（**不跟 k**：它们不在竖向预算里）。 */
   readonly sliderTop: number;
@@ -224,8 +304,8 @@ function round2(v: number): number {
 export function computeSettingsMetrics(uiScale: number): SettingsMetrics {
   const k = panelScaleFor(uiScale);
   /**
-   * ⚠️ 这一份几何里，**只有两样跟 k**（`lineH` / `detailPadding`），
-   * 其余全部是 1× 的底座值 —— 理由见 `PANEL_SCALE_MAX` 那段。
+   * ⚠️ 这一份几何里，**跟 k 走的只有三样**（`lineH` / `detailPadding` /
+   * `detailBottom`），其余全部是 1× 的底座值 —— 理由见 `PANEL_SCALE_MAX`。
    *
    * 于是 `k === 1` 时这一份**逐位等于**老的几何常量（`DETAIL_TOP` /
    * `DETAIL_BOTTOM` / `gridBottom` / …），老的几何断言因此原样成立。
@@ -252,8 +332,8 @@ export function computeSettingsMetrics(uiScale: number): SettingsMetrics {
      * ⚠️ 提示区那两行**不动**（它们已经在底部三样的位置上、没有余量），
      * 所以"详情区变矮"是这一版缩放的**代价**，也是它唯一的位置变化。
      */
-    detailBottom: HINT_BLOCK_TOP - Math.round(16 * k),
-    lineH: Math.round(22 * k),
+    detailBottom: HINT_BLOCK_TOP - Math.round(DETAIL_BOTTOM_GAP * k),
+    lineH: Math.round(DETAIL_LINE_H * k),
     hintTop: HINT_BLOCK_TOP,
     hintLineH: HINT_LINE.height,
     buttonX: panelX + RESET_BUTTON.x,
@@ -265,8 +345,40 @@ export function computeSettingsMetrics(uiScale: number): SettingsMetrics {
     modeLabelTop: OPERATION_MODE_ROW.labelTop,
     modeTop: OPERATION_MODE_ROW.top,
     modeH: OPERATION_MODE_ROW.h,
-    detailPadding: Math.round(SKILL_DETAIL.padding * k),
+    detailPadding: Math.round(DETAIL_PAD_BASE * k),
   };
+}
+
+/* ------------------------------------------------------------------ *
+ * 竖向预算的**规则**（`PANEL_SCALE_MAX` 由它给出）
+ * ------------------------------------------------------------------ */
+
+/** 详情区一行的**基准**行高（`lineH = round(它 × k)`）。 */
+export const DETAIL_LINE_H = 22;
+/** 详情区底边与提示区之间留白的**基准**（`detailBottom = 提示区顶 − round(它 × k)`）。 */
+export const DETAIL_BOTTOM_GAP = 16;
+/** 详情区文字四周留白的**基准**（`= SKILL_DETAIL.padding`，`round(它 × k)`）。 */
+export const DETAIL_PAD_BASE = SKILL_DETAIL.padding;
+
+/**
+ * 竖向预算的**规则**：详情区一屏至少放得下 `minRows` 行时，k 最多能到多少。
+ *
+ * ⚠️ 这就是"**钳位由规则给出，不是算完再夹一下**"的落点：
+ * `PANEL_SCALE_MAX` 是它的向下取整（留一档给 `Math.round` 的台阶），
+ * 而不是"先乘完再看看有没有溢出"。它也**是测试的判据** ——
+ * `settingsScale.test.ts` 断言上限正好压在这条线之内。
+ *
+ * 推导（沿用本文件现有的坐标口径：详情区顶边是画布坐标、底边是面板相对）：
+ *
+ *   详情区高 = (HINT_BLOCK_TOP − 16k) − DETAIL_TOP
+ *   内    框 = 详情区高 − 2×(8k)
+ *   一屏行数 ≥ minRows  ⟺  (详情区高 − 32k) ≥ minRows × 22k
+ *   → k ≤ 详情区高 / (16 + 2×8 + 22×minRows)
+ */
+export function panelScaleBoundFor(minRows: number): number {
+  const detailH = HINT_BLOCK_TOP - DETAIL_TOP;
+  const perK = DETAIL_BOTTOM_GAP + 2 * DETAIL_PAD_BASE + DETAIL_LINE_H * minRows;
+  return detailH / perK;
 }
 
 /* ------------------------------------------------------------------ *
@@ -472,7 +584,13 @@ export function touchResetButtonRect(): MetricsRect {
   const m = current;
   return {
     x: m.panelX + TOUCH_RESET_BUTTON.x,
-    y: m.panelY + TOUCH_PREVIEW.top * m.k + m.touchPreviewH + TOUCH_RESET_BUTTON.gap * m.k,
+    /**
+     * ⚠️ 预览块的**位置不跟 k 走**（见 `PANEL_SCALE_MAX` 里"旧值 1.2 怎么
+     * 来的"）：块顶固定在 `TOUCH_PREVIEW.top`，所以按钮 = 块顶 + 块高 + 间隙。
+     * 原先这里是 `TOUCH_PREVIEW.top * m.k + …` —— 那正是把 k 卡在 1.2 的
+     * 那个滑动。
+     */
+    y: m.panelY + TOUCH_PREVIEW.top + m.touchPreviewH + TOUCH_RESET_BUTTON.gap * m.k,
     w: TOUCH_RESET_BUTTON.w,
     h: m.buttonH,
   };
@@ -481,18 +599,23 @@ export function touchResetButtonRect(): MetricsRect {
 /** 触屏键位预览的**说明行**位置（画布坐标，左上角）。 */
 export function touchPreviewCaptionPos(): { readonly x: number; readonly y: number } {
   const m = current;
-  return { x: m.panelX + TOUCH_PREVIEW.x, y: m.panelY + TOUCH_PREVIEW.top * m.k };
+  return { x: m.panelX + TOUCH_PREVIEW.x, y: m.panelY + TOUCH_PREVIEW.top };
 }
 
 /**
  * 触屏键位预览**双弧那块**（去掉顶部说明行）—— 画布坐标。
  *
  * ⚠️ 它是预览的全部几何输入（`touchPreview.ts` 按等比装进去），所以
- * "预览跟着 k 长"只需要改这一处。
+ * "预览跟着 k 缩"只需要改这一处。
+ *
+ * **块顶固定、块高固定，说明行跟 k 长 → 双弧那块就跟着缩**
+ * （`TOUCH_PREVIEW.h − captionH·k`）。这块高给的是**等比缩小**：
+ * `touchPreview.ts` 取 `min(宽比, 高比)`，所以圆钮、间距、相对方位一起缩。
+ * 下限由 `touchPreviewMinArcH()` 给出（k ≤ 1.75，见 `PANEL_SCALE_MAX`）。
  */
 export function touchPreviewArcBox(): MetricsRect {
   const m = current;
-  const top = m.panelY + TOUCH_PREVIEW.top * m.k;
+  const top = m.panelY + TOUCH_PREVIEW.top;
   return {
     x: m.panelX + TOUCH_PREVIEW.x,
     y: top + TOUCH_PREVIEW.captionH * m.k,

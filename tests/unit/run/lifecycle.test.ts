@@ -81,7 +81,7 @@ function openingRun(runSeed: number, playerId = 'player') {
 function qiji(id: string, unlock: QijiUnlock, maxStacks?: number): QijiEntity {
   return {
     id,
-    kind: 'passive',
+    kind: 'qiji',
     nameKey: `qiji.${id}.name`,
     icon: 'char_break',
     category: 'offense',

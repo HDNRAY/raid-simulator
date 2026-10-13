@@ -51,6 +51,18 @@ export interface CanvasHost {
     moveFocus(delta: number, wrap?: boolean): void;
     confirm(): void;
   };
+  /** 选炁机屏（P3；← → ↑ ↓ 移光标，Enter 选一个生效）。 */
+  readonly qijiSelect: {
+    frame(): void;
+    cycle(delta: number): void;
+    moveFocus(delta: number, wrap?: boolean): void;
+    confirm(): void;
+  };
+  /** 一局结束屏（P3；Enter / 点屏幕 = 回选角色）。 */
+  readonly runOver: {
+    frame(): void;
+    confirm(): void;
+  };
   /**
    * **当前这一屏的边角控件**（齿轮 / 返回箭头）—— 由那一屏自己的
    * `frame()` 调它的 `update()`（键位提示跟着唯一 flag 走）。
@@ -165,7 +177,9 @@ export function wireLoop(o: WireOptions): void {
        */
       if (state.phase === 'home') host.home.frame();
       else if (state.phase === 'characterSelect') host.select.frame();
-      else host.prepare.frame();
+      else if (state.phase === 'prepare') host.prepare.frame();
+      else if (state.phase === 'qijiSelect') host.qijiSelect.frame();
+      else host.runOver.frame();
       /**
        * ⚠️ **非战斗阶段也要调触屏层的 `frame()`（不带快照）**：
        * 它是"按钮层显隐"的**唯一写入点**，而按钮层的初值是
@@ -319,6 +333,46 @@ export function wireLoop(o: WireOptions): void {
           default:
             return;
         }
+      }
+      /**
+       * **选炁机屏（P3）**：与其它选择屏同构 —— ← → ↑ ↓ 移光标、
+       * Enter 选一个生效。⚠️ **没有"确定 / 取消"两步**：选了当场生效
+       * （§5.3"选了不能换"），所以 Enter 与点击是同一种动作。
+       */
+      if (layer === 'qijiSelect') {
+        switch (event.key) {
+          case 'ArrowLeft':
+            host.qijiSelect.cycle(-1);
+            return;
+          case 'ArrowRight':
+            host.qijiSelect.cycle(1);
+            return;
+          case 'ArrowUp':
+            host.qijiSelect.moveFocus(-1);
+            return;
+          case 'ArrowDown':
+            host.qijiSelect.moveFocus(1);
+            return;
+          case 'Tab':
+            host.qijiSelect.moveFocus(event.shiftKey ? -1 : 1, true);
+            event.preventDefault();
+            return;
+          case 'Enter':
+            host.qijiSelect.confirm();
+            return;
+          default:
+            return;
+        }
+      }
+      /**
+       * **一局结束屏（P3）**：整屏只有一个动作（回选角色），所以只认
+       * `Enter`；`Esc` 已经在上面那条返回分支里处理过了
+       * （`phaseFromEscape('runOver')` = `'characterSelect'`，两者**同一个
+       * 去向**，见 `phaseLogic` 的表）。
+       */
+      if (layer === 'runOver') {
+        if (event.key === 'Enter') host.runOver.confirm();
+        return;
       }
       if (layer === 'characterSelect') {
         switch (event.key) {

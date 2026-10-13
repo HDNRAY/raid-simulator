@@ -29,9 +29,15 @@
  */
 
 import { BOSS_POOL, resolveBossId, resolvePlayerId } from '../data/roster';
+import { ALL_QIJI, qijiById } from '../data/qiji';
+import { buildPlayerKit, type PlayerKit } from '../data/kit';
+import type { QijiEntity } from '../core/types/qiji';
+import type { RunState } from '../core/run/index';
+import { runLengthOf } from '../core/run/index';
 import { createRunSession } from './runSession';
+import type { QijiCandidateView, QijiView } from '../ui/qijiSelectLogic';
 import { switchPlayerProfile } from './playerKeys';
-import { phaseFromEscape, screenVisibilityOf } from './phaseLogic';
+import { phaseFromEscape, screenVisibilityOf, type Phase } from './phaseLogic';
 import type { BattleLoop } from './battleLoop';
 import type { GameState } from './flow';
 import type { ContentRegistry } from '../core/content/registry';
@@ -62,6 +68,13 @@ export interface PhaseFlowDeps {
   };
   /** 开局工厂（`battleSetup.createStartBattle` 的产物）。 */
   readonly startBattle: () => BattleLoop;
+  /**
+   * **这一局打几场**（`?runlen=N`；`undefined` = 用 Boss 池的长度）。
+   *
+   * ⚠️ 它是**构造期常量**（来自 URL），不是每帧读的运行期状态 ——
+   * 一局开始之后再改它没有意义（`order` 已经截断了）。
+   */
+  readonly runLength?: number | undefined;
 }
 
 /**
@@ -71,12 +84,48 @@ export interface PhaseFlowDeps {
  *   （接线到各界面 / 指针路由 / 主循环 / 调试入口）。
  */
 export function createPhaseFlow(d: PhaseFlowDeps): {
-  applyPhase(phase: 'home' | 'characterSelect' | 'prepare' | 'battle'): void;
+  applyPhase(phase: Phase): void;
   enterBattle(playerId: string, bossId: string): void;
-  switchTo(target: 'home' | 'characterSelect' | 'prepare'): void;
+  switchTo(target: 'home' | 'characterSelect' | 'prepare' | 'qijiSelect' | 'runOver'): void;
   backFromBattle(): void;
   backToHome(): void;
+  /**
+   * **一局结束屏的确认**：丢掉这一局、回选角色（开下一局）。
+   *
+   * ⚠️ 与 `backToHome` 的"放弃"是**两条**路：那条会 `clear()` 然后回
+   * **首页**（"我不想玩了"），这条回**选角色**（"再来一局"）。
+   * 它们的目标相位不同，所以不能合成一个函数。
+   */
+  continueRun(): void;
   startRoguelikeRun(playerId: string): void;
+  /** 选炁机屏的候选（**视图形状**，渲染层只认它）。 */
+  qijiCandidates(): readonly QijiCandidateView[];
+  /** 选一个炁机生效（**当场生效**，没有撤销）。 */
+  chooseQiji(qijiId: string): void;
+  /**
+   * **这一场战斗的玩家装配**（角色 + 本局已选的炁机；§5.5 的 `BattleKit`）。
+   *
+   * ⚠️ 它是**取值函数**：每开一场都要现算（打了这一场之后可能又选了一个
+   * 炁机），快照一份会让第 2 场还带着第 1 场的装配。
+   */
+  playerKit(playerId: string): PlayerKit;
+  /**
+   * **相位历史的只读快照**（调试 / 验收探针用）。
+   *
+   * ⚠️ 它是**观测数据**（像事件流一样），不参与任何判定：`?runlen=2`
+   * 的验收要"贴出每场的相位序列"，而截图证明不了"走进过哪一屏"。
+   * 每次 `applyPhase` 追加一条，**不清理**（进程内内存，几条字符串）。
+   */
+  phaseHistory(): readonly string[];
+  /** 当前一局的 `RunState`（没有时 `undefined`）。⚠️ 只读引用，别改它。 */
+  runState(): RunState | undefined;
+  /** 一局结束屏要显示的内容（位置 / 长度 / 这一局带了哪些炁机）。 */
+  runSummary(): {
+    readonly victory: boolean;
+    readonly position: number;
+    readonly length: number;
+    readonly loadout: readonly { readonly nameKey: string; readonly stacks: number }[];
+  };
 } {
   const { state } = d;
 
@@ -88,7 +137,50 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
    * ⚠️ 种子在这里生成（`Date.now() >>> 0`）：`app/` 层允许非确定性，
    * `core/` 不许（lint C2）—— 与 `battleSetup.ts` 给战斗种子的做法一致。
    */
-  const runSession = createRunSession({ bossPool: BOSS_POOL.map((b) => b.id) });
+  /**
+   * **相位序列**（观测用，见 `phaseHistory` 的说明）。
+   *
+   * ⚠️ 写在这里而不是各转移函数里：`applyPhase` 是**显隐的唯一写入点**，
+   * 也是"真的切过去了"的唯一时刻 —— 在各转移函数里各记一次就会有漏。
+   */
+  const phaseHistory: string[] = [];
+
+  const runSession = createRunSession({
+    bossPool: BOSS_POOL.map((b) => b.id),
+    /**
+     * ⚠️ **炁机池只有一处来源**（`data/qiji.ts` 的 `ALL_QIJI`）：解锁判定
+     * 与候选生成读的都是它。两份池子必然漂，而漂的样子是"解锁了一个不在
+     * 候选里的东西"。
+     */
+    qijiPool: ALL_QIJI,
+    ...(d.runLength === undefined ? {} : { runLength: d.runLength }),
+  });
+
+  /**
+   * 这一局**已经选了生效**的炁机（定义 + 层数）。
+   *
+   * ⚠️ 它是 `RunState.chosen`（只存 `{ qijiId, stacks }`）的**展开**：
+   * 战斗装配要的是定义（`abilities` / `comboWindow`），而 `RunState` 里
+   * 只有 id。展开只在这一处，所以"某个 id 在不在池子里"只有一个答案。
+   */
+  const activeQiji = (): readonly { readonly def: QijiEntity; readonly stacks: number }[] => {
+    const state = runSession.state();
+    if (state === undefined) return [];
+    return state.chosen.flatMap((choice) => {
+      /** ⚠️ 走 `qijiById`（内容表自己的 id→定义 查找）而不是在这里再写一遍 find。 */
+      const def = qijiById(choice.qijiId);
+      return def === undefined ? [] : [{ def, stacks: choice.stacks }];
+    });
+  };
+
+  /**
+   * **这一场战斗的玩家装配**（炁机在这里生效）。
+   *
+   * ⚠️ 自由模式（没有进行中的一局）时 `activeQiji()` 是空数组 ——
+   * `buildPlayerKit(playerId)` 于是与"今天"逐字相同（`caps` = 角色的、
+   * `modifiers` = 空、`comboWindows` = 空）。
+   */
+  const playerKit = (playerId: string): PlayerKit => buildPlayerKit(playerId, activeQiji());
 
   /**
    * **界面路由的唯一落实点**：把 `phase` 写进状态，并一次性重设
@@ -118,8 +210,13 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
    * `isBattleActive()` 决定（那里的"唯一写入点"不该被绕过 —— 与
    * `backToPrepare` 时代同一条纪律）。
    */
-  const applyPhase = (phase: 'home' | 'characterSelect' | 'prepare' | 'battle'): void => {
+  const applyPhase = (phase: Phase): void => {
     state.phase = phase;
+    /**
+     * ⚠️ 记的是**相位名**（不是"第几场"）：场次在 `RunState.position` 里
+     * 有唯一真相，这里重复一遍就是第二份。验收时把两者拼起来读即可。
+     */
+    phaseHistory.push(phase);
     /**
      * ⚠️ **判据只有一处**：`phase → 四屏显隐`整块在
      * `phaseLogic.screenVisibilityOf`（纯函数、有单测）。这里只负责
@@ -131,6 +228,8 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
     state.home?.setVisible(show.home);
     state.select?.setVisible(show.characterSelect);
     state.prepare?.setVisible(show.prepare);
+    state.qijiSelect?.setVisible(show.qijiSelect);
+    state.runOver?.setVisible(show.runOver);
     d.scene.root.visible = show.battle;
   };
 
@@ -201,7 +300,7 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
    * 每帧被主循环驱动，留着不放会继续跑一场已经看不到的战斗
    * （而且下一局 `enterBattle` 还会再建一个 —— 两个循环同时推进）。
    */
-  const switchTo = (target: 'home' | 'characterSelect' | 'prepare'): void => {
+  const switchTo = (target: 'home' | 'characterSelect' | 'prepare' | 'qijiSelect' | 'runOver'): void => {
     state.loop?.dispose();
     state.loop = undefined;
     applyPhase(target);
@@ -213,16 +312,50 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
    * ⚠️ **按模式分流**，而且判据只有一个：`runSession.active`（有没有
    * 没结束的一局肉鸽）。加一个 `mode` 字段就会多一个可能与它打架的真相源。
    *
-   * ⚠️ 肉鸽这一支是**临时的桩**：P2 只打一场就 `clear()`（回选角色）；
-   * P3 会在这里改成"推进到下一场 + 进炁机选择"（见 `runSession.ts`）。
+   * 肉鸽这一支（P3 接真）做三件事：
+   *   1. 把**这一场的事件流 + 胜负 + 满血**喂给 `runSession.advance`
+   *      （统计**不在这里算** —— 那是 `core/run/stats.ts` 的归约，
+   *      由 `advanceRun` 调用；本文件一个加法都不写）
+   *   2. 按它给的**去向**走：进选择屏 / 直接下一场 / 一局结束
+   *   3. 自由模式（`runSession.active === false`）照旧回备战界面
+   *
+   * ⚠️ **必须在 `switchTo` 之前读 loop**：`switchTo` 会 `dispose` 掉它
+   * （而且把 `state.loop` 置空），之后读事件流就什么都拿不到了。
    */
   const backFromBattle = (): void => {
-    if (runSession.active) {
-      runSession.clear();
-      switchTo('characterSelect');
+    if (!runSession.active) {
+      switchTo('prepare');
       return;
     }
-    switchTo('prepare');
+
+    const loop = state.loop;
+    const snapshot = loop?.engineState.snapshot;
+    const outcome = snapshot?.status === 'victory' ? 'victory' : 'defeat';
+    /**
+     * **满血赢的**：终局快照里玩家 `hp === caps.hp`。
+     *
+     * ⚠️ 事件流里**没有**血量上限，这个事实推不出来 —— 所以由这里
+     * （拿得到快照的那一层）算好喂进去（`core/run/lifecycle.ts` 的
+     * `BattleInput.flawless` 写明了这条）。
+     */
+    const player = snapshot?.combatants.find((c) => c.side === 'ally');
+    const flawless = outcome === 'victory' && player !== undefined && player.resources.hp >= player.caps.hp;
+
+    const next = runSession.advance(outcome, loop?.battleEvents ?? [], flawless);
+    if (next.kind === 'selectQiji') {
+      switchTo('qijiSelect');
+      return;
+    }
+    if (next.kind === 'runOver') {
+      /**
+       * ⚠️ 这里**不 `clear()`**：一局结束屏要显示"打到第几场 / 带了哪些炁机"
+       * （`runSummary` 读的就是这一局）。丢掉它的时机是**离开这一屏**时
+       * （`backToHome` / 一局结束屏的确认），不是进来的时候。
+       */
+      switchTo('runOver');
+      return;
+    }
+    enterBattle(runSession.state()?.playerId ?? d.selection.playerId, next.bossId);
   };
 
   /**
@@ -239,7 +372,19 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
    */
   const backToHome = (): void => {
     const target = phaseFromEscape(state.phase);
-    if (target !== undefined) switchTo(target);
+    if (target === undefined) return;
+    /**
+     * ⚠️ **放弃这一局**：从选炁机屏 / 一局结束屏返回（目标 = 选角色）时，
+     * 这一局的 `RunState` 该丢掉 —— 否则下一局会拿着上一局的
+     * `battleStats` / `unlocked` / `chosen` 继续（"我明明重开了，怎么还带着
+     * 三个炁机"）。
+     *
+     * ⚠️ 从**自由模式 / 选角色屏**返回首页时 `target === 'home'`，
+     * 而那两种情况本来就没有进行中的一局（`active` 为假）—— 调 `clear()`
+     * 是幂等的空操作，所以不需要为它再写一条分支。
+     */
+    runSession.clear();
+    switchTo(target);
   };
 
   /**
@@ -252,6 +397,10 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
    * ⚠️ 洗牌走 `core/run/` 自己的随机流（§7.1），不碰 `BattleState.rngSeed`。
    */
   const startRoguelikeRun = (playerId: string): void => {
+    /**
+     * ⚠️ **`?runlen=N` 在 `begin` 里生效**（`runSession` 的 `runLength`）：
+     * 它截断洗好的 Boss 顺序，于是"这一局打几场"从第一场起就是确定的。
+     */
     runSession.begin(playerId, Date.now() >>> 0);
     const bossId = runSession.bossId();
     /**
@@ -266,5 +415,100 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
     enterBattle(playerId, bossId);
   };
 
-  return { applyPhase, enterBattle, switchTo, backFromBattle, backToHome, startRoguelikeRun };
+  /**
+   * **选炁机屏的候选**（把 `core/run` 的 `Candidate` 翻成渲染要的字段）。
+   *
+   * ⚠️ 只在这一处做这个翻译：渲染层**不认识** `RunState` / `QijiEntity` /
+   * `UnlockProgress`（那三个都是 core 的），而 app 层在这里一次给全。
+   */
+  const qijiCandidates = (): readonly QijiCandidateView[] =>
+    runSession.candidates().map((candidate) => {
+      const qiji: QijiView = {
+        id: candidate.qiji.id,
+        nameKey: candidate.qiji.nameKey,
+        icon: candidate.qiji.icon,
+        ...(candidate.qiji.descKey === undefined ? {} : { descKey: candidate.qiji.descKey }),
+        ...(candidate.qiji.maxStacks === undefined ? {} : { maxStacks: candidate.qiji.maxStacks }),
+      };
+      return { qiji, remaining: candidate.remainingStacks };
+    });
+
+  /**
+   * **选一个炁机生效**（用户规则：选了才本局生效）。
+   *
+   * ⚠️ 选完**直接进下一场**（§5.3 的节拍：每场战斗 → 一个决策 → 下一场）。
+   * 没有"确定 / 取消"两步 —— 那会多一个与"选了不能换"打架的中间态。
+   */
+  const chooseQiji = (qijiId: string): void => {
+    if (!runSession.chooseQiji(qijiId)) {
+      /**
+       * 选不上（不是候选 / 这一局没了）：**停在选择屏**而不是静默进下一场。
+       * 静默前进会让"点了没反应"变成"莫名其妙开始了下一场"，
+       * 而后者看不出是哪一步错了。
+       */
+      return;
+    }
+    const bossId = runSession.bossId();
+    if (bossId === undefined) {
+      /** 越界（顺序算错）：回一局结束屏，而不是打一个不存在的 Boss。 */
+      switchTo('runOver');
+      return;
+    }
+    enterBattle(runSession.state()?.playerId ?? d.selection.playerId, bossId);
+  };
+
+  /** 一局结束屏要显示的内容（纯读取，不改任何状态）。 */
+  const runSummary = (): {
+    readonly victory: boolean;
+    readonly position: number;
+    readonly length: number;
+    readonly loadout: readonly { readonly nameKey: string; readonly stacks: number }[];
+  } => {
+    const run = runSession.state();
+    if (run === undefined) {
+      return { victory: false, position: 0, length: 0, loadout: [] };
+    }
+    /**
+     * ⚠️ `position` 在"通关"时会**超出长度一位**（`len + 1`），那是
+     * "第 `len + 1` 场不存在"的直接编码（见 `core/run/lifecycle.ts`）。
+     * 显示"打到第几场"时夹回 `1..len` —— 通关的摘要不该写"打到第 3/2 场"。
+     */
+    const length = runLengthOf(run);
+    /** 通关时 `position` 是 `len + 1`（见上）：摘要里夹回最后一场。 */
+    const position = Math.min(Math.max(run.position, 1), Math.max(length, 1));
+    return {
+      victory: run.status === 'victory',
+      position,
+      length,
+      loadout: activeQiji().map(({ def, stacks }) => ({ nameKey: def.nameKey, stacks })),
+    };
+  };
+
+  /**
+   * **一局结束屏的确认**（用户规则：通关 / 失败都回选角色开下一局）。
+   *
+   * ⚠️ 这里 `clear()` 是**对的**（与 `backFromBattle` 里的 `runOver` 分支
+   * 相反）：那一条是"刚进一局结束屏、摘要还要显示"，而这一条是"看完了、
+   * 离开"—— 离开之后 `RunState` 没有任何消费者（下一局从 `begin` 重开）。
+   */
+  const continueRun = (): void => {
+    runSession.continueRun();
+    switchTo('characterSelect');
+  };
+
+  return {
+    applyPhase,
+    enterBattle,
+    switchTo,
+    backFromBattle,
+    backToHome,
+    continueRun,
+    startRoguelikeRun,
+    playerKit,
+    phaseHistory: () => phaseHistory,
+    runState: () => runSession.state(),
+    qijiCandidates,
+    chooseQiji,
+    runSummary,
+  };
 }

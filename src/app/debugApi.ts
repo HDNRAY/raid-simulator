@@ -371,3 +371,68 @@ export function settingsDebugApi(
     },
   };
 }
+
+/**
+ * **P3 的两屏**（选炁机 / 一局结束）的调试入口。
+ *
+ * ==================================================================
+ * 为什么需要它（"截图证明不了"的那两件事）
+ * ==================================================================
+ *
+ * `?runlen=2` 的验收要能回答：
+ *   1. **选炁机屏现在有几个候选、光标在哪** —— 截图只能看出"画了几张卡"，
+ *      而"候选集合对不对"（解锁了哪些、叠满了没有）只有状态能证明。
+ *      尤其是那条**反面**验收（"没到 3 次时它【不】出现"）：
+ *      截图上"少一张卡"与"画漏了一张"完全一样。
+ *   2. **一局结束屏的摘要是哪一局** —— 通关 / 失败两种文案长得像，
+ *      而"打到第几场、带了哪些炁机"必须能从状态读出来。
+ *
+ * ⚠️ 一律**转调界面自己的方法**（`confirm` / `cycle` / `pick`），不另写一套：
+ * 旁路会让"验证的是探针而不是界面"（见 `debugApi.ts` 文件头）。
+ * ⚠️ `state()` 返回**拷贝**：调用方拿到共享引用就可能把界面改坏。
+ */
+export interface QijiDebugTarget {
+  readonly current: {
+    readonly cursor: number;
+    readonly candidates: readonly string[];
+  };
+  cycle(delta: number): void;
+  moveFocus(delta: number, wrap?: boolean): void;
+  confirm(): void;
+}
+
+/** 一局结束屏暴露给调试的最小面。 */
+export interface RunOverDebugTarget {
+  readonly visible: boolean;
+}
+
+export function qijiDebugApi(
+  qijiSelect: QijiDebugTarget,
+  runOver: RunOverDebugTarget,
+): {
+  readonly qiji: {
+    /** 候选的**炁机 id 列表**（顺序 = 画出来的顺序）。 */
+    candidates(): readonly string[];
+    /** 光标下标。 */
+    cursor(): number;
+    /** 同 ← →：移光标（不改任何选择）。 */
+    cycle(delta: number): void;
+    /** 同 ↑ ↓ / Tab：换行（`wrap` 为真时环绕）。 */
+    moveFocus(delta: number, wrap?: boolean): void;
+    /** 同 Enter：选光标处那一个（**会真的生效并离开这一屏**）。 */
+    confirm(): void;
+    /** 一局结束屏此刻是否可见（验收"打到第几场之后停了"）。 */
+    overviewOpen(): boolean;
+  };
+} {
+  return {
+    qiji: {
+      candidates: () => [...qijiSelect.current.candidates],
+      cursor: () => qijiSelect.current.cursor,
+      cycle: (delta) => qijiSelect.cycle(delta),
+      moveFocus: (delta, wrap = false) => qijiSelect.moveFocus(delta, wrap),
+      confirm: () => qijiSelect.confirm(),
+      overviewOpen: () => runOver.visible,
+    },
+  };
+}

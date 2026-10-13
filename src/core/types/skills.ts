@@ -40,6 +40,17 @@ export type EntityKind =
   | 'passive'
   | 'buffTemplate'
   | 'activeSkill'
+  /**
+   * **炁机**（肉鸽的一局内强化方向 / 奇物）。
+   *
+   * ⚠️ 加这个值**不是** W8 的全部：校验器与注册表对它的处理（"为什么这个
+   * kind 在注册表里干什么"）仍然没做 —— 那是 P6。今天加它是因为
+   * `QijiEntity extends GameEntity`（用户："炁机也是 gameentity 啊……继承"）
+   * 要把 `kind` 收窄成 `'qiji'`：不收窄的话，`data/qiji.ts` 的内容里
+   * 只能填 `'passive'` 这种别的 kind —— 那是**用假值绕过类型**，
+   * 比"类型还没收窄"更坏。
+   */
+  | 'qiji'
   | 'encounter';
 
 export type EquipSlot = 'weapon' | 'armor' | 'trinket' | 'relic' | 'relic2';

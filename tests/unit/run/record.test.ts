@@ -60,7 +60,7 @@ const BOSSES: readonly string[] = [
 function qiji(id: string, unlock: QijiUnlock): QijiEntity {
   return {
     id,
-    kind: 'passive',
+    kind: 'qiji',
     nameKey: `qiji.${id}.name`,
     icon: 'char_break',
     category: 'offense',
