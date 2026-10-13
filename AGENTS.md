@@ -2,6 +2,15 @@
 
 本文件是**强制**约定。与其它文档冲突时以本文件为准。
 
+**本文件只放"现在该怎么做"。** 当年为什么那么定、后来怎么被推翻、实测
+为什么错 —— 那些**故事**在
+[`docs/specs/2026-10-14-agents-md-history.md`](docs/specs/2026-10-14-agents-md-history.md)，
+不构成约束，但值得读（避免把已经否掉的方案又提一遍）。
+
+⚠️ **小节号（`§1`/`§2`/`§3`/`§3b`/`§3c`/`§3e`/`§4`/`§4a`/`§4b`）是全仓库
+按号引用的**（`src/` / `tests/` / `tools/` / `docs/` 里 300+ 处）。清理时
+**只能动叙述，不能重排编号** —— 要加内容就**加子节**。
+
 ---
 
 ## 1. 类型断言：禁止 `as any` 与 `as unknown as`
@@ -13,16 +22,10 @@ value as any
 value as unknown as T
 ```
 
-### 为什么
-
-这两个写法会**同时**关掉两件事：
-
-1. **类型检查** —— 编译器不再校验这个值到底是不是 `T`
-2. **代码审查的信号** —— 读到 `as unknown as` 时，人无法判断
-   这是"我知道自己在做什么"还是"我懒得查类型"
-
-它们最常见的用途是"让报错消失"，而不是"让代码正确"。
-一旦出现，后续所有基于类型的重构都会在这几行上失效。
+**为什么**（一句话）：它们**同时**关掉"类型检查"与"代码审查的信号"，
+最常见的用途是"让报错消失"而不是"让代码正确" —— 一旦出现，后续所有
+基于类型的重构都会在这几行上失效。展开见
+[history §1](docs/specs/2026-10-14-agents-md-history.md)。
 
 ### 应该怎么写
 
@@ -30,38 +33,16 @@ value as unknown as T
 
 | 场景 | 做法 |
 |---|---|
-| 两个接口形状不同 | **写适配器函数**，显式声明两侧类型 |
-| 运行期数据未经校验 | **写类型守卫**（`function isX(v: unknown): v is X`） |
-| 测试要喂非法数据 | 写一个**有名字的解析器**（见下） |
+| 两个接口形状不同 | **写适配器函数**，显式声明两侧类型（例：屏蔽 `MessageEvent` 的包装 `addEventListener: (type, listener) => worker.addEventListener(type, (message: MessageEvent<FromWorker>) => { listener({ data: message.data }); return undefined; })`）|
+| 运行期数据未经校验 | **写类型守卫**（`function isX(v: unknown): v is X`）|
+| 测试要喂非法数据 | 写一个**有名字的解析器**（例：`function asCatalog(value: unknown): typeof zhCN { return value as typeof zhCN; }`，把"这里确实是一份未经验证的数据"写在名字上，而且只有这一处）|
 | 第三方类型确实不对 | 在**调用处**用最小范围的 cast，并写明原因；优先考虑 `.d.ts` 补丁 |
 
-### 示例：测试里要构造非法数据
+⚠️ 注意：**收窄联合类型**的类型守卫不算违规 —— 这条禁的是 `as any` /
+`as unknown as` 这两个**逃生舱**，不是所有的 `as`。
 
-不要写 `{ a: 1 } as unknown as typeof catalog`，而是：
-
-```ts
-/**
- * 把"故意构造的非法/残缺数据"交给被测量函数。
- *
- * ⚠️ 这不是绕过类型检查 —— 它把"这里确实是一份未经验证的数据"
- * 写在了名字上，而且只有这一处。
- */
-function asCatalog(value: unknown): typeof zhCN {
-  return value as typeof zhCN;
-}
-```
-
-### 示例：两个接口事件形状不同
-
-不要写 `listener as unknown as EventListener`，而是：
-
-```ts
-addEventListener: (type, listener) =>
-  worker.addEventListener(type, (message: MessageEvent<FromWorker>) => {
-    listener({ data: message.data });
-    return undefined;
-  }),
-```
+⚠️ **收多个同型参数**的函数另有硬规则（具名入参、返回也具名），见下面 §2
+的「同型参数不许靠位置区分 —— 用具名结构」。
 
 ### 这条规则被违反时
 
@@ -113,6 +94,47 @@ validateContent(bundle, { strict: false })
 | **未实现**：设计过、引擎还没有消费者 | **保留 + 标注**，并拒绝静默误用 |
 | **会静默算错 / 静默无效**：用了不报错、结果错 | **校验报错拦下** |
 
+### ⚠️ 同型参数不许靠位置区分 —— **用具名结构**
+
+**判据**：一个函数收**多个同类型**（尤其都是 `number` / 都是 `string`）的
+参数时，**不许**按位置传。类型系统在这里**帮不上忙** —— 传反了编译器
+**不响** ✓。
+
+→ **收成一个具名入参对象**，返回也具名：
+
+```ts
+// ✗ 同型 number 按位置传：传反了编译器不响
+scrollThumbRatio(viewportPx, contentPx)
+// ✓ 具名入参；返回同理是 { offset, length }，不要返回 [number, number]
+scrollBarGeometry({ viewportPx, maxScrollPx, scrollPx, trackLenPx })
+```
+
+⚠️ **为什么这条要成硬规则**：真实 bug 的形状就是"两个 `number` 传反" ——
+它**能通过 typecheck**，只在画面/数值上表现出来，而且**看起来像别的问题**。
+
+### ⚠️ 同一份几何 / 算法**只许有一份实现**
+
+**规则**：同一份几何或算法**只许有一个实现** —— 两份"都正确"的实现
+**也会漂**（改了一处、另一处留着旧行为）。本仓库已有的实例是
+`ui/scrollWindow.ts` 的 `scrollBarGeometry`（**像素**那份；**按行**的两条
+滚动条是另一回事，见下）。
+
+**并且要有源码扫描守卫**：别处**不许再自己乘比例**。守卫在
+`tests/unit/lintRules.test.ts`：
+
+- 它扫 `src/`，除了 `ui/scrollWindow.ts` **不允许**出现第二处
+  `scrollThumbRatio(...)` 调用
+- ⚠️ 例外是一条**明账**：单位是"行"的两条滚动条在
+  `ROW_BASED_ALLOWED` 里登记（`src/ui/LogReviewPanel.ts`、
+  `src/ui/settings/SkillDetail.ts`）—— 表**只会变短**
+- 还有一条**反向**断言：两个像素调用点
+  （`src/ui/prepareCardGrid.ts`、`src/ui/prepareDetailViewport.ts`）
+  必须确实在调 `scrollBarGeometry(` —— 所以"把唯一那份删掉"也会红
+
+⚠️ **为什么要机器守**：只有一个模块允许算它，但**谁想再写一条滚动条**，
+顺手 import 一下、自己乘个轨道长，第二份几何就在没人注意的地方长出来了。
+"只有一处"这件事**必须由机器守**，不能靠下一个人记得。
+
 ---
 
 ## 3. 单文件不超过 700 行
@@ -149,17 +171,17 @@ validateContent(bundle, { strict: false })
 - 说不清、或者那句话里出现"和""以及""顺便" —— 它就该拆，**哪怕只有 200 行**
 - 行数只是这个问题的**代理指标**，不是问题本身
 
-**已经因此拆过的例子**：`render/BattleScene.ts` 曾经是 1421 行，
-"拆到 700 以下"被当成目标；但它真正的问题是**一个文件里装了整个战斗页面的
-所有小区域**（顶栏 / 血条 / 玩家面板 / 预警条 / 技能栏 / 日志 / 结算…）✗
-—— 后来按**屏幕区域**切开，每个区域自己管"造 / 画 / 缩放"。
-
-### 什么时候该主动拆，而不是等触线
+**该主动拆的信号**（不要等触线）：
 
 - 文件里出现了**同一层次的多块并列内容**（多个区域、多组相似的 case）
 - 一个方法长到需要靠分节注释才能读（`/* ---- 甲 ---- */` 出现三次以上）
 - **某个方法在操作"别人的内部"** —— 例如场景逐个手调每个部件的缩放，
   说明"谁该知道自己多大"放错了地方。这类**错位的职责**比行数更值得优先修
+
+⚠️ 反例上的教训：`render/BattleScene.ts` 曾经是 1421 行，"拆到 700 以下"
+**被当成了目标**；但它真正的问题是**一个文件里装了整个战斗页面的所有小
+区域**（顶栏 / 血条 / 玩家面板 / 预警条 / 技能栏 / 日志 / 结算…）✗ ——
+正确拆法是**按屏幕区域切**，每个区域自己管"造 / 画 / 缩放"。
 
 ### 超过时怎么办
 
@@ -180,15 +202,11 @@ validateContent(bundle, { strict: false })
 用户明确指出过（原话）："你为啥要删注释，你应该倾向于拆 util 方法，
 或者横向切割。"
 
-**这条规则的由来**：我连续多轮在文件顶到 700 行时选择"压缩注释"甚至
-"删掉整段注释"，把文件挤回上限。这是**错的**：
-
-- 本仓库的注释**不是填充物**，它们承担"记录踩过的坑"的职责（哪一版漏了什么、
-  为什么不能那样写）。压掉之后**下一个人会重新踩同一个坑**
-- 我的压缩还**丢过信息**：`ui/settings/logic.ts` 里"为什么把判定逻辑抽出来"
-  （Pixi v8 在 jsdom 里不好跑 → 只能写"能构造、不报错"这种零信息冒烟测试）
-  整段被删，而它在别处没有记录
-- 删注释是**把成本转嫁给未来**，换取的只是"这一次不用动结构"
+⚠️ **为什么这条要写得这么死**（不是洁癖）：本仓库的注释**不是填充物**，
+它们承担"记录踩过的坑"的职责。压掉之后**下一个人会重新踩同一个坑** ——
+实测就丢过信息、也漏过坑。删注释只是**把成本转嫁给未来**，换来的不过是
+"这一次不用动结构"。那几笔账（含被删掉的那段）在
+[history §3.4](docs/specs/2026-10-14-agents-md-history.md)。
 
 **正确顺序**（依次尝试，不要跳到第 3 步）：
 
@@ -223,46 +241,10 @@ validateContent(bundle, { strict: false })
 **当前为空 —— 所有文件都在 700 行以内**（口径：`content.split('\n').length`，
 比 `wc -l` 多 1），与测试里的 `GRANDFATHERED` 表一致。
 
-✅ 已拆到 700 以下、**从表里移除**的：
-
-| 原文件 | 原行数 | 现在 | 拆成了 |
-|---|---|---|---|
-| `src/render/BattleScene.ts` | 1421 | **668** | `skillBar` / `IconStrip` / `FloatingTextLayer` / `background` / `sceneTypes` / `hudUtils` / `actorLayout` + `parts/` 下 7 个帧部件 |
-| `src/ui/settings/SettingsPanel.ts` | 938 | **646** | `KeyGrid` / `SkillDetail` / `SettingsFrame` / `KeysFooter` / `ScaleSlider` / `rows` |
-| `src/core/combat/battleState.ts` | 1580 | **694** | `castPipeline` / `hitResolution` / `stats` / `holds` / `runAi` / `battleStateTypes` |
-| `src/core/types.ts` | **973**（棘轮上限） | **拆成目录** | `core/types/` 下 13 个文件：`ids` / `resources` / `stats` / `buffs` / `triggers` / `effects` / `abilities` / `skills` / `loadout` / `behavior` / `runtime` / `encounter` / `index`（各 21–162 行） |
-
-### ✅ `src/core/types.ts` 已按**横向切割**拆成目录（原来以为不能拆）
-
-**原先的判断是错的。** 这里曾写着"类型图是中心辐射的，再切下去会造出
-类型层的 import 环"——**那个顾虑被夸大了**：
-
-- `import type` 在编译期**完全擦除**，运行期没有环，不会有"import 是
-  undefined"
-- 本仓库真踩过的两次环（`data/scale.ts`、`settingsGeometry.ts`）都是
-  **值导入**（`const` / 函数），不是类型
-- 而且 `events.ts` / `actions.ts` **早就是先例**：它们反向 `import type`
-  标识类型，一直没问题
-
-所以按**横向切割**（按概念分段各一个文件）拆成了 `src/core/types/`：
-
-| 文件 | 行数 |
-|---|---|
-| `stats.ts`（属性与修正） | 162 |
-| `buffs.ts` | 137 |
-| `skills.ts`（技能 + 内容基类） | 133 |
-| `effects.ts` | 109 |
-| `abilities.ts` | 103 |
-| `triggers.ts` | 99 |
-| `runtime.ts` | 86 |
-| `loadout.ts` / `behavior.ts` | 59 / 50 |
-| `resources.ts` | 45 |
-| `index.ts`（转发） | 32 |
-| `ids.ts` / `encounter.ts` | 22 / 21 |
-
-⚠️ **`index.ts` 转发全部**，所以 `from '../core/types'` 这种整体导入**照旧
-可用**（模块解析会走到 `types/index.ts`）。真要按需引用时可以改成直接引
-具体文件，但那是可选的。
+⚠️ **`GRANDFATHERED` 表是唯一权威**（它在 `lintRules.test.ts` 里）。这张表
+与"已拆过哪些文件、拆成了什么"的**沿革**在
+[history §3.1–3.2](docs/specs/2026-10-14-agents-md-history.md) —— 那张沿革
+表里的行数是**当时的读数**，别抄（文件后来又长/缩过）。
 
 ---
 
@@ -274,26 +256,11 @@ validateContent(bundle, { strict: false })
 - **唯一真相**：`input/touchLayout.ts` 的 `TouchLayout` 只有**一个写入
   路径** `set()`，写完通知所有订阅者。输入层与渲染层各自订阅 ——
   **不许任何一方自己留副本**（那正是"画面改了、输入还是旧的"的来源）
-- ⚠️ **【作废 · 2026-10-12】能力探测（`matchMedia`）不再决定任何事**
+- ⚠️ **操作方式只看唯一 flag** —— 能力探测（`matchMedia` / UA）**不再决定任何事**
 
-  原文（**保留，用来记住当时为什么那么想**）：
-
-  > **能力探测不看 UA**：`render/platform.ts` 用 `matchMedia('(pointer: coarse)')`
-  > + `(hover: none)`。触屏笔记本的 UA 与普通笔记本一样，UA 判断会漏掉它
-
-  **用户明确推翻了它**（原话："**所有 决定 是 键盘还是触屏的 只用唯一 flag**"、
-  "不用自动判断，由入口显式传"）。
-
-  **当时为什么那么想**：UA 会被伪造、且混合设备的 UA 与普通笔记本一样，
-  "主输入设备是不是手指"看起来只有媒体查询能问。而它当时只决定
-  "要不要显示键名提示"，所以**故意偏向触屏**（"宁可多认成触屏，代价很小"）。
-
-  **实测为什么错**：那个"代价很小"的前提**变了** —— 这个值后来还被拿去决定
-  「按键」页那**一个**「恢复默认」恢复哪一套键位，于是触屏笔记本上键盘键位
-  **恢复不了**（用户报的正是"我现在是键盘 为啥显示的 触屏绑定？"）。
-  一个**故意偏保守**的估计值被升级成**会吞功能**的判断，就是这个 bug 的形状。
-
-  **现在的规则**：操作方式是**显式的唯一 flag**
+  用户原话："**所有 决定 是 键盘还是触屏的 只用唯一 flag**"、"不用自动判断，
+  由入口显式传"。当时的作废经过（为什么曾经想用媒体查询、实测为什么错）
+  在 [history §4.1](docs/specs/2026-10-14-agents-md-history.md)。
 
   ```
   OperationMode = 'keyboard' | 'touch'     默认 keyboard（用户接受这个代价）
@@ -326,38 +293,14 @@ validateContent(bundle, { strict: false })
 
 - **不许**把某个功能做成"只有键盘能用"。已经踩过的坑：改键
   （`startCapture`）只有 `Enter` 一条路，触屏**完全进不去改键**
-- ⚠️ **【作废 · 2026-10-12】触屏按钮的配置入口"就是「按键」页"**
+- ⚠️ **触屏按钮的配置就在「按键」页右下角**（没有独立的「触屏」页）
 
-  原文（**保留，用来记住当时为什么那么想**）：
-
-  > 触屏按钮的配置入口**就是**「按键」页 —— 触屏按钮是由键位表
-  > 机械派生出来的（`touchButtonsFromBindings` = "有键的技能"），
-  > 所以两者是**同一张表**，不存在"另一套触屏配置"
-
-  **用户明确推翻了这条**（原话："触屏和键盘**当然是 2 套**，连
-  localStorage 都是分 2 个 key 存的，只是**可选技能是一样的**"）。
-
-  **当时为什么那么想**：如果触屏另存一套，两套配置会**漂**
-  （改了键、按钮没跟着变）；"同一张表"结构上不可能漂。
-
-  **实测为什么错**：那个派生关系造出一个**死结** ——
-  技能没绑键 → 触屏上就没有它的按钮；而配按钮的地方是「按键」页，
-  触屏**按不出键、进不去改键**。于是**纯触屏玩家无法给自己加一个
-  技能按钮**（而"没绑键的技能"恰恰是最需要加按钮的那一类）。
-
-  **当时的规则（已被下一段取代）**：
-  - 触屏按钮是**用户自己选的一份集合**，存**自己的 key**
-    `raid.touchButtons.v1`（与 `raid.bindings.*.v1` 分开）
-  - 两边**互不派生**（这一条**仍然成立**，见下）
-  - 派生函数 `touchButtonIdsFromBindings` **只剩两个用途**：
-    老存档**迁移一次**、以及「恢复默认」的默认值（这一条**仍然成立**）
-
-  ⚠️ **【作废 · 2026-10-12 当日第二次改口】「触屏」页**：
   用户原话："**首页点开的设置，可以不要 按键tab**。刚说的触屏的按键设置
-  方法，最好**集成到 按键tab 里面**。"
+  方法，最好**集成到 按键tab 里面**。"两次改口的经过在
+  [history §4.2–4.3](docs/specs/2026-10-14-agents-md-history.md)。
 
-  所以现在**没有**独立的「触屏」页 —— 触屏键位就是「按键」页**右下角的
-  一组模拟键位**（`ui/settings/TouchSlotPreview`），交互是**两步**：
+  它就是「按键」页**右下角的一组模拟键位**（`ui/settings/TouchSlotPreview`），
+  交互是**两步**：
 
   ```
   ① 点一个键位（右下角）→ 它进入"选中"状态
@@ -371,13 +314,18 @@ validateContent(bundle, { strict: false })
   - 槽位是**固定的 7 个格子**（`TOUCH_BUTTON_CAPACITY`，3 内弧 + 4 外弧），
     中间可以是**空的**：`raid.touchButtons.v1` 是"下标 = 键位号"的数组，
     `''` = 空键位（旧存档没有 `''`，读出来天然兼容，**不需要迁移**）
-  - **仍然**两边互不派生：改键不动键位、改键位不动键；可选技能仍是
-    同一个池（`bindableSkillIdsOf`）
+  - ⚠️ **两边互不派生**（这是硬约束）。用户原话："触屏和键盘**当然是 2 套**，
+    连 localStorage 都是分 2 个 key 存的，只是**可选技能是一样的**"。
+    所以触屏按钮是**用户自己选的一份集合**，存**自己的 key**
+    `raid.touchButtons.v1`（与 `raid.bindings.*.v1` 分开）；
+    改键不动键位、改键位不动键；可选技能仍是同一个池（`bindableSkillIdsOf`）。
+    派生函数 `touchButtonIdsFromBindings` 只剩两个用途：老存档**迁移一次**、
+    以及「恢复默认」的默认值
   - ⚠️ **从首页打开的设置没有「按键」页**（那里没有技能可配）——
     "哪几页可见"的唯一判据是 `ui/settings/tabs.ts` 的 `visibleTabs(origin)`，
     相位 → 来源的翻译在 `app/phaseLogic.ts` 的 `settingsOriginOf`
   - ❌ **不要**把触屏键位配置做成"请你按一个键" —— 那对触屏没有意义，
-    而且正是上面那个死结的成因
+    而且正是"技能没绑键 → 触屏就没有按钮 → 又进不去改键"那个**死结**的成因
 
 ### ⚠️ 键位提示**不能放进 i18n**
 
@@ -425,6 +373,21 @@ validateContent(bundle, { strict: false })
 
 ---
 
+## 3e. ⚠️ Pixi 的 `mask` 在 headless 里**不生效** —— 裁剪要逐行判可见性
+
+**规则**：需要"只画窗口内的那部分"时，用**逐行 / 逐项可见性**判断
+（先例：设置页技能详情、备战详情 —— 把 `offset` 传进绘制、**逐行**判
+可见性），**不要**指望 Pixi 的 `mask` / 遮罩。
+
+⚠️ **为什么**：本仓库实测过 —— headless 里靠 `mask` 裁过的东西会
+**直接画到区域外**（遮罩等于没有）。而"截图验证"恰好跑在 headless 里，
+所以这不是理论洁癖：用 `mask` 的实现**你自己看不见它坏**。
+
+判据与先例见 `src/ui/prepareDetailPanel.ts`（顶部注释）、
+`src/ui/settings/SkillDetail.ts`、`src/ui/settings/wrapText.ts`。
+
+---
+
 ## 4. 改动后的必跑流程
 
 ```
@@ -433,6 +396,72 @@ pnpm run typecheck   →   npx eslint .   →   pnpm run test:run
 ```
 
 **就这四条。没有端到端脚本。**
+
+### ⭐ §4a 先问"**能不能直接到那个状态**"，再问"**要不要按键**"
+
+**这是本仓库验证方法的第一条判据。** 上一节说"逻辑靠单测、UI 靠截图"，
+这一节说**怎么到那个要看的画面**：
+
+```
+① 纯逻辑 / 几何 / 文案            → 【UT】✓ 不用进浏览器 ✓
+② "某个屏长什么样"                → ⭐【直接跳到那个屏】✗ 不要走全流程 ✗
+                                     （URL 参数 ✓ 或 debug API ✓）+ 截图 ✓
+   ⚠️ 尤其【不要为了到某个相位去打一整场战斗】✗ —— 那是几分钟换一张图
+③ 引擎行为（冷却 / 消费 / 帧推进）→ 【window.__raidBattle.act() 注入 +
+                                     probe() 读数】✓ 不按键 ✓
+④ 只有"真的按那个键"才需要按键 ✓ —— 键位绑定 / 输入路由 这一类
+```
+
+⚠️ **为什么**：走全流程 = 慢 + 脆（中间任何一步的等待都可能超时），
+而**它验证的东西和"直接跳过去"完全一样**。②③ 都是这个仓库已经付过
+代价建好的入口，用它们。
+
+#### 已存在的**直接入口**（不用重新发现）
+
+```
+URL:  ?prepare=skip   直接进战斗（跳过全部流程）
+      ?boss=<id>      指定对手          ?noai=1    对手不行动
+      ?runlen=N       这一局打几场      ?runseed=N  固定一局的种子
+      ?touch=0 / 1    强制键盘 / 触屏
+debug API（window.__raidBattle.*）:
+      home.confirm() · characterSelect.pick('player') · prepare.* · run.* ·
+      qiji.* · logReview.* · act() · probe() · stage · settings
+```
+
+⚠️ **这些全都不是按键** ✗ → 用了它们就**不会**踩下面的 §4b 那个坑 ✓。
+（"怎么点/怎么读"的现成用法在 `tools/shot.mjs` 里。）
+
+### ⚠️ §4b CDP 的一个坑：**不带 `text` 的按键会把页面打成 `hidden`，rAF 全停**
+
+**症状**（看起来像游戏 bug ✗）：进战斗后 `frameCount` **冻结**、战斗 `tick`
+**停在 0**，而且**再也回不来**（`Page.bringToFront` /
+`setWebLifecycleState('active')` 都救不回）。
+
+**根因链**（Chrome 154 / `--headless=new` 实测）：
+
+```
+用 CDP Input.dispatchKeyEvent 派发一个【不带 text 载荷】的按键 ✗
+  → 触发 visibilitychange → document.visibilityState === 'hidden' ✗
+  → 【Chrome 停止投递 rAF】✗
+  → Pixi 的 Ticker 是在 update() 返回【之后】才 requestAnimationFrame ✓
+    ⇒ 【链一断就永久死】✗（不是"降频" ✓）
+```
+
+⚠️ **且：方向键天生没有 `text`** ✗（`text: ''` 也无效）→ 所以
+"给所有键补一个假 `text`"这条修法**不成立** ✗。（完整读数表在
+[history §5.2](docs/specs/2026-10-14-agents-md-history.md)。）
+
+**✅ 已修**：`tools/cdp.mjs` 的 `connectCdp()` 里**默认开**
+
+```js
+Emulation.setFocusEmulationEnabled({ enabled: true })
+```
+
+所以**凡是用 `tools/cdp.mjs` 的脚本**都不再踩 ✓ —— 但要知道这件事，
+否则下次会给一个"引用了别的怪症状"的 bug 找错方向。
+
+⚠️ **还有一个同类入口**：`tools/bench.mjs` **不使用** `connectCdp`
+（自己开 WebSocket）✗ —— 它需要自己开焦点模拟。
 
 ### ⚠️⚠️ 测试不许依赖被 gitignore 的素材，也不许去判断素材
 
@@ -499,9 +528,9 @@ pnpm run typecheck   →   npx eslint .   →   pnpm run test:run
 用户原话："你别跑e2e了，每次都卡住 浪费时间，删掉，逻辑保证ut没问题，
 ui截图 验证"
 
-删掉的原因不是"不重要"，而是**成本收益不对**：那两个 CDP 脚本（键盘 /
-触屏）**反复卡住**（headless Chrome 残留、rAF 被节流、等待超时），每次
-排查都浪费一轮对话；而它们覆盖的东西可以用更便宜的方式覆盖。
+⚠️ **现状是硬约束**：不要重建 e2e、也不要把截图脚本发展成 e2e。
+删掉它的成本收益账在
+[history §5](docs/specs/2026-10-14-agents-md-history.md)。
 
 ### 替代方案（这是现在的规范）
 
