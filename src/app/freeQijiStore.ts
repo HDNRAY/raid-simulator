@@ -1,11 +1,11 @@
 /**
- * **自由模式的炁机激活**：层数表 + 存档。
+ * **自由模式的炁机激活**：集合 + 存档。
  *
  * ==================================================================
  * 它是什么（一句话，没有"和"）
  * ==================================================================
  *
- * 它是"自由模式里现在开着哪几条炁机、各几层"这份状态的**唯一持有者**：
+ * 它是"自由模式里现在开着哪几条炁机"这份状态的**唯一持有者**：
  * 读（含版本与池子校验）、写、以及"这一局开战时交给
  * `buildPlayerKit` 的那张表"这个翻译。
  *
@@ -33,7 +33,7 @@
  *      刷新一下全没了"变成一个**看起来像 bug** 的行为
  *   2. 它是**偏好**不是战果：不像肉鸽的 `RunState.chosen`（那一局的账本，
  *      局散即弃），自由模式的配置是玩家攒出来的一套组合
- *   3. 代价可控：条目是 `{ qijiId: stacks }`，几条而已
+ *   3. 代价可控：条目就是几个 id
  *
  * ⚠️ **不与肉鸽的 `RunState.chosen` 共用一个 key**：那一份必须"每局重来"
  * （`runSession.clear()` 会丢），而这一份必须**留着**。共用会让"开一局
@@ -47,7 +47,27 @@
  * 池子从 5 条变 8 条、有两条改了 id）。直接信它会让"这里有一条不存在的
  * 炁机"一路静默到 `buildPlayerKit`（那里只认 `qijiById` 找得到的 id，
  * 找不到就丢掉 —— 于是玩家的某一条**静默失效**）。
- * 所以这里在**入口**就把不认识的键、非法的层数丢掉。
+ * 所以这里在**入口**就把不认识的 id 丢掉。
+ *
+ * ==================================================================
+ * ⚠️ 格式迁移（2026-10-13）：`id → 层数` **读成开关**
+ * ==================================================================
+ *
+ * 上一版把激活做成了层数（`{"vitality":2}`）—— 用户明确纠正"**炁机的激活
+ * 没有层**"（见 `ui/freeQiji.ts` 的文件头）。新的存储形状是 **id 的数组**
+ * （集合）：`["vitality","breath"]`。
+ *
+ * 老存档要能读回来，所以 `parseFreeQiji` **两种形状都认**：
+ *
+ * ```
+ *   ["vitality"]            → 新格式（集合），原样读
+ *   {"vitality":2}          → 旧格式（层数），值 > 0 ⇒ **算开着**
+ *   {"vitality":0,"x":-1}   → 旧格式里的坏值，**逐条丢弃**
+ * ```
+ *
+ * 读旧格式时 `migrated = true`，调用方（`app/deps.ts`）据此**写回**一次
+ * 新格式 —— 与 `settingsStore.loadTouchButtons` 同一条"迁移只做一次"的
+ * 纪律（照本仓库既有做法）。
  */
 
 import type { StorageLike } from './settingsStore';
@@ -55,80 +75,102 @@ import type { StorageLike } from './settingsStore';
 /** 存档 key（**只有这一处**拼它）。 */
 export const KEY_FREE_QIJI = 'raid.freeQiji.v1';
 
-/** 自由的炁机层数表：`id → 已叠层数`（缺键 = 没开）。 */
-export type FreeQijiMap = Readonly<Record<string, number>>;
+/** 自由的炁机激活集合：数组里每个 id 都开着（不在里面 = 没开）。 */
+export type FreeQijiSet = readonly string[];
+
+/** 读取结果：集合 + 这次是不是**从旧格式迁移**来的（调用方据此写回）。 */
+export interface FreeQijiLoad {
+  readonly ids: FreeQijiSet;
+  /** `true` = 存储里是旧的"id → 层数"形状，这次按开关读出来了。 */
+  readonly migrated: boolean;
+}
 
 /**
- * 从原始字符串解析出层数表。
+ * 从原始字符串解析出激活集合（**纯函数、可单测**）。
  *
- * ⚠️ 纯函数、可单测：坏 JSON / 形状不对 / 层数是 `NaN` / 负数一律
- * **当成"没开"**丢掉，而不是抛 —— 存档坏了不该让游戏起不来。
+ * ⚠️ 坏 JSON / 形状不对 / 认不出的条目一律**丢掉**，而不是抛 —— 存档坏了
+ * 不该让游戏起不来。丢的是**逐条**：一条坏值不影响同一次读取里的其它条。
  *
- * @param known 当前池子里认识的 id（不在里面的键丢掉）。
- * @param capOf 每条的上限（`maxStacks`）；解析时**夹一下**，
- *   这样"上限从 3 改成 1"之后老存档不会带着 3 层进战斗。
+ * @param known 当前池子里认识的 id（不在里面的丢掉）。
  */
-export function parseFreeQiji(
-  raw: string | null,
-  known: readonly string[],
-  capOf: (id: string) => number,
-): FreeQijiMap {
-  if (raw === null || raw === '') return {};
+export function parseFreeQiji(raw: string | null, known: readonly string[]): FreeQijiLoad {
+  if (raw === null || raw === '') return { ids: [], migrated: false };
   let data: unknown;
   try {
     data = JSON.parse(raw);
   } catch {
-    return {};
+    return { ids: [], migrated: false };
   }
-  if (typeof data !== 'object' || data === null || Array.isArray(data)) return {};
   const allow = new Set(known);
-  const out: Record<string, number> = {};
-  for (const [id, value] of Object.entries(data)) {
-    if (!allow.has(id)) continue;
-    /**
-     * ⚠️ 非数字 / 非有限值 / **非正数**一律丢掉（而不是夹成 1）：
-     * `0` 或负数只可能来自**坏存档**，把坏数据"修好"成 1 层会让玩家
-     * 莫名其妙多一条强化，而丢掉它只是回到"没开"——那是安全的默认。
-     */
-    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) continue;
-    const stacks = Math.min(Math.floor(value), Math.max(1, capOf(id)));
-    /** ⚠️ 0 层不写进表（与 `prepareLogic.withStacks` 同一约定：缺键 = 没开）。 */
-    if (stacks > 0) out[id] = stacks;
+  const out: string[] = [];
+  const push = (id: string): void => {
+    if (!allow.has(id) || out.includes(id)) return;
+    out.push(id);
+  };
+
+  /**
+   * ⚠️ **新格式**：id 的数组（集合）。非字符串的条目逐条丢弃。
+   */
+  if (Array.isArray(data)) {
+    for (const entry of data) {
+      if (typeof entry === 'string') push(entry);
+    }
+    return { ids: sortIds(out), migrated: false };
   }
-  return out;
+
+  /**
+   * ⚠️ **旧格式**：`{ id: 层数 }`。值 > 0（有限数）**算开着** —— 层数已经
+   * 没有意义了，但"当时开过"这个事实要保住（否则玩家的配置凭空消失）。
+   * `0` / 负数 / 非数 / 未知 id 一律逐条丢弃。
+   */
+  if (typeof data === 'object' && data !== null) {
+    for (const [id, value] of Object.entries(data)) {
+      const on = typeof value === 'number' && Number.isFinite(value) && value > 0;
+      if (on) push(id);
+    }
+    return { ids: sortIds(out), migrated: true };
+  }
+
+  return { ids: [], migrated: false };
 }
 
-/** 序列化（只留开着的那些键 —— 层数表里不该出现 0）。 */
-export function serializeFreeQiji(map: FreeQijiMap): string {
-  const out: Record<string, number> = {};
-  for (const id of Object.keys(map).sort()) {
-    const value = map[id];
-    if (value === undefined || value <= 0) continue;
-    out[id] = value;
-  }
-  return JSON.stringify(out);
+/**
+ * 序列化：**去重 + 排序**的 id 数组。
+ *
+ * ⚠️ 排序让"同一份配置"永远给同一个字符串（便于对账 / 快照），
+ * 与集合"顺序没有含义"的语义一致。
+ */
+export function serializeFreeQiji(ids: FreeQijiSet): string {
+  return JSON.stringify(sortIds(ids.filter((id) => id !== '')));
 }
 
-/** 读存档（坏值一律退化成空表，见 `parseFreeQiji`）。 */
-export function loadFreeQiji(
-  storage: StorageLike | undefined,
-  known: readonly string[],
-  capOf: (id: string) => number,
-): FreeQijiMap {
+/**
+ * 读存档（坏值一律退化成空集合，见 `parseFreeQiji`）。
+ *
+ * ⚠️ 迁移**不在这里写回**：写回是调用方的事（`deps.ts` 照
+ * `loadTouchButtons` 的先例拿 `migrated` 决定要不要 `saveFreeQiji`）——
+ * 一个"读"函数不该有写副作用。
+ */
+export function loadFreeQiji(storage: StorageLike | undefined, known: readonly string[]): FreeQijiLoad {
   let raw: string | null = null;
   try {
     raw = storage?.getItem(KEY_FREE_QIJI) ?? null;
   } catch {
-    return {};
+    return { ids: [], migrated: false };
   }
-  return parseFreeQiji(raw, known, capOf);
+  return parseFreeQiji(raw, known);
 }
 
 /** 写存档（配额满 / 隐私模式下静默放弃，与 `settingsStore` 同一条纪律）。 */
-export function saveFreeQiji(storage: StorageLike | undefined, map: FreeQijiMap): void {
+export function saveFreeQiji(storage: StorageLike | undefined, ids: FreeQijiSet): void {
   try {
-    storage?.setItem(KEY_FREE_QIJI, serializeFreeQiji(map));
+    storage?.setItem(KEY_FREE_QIJI, serializeFreeQiji(ids));
   } catch {
     /* 这次没存上，不影响这一局 */
   }
+}
+
+/** 去重（同一条只出现一次）+ 排序（同一份配置永远给同一个形状）。 */
+function sortIds(ids: readonly string[]): readonly string[] {
+  return [...new Set(ids)].sort();
 }

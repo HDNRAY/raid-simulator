@@ -37,17 +37,49 @@
  * "详情区该改成可滚"的信号（今天最多：Boss 4 招 + 1 行标题 = 5）。
  *
  * ==================================================================
- * ⚠️ 溢出：先**整体上移**（`contentShift`），再退化成"不显示"
+ * ⚠️⚠️ 2026-10-13 第四轮：正文**画到面板外面**去了 —— 裁剪是这次修的
  * ==================================================================
  *
- * 内容比视口高时，本组件把行画进一个**可整体位移的子容器**里，并把
- * 第一行的 y 往上挪 `overflow`（"末尾优先"）—— 那是 `QijiSelectScreen`
- * 已有的做法，比在 jsdom 里跑遮罩可靠。
+ * 用户原话："**boss 详情的内容 出了区域 还是能显示···· 虽然可以滚动**"。
  *
- * ⚠️ **不做拖拽 / 滚轮滚动**（与选炁机屏一致）：详情区是**查看**用的，
- * 而它里面最长的内容是 Boss 的 4 条招式说明 —— 溢出时"末尾优先"已经
- * 保证**总能读到最后一招**（最早那一招被推到面板上缘之外）。
- * 真需要滚动时按 `scrollWindow` 那套加（`SkillDetail` 是范例）。
+ * 实测（截图 + 逐字坐标，见提交说明）：聚焦「傲慢」、滚到顶时，最后一招
+ * 「碾压」的名字与说明被画到 **y ≈ 490~520**，而面板底边是 **459** ——
+ * 那几行压在下面的素材声明上。
+ *
+ * ==================================================================
+ * 根因：**裁剪那一行从来没生效过**（单位对不上）
+ * ==================================================================
+ *
+ * 旧版 `placeRows` 写的是 `visibleWindow(placed, this.scroll, viewRows)`：
+ * `visibleWindow` 的第二个参数是**条目下标**（"第几条开始"），而这里传的
+ * `this.scroll` 是**像素**。于是 `clampOffset(像素, 行数, 一屏行数)` 对
+ * 5 行的内容恒等于 0（`maxOffset(5, 13) = 0`）—— **永远返回全部行**，
+ * 一行都没裁掉。而"看得见哪一段"就只剩下那个 `dy` 平移：内容整体上移，
+ * 下面自然就伸出去了。
+ *
+ * ==================================================================
+ * 修法：**按每一行自己的内容区间判**（照 `settings/SkillDetail.clipToWindow`）
+ * ==================================================================
+ *
+ * ⚠️ 不用 Pixi 的 `mask`：本仓库实测**遮罩在 headless 里不生效**
+ * （见 `ui/settings/wrapText.ts`），拿它修等于"截图看上去还是坏的"。
+ *
+ *   行的内容区间 = `[nameTop, endTop)`，视口 = `[scroll, scroll + bodyViewH)`
+ *   只有**整行落在视口里**才画（`inside`）
+ *
+ * ⚠️ **为什么是"整行"而不是"相交就画"**：Pixi 的一段 `Text` 不能裁一半
+ * —— "相交就画"必然让跨在面板下缘的那一行有半截露在外面，而露出多少
+ * 取决于那一行折了几行（Boss 的说明 2~3 行 ⇒ 最多露 ~50px）。
+ *
+ * ⚠️ 为了让"整行"这条判据不产生**奇怪的空白**，画出来的偏移**吸附到行顶**
+ * （`snapScroll`）：拖拽 / 滚轮仍然按像素累加，但落笔时停在某一行的顶边，
+ * 于是顶上那一行不会半截压在**钉住的顶栏**上。滚到底那一档是例外
+ * （`scroll >= maxScroll` 时直接用 `maxScroll`，否则最后一行永远露不全）。
+ *
+ * ⚠️ 行高改成**实测**（`Label.root.height`）而不是估算的行数：`maxScroll`
+ * 与"整行是否放得下"都依赖内容底边，估算偏一行就会让最后一行**永远**
+ * 差一点放不下（于是"滚到底也看不到最后一招"）。估算仍是兜底（jsdom /
+ * 纹理还没量出来时 `height` 可能是 0）。
  */
 
 import type { Container, Graphics } from 'pixi.js';
@@ -60,7 +92,7 @@ import { detailRect } from './prepareGeometry';
 import type { DetailModel, DetailRow } from './prepareDetail';
 import { PORTRAITS, portraitFor } from '../render/portraitAssets';
 import { PortraitSprite } from '../render/portraitSprite';
-import { pixelViewport, scrollThumbRatio, visibleWindow } from './scrollWindow';
+import { DetailViewport, measuredHeight } from './prepareDetailViewport';
 import {
   DETAIL_ROW_POOL,
   METRICS,
@@ -81,6 +113,35 @@ import type { TranslateFn } from '../i18n/translator';
 interface RowLabels {
   readonly name: Label;
   readonly body: Label;
+}
+
+/**
+ * 一行在**内容坐标**里的三段位置。
+ *
+ * ⚠️ `endTop` 是这次修裁剪补上的：旧版只记 `nameTop` / `bodyTop`，于是
+ * "这一行到底占多高"没人知道 —— 而"整行落在视口里"这条判据正需要它
+ * （见文件头）。
+ */
+interface PlacedRow {
+  readonly slot: RowLabels;
+  /** 名字那一行的顶边（也是这一行的顶边）。 */
+  readonly nameTop: number;
+  /** 说明 / 值那一行的顶边（没有第二行时 = `nameTop`）。 */
+  readonly bodyTop: number;
+  /** 这一行的**底边**（不含 `rowGap`）—— 裁剪判据读它。 */
+  readonly endTop: number;
+}
+
+/**
+ * 去掉说明里的**强调标记**（`**…**`）。
+ *
+ * ⚠️ 内容表用 `**` 标重点（例如「碾压」的"读条全程**霸体**"），而 Pixi 的
+ * 一段 `Text` 做不了**行内**加粗 —— 设置页的技能详情早就用
+ * `replaceAll('**', '')` 处理过（见 `settings/SkillDetail.ts`）。
+ * 详情区这一版**漏了那一步**，于是面板上原样显示 `**霸体**`（截图实测）。
+ */
+function stripEmphasis(text: string): string {
+  return text.replaceAll('**', '');
 }
 
 export class PrepareDetailPanel {
@@ -117,22 +178,16 @@ export class PrepareDetailPanel {
    * 这种情况 —— 标题已经是「固本培元」，不该在下面再画一遍）。
    */
   private lastTitleKey: string | undefined;
-  /** 当前滚动位置（逻辑像素；0 = 顶部）。 */
-  private scroll = 0;
-  /** 可滚动的最大值（内容底边 − 视口底边；0 = 不用滚）。 */
-  private maxScroll = 0;
   /**
-   * **正文视口**的顶边与该滚多少 —— 它从**顶栏下缘**开始（顶栏钉在面板
-   * 顶部，不参与滚动，见 `update`）。
-   *
-   * ⚠️ 这几个数由 `update` 每帧写一次（顶栏高度取决于当前这一项的方框
-   * 大小，所以必须每帧算，不能在构造时定死）。
+   * **正文的滚动视口**（滚到哪 / 还能滚多少 / 哪一行整行看得见 / 滚动条）——
+   * 几何那一半在 `prepareDetailViewport`（AGENTS.md §3 的横向切割：本文件
+   * 只负责"画"）。
    */
-  private bodyTop = 0;
-  /** 正文视口的高。 */
-  private bodyViewH = 0;
-  /** 正文的**行距上界**（估算用：一条 `skill` 最多名 19 + 说明 17 + 空 6）。 */
-  private readonly rowStep = METRICS.nameLine + METRICS.bodyLine + METRICS.rowGap;
+  private readonly view = new DetailViewport();
+  /**
+   * 这一帧每一行在**内容坐标**里的区间（`layoutRows` 算，`placeRows` 读）。
+   */
+  private placed: readonly PlacedRow[] = [];
   /** 右侧那条滚动条（只有真能滚时才画）。 */
   private readonly scrollBar: Graphics;
 
@@ -253,7 +308,7 @@ export class PrepareDetailPanel {
     const targetId = model === undefined ? undefined : `${model.kind}:${model.id}`;
     if (targetId !== this.lastTargetId) {
       this.lastTargetId = targetId;
-      this.scroll = 0;
+      this.view.reset();
     }
     const rect = detailRect();
     const innerX = rect.x + PREPARE_LAYOUT.detailPad;
@@ -326,9 +381,15 @@ export class PrepareDetailPanel {
       .lineTo(innerX + innerW, bodyTop - METRICS.rowGap / 2)
       .stroke({ color: PALETTE.panelLine, width: 1, alpha: 0.6 });
 
-    const contentBottom = this.drawRows(model.rows, bodyTop, inlineSpan(innerX, innerW));
-    this.shiftContent(rect, bodyTop, contentBottom);
-    this.drawScrollBar(rect, bodyTop);
+    /**
+     * ⚠️ 顺序：**先摆行（量出内容底边）→ 再让视口按这一帧的底边算** →
+     * 最后按视口裁 / 平移。反过来的话 `maxScroll` 用的是上一帧的底边，
+     * "滚到底"那一档会差一帧才对（表现出来就是最后一行闪一下）。
+     */
+    const contentBottom = this.layoutRows(model.rows, bodyTop, inlineSpan(innerX, innerW));
+    this.view.measure(rect, bodyTop, contentBottom);
+    this.placeRows();
+    this.view.drawScrollBar(this.scrollBar, rect);
   }
 
   /* ---------------------------------------------------------------- *
@@ -415,27 +476,24 @@ export class PrepareDetailPanel {
    * ---------------------------------------------------------------- */
 
   /**
-   * 画正文行，返回**摊开来**的内容底边 y（不含 `rowGap`）。
+   * **摊开正文行**（写文字 + 量高 + 记下每一行的内容区间），返回内容的底边 y。
    *
    * ==================================================================
-   * ⚠️ 分两步：先算"每一行在内容坐标里的位置"，再**只摆可见的那些**
+   * ⚠️ 它**不摆放**：位置要等 `view.measure()` 把这一帧的视口算出来
    * ==================================================================
    *
-   * 第一步与滚动无关（行的位置由内容决定），第二步读 `scroll` —— 于是
-   * "内容有多高"与"现在看得见哪一段"是两件事，不会互相污染（这正是
-   * `scrollWindow` 把 `count` 与 `offset` 分开的理由）。
+   * 旧版把"摊开"与"摆放"挤在一个方法里，于是摆放时读到的 `maxScroll`
+   * 是**上一帧**的（顺序上只能那样）。拆成 `layoutRows` → `view.measure`
+   * → `placeRows` 之后，"这一帧的内容底边"与"这一帧可见哪一段"是同一次
+   * 计算里的东西。
    *
-   * ⚠️ 只有**落在视口里**的行会被摆出来：第一行只在 `scroll === 0` 时
-   * 显示，而最后一行只在滚到底时显示 —— 与复盘 / 设置页技能详情**同一份
-   * 边界规则**（`scrollWindow.visibleWindow`）。
+   * ⚠️ 行高是**实测**的（`measuredHeight`），因为 `maxScroll` 与"整行放得下
+   * 吗"都依赖内容底边 —— 估算偏一行会让最后一行**永远**差一点，于是
+   * "滚到底也看不到最后一招"（见文件头）。
    */
-  private drawRows(rows: readonly DetailRow[], startY: number, span: TextSpan): number {
+  private layoutRows(rows: readonly DetailRow[], startY: number, span: TextSpan): number {
     let y = startY;
-    const placed: {
-      readonly slot: RowLabels;
-      readonly nameTop: number;
-      readonly bodyTop: number;
-    }[] = [];
+    const placed: PlacedRow[] = [];
     this.rows.forEach((slot, i) => {
       const row = rows[i];
       if (row === undefined) {
@@ -459,7 +517,7 @@ export class PrepareDetailPanel {
           slot.name.setColor(PALETTE.text);
           slot.name.root.x = span.x;
           slot.name.root.y = y;
-          y += METRICS.nameLine;
+          y += this.measuredHeight(slot.name, METRICS.nameLine);
         }
         /**
          * ⚠️ 说明文字**必须**带参数（`descParams`）：Boss 的说明里有
@@ -470,12 +528,12 @@ export class PrepareDetailPanel {
           slot.body.root.visible = false;
         } else {
           slot.body.root.visible = true;
-          slot.body.set(this.translate(row.descKey, row.descParams));
+          slot.body.set(stripEmphasis(this.translate(row.descKey, row.descParams)));
           slot.body.setColor(PALETTE.textDim);
           slot.body.root.x = span.x;
           bodyContentTop = y;
           slot.body.root.y = y;
-          y += this.estimateLines(slot.body) * METRICS.bodyLine;
+          y += this.measuredHeight(slot.body, this.estimatedHeight(slot.body));
         }
       } else if (row.kind === 'kv') {
         slot.name.root.visible = true;
@@ -487,9 +545,10 @@ export class PrepareDetailPanel {
         slot.body.set(row.value);
         slot.body.setColor(PALETTE.text);
         slot.body.root.x = span.x;
-        bodyContentTop = y + METRICS.nameLine;
+        const nameH = this.measuredHeight(slot.name, METRICS.nameLine);
+        bodyContentTop = y + nameH;
         slot.body.root.y = bodyContentTop;
-        y += METRICS.nameLine + METRICS.bodyLine;
+        y += nameH + this.measuredHeight(slot.body, this.estimatedHeight(slot.body));
       } else {
         slot.name.root.visible = true;
         slot.name.set(this.textOf(row));
@@ -497,49 +556,42 @@ export class PrepareDetailPanel {
         slot.name.root.x = span.x;
         slot.name.root.y = y;
         slot.body.root.visible = false;
-        y += this.estimateLines(slot.name) * METRICS.bodyLine;
+        y += this.measuredHeight(slot.name, this.estimatedHeight(slot.name));
       }
+      /** ⚠️ 这一行的**内容底边**（不含 `rowGap`）—— 裁剪判据读它。 */
+      const endTop = y;
       y += METRICS.rowGap;
-      placed.push({ slot, nameTop, bodyTop: bodyContentTop });
+      placed.push({ slot, nameTop, endTop, bodyTop: bodyContentTop });
     });
-    this.placeRows(placed);
+    this.placed = placed;
     return y - METRICS.rowGap;
   }
 
   /**
-   * 按 `scroll` 把**可见的那些行**摆到面板上（顶栏那一条**不动**）。
+   * 按视口把**可见的那些行**摆到面板上（顶栏那一条**不动**）。
    *
-   * ⚠️ 行是**按绝对内容坐标算好**再平移的（`top − scroll + 视口顶`）：
-   * 于是"滚到一半"时某一行停在半途，而不是跳一整行 —— 手指 / 滚轮给的是
-   * 连续位移，跳行会让它看起来卡顿。
+   * ⚠️ 判据（"整行落在视口里" / 吸附行顶 / 滚到底例外）**全部**在
+   * `prepareDetailViewport`（那是 §3 横向切割出去的一半，见那个文件的
+   * 文件头）—— 这里只做两件事：问视口"画出来的视口顶边在哪"，然后按
+   * 它裁剪 + 平移。
+   *
+   * ⚠️ **绝对赋值**（`= 内容 y − 画出来的偏移`）而不是 `+= dy`：
+   * `layoutRows` 每帧都会把内容 y 重新算进 `root.y`，再累加就会每帧漂
+   * 一个 `dy`（画面上的表现是"越滚越快"）。
    *
    * ⚠️ 每个槽位的**显隐**由"内容说它该不该画"（`visible`，见上）与
    * "它在不在视口里"两个条件**一起**决定：只看后者的话，被裁掉的那几行
    * （`rows` 数组短于槽位数）会带着上一帧的字重新出现。
    */
-  private placeRows(
-    placed: readonly {
-      readonly slot: RowLabels;
-      /** 内容坐标：名字那一行的 y。 */
-      readonly nameTop: number;
-      /** 内容坐标：说明 / 值那一行的 y（没有第二行时 = `nameTop`）。 */
-      readonly bodyTop: number;
-    }[],
-  ): void {
-    const viewRows = Math.max(1, Math.ceil(this.bodyViewH / this.rowStep));
-    const shown = new Set(visibleWindow(placed, this.scroll, viewRows));
-    /**
-     * ⚠️ **绝对赋值**（`= 内容 y − scroll + 视口顶`）而不是 `+= dy`：
-     * `drawRows` 每帧都会把内容 y 重新算进 `root.y`，再累加就会每帧漂
-     * 一个 `dy`（画面上的表现是"越滚越快"）。
-     */
-    const dy = this.bodyTop - this.scroll;
-    for (const line of placed) {
-      const on = shown.has(line);
+  private placeRows(): void {
+    const viewTop = this.view.drawnViewTop(this.placed, this.view.bodyTop);
+    const dy = -this.view.offsetOf(viewTop, this.view.bodyTop);
+    for (const line of this.placed) {
+      const inside = this.view.shows(line, viewTop);
       /** ⚠️ 两个条件**一起**成立才画：内容说该画 + 这一行在视口里。 */
-      line.slot.name.root.visible = on && line.slot.name.root.visible;
-      line.slot.body.root.visible = on && line.slot.body.root.visible;
-      if (on) {
+      line.slot.name.root.visible = inside && line.slot.name.root.visible;
+      line.slot.body.root.visible = inside && line.slot.body.root.visible;
+      if (inside) {
         line.slot.name.root.y = line.nameTop + dy;
         line.slot.body.root.y = line.bodyTop + dy;
       }
@@ -552,8 +604,18 @@ export class PrepareDetailPanel {
     return this.translate(row.nameKey);
   }
 
+  /** 实测高度（`prepareDetailViewport.measuredHeight` 的转发：这里只读 Pixi 的盒高）。 */
+  private measuredHeight(label: Label, fallback: number): number {
+    return measuredHeight(label.root.height, fallback);
+  }
+
+  /** 估算的文本高度（`estimateLines × bodyLine`）。 */
+  private estimatedHeight(label: Label): number {
+    return this.estimateLines(label) * METRICS.bodyLine;
+  }
+
   /**
-   * 折了几行（**估算**）。
+   * 折了几行（**估算**，只作 `measuredHeight` 的兜底）。
    *
    * ⚠️ 为什么估算而不是 `getBounds()`：Pixi 的测量在 jsdom 里跑不动
    * （`PrepareScreen` 与 `prepareRender` 都因为同一条纪律把逻辑抽出去
@@ -574,111 +636,25 @@ export class PrepareDetailPanel {
    * ---------------------------------------------------------------- */
 
   /**
-   * 滚轮 / 拖拽滚 **delta 像素**（触屏没有滚轮，拖拽那条路见 `PrepareScreen.dragDetail`）。
+   * 滚轮 / 拖拽滚 **delta 像素**（触屏没有滚轮，拖拽那条路见
+   * `PrepareScreen.dragDetail`）。
    *
-   * ⚠️ 钳位走 `scrollWindow.clampOffset`（**复用**那一份边界规则）：
-   * 滚到尽头 / 内容不足一屏 / 空内容三种边界只有一处实现。
+   * ⚠️ 钳位与边界规则**全在** `prepareDetailViewport.scrollBy`（搬走的那
+   * 一半，含"曾经拿 `clampOffset` 钳像素、上界差 1"那条坑的记录）。
    *
    * @returns 有没有真的动（调用方据此决定要不要重画）。
    */
   scrollBy(delta: number): boolean {
-    if (this.maxScroll <= 0) return false;
-    /**
-     * ⚠️ 钳位走 `pixelViewport`（**像素**那一套）。曾经写成
-     * `clampOffset(this.scroll + delta, this.maxScroll, 1)` —— 而
-     * `clampOffset` 是**行**那一套（第三个数是"一屏几行"），拿它钳像素会
-     * 让上界差 1（滚到底时最后一行差一点点才露全）。
-     */
-    const next = pixelViewport(this.bodyViewH + this.maxScroll, this.bodyViewH, this.scroll + delta).offsetPx;
-    if (next === this.scroll) return false;
-    this.scroll = next;
-    return true;
+    return this.view.scrollBy(delta);
   }
 
   /**
    * 这个逻辑点是不是落在**正文视口**里（拖拽要在里面才算"滚详情"）。
    *
-   * ⚠️ 上界是 `bodyTop`（**顶栏下缘**）而不是面板顶边：顶栏是钉住的，
-   * 在它上面拖动不该滚正文 —— 那会让玩家"想点标题却把内容滚走了"。
+   * ⚠️ 判据在 `prepareDetailViewport.isOnDetail`（上界是**顶栏下缘**而不是
+   * 面板顶边 —— 在标题上拖动不该把内容滚走）。
    */
   isOnDetail(px: number, py: number): boolean {
-    const rect = detailRect();
-    const top = this.bodyTop === 0 ? rect.y + PREPARE_LAYOUT.detailPad : this.bodyTop;
-    return (
-      this.maxScroll > 0 &&
-      px >= rect.x &&
-      px <= rect.x + rect.w &&
-      py >= top &&
-      py <= rect.y + rect.h
-    );
-  }
-
-  /** 右侧那条滚动条（只有真能滚时才画；轨道只在**正文视口**那一段）。 */
-  private drawScrollBar(
-    rect: {
-      readonly x: number;
-      readonly y: number;
-      readonly w: number;
-      readonly h: number;
-    },
-    bodyTop: number,
-  ): void {
-    this.scrollBar.clear();
-    if (this.maxScroll <= 0) return;
-    const trackX = rect.x + rect.w - 5;
-    const trackTop = bodyTop;
-    const trackH = Math.max(0, rect.y + rect.h - PREPARE_LAYOUT.detailPad - bodyTop);
-    const thumbRatio = scrollThumbRatio(this.bodyViewH, this.maxScroll + this.bodyViewH);
-    const thumbH = Math.max(24, Math.round(thumbRatio * trackH));
-    const progress = this.maxScroll === 0 ? 0 : this.scroll / this.maxScroll;
-    const thumbY = trackTop + Math.round((trackH - thumbH) * progress);
-    this.scrollBar
-      .roundRect(trackX, trackTop, 3, trackH, 1.5)
-      .fill({ color: PALETTE.panelLine, alpha: 0.35 });
-    this.scrollBar
-      .roundRect(trackX, thumbY, 3, thumbH, 1.5)
-      .fill({ color: PALETTE.textDim, alpha: 0.9 });
-  }
-
-  /**
-   * 正文比视口高时，按 `scroll` 决定**看得见哪一段**（而不是"末尾优先"）。
-   *
-   * ==================================================================
-   * ⚠️ 为什么从"末尾优先"改成"可滚"（实测逼出来的）
-   * ==================================================================
-   *
-   * 第一版是"溢出就把整层顶到末尾"（`QijiSelectScreen` 的做法）：
-   * 内容底边对齐视口底边。可是**详情区的头两行（标题 / 生命上限）会被
-   * 顶出面板**——实测「色欲」那四条招式说明一进来，**「生命上限 420」
-   * 就看不见了**，而那一行是"这个 Boss 多硬"的唯一线索。
-   *
-   * ==================================================================
-   * ⚠️⚠️ 2026-10-13 第三轮：顶栏**钉住**，只让正文滚
-   * ==================================================================
-   *
-   * 上一版把标题 / 副标题塞进那个"整体上移"的内容层里 —— 于是**滚到底**
-   * 时"生命上限 420"仍然会被滚出面板（那正是用户报的"详情区顶栏随内容
-   * 滚动会滚出面板"）。现在：
-   *
-   * ```
-   *   顶栏（标题 + 关键数值 + 头像）→ 钉在面板顶部，不参与滚动
-   *   正文（招式 / 说明 / 键值行）  → 在 [bodyTop, 面板底 − 内边距] 里滚
-   * ```
-   *
-   * ⚠️ 视口顶边是**顶栏下缘**（`bodyTop`）而不是面板顶边：正文滚到顶栏
-   * 底下就停住，不会与标题叠在一起。
-   *
-   * ⚠️ 触屏没有滚轮（AGENTS.md §3b）：拖拽那条路是**必须**的，不是补充。
-   * 它走 `canvasInput` 已有的入口模式（`pointermove` 时转发）——
-   * 不自己挂 `window` 监听器。
-   */
-  private shiftContent(
-    rect: { readonly y: number; readonly h: number },
-    bodyTop: number,
-    contentBottom: number,
-  ): void {
-    this.bodyViewH = Math.max(0, rect.y + rect.h - PREPARE_LAYOUT.detailPad - bodyTop);
-    this.maxScroll = pixelViewport(contentBottom - bodyTop, this.bodyViewH, 0).maxPx;
-    this.scroll = pixelViewport(contentBottom - bodyTop, this.bodyViewH, this.scroll).offsetPx;
+    return this.view.isOnDetail(detailRect(), px, py);
   }
 }

@@ -261,45 +261,71 @@ export function foldTextMaxChars(L: PrepareLayout = PREPARE_LAYOUT): number {
  * 「开始战斗」的矩形（渲染与命中测试**共用**这一个推导）。
  *
  * ==================================================================
- * ⚠️ 它的 y **算出来**（旧版是布局表里一个写死的 `startY = 430`）
+ * ⚠️ 2026-10-13 第四轮：**锚定画布底部**（旧版跟着内容走）
  * ==================================================================
  *
- * 旧版三块同时展开，纵向排不下，于是按钮被横着挪到炁机行的**右侧**
- * （避开卡片列）—— 而那恰好是"按钮与它的文字错位"的来源：按钮的矩形
- * 由 `startY` 推、文字却仍然画在**整张画布的中心**（`LOGICAL.width / 2`
- * = 480，而按钮中心是 328）。
+ * 用户原话："**开始战斗 和 开始战斗下面的说明 其实可以放一排，
+ * 并且 锚定在底部**"。
  *
- * 手风琴把纵向省出来之后，按钮回到**卡片列下方居中**；y 由
- * `sectionsBottom`（三块里最高的一种展开方式）+ `startGap` 算出来：
- * 展开哪一块它都不动（见 `sectionsBottom`）。
+ * 旧版的 y 由 `sectionsBottom`（三块里最高的一种展开方式）+ `startGap`
+ * 推出 —— 也就是**跟着卡片内容走**：张数一变、切一块，按钮就上下溜。
+ * 现在 y 只由 `L.footerRowCenterY`（从画布底边往上推的常量）决定，
+ * **不看张数、也不看展开哪一块**。
+ *
+ * ==================================================================
+ * ⚠️ 为什么 x 是**卡片列左端**（`pad`），而不是"按钮 + 说明"整块居中
+ * ==================================================================
+ *
+ * 整块居中要让按钮的 x 依赖**说明文字的实测宽度**，而同一个矩形在
+ * **命中测试**里也要算一遍（那是纯几何，量不到文字）—— 同一个矩形两处
+ * 各算一遍，正是上一轮那个"开始战斗与文字错位 152px"的 bug 形状。
+ * 所以按钮的 x 只由布局常量决定：它贴卡片列左端，说明在它右边那一格
+ * （`footerHintSlot`）里左对齐。
+ *
+ * ⚠️ 它**不再接 `counts`**：这个矩形与张数无关（那正是"锚定"的意思）。
  */
-export function startRect(
-  counts: PrepareCounts,
-  L: PrepareLayout = PREPARE_LAYOUT,
-): Rect {
+export function startRect(L: PrepareLayout = PREPARE_LAYOUT): Rect {
   return {
-    x: Math.round(L.pad + (L.playerColW - L.startW) / 2),
-    y: Math.round(sectionsBottom(counts, L) + L.startGap),
+    x: L.pad,
+    y: Math.round(L.footerRowCenterY - L.startH / 2),
     w: L.startW,
     h: L.startH,
   };
 }
 
 /**
- * 「开始战斗」的**中心 x** —— 按钮上的文字与它下面那行提示的对齐基准。
+ * 「开始战斗」的**中心 x** —— 按钮上那四个字的对齐基准。
  *
  * ⚠️ 这个函数存在的唯一理由是**把那个错位 bug 钉死**：旧版按钮矩形由
  * `pad + (playerColW - startW)/2` 算出（中心 **328**），而文字画在
  * `LOGICAL.width / 2`（**480**）—— 同一个东西两处各算一遍，于是漂了 152px。
- * 现在 `prepareFooter` 的文字 / 提示**都从这里取**，而它又由 `startRect`
- * 推 —— 布局再动也不会漂（单测直接断言"文字中心 = 矩形中心"）。
+ * 现在 `prepareFooter` 的文字**从这里取**，而它又由 `startRect` 推 ——
+ * 布局再动也不会漂（单测直接断言"文字中心 = 矩形中心"）。
  */
-export function startCenterX(
-  counts: PrepareCounts,
-  L: PrepareLayout = PREPARE_LAYOUT,
-): number {
-  const rect = startRect(counts, L);
+export function startCenterX(L: PrepareLayout = PREPARE_LAYOUT): number {
+  const rect = startRect(L);
   return rect.x + rect.w / 2;
+}
+
+/**
+ * **操作说明那一格**（按钮右边：`footerRowGap` + `footerHintW`）。
+ *
+ * ⚠️ 与按钮**同一排**（同一个 `y` / 同一个垂直中心）：用户要的正是
+ * "放一排"。`x` 从按钮右边推 —— 于是"按钮与说明"的相对位置只有一处
+ * 说了算。
+ *
+ * ⚠️ `w` 是**格子的宽度上限**（不是文字的实测宽度）：说明左对齐写在
+ * 这一格里，文字短就留白 —— 格子宽度不随文案变，切换键盘 / 触屏时
+ * 这一排不会左右跳。
+ */
+export function footerHintSlot(L: PrepareLayout = PREPARE_LAYOUT): Rect {
+  const start = startRect(L);
+  return {
+    x: start.x + start.w + L.footerRowGap,
+    y: start.y,
+    w: L.footerHintW,
+    h: start.h,
+  };
 }
 
 /**
@@ -393,7 +419,7 @@ export function prepareHitAreas(
       out.push({ kind, id: entry.id, ...rect, y });
     }
   }
-  out.push({ kind: 'start', id: 'start', ...startRect(counts, L) });
+  out.push({ kind: 'start', id: 'start', ...startRect(L) });
   return out;
 }
 

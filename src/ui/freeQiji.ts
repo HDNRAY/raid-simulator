@@ -1,13 +1,13 @@
 /**
- * **自由模式的炁机层数表**：一条炁机开了几层、怎么加、怎么退、
+ * **自由模式的炁机激活**：哪几条开着、怎么开 / 关、
  * 以及怎么变成 `buildPlayerKit` 要的形状。
  *
  * ==================================================================
  * 它是什么（一句话，没有"和"）
  * ==================================================================
  *
- * 它是"炁机激活"这件事的**纯数据层**：`id → 层数` 的表怎么变（加 / 退 /
- * 封顶归零）、怎么读、怎么翻译给引擎 —— 不认识光标、不认识卡片、不碰 Pixi。
+ * 它是"炁机激活"这件事的**纯数据层**：一张"开着的 id"的集合怎么读、
+ * 怎么切换、怎么翻译给引擎 —— 不认识光标、不认识卡片、不碰 Pixi。
  *
  * ==================================================================
  * 为什么从 `prepareLogic.ts` 切出来（AGENTS.md §3）
@@ -18,11 +18,11 @@
  *
  * | 那一半 | 一句话 |
  * |---|---|
- * | 本文件 | 炁机**层数**怎么变（纯数据） |
+ * | 本文件 | 炁机**开关**怎么变（纯数据） |
  * | `prepareLogic` | 光标 / 选择 / 焦点怎么走（状态机） |
  *
- * 两者的输入输出完全不重叠（层数表里没有 `playerId` 这种字段），而
- * `prepareLogic` 的**状态机**那一半才是"这一屏的操作规则"—— 层数表挪走
+ * 两者的输入输出完全不重叠（激活集合里没有 `playerId` 这种字段），而
+ * `prepareLogic` 的**状态机**那一半才是"这一屏的操作规则"—— 集合挪走
  * 之后它对"炁机"只剩下"光标停在哪一条"。
  *
  * ⚠️ `prepareLogic` **转发**这些名字（`export type { … }` / `export { … }`），
@@ -30,127 +30,87 @@
  * 路径（那是纯噪音，还会让 review 看不出真正动了什么）。
  *
  * ⚠️ 注释与代码一起搬（§3：不留"见 xxx"的摘要）。
-
  *
-
  * ==================================================================
- * ⚠️ 炁机层数：**沿用 `maxStacks`**，不另开一套自由模式规则
+ * ⚠️⚠️ 2026-10-13：激活是【开关】，**没有层数**（用户明确纠正）
  * ==================================================================
  *
- * 判据（AGENTS.md §2 的"同一件事不许有第二份表达"）：`data/qiji.ts` 的
- * `maxStacks` 已经是"一个炁机最多生效几层"的**唯一**声明 ——
- * `core/run` 的候选生成读它、`buildPlayerKit` 按 `stacks` 展开修正也读它。
- * 自由模式若无视它、让每条都能无限叠，同一个字段就会有**两种含义**
- * （肉鸽里 3 层、自由模式里 ∞），而那种漂移不会报错、只会让数值对不上。
+ * 用户原话："**炁机的激活 没有层，你这个问题本就不存在**"。
  *
- * 于是"任意个"落在**条数**上（8 条炁机想开几条开几条，随时改），
- * 而每条自己的**层数**仍然认 `maxStacks`（默认 1）：
+ * 上一版把"激活"做成了 `id → 层数` 的表（沿用内容表的 `maxStacks`），
+ * 于是在**备战屏**上造出一堆本不存在的概念：卡片角标"叠了几层"、
+ * 收起摘要里的"×2"、详情区的"已叠 N / M 层"，以及最要命的那条 ——
+ * 为了给触屏一个"退一层"的入口，把一张卡劈成**左半 / 右半**
+ * （左 = 减一层、右 = 加一层）。0 层时点左半就**什么也不做**，
+ * 玩家看到的是"点了能选中但不能激活"。
  *
- *   「固本培元」(maxStacks 3) 可以点 3 次 = +90 生命
- *   「周天运转」(maxStacks 2) 可以点 2 次 = +20 炁/秒
- *   其余 6 条（无 `maxStacks`）**只能一层**，再点就归零重来
+ * 现在回到用户要的语义：
  *
- * ⚠️ **封顶之后继续点 = 归零**（而不是"没反应"）：层数就是卡上的角标，
- * 而"点到底了却什么都看不出"正是本仓库点名过的那种"以为按键坏了"。
- * 归零给了它一个**看得见的下一个状态**，也让"取消"不必再学第二个键。
- * 想往下退一层用 `Shift+Enter`（或在卡片左半边点一下）。
+ * ```
+ *   一条炁机 = 开 / 关（`toggleQiji`，一次点击/一次 Enter = 切一次）
+ *   任意条可以同时开着（"任意个"落在**条数**上）
+ *   效果**只生效一次**（与肉鸽同一条：一层就够了）
+ * ```
+ *
+ * ⚠️ **与肉鸽的 `maxStacks` 不是同一件事**，别合并：
+ * 肉鸽那边每次战斗后**再选一次**，同一个通用炁机可以累积到 `maxStacks`
+ * （§5.4 的"选满一维之后被迫看向机制炁机"）—— 那是**多次独立决策**，
+ * 不是"一次激活的层数"。所以内容表的 `maxStacks` 仍然保留、仍然由
+ * `core/run` 消费；**本文件一个字都不读它**。
+ *
+ * ⚠️ **不要**因为"没有层"就让效果叠 N 次：`freeQijiChoices` 给每一条的
+ * `stacks` 恒为 **1**（见那个函数）。
  */
-
-/* ================================================================== *
- * 炁机激活（层数）
- * ================================================================== */
 
 /**
- * 一条炁机在自由模式里的层数上限。
+ * 自由的炁机**激活集合**：数组里每个 id 都**开着**（不在里面 = 没开）。
  *
- * ⚠️ `maxStacks` 缺省 **1**（与 `QijiEntity.maxStacks` 的文档一致）——
- * 判据只有内容表那一处，这里不写第二份名单。
- * ⚠️ 上限至少 1：内容里写 `maxStacks: 0` 是没意义的（那条炁机永远开不了），
- * 但真写了也不该让界面无路可走 —— 夹到 1 然后由内容测试去拦它。
+ * ⚠️ 用数组（而不是 `{ id: true }` 那种映射）：它是**集合**语义 ——
+ * "开着"这件事只有一个表达（在不在里面），不存在第二个真假字段。
+ * 顺序没有含义（`freeQijiChoices` 按**内容表**的顺序重排，
+ * 存档序列化按 id 排序）。
  */
-export function stackCapOf(maxStacks: number | undefined): number {
-  if (maxStacks === undefined) return 1;
-  if (!Number.isFinite(maxStacks)) return 1;
-  return Math.max(1, Math.floor(maxStacks));
-}
+export type FreeQiji = readonly string[];
 
-/** 自由的炁机**层数表**：`id → 已叠层数`（缺键 = 没开、0 层）。 */
-export type FreeQiji = Readonly<Record<string, number>>;
-
-/** 这个 id 现在开了几层（不在表里 = 0）。 */
-export function stacksIn(free: FreeQiji, id: string): number {
-  return free[id] ?? 0;
-}
-
-/** 结果：下一帧的层数表 + 这次动作之后这个 id 的层数（渲染层画角标要用）。 */
-export interface QijiCycle {
-  readonly free: FreeQiji;
-  readonly stacks: number;
+/** 这条炁机现在开着吗？ */
+export function isQijiOn(free: FreeQiji, id: string): boolean {
+  return free.includes(id);
 }
 
 /**
- * 把一条炁机**往上叠一层**；已经到顶就**归零重来**。
+ * 开 / 关一条炁机（**一次点击 = 一次切换**）。
  *
- * 需求："勾选 / 取消 ✓ 任意个"。一个键同时承担两件事的代价是"到顶之后
- * 再点是什么"必须有答案 —— 见文件头：归零（而不是"没反应"），因为层数
- * 就画在卡上，归零是**看得见**的下一步。
+ * 用户报的那个 bug 的形状是"0 层时点左半边什么都不做"—— 所以这里的
+ * 契约是**任何状态点下去都有结果**：开着 → 关，关着 → 开。
  *
- * ⚠️ 没变化的路径返回**同一个对象**（调用方据此跳过写存储 / 重画）。
+ * ⚠️ 关掉时把 id 从集合里**删掉**（而不是留一个 `false`）：两份"没开"的
+ * 表达（缺项 / false）会让"这条到底开没开"变成要看两个地方。
  */
-export function cycleQijiStack(
-  free: FreeQiji,
-  id: string,
-  maxStacks: number | undefined,
-): QijiCycle {
-  const cap = stackCapOf(maxStacks);
-  const cur = stacksIn(free, id);
-  const next = cur >= cap ? 0 : cur + 1;
-  if (next === cur) return { free, stacks: cur };
-  return { free: withStacks(free, id, next), stacks: next };
+export function toggleQiji(free: FreeQiji, id: string): FreeQiji {
+  return free.includes(id) ? free.filter((on) => on !== id) : [...free, id];
 }
 
 /**
- * 把一条炁机**退一层**（`Shift+Enter` / 点卡片左半边）。
- *
- * 0 层再退就是 0（不变），所以"退到底"是稳定的，不会绕回上限。
- */
-export function unstackQiji(free: FreeQiji, id: string): QijiCycle {
-  const cur = stacksIn(free, id);
-  if (cur <= 0) return { free, stacks: 0 };
-  return { free: withStacks(free, id, cur - 1), stacks: cur - 1 };
-}
-
-/**
- * 写一层数。**0 层 = 删掉这个键**（而不是留一个 `{ id: 0 }`）：
- * 两份"没开"的表达（缺键 / 0）会让"这个 id 到底开没开"变成要看两个地方。
- */
-function withStacks(free: FreeQiji, id: string, stacks: number): FreeQiji {
-  if (stacks <= 0) {
-    const { [id]: _dropped, ...rest } = free;
-    return rest;
-  }
-  return { ...free, [id]: stacks };
-}
-
-/**
- * 层数表 → **`buildPlayerKit` 要的形状**（`{ qijiId, stacks }[]`）。
+ * 激活集合 → **`buildPlayerKit` 要的形状**（`{ qijiId, stacks }[]`）。
  *
  * ⚠️ 这个函数是"自由模式的炁机怎么进战斗"的**唯一翻译点**：产物直接喂给
  * `data/kit.buildPlayerKit`（与肉鸽那条路**同一个函数**），所以"两个模式
  * 的效果不一样"从结构上不可能 —— 差别只在**谁来填这张表**。
  *
- * ⚠️ **顺序按 `order`（内容表的顺序）排**，不按对象键顺序：
- * `buildPlayerKit` 的展开与 `Object.keys` 的插入顺序有关，而黄金截图 /
- * 断言要能复现同一份修正列表。
+ * ⚠️ **`stacks` 恒为 1**（激活没有层）：它不是从哪读来的数，而是
+ * `buildPlayerKit` 的入参形状要求一个数。写 1 = 效果**只生效一次**；
+ * 若哪天有人按"既然没层就随便给个 3"来改，一条炁机的效果会**静默翻倍**。
+ *
+ * ⚠️ **顺序按 `order`（内容表的顺序）排**，不按集合的顺序：
+ * `buildPlayerKit` 的展开与遍历顺序有关，而黄金截图 / 断言要能复现同一份
+ * 修正列表。
  * ⚠️ 不在 `order` 里的键被丢掉（内容表换了名字之后的陈旧存档）。
  */
 export function freeQijiChoices(
   free: FreeQiji,
   order: readonly { readonly id: string }[],
 ): readonly { readonly qijiId: string; readonly stacks: number }[] {
-  return order.flatMap((entry) => {
-    const stacks = stacksIn(free, entry.id);
-    return stacks > 0 ? [{ qijiId: entry.id, stacks }] : [];
-  });
+  return order
+    .filter((entry) => isQijiOn(free, entry.id))
+    .map((entry) => ({ qijiId: entry.id, stacks: 1 }));
 }
-

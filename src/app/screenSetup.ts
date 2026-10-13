@@ -94,10 +94,7 @@ export interface ScreenSetupDeps {
    *     都要读当前值）
    */
   readonly qijiOptions: readonly PrepareQijiOption[];
-  readonly prepareDetailContext: (free: {
-    readonly stacks: (id: string) => number;
-    readonly cap: (id: string) => number;
-  }) => DetailContext;
+  readonly prepareDetailContext: (free: { readonly on: (id: string) => boolean }) => DetailContext;
   readonly freeQiji: FreeQiji;
   readonly rememberFreeQiji: (free: FreeQiji) => void;
 }

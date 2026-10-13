@@ -27,9 +27,10 @@
  * ⚠️ **层序在这里定死**：底色 → 卡片笔 → 块头笔 → 名称 → 标题 →
  * 页脚 → 详情区 → 边角控件（后加的在上层）。这一条只在本文件里出现一次。
  *
- * ⚠️ `detailContext` 的两个闭包读的是**活的状态**（`stacks` / `cap`），
- * 所以它们由调用方以**函数**传进来，而不是传一份值 —— 传值会让"层数变了
- * 但详情区还显示上一帧的层数"这种 bug 回来（见 `prepareDetail.DetailContext`）。
+ * ⚠️ `detailContext` 的闭包读的是**活的状态**（`on`），
+ * 所以它由调用方以**函数**传进来，而不是传一份值 —— 传值会让"激活状态
+ * 变了但详情区还显示上一帧的开关态"这种 bug 回来（见
+ * `prepareDetail.DetailContext`）。
  */
 
 import type { Container } from 'pixi.js';
@@ -76,10 +77,8 @@ export interface PreparePartsArgs {
   /** 进场时的选择（栏目标题的初始 y 由它决定）。 */
   readonly selection: PrepareSelection;
   readonly counts: PrepareCounts;
-  /** 某条炁机**此刻**的层数（活闭包，见文件头）。 */
-  readonly stacks: (id: string) => number;
-  /** 某条炁机的层数上限（活闭包）。 */
-  readonly cap: (id: string) => number;
+  /** 某条炁机**此刻**开着没有（活闭包，见文件头）。 */
+  readonly on: (id: string) => boolean;
 }
 
 /** 造齐这一屏的全部 Pixi 对象（只调用一次）。 */
@@ -168,16 +167,17 @@ export function buildPrepareParts(args: PreparePartsArgs): PrepareParts {
      * 唯一 flag），每帧读一次才不会停在进场时的那一套。
      */
     showKeyHints: options.showKeyHints,
-    /** ⚠️ 按钮的位置由张数算出来（见 `prepareGeometry.startRect`）。 */
-    counts,
+    /**
+     * ⚠️ **不再传张数**：那一排锚定画布底部（`footerRowCenterY`），
+     * 与卡片内容无关 —— 见 `prepareGeometry.startRect`。
+     */
   });
 
   /**
    * ⚠️ 上下文**只建一次**：它的每个取值函数都接在静态内容表上，而
-   * "此刻几层"由 `qijiStacks` 现取（`stacks` 是**活闭包**，
-   * 所以层数一变它自己就是新的）。
+   * "此刻开没开"由 `on` 现取（它是**活闭包**，所以状态一变它自己就是新的）。
    */
-  const detailContext = options.detailContext({ stacks: args.stacks, cap: args.cap });
+  const detailContext = options.detailContext({ on: args.on });
   const detailPanel = new PrepareDetailController({
     pixi,
     translate: options.translate,

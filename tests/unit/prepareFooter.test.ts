@@ -3,6 +3,9 @@ import { prepareHintOf } from '../../src/ui/prepareFooter';
 import { zhCN } from '../../src/i18n/locales/zh-CN';
 import { createTranslator } from '../../src/i18n/translator';
 import type { LocaleId, TranslateFn } from '../../src/i18n/translator';
+import { FONT, LOGICAL } from '../../src/ui/layout';
+import { PREPARE_LAYOUT } from '../../src/ui/prepareLayout';
+import { footerHintSlot, startRect } from '../../src/ui/prepareGeometry';
 
 /**
  * ==================================================================
@@ -88,12 +91,18 @@ describe('触屏那一句：换一套，而且**不含键盘键名**', () => {
     }
   });
 
-  it('说的都是触屏**真有的**操作（点选 / 展开 / 炁机左右半边 / 拖动详情）', () => {
+  it('说的都是触屏**真有的**操作（点选 / 展开 / 炁机开关 / 拖动详情）', () => {
     expect(text).toContain('点卡片');
     expect(text).toContain('点块头');
-    expect(text).toContain('右半');
-    expect(text).toContain('左半');
+    expect(text).toContain('炁机');
     expect(text).toContain('拖动');
+    /**
+     * ⚠️ **左右半边那套机制已经删掉**（用户纠正："炁机的激活 没有层"）——
+     * 文案里不许再提它，否则玩家会去找一条不存在的交互
+     * （见 `ui/freeQiji.ts` 的文件头）。
+     */
+    expect(text).not.toContain('右半');
+    expect(text).not.toContain('左半');
   });
 });
 
@@ -102,5 +111,53 @@ describe('开发中：反馈优先于操作说明', () => {
     const developing = zhCN.roster.ui.developing;
     expect(prepareHintOf(t, { developing: true, showKeyHints: true })).toBe(developing);
     expect(prepareHintOf(t, { developing: true, showKeyHints: false })).toBe(developing);
+  });
+});
+
+/**
+ * 估算一行文字占多宽（逻辑像素）。
+ *
+ * ⚠️ **保守**：CJK / 全角按 `1.0 × 字号`、其余（ASCII / 标点）按
+ * `0.6 × 字号` —— 真实度量里中文约 1.0×、拉丁约 0.5×，所以这是**偏大**
+ * 的一侧（宁可误报"放不下"，也不放过真的溢出）。
+ * ⚠️ 权威读数在浏览器里（页面的 `Text.width`）；这一条是**改文案时不用
+ * 起 Chrome 就能发现的闸门**。
+ */
+function estimateTextWidth(text: string, size: number): number {
+  let w = 0;
+  for (const ch of text) {
+    w += /[\u2e80-\u9fff\uff00-\uffef\u3000-\u303f]/.test(ch) ? size : size * 0.6;
+  }
+  return w;
+}
+
+describe('⚠️ 那一排（按钮 + 说明）的几何', () => {
+  it('⚠️【关键】两套文案都**放得下**那一格（键盘那句更长）', () => {
+    const slot = footerHintSlot();
+    expect(slot.w).toBeGreaterThan(0);
+    for (const showKeyHints of [true, false]) {
+      const label = showKeyHints ? '键盘' : '触屏';
+      const text = prepareHintOf(t, { developing: false, showKeyHints });
+      const w = estimateTextWidth(text, FONT.tiny);
+      expect(w, `${label}文案溢出那一格（${String(Math.round(w))} > ${String(slot.w)}）：${text}`)
+        .toBeLessThanOrEqual(slot.w);
+    }
+  });
+
+  it('⚠️【关键】说明与按钮**同一排**（同一个垂直中心），且在按钮**右边**', () => {
+    const start = startRect();
+    const slot = footerHintSlot();
+    expect(slot.y + slot.h / 2).toBeCloseTo(start.y + start.h / 2, 6);
+    expect(slot.x).toBe(start.x + start.w + PREPARE_LAYOUT.footerRowGap);
+    /** 那一格整块都在卡片列内（不越出到详情区那一侧）。 */
+    expect(slot.x + slot.w).toBeLessThanOrEqual(PREPARE_LAYOUT.pad + PREPARE_LAYOUT.playerColW);
+  });
+
+  it('⚠️【关键】那一排**锚定底部**：声明行框在上面、页脚在画布内', () => {
+    const start = startRect();
+    const noticeTop =
+      LOGICAL.height - PREPARE_LAYOUT.noticeGap - Math.ceil(PREPARE_LAYOUT.noticeSize * 1.3) / 2;
+    expect(start.y + start.h).toBeLessThanOrEqual(noticeTop - PREPARE_LAYOUT.footerGap);
+    expect(start.y + start.h).toBeLessThan(LOGICAL.height);
   });
 });

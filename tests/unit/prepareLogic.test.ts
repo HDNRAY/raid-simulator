@@ -527,11 +527,15 @@ describe('手风琴：焦点决定展开哪一块', () => {
 
 describe('⚠️ 点击的**意图**（`pointerIntentOf`：把"点了什么"从 Pixi 类里拿出来）', () => {
   /**
-   * 这一份测的是**触屏唯一入口**的判定：点按钮 / 块头 / 炁机左右半边 /
+   * 这一份测的是**触屏唯一入口**的判定：点按钮 / 块头 / 炁机卡 /
    * 人物卡各是什么意思。
    *
    * ⚠️ 它原来内联在 `PrepareScreen.hitTest` 里（一个 Pixi 类），只能靠
-   * 截图看对不对 —— 而"点炁机**左半**是退一层"这件事在截图上根本看不出来。
+   * 截图看对不对 —— 而"点炁机**整张卡**是一个含义"这件事光看截图看不出来。
+   *
+   * ⚠️ 2026-10-13：上一版按**左半 / 右半**分成"退一层 / 加一层"，而 0 层时
+   * 点左半**什么都不做**（用户报的"点了能选中但不能激活"）。激活是开关，
+   * 整张卡一个含义（见 `ui/freeQiji.ts`）。
    */
   const qiji = [{ id: 'q1' }, { id: 'q2' }];
 
@@ -552,49 +556,38 @@ describe('⚠️ 点击的**意图**（`pointerIntentOf`：把"点了什么"从 
     });
   });
 
-  it('【关键】炁机卡：**右半边 = 加一层**、**左半边 = 退一层**', () => {
-    /** 展开炁机那一块，取第一张卡的矩形（渲染与命中同一份几何）。 */
-    const card = prepareHitAreas(players, bosses, qiji, 'qiji').find((a) => a.kind === 'qiji' && a.id === 'q1')!;
-    const right = pointerIntentOf(card.x + card.w - 2, card.y + 4, players, bosses, qiji, 'qiji');
-    expect(right).toEqual({ kind: 'qiji', id: 'q1', back: false });
-    const left = pointerIntentOf(card.x + 2, card.y + 4, players, bosses, qiji, 'qiji');
-    expect(left).toEqual({ kind: 'qiji', id: 'q1', back: true });
-  });
-
   /**
-   * ⚠️ 左右半的**分界**要钉住（而不是"左边一点 / 右边一点"）。
-   *
-   * 用户报过"点左半边没反应"，所以"中线在哪"必须是可执行的断言：中线是
-   * **卡片自己的** `x + w / 2`（逻辑坐标，与画出来的那一张同一个矩形）。
-   * 若哪天有人把卡片宽度（110）或滚动偏移在这里算第二遍，这条会先红。
+   * ⚠️ **核心**：整张卡的**任意位置**给同一个意图（点左边 = 点右边）。
+   * 用户报的"左半边点了能选中但不能激活"就是这条的反面。
    */
-  it('【关键】左右半的分界 = 卡片中线（正好落在中线上算**右半**）', () => {
+  it('【关键】炁机卡：**左 / 中 / 右任意位置**都是同一个意图（整张卡可点）', () => {
     const card = prepareHitAreas(players, bosses, qiji, 'qiji').find((a) => a.kind === 'qiji' && a.id === 'q1')!;
     const mid = card.x + card.w / 2;
-    const at = (px: number) => pointerIntentOf(px, card.y + 2, players, bosses, qiji, 'qiji');
-    expect(at(mid - 0.5)).toEqual({ kind: 'qiji', id: 'q1', back: true });
-    expect(at(mid)).toEqual({ kind: 'qiji', id: 'q1', back: false });
+    const at = (px: number) => pointerIntentOf(px, card.y + 4, players, bosses, qiji, 'qiji');
+    expect(at(card.x + 2)).toEqual({ kind: 'qiji', id: 'q1' });
+    expect(at(mid - 0.5)).toEqual({ kind: 'qiji', id: 'q1' });
+    expect(at(mid)).toEqual({ kind: 'qiji', id: 'q1' });
+    expect(at(card.x + card.w - 2)).toEqual({ kind: 'qiji', id: 'q1' });
     /** 两条边也算卡内（`inRect` 是闭区间）—— 贴着边框点得中。 */
-    expect(at(card.x)).toEqual({ kind: 'qiji', id: 'q1', back: true });
-    expect(at(card.x + card.w)).toEqual({ kind: 'qiji', id: 'q1', back: false });
+    expect(at(card.x)).toEqual({ kind: 'qiji', id: 'q1' });
+    expect(at(card.x + card.w)).toEqual({ kind: 'qiji', id: 'q1' });
   });
 
   /**
-   * ⚠️ **每一张**炁机卡的两半都要可点（不只是第一张）。
+   * ⚠️ **每一张**炁机卡都要可点（不只是第一张）。
    *
-   * 用户报的"点左半边没反应"如果真在渲染上，逐张比对才会露出来 ——
    * 只看第一张的话，"第二行 / 第 5 列用旧宽度"这类错位看不出来。
    */
-  it('【关键】逐张炁机卡：左半 = 退、右半 = 加（第二行也要）', () => {
+  it('【关键】逐张炁机卡都能被点中（第二行也要）', () => {
     const cards = prepareHitAreas(players, bosses, qiji, 'qiji').filter((a) => a.kind === 'qiji');
     expect(cards.length).toBeGreaterThan(1);
     for (const card of cards) {
       expect(pointerIntentOf(card.x + 1, card.y + card.h / 2, players, bosses, qiji, 'qiji')).toEqual(
-        { kind: 'qiji', id: card.id, back: true },
+        { kind: 'qiji', id: card.id },
       );
       expect(
         pointerIntentOf(card.x + card.w - 1, card.y + card.h / 2, players, bosses, qiji, 'qiji'),
-      ).toEqual({ kind: 'qiji', id: card.id, back: false });
+      ).toEqual({ kind: 'qiji', id: card.id });
     }
   });
 
@@ -619,11 +612,10 @@ describe('⚠️ 点击的**意图**（`pointerIntentOf`：把"点了什么"从 
       (a) => a.kind === 'qiji',
     )!;
     expect(top.id).toBe('q5');
-    /** 左半边 = 退一层（点得中的是**滚过之后**画在那里的那一张）。 */
+    /** 点得中的是**滚过之后**画在那里的那一张。 */
     expect(pointerIntentOf(top.x + 2, top.y + 2, players, bosses, many, 'qiji', scroll)).toEqual({
       kind: 'qiji',
       id: 'q5',
-      back: true,
     });
   });
 

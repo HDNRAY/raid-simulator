@@ -45,7 +45,7 @@ function toPlainText(metrics: readonly PanelTextMetric[]): PanelTextMetric[] {
  * ⚠️ 2026-10-13（自由模式改造）加了四样，**都是为了"截图能当证据"**：
  *
  *   - `current.cursor.qijiId`：光标现在停在哪条炁机上
- *   - `freeQiji`：当前开着哪些炁机、各几层（**效果叠加**的验收要读它）
+ *   - `freeQiji`：当前**开着**哪几条炁机（开关态 —— 验收要读它）
  *   - `hover(x, y)`：鼠标悬停（详情区的鼠标那条路）
  *   - `detail()`：详情区**此刻显示的是哪一项** —— 截图能看出"面板上有字"，
  *     但"是**谁的**字"只有这个读数能钉死
@@ -65,11 +65,11 @@ export interface PrepareDebugTarget {
     readonly expanded: 'player' | 'qiji' | 'boss';
     readonly cursor: { readonly playerId: string; readonly bossId: string; readonly qijiId: string };
   };
-  /** 当前开着的炁机（id → 层数；没开的不出现）。 */
-  readonly freeQiji: Readonly<Record<string, number>>;
+  /** 当前开着哪几条炁机（激活集合；没开的 id 不出现）。 */
+  readonly freeQiji: readonly string[];
   cycle(delta: number): void;
   moveFocus(delta: number, wrap?: boolean): void;
-  confirm(back?: boolean): void;
+  confirm(): void;
   pick(kind: 'player' | 'boss', id: string): void;
   focusSlot(slot: 'player' | 'qiji' | 'boss' | 'start'): void;
   /** 展开某一块（手风琴；只换焦点，不改选择）。 */
@@ -114,11 +114,11 @@ export interface PrepareDebugTarget {
 export function prepareDebugApi(prepare: PrepareDebugTarget): {
   readonly prepare: {
     state(): PrepareDebugTarget['current'];
-    freeQiji(): Readonly<Record<string, number>>;
+    freeQiji(): readonly string[];
     detail(): ReturnType<PrepareDebugTarget['detail']>;
     cycle(delta: number): void;
     moveFocus(delta: number, wrap?: boolean): void;
-    confirm(back?: boolean): void;
+    confirm(): void;
     pick(kind: 'player' | 'boss', id: string): void;
     focusSlot(slot: 'player' | 'qiji' | 'boss' | 'start'): void;
     expand(slot: 'player' | 'qiji' | 'boss'): void;
@@ -144,15 +144,14 @@ export function prepareDebugApi(prepare: PrepareDebugTarget): {
       cycle: (delta) => prepare.cycle(delta),
       /** 同 ↑ ↓（`wrap` = Tab / Shift+Tab：可见地环绕）。 */
       moveFocus: (delta, wrap = false) => prepare.moveFocus(delta, wrap),
-      /** 当前开着的炁机（效果叠加的验收读它）。 */
-      freeQiji: () => ({ ...prepare.freeQiji }),
+      /** 当前开着的炁机（开关态的验收读它）。 */
+      freeQiji: () => [...prepare.freeQiji],
       /** 详情区此刻显示的是哪一项（"是**谁的**字"只有这个读数能钉死）。 */
       detail: () => prepare.detail(),
       /**
-       * 同 Enter：确定光标处那一项；光标在炁机上则**叠一层**
-       * （`back` = Shift+Enter：退一层）。
+       * 同 Enter：确定光标处那一项；光标在炁机上则**开 / 关**它。
        */
-      confirm: (back = false) => prepare.confirm(back),
+      confirm: () => prepare.confirm(),
       /** 同点击卡片：移光标 + 确定（一步到位）。 */
       pick: (kind, id) => prepare.pick(kind, id),
       /**

@@ -25,7 +25,7 @@ const ctx: DetailContext = {
   bossById: (id) => (id === 'meiichiro' ? { id, nameKey: 'boss.name' } : undefined),
   qijiById: (id) =>
     id === 'vitality'
-      ? { id, nameKey: 'qiji.vitality.name', descKey: 'qiji.vitality.desc', maxStacks: 3 }
+      ? { id, nameKey: 'qiji.vitality.name', descKey: 'qiji.vitality.desc' }
       : id === 'jieShengJi'
         ? { id, nameKey: 'qiji.jieShengJi.name', descKey: 'qiji.jieShengJi.desc' }
         : undefined,
@@ -38,7 +38,8 @@ const ctx: DetailContext = {
     { kind: 'skill', nameKey: 'boss.cleave.name', descKey: 'boss.cleave.desc', descParams: { cast: 1, damage: 20 } },
   ],
   developing: (id) => id === 'daixuan',
-  qijiStacks: (id) => ({ stacks: id === 'vitality' ? 2 : 0, cap: id === 'vitality' ? 3 : 1 }),
+  /** ⚠️ 只有两种取值：开着 / 没开（激活是开关，没有层数）。 */
+  qijiOn: (id) => id === 'vitality',
 };
 
 describe('驱动源：hover 优先，其次键盘焦点', () => {
@@ -108,19 +109,17 @@ describe('内容按类切换，且只取真数据', () => {
     expect(m?.portraitId).toBeUndefined();
   });
 
-  it('炁机：开关态 + 层数 + 说明（说明是内容里的 `descKey`）', () => {
+  it('炁机：开关态 + 说明（说明是内容里的 `descKey`）', () => {
     const m = detailModelOf({ kind: 'qiji', id: 'vitality' }, ctx);
     expect(m?.kind).toBe('qiji');
     expect(m?.titleKey).toBe('qiji.vitality.name');
     /**
-     * ⚠️ 开关 / 层数**挪到了顶部那一行**（`subtitle`）—— 三类顶栏结构一致，
+     * ⚠️ 开关**挪到了顶部那一行**（`subtitle`）—— 三类顶栏结构一致，
      * 正文只剩"这一条炁机是干什么的"（说明那一行）。
+     * ⚠️ 只有"已激活 / 未激活"两种：激活是开关，**没有层数**
+     * （用户 2026-10-13 纠正，见 `ui/freeQiji.ts`）。
      */
-    expect(m?.subtitle).toEqual({
-      kind: 'text',
-      key: 'roster.ui.detail.qijiStacks',
-      params: { stacks: 2, cap: 3 },
-    });
+    expect(m?.subtitle).toEqual({ kind: 'text', key: 'roster.ui.detail.qijiOn' });
     expect(m?.rows[0]?.kind).toBe('skill');
   });
 

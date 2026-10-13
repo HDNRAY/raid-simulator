@@ -42,7 +42,7 @@
  * | 人物 | 头像 | `render/portraitAssets` 的配对（索爾 / 凱麗 / 索菲亞） |
  * | 人物 | 技能名 + 说明 | `data/units.playerSkillsFor(id)` |
  * | 炁机 | 名字 / 说明 | 内容实体的 `nameKey` / `descKey`（i18n 里已有） |
- * | 炁机 | 已开层数 / 上限 | `maxStacks`（与肉鸽**同一个字段**） |
+ * | 炁机 | 已激活没有 | 激活集合（`ui/freeQiji.ts`：开关，没有层数） |
  * | Boss | 名字 | `data/roster.BOSS_ROSTER` 的 `nameKey` |
  * | Boss | 生命上限 | `data/units.BOSS_CAPS.hp` |
  * | Boss | 招式 | `data/units.behaviorsFor(id)` → `ALL_SKILLS` |
@@ -71,7 +71,7 @@
  * "血量要显眼"。
  *
  * 于是模型这一层保证**三类的 `subtitle` 都有值**（人物 / Boss = 生命上限，
- * 炁机 = 开没开 / 叠了几层），渲染层负责把"标题 + 这一行 + 头像位"摆成
+ * 炁机 = 开没开），渲染层负责把"标题 + 这一行 + 头像位"摆成
  * 同一条（见 `ui/prepareDetailPanel.ts`）。**炁机没有头像、Boss 也没有**
  * —— 它们用**同一个位置**的程序化占位方块，所以顶栏不会留洞
  * （用户："炁机没有头像 → 那一条怎么排，你判断；别留一个空洞"）。
@@ -132,7 +132,7 @@ export interface DetailModel {
    * | 类 | 这一行 |
    * |---|---|
    * | 人物 / Boss | 生命上限（玩家最想看的那个数） |
-   * | 炁机 | 开没开 / 已叠几层（它没有"血量"，这一行就是它的关键数值） |
+   * | 炁机 | 已激活 / 未激活（它没有"血量"，这一行就是它的关键状态） |
    *
    * ⚠️ 它是**关键数值**，不是"次要信息"：渲染层用**亮色 + 大一号**画它
    * （不再是旧的 13px 暗灰）。所以这里**不设 `dim`**。
@@ -183,7 +183,6 @@ export interface DetailQiji {
   readonly id: string;
   readonly nameKey: string;
   readonly descKey?: string;
-  readonly maxStacks?: number;
 }
 
 /** 一个出战单位在详情区需要的最小形状。 */
@@ -213,13 +212,13 @@ export interface DetailContext {
   /** 这个 id 是不是"开发中"。 */
   readonly developing: (id: string) => boolean;
   /**
-   * 某条炁机**此刻**的层数 / 上限（画"已开 N 层"）。
+   * 某条炁机**此刻**开着没有（画"已激活 / 未激活"）。
    *
-   * ⚠️ 是**按 id 取的函数**而不是一个 `{ stacks, cap }` 字段：层数是
-   * **可变状态**（玩家每点一下就变），而模型每帧都要新造 —— 存成一个
-   * 字段就会出现"沿用上一帧的层数"。
+   * ⚠️ 是**按 id 取的函数**而不是一个布尔字段：激活状态是**可变状态**
+   * （玩家每点一下就变），而模型每帧都要新造 —— 存成一个字段就会出现
+   * "沿用上一帧的开关态"。
    */
-  readonly qijiStacks: (id: string) => { readonly stacks: number; readonly cap: number };
+  readonly qijiOn: (id: string) => boolean;
 }
 
 /* ================================================================== *
@@ -291,26 +290,23 @@ function bossDetail(id: string, ctx: DetailContext): DetailModel | undefined {
 function qijiDetail(id: string, ctx: DetailContext): DetailModel | undefined {
   const qiji = ctx.qijiById(id);
   if (qiji === undefined) return undefined;
-  const { stacks, cap } = ctx.qijiStacks(id);
   /**
-   * ⚠️ **开关 / 层数挪到顶部那一行**（原来是正文的头两行）。
+   * ⚠️ **开关挪到顶部那一行**（原来是正文的头两行）。
    *
    * 理由有两条：
    *   1. **结构一致**（用户要求三类的顶栏一样）：人物 / Boss 的顶栏那一行
-   *      是"生命上限"，炁机没有血量，它的**关键数值**就是开没开 / 叠了几层
+   *      是"生命上限"，炁机没有血量，它的**关键状态**就是开没开
    *      —— 放在同一个位置，三类的顶部才是同一种东西。
    *   2. **不重复**：同一件事（开没开）画两遍会让"这一行是状态还是说明"
    *      变含糊，而详情区最上面一条是**一眼扫过**的位置。
    *
-   * ⚠️ 三种取值仍按旧规则分（没开 / 可叠多层 `stacks / cap` / 单层生效）：
-   * 合成一句会让"上限 3、现在 0"读成"开了 0/3 层"（看不出它其实没开）。
+   * ⚠️ **只有两种取值**：炁机激活是开关，**没有层数**
+   * （用户 2026-10-13 明确纠正；来龙去脉见 `ui/freeQiji.ts` 的文件头）。
+   * 上一版还有第三个分支"已叠 N / M 层"，那是被删掉的错机制。
    */
-  const subtitle: DetailTextRow =
-    stacks <= 0
-      ? { kind: 'text', key: 'roster.ui.detail.qijiOff' }
-      : cap > 1
-        ? { kind: 'text', key: 'roster.ui.detail.qijiStacks', params: { stacks, cap } }
-        : { kind: 'text', key: 'roster.ui.detail.qijiOn' };
+  const subtitle: DetailTextRow = ctx.qijiOn(id)
+    ? { kind: 'text', key: 'roster.ui.detail.qijiOn' }
+    : { kind: 'text', key: 'roster.ui.detail.qijiOff' };
   const rows: DetailRow[] = [];
   if (qiji.descKey !== undefined) {
     /**

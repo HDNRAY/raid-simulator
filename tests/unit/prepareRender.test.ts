@@ -201,7 +201,7 @@ describe('一帧要画的卡：状态 → 每张卡的画法', () => {
     areas,
     nameOf: (_kind: 'player' | 'qiji' | 'boss', id: string) => `名-${id}`,
     selection: { playerId: 'player', bossId: 'meiichiro' },
-    stacks: () => 0,
+    on: () => false,
     developing: () => false,
   };
 
@@ -231,16 +231,32 @@ describe('一帧要画的卡：状态 → 每张卡的画法', () => {
     expect(cursored!.strokeColor).not.toBe(selected!.strokeColor);
   });
 
-  it('炁机卡：叠了 2 层才画角标；人物卡永远不画', () => {
+  it('炁机卡：开着画金色（与"已确定"同一种"生效"色），人物卡永远不沾它', () => {
     const withQiji = prepareHitAreas(players, bosses, qiji, 'qiji');
     const draws = cardDrawsOf({
       ...base,
       areas: withQiji,
       cursor: undefined,
-      stacks: (id) => (id === 'vitality' ? 2 : 0),
+      on: (id) => id === 'vitality',
     });
     expect(draws).toHaveLength(1);
-    expect(draws[0]).toMatchObject({ kind: 'qiji', id: 'vitality', badge: true, showPortrait: false });
+    expect(draws[0]).toMatchObject({
+      kind: 'qiji',
+      id: 'vitality',
+      strokeColor: PREPARE_SKIN.selectionLine,
+      showPortrait: false,
+    });
+  });
+
+  it('炁机卡**没有角标**了（激活是开关、没有层数 —— 用户纠正过的那条机制）', () => {
+    const withQiji = prepareHitAreas(players, bosses, qiji, 'qiji');
+    const draws = cardDrawsOf({
+      ...base,
+      areas: withQiji,
+      cursor: undefined,
+      on: () => true,
+    });
+    expect(draws[0]).not.toHaveProperty('badge');
   });
 
   it('人物卡带头像、Boss 卡不带（素材表里只有人物有脸）', () => {
@@ -285,7 +301,7 @@ describe('【关键】画出来的卡 == 命中区（逐张 / 每种展开 / 含
       nameOf: (_kind, id) => id,
       cursor: undefined,
       selection: { playerId: 'p0', bossId: 'b0' },
-      stacks: () => 0,
+      on: () => false,
       developing: () => false,
     });
 

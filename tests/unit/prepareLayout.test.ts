@@ -7,6 +7,7 @@ import {
   detailRect,
   foldHitRect,
   foldRect,
+  footerHintSlot,
   prepareHitAreas,
   prepareLabelY,
   rowTopsOf,
@@ -138,15 +139,20 @@ describe('⚠️ 手风琴：同时只展开一块，收起的两块只占一条
   });
 
   it('【关键】三种展开方式下都能放下（整条链的下界在按钮之上）', () => {
-    const start = startRect(COUNTS);
+    const start = startRect();
     for (const expanded of EXPANDED_ALL) {
       const tops = rowTopsOf(COUNTS, expanded);
       const last = SECTION_ORDER[SECTION_ORDER.length - 1]!;
       const bottom = tops[last] + sectionContentH(last, COUNTS, expanded);
       expect(bottom).toBeLessThanOrEqual(start.y);
     }
-    /** ⚠️ 按钮的 y 取的是"最高的那一种"，所以**切块时它不会动**。 */
-    expect(start.y).toBe(Math.round(sectionsBottom(COUNTS) + PREPARE_LAYOUT.startGap));
+    /**
+     * ⚠️ 2026-10-13 第四轮：按钮的 y **不再由内容推出** —— 它锚在画布
+     * 底边（`footerRowCenterY`），所以切块 / 张数变都不动。
+     * 上面那条"内容底边 ≤ 按钮顶边"仍然要成立（内容不许压上页脚）。
+     */
+    expect(start.y).toBe(Math.round(PREPARE_LAYOUT.footerRowCenterY - PREPARE_LAYOUT.startH / 2));
+    expect(start.y).toBeGreaterThan(sectionsBottom(COUNTS));
   });
 
   it('收起态那条块头的高度**合理**：不小于手指下限、不超过它展开时的高度', () => {
@@ -293,7 +299,7 @@ describe('⚠️ 纵向链：三块 + 开始键 + 页脚互不重叠，且都在
       tops.boss + cardBlockH(bosses.length, PREPARE_LAYOUT.bossColumns, PREPARE_LAYOUT.cardH, PREPARE_LAYOUT);
     expect(playerBottom).toBeLessThanOrEqual(tops.qiji);
     expect(qijiBottom).toBeLessThanOrEqual(tops.boss);
-    expect(bossBottom).toBeLessThanOrEqual(startRect(COUNTS).y);
+    expect(bossBottom).toBeLessThanOrEqual(startRect().y);
   });
 
   it('【关键】下一块的**标题**不能插进上一块的内容里（实测发现过一次）', () => {
@@ -311,34 +317,52 @@ describe('⚠️ 纵向链：三块 + 开始键 + 页脚互不重叠，且都在
   });
 
   it('整条纵向链都在画布内（540），开始键与页脚也不越界', () => {
-    const start = startRect(COUNTS);
+    const start = startRect();
     expect(start.y + start.h).toBeLessThanOrEqual(LOGICAL.height);
     expect(start.y).toBeGreaterThan(sectionsBottom(COUNTS));
     /**
-     * ⚠️ 提示行在开始键**下面**、而素材声明在最底 —— 两者**不能叠**
-     * （提示行是 `FONT.tiny` 11，声明是 `FONT.small` 13，都居中）。
+     * ⚠️ 2026-10-13 第四轮：说明**与按钮同一排**（在它右边那一格里），
+     * 所以下面只剩**素材声明**那一行 —— 两者不能叠。
      */
-    const hintY = start.y + start.h + 10;
-    const noticeY = 524;
-    expect(hintY).toBeLessThan(noticeY);
-    expect(hintY + LABEL_LINE.box(11) / 2).toBeLessThanOrEqual(noticeY - LABEL_LINE.box(13) / 2);
+    const hintSlot = footerHintSlot();
+    const noticeY = LOGICAL.height - PREPARE_LAYOUT.noticeGap;
+    const noticeTop = noticeY - LABEL_LINE.box(PREPARE_LAYOUT.noticeSize) / 2;
+    /** 同一排：说明的垂直中心 = 按钮的垂直中心。 */
+    expect(hintSlot.y + hintSlot.h / 2).toBeCloseTo(start.y + start.h / 2, 6);
+    /** 那一排整体在声明行框之上。 */
+    expect(start.y + start.h).toBeLessThanOrEqual(noticeTop - PREPARE_LAYOUT.footerGap);
+    expect(hintSlot.x).toBe(start.x + start.w + PREPARE_LAYOUT.footerRowGap);
   });
 
   it('⚠️【关键】「开始战斗」的**文字中心 = 按钮矩形中心**（旧的错位 bug）', () => {
-    const start = startRect(COUNTS);
-    /** 文字 / 提示都用它当 x（`prepareFooter` 的唯一基准）。 */
-    expect(startCenterX(COUNTS)).toBeCloseTo(start.x + start.w / 2, 6);
-    /** 而且它就是**卡片列**的中心（按钮在左列下方，不在画布中心）。 */
-    expect(startCenterX(COUNTS)).toBeCloseTo(
-      PREPARE_LAYOUT.pad + PREPARE_LAYOUT.playerColW / 2,
-      6,
-    );
+    const start = startRect();
+    /** 文字用它当 x（`prepareFooter` 的唯一基准）。 */
+    expect(startCenterX()).toBeCloseTo(start.x + start.w / 2, 6);
     /**
      * ⚠️⚠️ 它**不等于**画布中心 —— 旧版把文字画在 `LOGICAL.width / 2`(480)，
      * 而按钮中心是 328：差 152px，用户看到的就是"开始战斗和按钮错位了"。
      * 这条断言正是那个 bug 的回归闸门。
      */
-    expect(startCenterX(COUNTS)).not.toBe(LOGICAL.width / 2);
+    expect(startCenterX()).not.toBe(LOGICAL.width / 2);
+  });
+
+  it('⚠️【关键】那一排锚定**画布底部**：与张数 / 展开方式**无关**', () => {
+    /**
+     * 用户原话："开始战斗 和 开始战斗下面的说明 其实可以放一排，
+     * 并且 **锚定在底部**"。
+     *
+     * 判据：同一份布局在"今天 8 条"与"20 条"下给**同一个**矩形 ——
+     * 旧的 `sectionsBottom + startGap` 会随着张数往下溜。
+     */
+    const today = startRect();
+    const many = startRect();
+    expect(today).toEqual(many);
+    /** 底边锚点的唯一出处：与它推出来的一致。 */
+    expect(today.y).toBe(Math.round(PREPARE_LAYOUT.footerRowCenterY - PREPARE_LAYOUT.startH / 2));
+    /** 而且真的靠画布底部（在纵向下半区）。 */
+    expect(today.y).toBeGreaterThan(LOGICAL.height / 2);
+    /** ⚠️ 按钮与说明**贴卡片列左端**（见 `prepareGeometry.startRect` 的说明）。 */
+    expect(today.x).toBe(PREPARE_LAYOUT.pad);
   });
 });
 

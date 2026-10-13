@@ -6,8 +6,10 @@
  * ==================================================================
  *
  * 它负责**一张卡的样子**：底板（圆角 + 描边 + 光标外环）、名字的摆放、
- * 名字右边那颗对话头像（含"没加载完"的占位方框）、以及炁机卡"已开"
- * 的角标。
+ * 名字右边那颗对话头像（含"没加载完"的占位方框）。
+ *
+ * ⚠️ 上一版还画过"炁机已开几层"的角标 —— 激活是开关、没有层数，所以它
+ * 整块删掉了（用户 2026-10-13 纠正，见 `ui/freeQiji.ts` 的文件头）。
  *
  * ==================================================================
  * ⚠️ 2026-10-13 第二轮：按 **(kind, id) 查表**，不再按下标对齐
@@ -35,7 +37,7 @@ import type { Container, Graphics } from 'pixi.js';
 import { Label, type PixiCtor } from './primitives';
 import { PALETTE } from '../render/theme';
 import { PREPARE_LAYOUT } from './prepareLayout';
-import { CARD_RADIUS, CARD_STROKE, CURSOR_RING_GAP, PREPARE_SKIN, centeredTextTopY } from './prepareRender';
+import { CARD_RADIUS, CARD_STROKE, CURSOR_RING_GAP, centeredTextTopY } from './prepareRender';
 import { portraitFor } from '../render/portraitAssets';
 import { PortraitSprite } from '../render/portraitSprite';
 import type { CardDraw } from './prepareCardState';
@@ -190,24 +192,6 @@ export class PrepareCards {
           .roundRect(portrait.root.x - box / 2, portrait.root.y - box / 2, box, box, 3)
           .stroke({ color: PALETTE.panelLine, width: 1, alpha: 0.9 });
       }
-    }
-
-    if (state.badge) {
-      /**
-       * ⚠️ 角标画在**卡片内部右上角**（不越出卡片）：越出去会与邻卡的
-       * 描边叠在一起，看起来像那颗标记属于旁边那张卡。
-       *
-       * ⚠️ 角标是**一颗实心圆点**（不写数字）：数字要另一个 Label（每张卡
-       * 一份），而它的信息 —— 开了几层 —— 详情区里有确切数字。
-       * 这里只需要"它比一层更多"这一个信号。
-       */
-      const r = 4;
-      this.gfx
-        .circle(x + w - PREPARE_LAYOUT.cardPad + 2, y + PREPARE_LAYOUT.cardPad - 2, r)
-        .fill({ color: PREPARE_SKIN.selectionLine });
-      this.gfx
-        .circle(x + w - PREPARE_LAYOUT.cardPad + 2, y + PREPARE_LAYOUT.cardPad - 2, r)
-        .stroke({ color: PALETTE.text, width: 1, alpha: 0.8 });
     }
 
     /** 光标外环（两种情况为真，见 `prepareRender.CardSkin.ring`）。 */

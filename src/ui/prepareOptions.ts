@@ -36,20 +36,17 @@ import type { PixiCtor } from './primitives';
  * 炁机在这一屏需要的最小形状。
  *
  * ⚠️ 与 `core/types/qiji.ts` 的 `QijiEntity` **刻意不同**（结构性类型）：
- * 这一屏只用得到"叫什么 / 能叠几层 / 怎么开"，而 `QijiEntity` 带着
- * `abilities` / `unlock` / `comboWindow` 那些战斗期的知识。收窄之后
- * 单测可以喂 3 个字面量。
+ * 这一屏只用得到"叫什么"，而 `QijiEntity` 带着 `abilities` / `unlock` /
+ * `comboWindow` / `maxStacks` 那些战斗期（与**肉鸽**）的知识。收窄之后
+ * 单测可以喂 2 个字面量。
+ *
+ * ⚠️ **没有 `maxStacks`**：备战屏的炁机是**开关**，没有层数
+ * （见 `ui/freeQiji.ts` 的文件头）。肉鸽那边的 `maxStacks` 是另一件事，
+ * 由 `core/run` 消费，与本屏无关。
  */
 export interface PrepareQijiOption {
   readonly id: string;
   readonly nameKey: string;
-  /**
-   * 一局/一次配置里最多生效几层（`QijiEntity.maxStacks`，缺省 1）。
-   *
-   * ⚠️ 自由模式**沿用**它（不另开一套无限叠加的规则）：判据只有内容表
-   * 那一处，见 `prepareLogic` 文件头的长说明。
-   */
-  readonly maxStacks?: number;
 }
 
 export interface PrepareScreenOptions {
@@ -67,12 +64,9 @@ export interface PrepareScreenOptions {
    * 测试里可以喂假上下文（与 `prepareLogic.canStartBattle` 注入
    * `developing` 同一条纪律）。
    */
-  readonly detailContext: (free: {
-    readonly stacks: (id: string) => number;
-    readonly cap: (id: string) => number;
-  }) => DetailContext;
+  readonly detailContext: (free: { readonly on: (id: string) => boolean }) => DetailContext;
   readonly initial: { readonly playerId: string; readonly bossId: string };
-  /** 上次存下来的炁机激活状态（未开的条目不出现）。 */
+  /** 上次存下来的炁机激活状态（没开的条目不出现）。 */
   readonly freeQiji?: FreeQiji | undefined;
   /** 是否显示键位提示（触屏为假）。见 `HomeScreenOptions.showKeyHints`。 */
   readonly showKeyHints: () => boolean;
@@ -87,9 +81,9 @@ export interface PrepareScreenOptions {
   /** 选择变了（用于持久化）。 */
   readonly onChange?: (playerId: string, bossId: string) => void;
   /**
-   * 炁机的层数变了（用于持久化）。
+   * 炁机的激活状态变了（用于持久化）。
    *
-   * ⚠️ 它**只报层数表**，不报"哪一条变了"：调用方（`app/`）要的是
+   * ⚠️ 它**只报激活集合**，不报"哪一条变了"：调用方（`app/`）要的是
    * "存什么"，而"哪一条"是界面的事 —— 多传一个 id 只会让两边都要维护
    * 一个用不上的字段。
    */

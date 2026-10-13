@@ -18,7 +18,7 @@
  * ```
  *   人物块头 = 选中的那个人（`selection.playerId`），不是光标停的第 N 个
  *   对手块头 = 选中的那个 Boss（`selection.bossId`）
- *   炁机块头 = **已激活的那几条**（层数表），不是光标停的那一条
+ *   炁机块头 = **已激活的那几条**（激活集合），不是光标停的那一条
  * ```
  *
  * ⚠️ 写成"光标那一项"在桌面上几乎看不出来（两者常常重合），而触屏
@@ -52,8 +52,8 @@ export interface FoldSummaryArgs {
   readonly players: readonly FoldEntry[];
   readonly bosses: readonly FoldEntry[];
   readonly qiji: readonly FoldEntry[];
-  /** 某条炁机此刻的层数（0 = 没开）。 */
-  readonly stacks: (id: string) => number;
+  /** 某条炁机此刻开着没有。 */
+  readonly on: (id: string) => boolean;
   readonly translate: TranslateFn;
   /**
    * 一行**最多几个字**（由块头的内宽 ÷ 名字字号算出来，见调用方）。
@@ -84,14 +84,13 @@ export function foldSummaryOf(args: FoldSummaryArgs): FoldSummary | undefined {
    * 那一块存在但空着（实际是这一屏根本没有炁机行，见选角色屏）。
    */
   if (args.qiji.length === 0) return undefined;
-  const on = args.qiji.filter((q) => args.stacks(q.id) > 0);
+  const on = args.qiji.filter((q) => args.on(q.id));
   if (on.length === 0) return { text: t('roster.ui.summary.qijiOff') };
-  const tokens = on.map((q) => {
-    const name = t(q.nameKey);
-    const n = args.stacks(q.id);
-    /** ⚠️ 层数 > 1 才写出来（1 层是默认态，写了反而看不清哪几条开了）。 */
-    return n > 1 ? t('roster.ui.summary.stacked', { name, n }) : name;
-  });
+  /**
+   * ⚠️ 只有名字（**不再有"×2"**）：激活是开关，没有层数
+   * （见 `ui/freeQiji.ts` 的文件头）。
+   */
+  const tokens = on.map((q) => t(q.nameKey));
   return {
     text: joinWithin(t('roster.ui.summary.qijiOn', { n: on.length }), tokens, args.maxChars),
   };

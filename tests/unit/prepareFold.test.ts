@@ -17,6 +17,9 @@ import { BOSS_ROSTER } from '../../src/data/roster';
  * （`selection`），**不是光标**停的那一项。两者在桌面上常常重合，写错了
  * 只拍图是看不出来的（点一下再收起才会露馅）—— 所以它必须是能断言的
  * 纯逻辑。
+ *
+ * ⚠️ 2026-10-13：炁机那一条**不再写"×N"** —— 激活是开关，没有层数
+ * （用户纠正，见 `ui/freeQiji.ts`）。列出的就是那几条**开着**的。
  */
 const tr = createTranslator('zh-CN');
 
@@ -49,7 +52,7 @@ const args = (over: Partial<Parameters<typeof foldSummaryOf>[0]> = {}) => ({
   players,
   bosses,
   qiji,
-  stacks: () => 0,
+  on: () => false,
   translate: t,
   maxChars: 40,
   ...over,
@@ -77,37 +80,20 @@ describe('块头：收起的那一块显示"当前选了什么"', () => {
 
   it('炁机：列出**已激活的那几条**（按内容表顺序），并写清条数', () => {
     const on = foldSummaryOf(
-      args({
-        kind: 'qiji',
-        stacks: (id) => (id === 'vitality' ? 1 : id === 'breath' ? 2 : 0),
-      }),
+      args({ kind: 'qiji', on: (id) => id === 'vitality' || id === 'breath' }),
     );
     expect(on?.text).toBe(
       tr.t('roster.ui.summary.qijiOn', { n: 2 }) +
         tr.t('qiji.vitality.name') +
         '、' +
-        tr.t('roster.ui.summary.stacked', { name: tr.t('qiji.breath.name'), n: 2 }),
+        tr.t('qiji.breath.name'),
     );
-    /** ⚠️ 一层不写层数（默认态），多层才写 —— 见 `prepareFold` 的说明。 */
-    expect(on?.text).not.toContain('×1');
-  });
-
-  it('多层的那几条写出 `×N`（3 层与 1 层必须看得出区别）', () => {
-    const on = foldSummaryOf(args({ kind: 'qiji', stacks: (id) => (id === 'vitality' ? 3 : 0) }));
-    expect(on?.text).toBe(
-      tr.t('roster.ui.summary.qijiOn', { n: 1 }) +
-        tr.t('roster.ui.summary.stacked', { name: tr.t('qiji.vitality.name'), n: 3 }),
-    );
+    /** ⚠️ 没有层数，所以**不可能**出现 `×N`（用户纠正过的那条机制）。 */
+    expect(on?.text).not.toContain('×');
   });
 
   it('⚠️ 排不下时**收口**（补省略号，不折行 —— 折行会顶掉下面两块的高度）', () => {
-    const on = foldSummaryOf(
-      args({
-        kind: 'qiji',
-        maxChars: 12,
-        stacks: () => 1,
-      }),
-    );
+    const on = foldSummaryOf(args({ kind: 'qiji', maxChars: 12, on: () => true }));
     expect(on?.text.endsWith('…')).toBe(true);
     expect(on?.text.length).toBeLessThanOrEqual(13);
   });

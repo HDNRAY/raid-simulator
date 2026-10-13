@@ -28,19 +28,33 @@
  * 用户原话："开始战斗和按钮错位了"。
  *
  * 量出来的原因（不是猜的）：按钮**矩形**由布局表算出来
- * （`startRect()`：`pad + (playerColW - startW)/2` = **280**，中心 **328**），
- * 而按钮上的**文字**画在 `LOGICAL.width / 2` = **480** —— 差 **152px**。
- * 于是画面上是"一颗空按钮 + 一串飘在它右边 150px 的字"。
+ * （旧版 `startRect()`：`pad + (playerColW - startW)/2` = **280**，
+ * 中心 **328**），而按钮上的**文字**画在 `LOGICAL.width / 2` = **480**
+ * —— 差 **152px**。于是画面上是"一颗空按钮 + 一串飘在它右边 150px 的字"。
  *
  * ⚠️ 根因不是"数字写错了"，而是**同一个东西有两个出处**：矩形来自
- * `prepareLayout`（命中测试读它），文字的位置在这里又算了一遍。所以修法
+ * `prepareGeometry`（命中测试读它），文字的位置在这里又算了一遍。所以修法
  * 是**让文字从矩形推**（`start.x + start.w / 2`），而不是把 480 改成 328
  * —— 后者下次布局一动手又会漂。
  *
- * ⚠️ 同理，下面那行**操作提示**也居中到按钮的中心（它读起来就是按钮的
- * 说明，旧版把它留在"整张画布的中心"，于是它比按钮偏右 152px）。
- * 只有最底下的**素材声明**仍然居中于整张画布 —— 那是全屏的版权标示，
- * 不属于按钮。
+ * ==================================================================
+ * ⚠️⚠️ 2026-10-13 第四轮：那一排**锚定画布底部**，说明与按钮**同一排**
+ * ==================================================================
+ *
+ * 用户原话："**开始战斗 和 开始战斗下面的说明 其实可以放一排，
+ * 并且 锚定在底部**"。
+ *
+ * | | 旧版 | 现在 |
+ * |---|---|---|
+ * | 按钮 y | 跟着三块内容走（`sectionsBottom + startGap`） | **从画布底边推**（`footerRowCenterY`） |
+ * | 说明位置 | 按钮**下面**那一行、与按钮同心 | 按钮**右边**那一格、同一排（`footerHintSlot`） |
+ * | 说明对齐 | 居中（`anchorX: 0.5`） | 左对齐（`anchorX: 0`），格宽固定 |
+ *
+ * ⚠️ 说明那一格的**宽度是常量**（`footerHintW`），不随文案变：切换键盘 /
+ * 触屏时这一排不会左右跳。两套文案都必须放得下 —— 有单测钉着。
+ *
+ * ⚠️ 只有最底下的**素材声明**仍然居中于整张画布 —— 那是全屏的版权标示，
+ * 不属于这一排。
  *
  * ==================================================================
  * ⚠️ 提示行承担一个**反馈职责**
@@ -55,21 +69,14 @@ import type { Container, Graphics } from 'pixi.js';
 import { FONT, LOGICAL } from './layout';
 import { Label, type PixiCtor } from './primitives';
 import { PALETTE } from '../render/theme';
-import type { PrepareCounts } from './prepareLayout';
-import { startCenterX, startRect } from './prepareGeometry';
+import { PREPARE_LAYOUT } from './prepareLayout';
+import { footerHintSlot, startCenterX, startRect } from './prepareGeometry';
 import { CARD_RADIUS, PREPARE_SKIN, startSkin } from './prepareRender';
 import type { TranslateFn } from '../i18n/translator';
 
 export interface PrepareFooterOptions {
   readonly pixi: PixiCtor;
   readonly parent: Container;
-  /**
-   * 三块的张数 —— ⚠️ 只用来算「开始战斗」的 y（见 `prepareLayout.startRect`）。
-   *
-   * ⚠️ 它是**构造参数**：按钮的位置在造对象时就要定（文字要摆在按钮中心），
-   * 而张数在运行期不变（名单是静态的）—— 传进来比"每帧重算一遍位置"干净。
-   */
-  readonly counts: PrepareCounts;
   /**
    * 取词函数。
    *
@@ -151,23 +158,26 @@ export class PrepareFooter {
   private readonly hint: Label;
   private readonly notice: Label;
   /**
-   * 「开始战斗」的矩形（**唯一出处**：命中测试也读 `prepareLayout.startRect`）。
+   * 「开始战斗」的矩形（**唯一出处**：命中测试也读 `prepareGeometry.startRect`）。
    *
-   * ⚠️ 文字 / 提示的 x **全部从它推**（`rect.x + rect.w / 2`）—— 这是
-   * "错位"那个 bug 的结构性修法，见文件头。
+   * ⚠️ 文字 / 说明的 x **全部从它推** —— 这是"错位"那个 bug 的结构性修法，
+   * 见文件头。
    */
   private readonly start: ReturnType<typeof startRect>;
+  /** 操作说明那一格（按钮右边，同一排）。 */
+  private readonly hintSlot: ReturnType<typeof footerHintSlot>;
 
   constructor(private readonly options: PrepareFooterOptions) {
     const { pixi, parent } = options;
     this.gfx = new pixi.Graphics();
-    this.start = startRect(options.counts);
+    this.start = startRect();
+    this.hintSlot = footerHintSlot();
     /**
      * ⚠️ 中心由 `startCenterX` 给（= 矩形中心，**不是** `LOGICAL.width / 2`）
      * —— 见文件头：这一条就是"错位"那个 bug 的修法，而且是**可单测**的
      * （`tests/unit/prepareLayout.test.ts` 断言"文字中心 = 矩形中心"）。
      */
-    const centerX = startCenterX(options.counts);
+    const centerX = startCenterX();
 
     this.startLabel = new Label(pixi, {
       x: centerX,
@@ -178,28 +188,32 @@ export class PrepareFooter {
       anchorY: 0.5,
     });
     this.hint = new Label(pixi, {
-      x: centerX,
+      /** ⚠️ 贴在按钮**右边那一格**的左端（`anchorX: 0` = 左对齐）。 */
+      x: this.hintSlot.x,
       /**
-       * ⚠️ 提示行贴在**按钮下面**（它读起来就是那颗按钮的说明）。
+       * ⚠️ 与按钮**同一个垂直中心**（同一排）—— 这一条就是用户要的
+       * "开始战斗和说明放一排"。
        */
-      y: this.start.y + this.start.h + 10,
+      y: this.start.y + this.start.h / 2,
       size: FONT.tiny,
       color: PALETTE.textDim,
-      anchorX: 0.5,
+      anchorX: 0,
       anchorY: 0.5,
     });
     /**
      * 页脚声明：贴屏幕**底边、居中于整张画布**（它是全屏的版权标示，
-     * 不属于那颗按钮）。
+     * 不属于那一排）。
      *
      * ⚠️ 它不是装饰，是**权利归属的标示**（素材取自《炎龍騎士團2》）。
      * 字号用 `FONT.small`(13) 而不是 `FONT.tiny`(11) —— 中文有 13 的
      * 下限（见 `layout.ts` 的字号表）。
+     * ⚠️ 位置（底边距离 / 字号）来自布局表 —— 那一排的 y 就是**从它反推**
+     * 的（`footerRowCenterY`），两处各写一个数必然叠在一起或留着怪缝。
      */
     this.notice = new Label(pixi, {
       x: LOGICAL.width / 2,
-      y: LOGICAL.height - 16,
-      size: FONT.small,
+      y: LOGICAL.height - PREPARE_LAYOUT.noticeGap,
+      size: PREPARE_LAYOUT.noticeSize,
       color: PALETTE.textDim,
       anchorX: 0.5,
       anchorY: 0.5,

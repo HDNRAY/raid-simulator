@@ -5,8 +5,8 @@
  * 它是什么（一句话，没有"和"）
  * ==================================================================
  *
- * 它把**状态**（这一格是光标吗 / 是已确定的选择吗 / 开了几层）
- * 翻成**画法**（底色 / 描边 / 名字色 / 要不要外环 / 要不要角标）。
+ * 它把**状态**（这一格是光标吗 / 是已确定的选择吗 / 炁机开着吗）
+ * 翻成**画法**（底色 / 描边 / 名字色 / 要不要外环）。
  *
  * ==================================================================
  * 为什么单独一个文件（AGENTS.md §3 的关注分离）
@@ -25,7 +25,7 @@
  * | `PrepareScreen` | 光标与选择怎么走 |
  */
 
-import { cardSkin, qijiSkin, type CardSkin, type QijiSkin } from './prepareRender';
+import { cardSkin, qijiSkin, type CardSkin } from './prepareRender';
 import { PREPARE_LAYOUT, type PrepareHitArea } from './prepareLayout';
 import type { PrepareTarget } from './prepareLogic';
 import type { PrepareSectionKind } from './prepareTypes';
@@ -39,13 +39,6 @@ export interface CardAppearance {
   readonly strokeWidth: number;
   readonly ring: boolean;
   readonly ringColor: number;
-  /**
-   * 画"已开"角标（只有炁机卡会为真）。
-   *
-   * ⚠️ 两个槽位的皮肤类型**不一样**（`CardSkin` 没有 `badge`），所以这里
-   * 用**类型守卫**取值而不是 cast（AGENTS.md §1）。
-   */
-  readonly badge: boolean;
   /**
    * 名字右边那颗对话头像要不要画。
    *
@@ -63,8 +56,12 @@ export interface CardAppearanceInput {
   readonly selected: boolean;
   /** 这个条目还在开发中（灰掉 + 不能开战）。 */
   readonly developing: boolean;
-  /** 这条炁机已叠层数（0 = 没开；人物 / Boss 传 0）。 */
-  readonly stacks: number;
+  /**
+   * 这条炁机**开着**没有（人物 / Boss 传 `false`）。
+   *
+   * ⚠️ 是布尔而不是"几层"：炁机激活是开关（见 `ui/freeQiji.ts` 的文件头）。
+   */
+  readonly on: boolean;
 }
 
 /** 状态 → 卡片外观（两个槽位各走自己的皮肤函数）。 */
@@ -73,16 +70,16 @@ export function cardAppearance(input: CardAppearanceInput): CardAppearance {
     const skin = qijiSkin({
       developing: input.developing,
       cursored: input.cursored,
-      stacks: input.stacks,
+      on: input.on,
     });
-    return { ...withoutBadge(skin), badge: skin.badge, showPortrait: false };
+    return { ...skin, showPortrait: false };
   }
   const skin = cardSkin({
     developing: input.developing,
     cursored: input.cursored,
     selected: input.selected,
   });
-  return { ...skin, badge: false, showPortrait: input.kind === 'player' };
+  return { ...skin, showPortrait: input.kind === 'player' };
 }
 
 /* ------------------------------------------------------------------ *
@@ -126,8 +123,8 @@ export interface CardDrawsArgs {
   readonly cursor: PrepareTarget | undefined;
   /** **已确定**的选择。 */
   readonly selection: { readonly playerId: string; readonly bossId: string };
-  /** 某条炁机已叠层数（0 = 没开）。 */
-  readonly stacks: (id: string) => number;
+  /** 某条炁机此刻**开着**没有。 */
+  readonly on: (id: string) => boolean;
   /** 这个 id 是不是"开发中"。 */
   readonly developing: (id: string) => boolean;
 }
@@ -155,7 +152,7 @@ export function cardDrawsOf(args: CardDrawsArgs): readonly CardDraw[] {
         (kind === 'player' && area.id === args.selection.playerId) ||
         (kind === 'boss' && area.id === args.selection.bossId),
       developing: args.developing(area.id),
-      stacks: kind === 'qiji' ? args.stacks(area.id) : 0,
+      on: kind === 'qiji' ? args.on(area.id) : false,
     });
     out.push({
       ...appearance,
@@ -172,21 +169,5 @@ export function cardDrawsOf(args: CardDrawsArgs): readonly CardDraw[] {
   return out;
 }
 
-/**
- * 把皮肤里的画法字段摊平（去掉 `badge` —— 它在两个类型里只有一边有，
- * 由调用方按自己的分支补上）。
- */
-function withoutBadge(skin: QijiSkin): Omit<CardAppearance, 'badge' | 'showPortrait'> {
-  return {
-    nameColor: skin.nameColor,
-    fillColor: skin.fillColor,
-    fillAlpha: skin.fillAlpha,
-    strokeColor: skin.strokeColor,
-    strokeWidth: skin.strokeWidth,
-    ring: skin.ring,
-    ringColor: skin.ringColor,
-  };
-}
-
-/** `CardSkin` 也满足 `withoutBadge` 的形状（类型上显式声明，便于两处对齐）。 */
+/** 卡片的"已确定"皮肤类型（`CardAppearance` 由它 + `showPortrait` 拼出来）。 */
 export type { CardSkin };

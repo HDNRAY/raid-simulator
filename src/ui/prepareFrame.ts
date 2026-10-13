@@ -63,7 +63,7 @@ import {
   sectionScrollbar,
   type SectionScroll,
 } from './prepareGeometry';
-import { canStartBattle, stacksIn, type FreeQiji, type PrepareSelection, type PrepareTarget } from './prepareLogic';
+import { canStartBattle, isQijiOn, type FreeQiji, type PrepareSelection, type PrepareTarget } from './prepareLogic';
 import { cardDrawsOf } from './prepareCardState';
 import { foldSummaryOf } from './prepareFold';
 import type { PrepareCards } from './prepareCards';
@@ -104,6 +104,7 @@ export interface PrepareFrameState {
   readonly selection: PrepareSelection;
   /** 光标此刻指着的那一项（`undefined` = 不在任何卡片上）。 */
   readonly cursor: PrepareTarget | undefined;
+  /** 已激活的炁机集合（见 `ui/freeQiji.ts`）。 */
   readonly free: FreeQiji;
   /** 三块各自的滚动偏移（**只读**；改它的是 `PrepareScreen`）。 */
   readonly scroll: SectionScroll;
@@ -155,7 +156,7 @@ export function drawPrepareFrame(parts: PrepareFrameParts, state: PrepareFrameSt
       nameOf,
       cursor: state.cursor,
       selection: state.selection,
-      stacks: (id) => stacksIn(state.free, id),
+      on: (id) => isQijiOn(state.free, id),
       developing: state.developing,
     }),
   );
@@ -225,7 +226,7 @@ function foldDraws(
       players: state.players,
       bosses: state.bosses,
       qiji: state.qiji,
-      stacks: (id) => stacksIn(state.free, id),
+      on: (id) => isQijiOn(state.free, id),
       translate: state.translate,
       maxChars,
     });

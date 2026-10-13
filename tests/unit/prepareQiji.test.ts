@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
-  cycleQijiStack,
   freeQijiChoices,
   hitTestPrepare,
+  isQijiOn,
   moveFocus,
-  stackCapOf,
-  stacksIn,
-  unstackQiji,
+  toggleQiji,
   type PrepareSelection,
 } from '../../src/ui/prepareLogic';
 import { prepareHitAreas } from '../../src/ui/prepareGeometry';
+import { buildPlayerKit } from '../../src/data/kit';
+import { ALL_QIJI } from '../../src/data/qiji';
+import { playerCapsFor } from '../../src/data/units';
+import { PLAYER_ROSTER } from '../../src/data/roster';
 
 /**
  * ==================================================================
@@ -18,22 +20,24 @@ import { prepareHitAreas } from '../../src/ui/prepareGeometry';
  *
  * 用户原话："选了人之后，可以**激活任意个他的炁机**"。
  *
+ * ⚠️ **"任意个"落在条数上**（8 条想开几条开几条），而**每一条是开关、
+ * 没有层数** —— 用户后来明确纠正："**炁机的激活 没有层，你这个问题本就
+ * 不存在**"。上一版把它做成 `id → 层数`（沿用 `maxStacks`）并造出"点卡片
+ * 左半减一层 / 右半加一层"，于是 0 层时点左半**什么都不做**，玩家看到的是
+ * "点了能选中但不能激活"。
+ *
  * ⚠️ 这一份钉的是**语义**，不是界面：
- *   - "任意个"= 条数不限（8 条想开几条开几条）
- *   - 但每条自己的**层数**仍认 `maxStacks`（与肉鸽**同一个字段**，
- *     不许在自由模式里另立一套"无限叠"的规则 —— 那会让同一个字段
- *     有两种含义，而漂移不报错、只让数值对不上）
- *   - 到顶之后再点 = **归零**（不是"没反应"：层数画在卡上，归零是
- *     看得见的下一步）
+ *   - 一次切换 = 开或关（关着的点一下必开 —— 这正是用户报的那条）
+ *   - 多条可以同时开着
+ *   - 效果**只生效一次**（`stacks: 1`，见 `freeQijiChoices`）
+ *
+ * ⚠️ 肉鸽那边的 `maxStacks` **不在本文件的范围**：那是"每次战斗后再选一次"
+ * 的累积（`core/run` 消费），与"一次激活几层"是两件事。
  */
 
 const players = [{ id: 'player' }, { id: 'kaili' }];
 const bosses = [{ id: 'meiichiro' }];
-const qiji = [
-  { id: 'vitality' }, // maxStacks 3
-  { id: 'breath' }, // maxStacks 2
-  { id: 'jieShengJi' }, // 无 maxStacks → 1
-];
+const qiji = [{ id: 'vitality' }, { id: 'breath' }, { id: 'jieShengJi' }];
 
 const sel = (over: Partial<PrepareSelection> = {}): PrepareSelection => ({
   playerId: 'player',
@@ -45,94 +49,122 @@ const sel = (over: Partial<PrepareSelection> = {}): PrepareSelection => ({
   ...over,
 });
 
-describe('炁机层数：上限来自内容表的 `maxStacks`（缺省 1）', () => {
-  it('缺省 1；给了就用给的；非法值夹到 >= 1', () => {
-    expect(stackCapOf(undefined)).toBe(1);
-    expect(stackCapOf(3)).toBe(3);
-    expect(stackCapOf(2.7)).toBe(2);
-    expect(stackCapOf(0)).toBe(1);
-    expect(stackCapOf(-5)).toBe(1);
-    expect(stackCapOf(Number.NaN)).toBe(1);
+describe('炁机激活：**开关**（没有层数）', () => {
+  it('关着的点一下 → 开；开着的点一下 → 关', () => {
+    const on = toggleQiji([], 'vitality');
+    expect(isQijiOn(on, 'vitality')).toBe(true);
+    const off = toggleQiji(on, 'vitality');
+    expect(isQijiOn(off, 'vitality')).toBe(false);
   });
 
-  it('点一次叠一层、到顶之后**归零**', () => {
-    let free = {};
-    for (const [step, expected] of [
-      [1, 1],
-      [2, 2],
-      [3, 3],
-      [4, 0],
-      [5, 1],
-    ] as const) {
-      const next = cycleQijiStack(free, 'vitality', 3);
-      free = next.free;
-      expect(next.stacks, `第 ${step} 次`).toBe(expected);
-    }
+  it('【关键】**0 层/关着**时点它 → 开（不再是"什么也不做"）', () => {
+    /** 用户报的那一条：任何状态点下去都必须有结果。 */
+    const closed: readonly string[] = [];
+    const first = toggleQiji(closed, 'breath');
+    expect(first).toEqual(['breath']);
+    /** ⚠️ 连点两次回到"没开"，而不是"归零 / 叠一层"之类。 */
+    expect(toggleQiji(first, 'breath')).toEqual([]);
   });
 
-  it('无 `maxStacks` 的炁机**只能一层**（再点归零）', () => {
-    let free = {};
-    free = cycleQijiStack(free, 'jieShengJi', undefined).free;
-    expect(stacksIn(free, 'jieShengJi')).toBe(1);
-    const again = cycleQijiStack(free, 'jieShengJi', undefined);
-    expect(again.stacks).toBe(0);
-    expect(stacksIn(again.free, 'jieShengJi')).toBe(0);
-  });
-
-  it('归零 = **删掉那个键**（不留 `{ id: 0 }` 这种第二份"没开"的表达）', () => {
-    const one = cycleQijiStack({}, 'breath', 2).free;
-    expect(Object.keys(one)).toEqual(['breath']);
-    /** `breath` 的上限是 2，再点一次就到顶归零。 */
-    const two = cycleQijiStack(one, 'breath', 2).free;
-    expect(two).toEqual({ breath: 2 });
-    const zero = cycleQijiStack(two, 'breath', 2).free;
-    expect(zero).toEqual({});
-    expect('breath' in zero).toBe(false);
-  });
-
-  it('退一层：到 0 就停（不会绕回上限）', () => {
-    const three = { vitality: 3 };
-    expect(stacksIn(unstackQiji(three, 'vitality').free, 'vitality')).toBe(2);
-    const zero = { vitality: 0 };
-    expect(unstackQiji({}, 'vitality').free).toEqual({});
-    expect(unstackQiji(zero, 'vitality').free).toEqual({ vitality: 0 });
+  it('关掉 = **删掉那个 id**（不留 `false` 这种第二份"没开"的表达）', () => {
+    const on = toggleQiji(toggleQiji([], 'vitality'), 'breath');
+    expect(on).toEqual(['vitality', 'breath']);
+    expect(toggleQiji(on, 'vitality')).toEqual(['breath']);
   });
 
   it('【关键】多条可以同时开着（"任意个"的落点）', () => {
-    let free = {};
-    free = cycleQijiStack(free, 'vitality', 3).free;
-    free = cycleQijiStack(free, 'breath', 2).free;
-    free = cycleQijiStack(free, 'breath', 2).free;
-    free = cycleQijiStack(free, 'jieShengJi', undefined).free;
-    expect(free).toEqual({ vitality: 1, breath: 2, jieShengJi: 1 });
+    let free: readonly string[] = [];
+    free = toggleQiji(free, 'vitality');
+    free = toggleQiji(free, 'breath');
+    free = toggleQiji(free, 'jieShengJi');
+    expect(free).toEqual(['vitality', 'breath', 'jieShengJi']);
   });
 
-  it('没变化时返回**同一个对象**（调用方据此跳过写存储）', () => {
-    const free = {};
-    expect(unstackQiji(free, 'vitality').free).toBe(free);
+  it('⚠️ 切换**不读也不看** `maxStacks`（那是肉鸽的字段）', () => {
+    /**
+     * 内容里 `vitality` 的 `maxStacks = 3`，而这里连点 4 次应当是
+     * 开 / 关 / 开 / 关 —— 层数一个字都不参与。
+     */
+    let free: readonly string[] = [];
+    const states: boolean[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      free = toggleQiji(free, 'vitality');
+      states.push(isQijiOn(free, 'vitality'));
+    }
+    expect(states).toEqual([true, false, true, false]);
   });
 });
 
-describe('层数表 → `buildPlayerKit` 的形状（自由模式唯一的翻译点）', () => {
-  it('按**内容表顺序**排，且只留开着的', () => {
-    const choices = freeQijiChoices({ breath: 2, vitality: 1 }, qiji);
+describe('激活集合 → `buildPlayerKit` 的形状（自由模式唯一的翻译点）', () => {
+  it('按**内容表顺序**排，只留开着的，且 `stacks` 恒为 1', () => {
+    const choices = freeQijiChoices(['breath', 'vitality'], qiji);
     expect(choices).toEqual([
       { qijiId: 'vitality', stacks: 1 },
-      { qijiId: 'breath', stacks: 2 },
+      { qijiId: 'breath', stacks: 1 },
     ]);
   });
 
-  it('【关键】顺序**不按对象键的插入顺序**（黄金截图 / 断言要能复现同一份修正列表）', () => {
-    /** 插入顺序反过来，产物必须一样。 */
-    const a = freeQijiChoices({ vitality: 1, breath: 2 }, qiji);
-    const b = freeQijiChoices({ breath: 2, vitality: 1 }, qiji);
+  it('【关键】顺序**不按集合的顺序**（黄金截图 / 断言要能复现同一份修正列表）', () => {
+    const a = freeQijiChoices(['vitality', 'breath'], qiji);
+    const b = freeQijiChoices(['breath', 'vitality'], qiji);
     expect(a).toEqual(b);
   });
 
+  it('【关键】效果**只生效一次**（`stacks` 恒为 1，不会因为"没层"变成叠 3 次）', () => {
+    const choices = freeQijiChoices(['vitality'], qiji);
+    expect(choices).toEqual([{ qijiId: 'vitality', stacks: 1 }]);
+    /** 一次激活 → 一条修正。3 层是**肉鸽**的语义，自由模式取不到。 */
+    expect(choices.every((c) => c.stacks === 1)).toBe(true);
+  });
+
   it('不认识的 id 被丢掉（内容改名之后的陈旧存档）', () => {
-    expect(freeQijiChoices({ ghost: 3, vitality: 1 }, qiji)).toEqual([
+    expect(freeQijiChoices(['ghost', 'vitality'], qiji)).toEqual([
       { qijiId: 'vitality', stacks: 1 },
     ]);
+  });
+});
+
+/**
+ * ⚠️ **真 `buildPlayerKit`**：把"效果只生效一次"从"`stacks: 1`"落到**数字**上
+ * （用户要的验收口径就是数：maxHp / 炁回复）。
+ */
+describe('【关键】效果**只生效一次**（真 `buildPlayerKit`）', () => {
+  const PLAYER = PLAYER_ROSTER[0]!.id;
+  const baseHp = playerCapsFor(PLAYER).hp;
+  /**
+   * ⚠️ 复刻 `app/phaseFlow.activeQiji()` 那一步翻译（它把 `qijiId` 展开成
+   * 定义）—— 这里不 import app 层（那要造整个游戏），但**同一个 `buildPlayerKit`**。
+   */
+  const kitOf = (ids: readonly string[]) =>
+    buildPlayerKit(
+      PLAYER,
+      freeQijiChoices(ids, ALL_QIJI).map((choice) => {
+        const def = ALL_QIJI.find((q) => q.id === choice.qijiId);
+        if (def === undefined) throw new Error(`测试里不该有找不到的炁机：${choice.qijiId}`);
+        return { def, stacks: choice.stacks };
+      }),
+    );
+
+  it('开一条「固本培元」→ 生命上限 **+30**（就一次）', () => {
+    expect(kitOf([]).caps.hp).toBe(baseHp);
+    expect(kitOf(['vitality']).caps.hp).toBe(baseHp + 30);
+  });
+
+  it('开 / 关 / 开同一条 → **不叠加**（还是 +30，不是 +60 / +90）', () => {
+    let free: readonly string[] = [];
+    free = toggleQiji(free, 'vitality');
+    free = toggleQiji(free, 'vitality');
+    free = toggleQiji(free, 'vitality');
+    expect(free).toEqual(['vitality']);
+    expect(kitOf(free).caps.hp).toBe(baseHp + 30);
+  });
+
+  it('开两条不同的炁机 → **两个效果都在**（生命 +30 且炁回复 +10/秒）', () => {
+    const kit = kitOf(['vitality', 'breath']);
+    expect(kit.caps.hp).toBe(baseHp + 30);
+    const regen = kit.modifiers.filter((m) => m.stat === 'energyRegen');
+    expect(regen).toHaveLength(1);
+    expect(regen[0]?.value).toBe(10);
   });
 });
 
@@ -157,15 +189,11 @@ describe('焦点顺序：人物 → 炁机 → 对手 → 开始', () => {
   });
 });
 
-describe('点击命中：炁机卡也能被点中（触屏靠它）', () => {
+describe('点击命中：炁机卡**整张**都能被点中（触屏靠它）', () => {
   it('点在炁机卡正中间 → 命中那一条', () => {
     /**
      * ⚠️ 坐标从 **`prepareHitAreas`** 取（与渲染共用同一份几何）——
      * 自己按 `qijiRowY` 再算一遍就会在"行顶是推导出来的"这件事上错位。
-     */
-    /**
-     * ⚠️ 炁机卡只画在**炁机那一块展开**的时候（手风琴）—— 所以这里显式
-     * 传 `expanded = 'qiji'`（与 `sel()` 那个状态一致）。
      */
     const area = prepareHitAreas(players, bosses, qiji, 'qiji').find(
       (a) => a.kind === 'qiji' && a.id === 'breath',

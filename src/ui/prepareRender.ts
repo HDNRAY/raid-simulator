@@ -240,13 +240,6 @@ export interface QijiSkin {
   readonly nameColor: number;
   readonly ring: boolean;
   readonly ringColor: number;
-  /**
-   * 是否画"已开几层"的角标。
-   *
-   * ⚠️ **只在 `stacks > 1` 时为真**：1 层是默认态，给它角标会让"开了一条"
-   * 与"开了三条"看起来差不多 —— 角标的意义就没了。
-   */
-  readonly badge: boolean;
 }
 
 /**
@@ -257,22 +250,25 @@ export interface QijiSkin {
  * ==================================================================
  *
  * 人物 / Boss 卡是**二选一**（"我选它上场"）：金 = 已确定、冷白 = 光标。
- * 炁机卡是**开关**（不叠层的选一个，叠层的选 0..N 层）：它没有"光标与
- * 选择分离"这回事 —— 开着就是开着，与光标在不在它上面无关。
+ * 炁机卡是**开关**：它没有"光标与选择分离"这回事 —— 开着就是开着，
+ * 与光标在不在它上面无关。
  *
  * 硬合进 `cardSkin` 会让那个函数同时服务两种语义，而它的**判据**
- * （`selected` vs `stacks`）会变成一个"看 kind 决定读哪个"的分支。
+ * （`selected` vs `on`）会变成一个"看 kind 决定读哪个"的分支。
  *
  * ⚠️ **"已开"用金色**（`selectionLine`）：与人物卡的"已确定"是同一个
  * 语义 —— "这个东西**生效了**"。本作里"生效"只有一种颜色。
+ *
+ * ⚠️ 上一版还有一个 `badge`（卡片右上角那颗"叠了不止一层"的点）——
+ * 激活没有层，所以它连同"层数"一起删掉了（用户 2026-10-13 纠正，
+ * 见 `ui/freeQiji.ts` 的文件头）。
  */
 export function qijiSkin(input: {
   readonly developing: boolean;
   readonly cursored: boolean;
-  /** 已叠层数（0 = 没开）。 */
-  readonly stacks: number;
+  /** 开着没有（见 `ui/freeQiji.ts`）。 */
+  readonly on: boolean;
 }): QijiSkin {
-  const on = input.stacks > 0;
   if (input.developing) {
     return {
       fillColor: PREPARE_SKIN.idleFill,
@@ -282,10 +278,9 @@ export function qijiSkin(input: {
       nameColor: PALETTE.textDim,
       ring: input.cursored,
       ringColor: PREPARE_SKIN.cursorLineMuted,
-      badge: false,
     };
   }
-  if (on) {
+  if (input.on) {
     return {
       fillColor: PREPARE_SKIN.selectionFill,
       fillAlpha: 0.3,
@@ -295,7 +290,6 @@ export function qijiSkin(input: {
       /** ⚠️ 开着 + 光标在它上面 → 加外环（否则"光标在哪"看不出来）。 */
       ring: input.cursored,
       ringColor: PREPARE_SKIN.cursorLine,
-      badge: input.stacks > 1,
     };
   }
   if (input.cursored) {
@@ -307,7 +301,6 @@ export function qijiSkin(input: {
       nameColor: PALETTE.text,
       ring: false,
       ringColor: PREPARE_SKIN.cursorLine,
-      badge: false,
     };
   }
   return {
@@ -318,7 +311,6 @@ export function qijiSkin(input: {
     nameColor: PALETTE.text,
     ring: false,
     ringColor: PREPARE_SKIN.cursorLine,
-    badge: false,
   };
 }
 

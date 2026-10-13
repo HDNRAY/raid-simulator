@@ -131,20 +131,18 @@ function qijiShape(id: string): DetailQiji | undefined {
     /** ⚠️ 与 `skillRow` 同一条兜底：`LocaleKey` 就是 `string`，内容漏了 key 时别显示 `undefined`。 */
     nameKey: qiji.nameKey ?? qiji.id,
     ...(qiji.descKey === undefined ? {} : { descKey: qiji.descKey }),
-    ...(qiji.maxStacks === undefined ? {} : { maxStacks: qiji.maxStacks }),
   };
 }
 
 /**
  * 造这一屏详情区的取值上下文。
  *
- * @param free 取"某条炁机此刻的层数 / 上限"。
- *   ⚠️ 层数**必须**从这里现取（不在这里读一次存起来）：它是可变状态，
+ * @param free 取"某条炁机此刻开着没有"。
+ *   ⚠️ 状态**必须**从这里现取（不在这里读一次存起来）：它是可变状态，
  *   而详情区每帧都要重画。
  */
 export function prepareDetailContext(free: {
-  readonly stacks: (id: string) => number;
-  readonly cap: (id: string) => number;
+  readonly on: (id: string) => boolean;
 }): DetailContext {
   return {
     playerById: playerUnit,
@@ -165,6 +163,6 @@ export function prepareDetailContext(free: {
             return skill === undefined ? [] : [skillRow(skill)];
           }),
     developing: isDeveloping,
-    qijiStacks: (id) => ({ stacks: free.stacks(id), cap: free.cap(id) }),
+    qijiOn: (id) => free.on(id),
   };
 }

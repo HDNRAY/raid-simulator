@@ -15,7 +15,7 @@
  * | 这一屏长什么样（矩形 / 网格 / 视口 / 滚动条在哪） | `prepareLayout` + `prepareCardGrid` |
  * | 光标 / 选择 / 焦点怎么走（含块内 ← → ↑ ↓ 的网格数学） | `prepareLogic` + `gridNav` |
  * | 滚动怎么算（谁滚、滚多少、光标跟随） | `prepareScroll` + `scrollWindow` |
- * | "点了什么"（按钮 / 块头 / 炁机左右半边 / 卡片） | `prepareLogic.pointerIntentOf` |
+ * | "点了什么"（按钮 / 块头 / 炁机卡 / 卡片） | `prepareLogic.pointerIntentOf` |
  * | 皮肤（颜色 / 线宽） | `prepareRender` |
  * | 详情区（内容模型 / 画 / 它自己的滚动） | `prepareDetail` + `prepareDetailMetrics` + `prepareDetailPanel` |
  * | 收起那块显示什么 | `prepareFold` + `prepareFoldBars` |
@@ -34,7 +34,7 @@
  * | 块**内**走光标 | ← → ↑ ↓（二维网格，到边界停住） | 点卡片（移光标 + 确定） |
  * | 块**间**切换 | **Tab / Shift+Tab**（环绕） | **点块头**（`expand`） |
  * | 确定人物 / 对手 | Enter | 点卡片 |
- * | 炁机 +1 / −1 层 | Enter / Shift+Enter | 点卡片**右半 / 左半** |
+ * | 炁机开 / 关 | Enter | 点卡片（**整张卡，任意位置**） |
  * | 看详情 | 移动焦点 | **点一下**（触屏没有 hover） |
  * | 开战 | Enter（光标在「开始」上） | 点「开始战斗」 |
  *
@@ -79,18 +79,16 @@ import {
   confirmCursor,
   cursorTarget,
   cycleCursor,
-  cycleQijiStack,
   expandSection,
   focusTarget,
   initialSelection,
+  isQijiOn,
   moveFocus,
   pickOption,
   pickQiji,
   pointerIntentOf,
-  stackCapOf,
-  stacksIn,
   stepCursor,
-  unstackQiji,
+  toggleQiji,
   type FreeQiji,
   type PreparePointerIntent,
   type PrepareSelection,
@@ -155,19 +153,18 @@ export class PrepareScreen {
     this.players = options.players;
     this.bosses = options.bosses;
     this.qiji = options.qiji;
-    this.free = options.freeQiji ?? {};
+    this.free = options.freeQiji ?? [];
     this.selection = initialSelection(options.initial, this.qiji);
 
     /**
-     * ⚠️ 两个取值函数是**活闭包**（读 `this.free` / 静态内容表），而不是
-     * 一份值：层数每点一下就变，传值会让详情区显示上一帧的层数。
+     * ⚠️ 取值函数是**活闭包**（读 `this.free`），而不是一份值：激活状态
+     * 每点一下就变，传值会让详情区显示上一帧的开关态。
      */
     this.parts = buildPrepareParts({
       options,
       selection: this.selection,
       counts: this.counts(),
-      stacks: (id) => stacksIn(this.free, id),
-      cap: (id) => stackCapOf(this.qijiById(id)?.maxStacks),
+      on: (id) => isQijiOn(this.free, id),
     });
     this.root = this.parts.root;
     this.chrome = this.parts.chrome;
@@ -190,7 +187,7 @@ export class PrepareScreen {
     return this.selection;
   }
 
-  /** 当前开着的炁机（层数表）—— 调试探针与存档读它。 */
+  /** 当前开着的炁机（激活集合）—— 调试探针与存档读它。 */
   get freeQiji(): FreeQiji {
     return this.free;
   }
@@ -312,15 +309,13 @@ export class PrepareScreen {
   /**
    * Enter：确定光标处的那一项；若光标停在「开始战斗」上就开战。
    *
-   * ⚠️ 光标在**炁机**上时它做的是"叠一层"（见 `cycleQijiStack`），
+   * ⚠️ 光标在**炁机**上时它做的是"开 / 关"（见 `toggleQiji`），
    * 而不是"确定选择" —— 炁机是可反复开关的集合，没有"选定的那一个"。
-   *
-   * @param back `Shift+Enter`：炁机**退一层**（触屏对等见 `hitTest`）。
    */
-  confirm(back = false): void {
+  confirm(): void {
     const at = this.cursor();
     if (at !== undefined && at.kind === 'qiji') {
-      this.applyQiji(at.id, back);
+      this.applyQiji(at.id);
       return;
     }
     const next = confirmCursor(this.selection, this.players, this.bosses, this.qiji);
@@ -382,8 +377,8 @@ export class PrepareScreen {
    * 刷新还在 0 层"这件事也能一起验。
    */
   resetQiji(): void {
-    if (Object.keys(this.free).length === 0) return;
-    this.free = {};
+    if (this.free.length === 0) return;
+    this.free = [];
     this.options.onQijiChange?.(this.free);
     this.draw();
   }
@@ -518,7 +513,7 @@ export class PrepareScreen {
    * 点一下（逻辑坐标）。
    *
    * ⚠️ **"点了什么"由 `prepareLogic.pointerIntentOf` 判**（纯函数、有单测：
-   * 按钮 → 块头 → 炁机左右半边 → 人物/对手的确定）。这里只负责"照着改
+   * 按钮 → 块头 → 炁机卡 → 人物/对手的确定）。这里只负责"照着改
    * 状态" —— 于是"谁能改状态"仍然只有本类一处，而判定不再只能靠截图验。
    *
    * ⚠️ 齿轮 / 返回箭头**先于**卡片（顺序即优先级）。
@@ -539,11 +534,12 @@ export class PrepareScreen {
         return true;
       case 'qiji':
         /**
-         * ⚠️ **左右半边 = 加一层 / 退一层**（`halfOfCard`，判定在
-         * `pointerIntentOf` 里）：触屏没有 Shift，而"取消"这条路必须存在
-         * （AGENTS.md §3b 的功能对等）。
+         * ⚠️ **整张卡一个含义 = 开 / 关**（判定在 `pointerIntentOf` 里）：
+         * 哪一半都一样，所以触屏与键盘走的是同一条规则（AGENTS.md §3b）。
+         * 上一版按左/右半边分成"退一层 / 加一层"，0 层时点左半什么都不做
+         * —— 那正是用户报的"点了能选中但不能激活"（见 `ui/freeQiji.ts`）。
          */
-        this.applyQiji(intent.id, intent.back);
+        this.applyQiji(intent.id);
         return true;
       case 'pick': {
         const next = pickOption(this.selection, this.players, this.bosses, intent.option, intent.id);
@@ -628,21 +624,19 @@ export class PrepareScreen {
   }
 
   /**
-   * 炁机加 / 退一层，并把光标移到它上面。
+   * 炁机**开 / 关**，并把光标移到它上面。
    *
    * ⚠️ 光标一定要移过去：不加这一句，触屏点一张卡之后**光标还停在别处**，
    * 于是"点一下看详情"这条触屏唯一的路就没有了。
    */
-  private applyQiji(id: string, back: boolean): void {
+  private applyQiji(id: string): void {
     const def = this.qijiById(id);
     if (def === undefined) return;
     /** ⚠️ 光标跟着走，**并且**把它推到看得见的地方（触屏点的是可见的卡）。 */
     this.selection = this.followCursor(pickQiji(this.selection, this.qiji, id));
-    const next = back
-      ? unstackQiji(this.free, id)
-      : cycleQijiStack(this.free, id, def.maxStacks);
-    if (next.free !== this.free) {
-      this.free = next.free;
+    const next = toggleQiji(this.free, id);
+    if (next !== this.free) {
+      this.free = next;
       this.options.onQijiChange?.(this.free);
     }
     this.draw();

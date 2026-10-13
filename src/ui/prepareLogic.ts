@@ -6,7 +6,7 @@
  * ==================================================================
  *
  * 它是这一屏的**状态机**：方向键怎么走、Enter 确定什么、点击落在哪一项、
- * 炁机怎么叠层 —— 一行 Pixi 都不碰（几何在 `prepareLayout.ts`，
+ * 炁机怎么开 / 关 —— 一行 Pixi 都不碰（几何在 `prepareLayout.ts`，
  * 内容模型在 `prepareDetail.ts`）。
  *
  * ==================================================================
@@ -19,7 +19,7 @@
  *   - 方向键在同槽位里移动**光标**、到边界停住（不环绕）
  *   - 上下 / Tab 换槽位的顺序
  *   - **Enter 才把光标处的选项写进选择**（移动光标不改选择）
- *   - 炁机**点一次叠一层、到 `maxStacks` 封顶、再点重来**（见下）
+ *   - 炁机**一次点击 / 一次 Enter = 开或关**（没有层，见下）
  *
  * ==================================================================
  * ⚠️ 光标（cursor）与选择（selection）是**两个独立概念**
@@ -46,9 +46,14 @@
  * 的"选了就离开这一屏"会造出两个语义打架的屏幕。
  *
  * ⚠️ **状态存在 `PrepareScreen` 之外**（`app/` 层的 `freeQijiStore`），
- * 而"层数怎么变"（加 / 退 / 封顶归零）在 **`ui/freeQiji.ts`** —— 那是
- * 纯数据，与"光标停在哪一条"（本文件）没有交集，所以 §3 的横向切割把
- * 它挪走了。本文件只留下"炁机这一块的**光标**怎么走"。
+ * 而"开还是关"（切换）在 **`ui/freeQiji.ts`** —— 那是纯数据，与
+ * "光标停在哪一条"（本文件）没有交集，所以 §3 的横向切割把它挪走了。
+ * 本文件只留下"炁机这一块的**光标**怎么走"。
+ *
+ * ⚠️ **激活是开关，没有层数**（用户 2026-10-13 明确纠正）—— 那张卡
+ * **整张可点**，一次点击 = 开 / 关。上一版把它劈成"左半减一层 / 右半加
+ * 一层"，0 层时点左半**什么都不做**（正是用户报的"点了能选中但不能
+ * 激活"）。判据与来龙去脉写在 `ui/freeQiji.ts` 的文件头。
  */
 
 import type { PrepareFocus, PrepareOption, PrepareSectionKind } from './prepareTypes';
@@ -69,19 +74,16 @@ export type { PrepareHitArea, PrepareHitKind } from './prepareLayout';
  * 而几何本身仍然只有 `prepareLayout` 那一份实现。
  */
 /**
- * ⚠️ **转发炁机层数那一套**（实现在 `./freeQiji`）：
- * 它们在 §3 的横向切割里搬走了，而调用方（`app/` 与既有测试）**一行都
+ * ⚠️ **转发炁机开关那一套**（实现在 `./freeQiji`）：
+ * 它在 §3 的横向切割里搬走了，而调用方（`app/` 与既有测试）**一行都
  * 不该改** —— 拆文件不该改 import 路径（那是纯噪音）。这里只是通道，
  * 实现只有那一份。
  */
 export {
-  cycleQijiStack,
   freeQijiChoices,
-  stackCapOf,
-  stacksIn,
-  unstackQiji,
+  isQijiOn,
+  toggleQiji,
   type FreeQiji,
-  type QijiCycle,
 } from './freeQiji';
 
 export {
@@ -112,8 +114,8 @@ export {
  * "我的光标被偷走了"）。
  *
  * ⚠️ `qijiId` 与 `playerId` / `bossId` 不同：它**不是选择**，而是
- * "光标停在炁机行的哪一张卡上" —— 炁机的"选择"是层数表（`freeQiji`），
- * 光标只是键盘用来挑"现在改哪一条"的。
+ * "光标停在炁机行的哪一张卡上" —— 炁机的"选择"是激活集合（`freeQiji`），
+ * 光标只是键盘用来挑"现在切哪一条"的。
  */
 export interface PrepareCursor {
   readonly playerId: string;
@@ -483,8 +485,8 @@ export function expandSection(
  * 确定（Enter）：把**光标处**的选项写进选择。
  *
  * - 光标在人物 / 对手卡上 → 把那一项确定为上场单位
- * - 光标在炁机卡上 → **不改选择**（炁机的改动走 `cycleQijiStack`，
- *   由调用方把它落到 `freeQiji` 层数表上）
+ * - 光标在炁机卡上 → **不改选择**（炁机的改动走 `toggleQiji`，
+ *   由调用方把它落到激活集合上）
  * - 光标在「开始战斗」上 → 什么都不做，返回**同一个对象**
  *   （调用方据此知道"这一下交给 `start()` 去处理"）
  *
@@ -626,9 +628,9 @@ export function hitTestPrepare(
  *   - 判定在 node 里可以精确测（`tests/unit/prepareLogic.test.ts`）
  *   - 屏幕那一层只剩一个 `switch`（谁改状态仍然只有一处）
  *
- * ⚠️ `qiji` 那一支**连"左半 / 右半"一起算好**（`back`）：那是触屏唯一的
- * "退一层"入口（AGENTS.md §3b 的功能对等），所以它属于**判定**，不属于
- * "照着做"。
+ * ⚠️ `qiji` 那一支**不含"左半 / 右半"**：激活是开关，**整张卡**只有
+ * 一种含义（一次点击 = 切一次）。上一版的左/右半边分裂见
+ * `ui/freeQiji.ts` 的文件头（用户报的"点了不能激活"就是它）。
  */
 export type PreparePointerIntent =
   /** 没点中任何东西（调用方据此"不消费这次点击"）。 */
@@ -637,8 +639,8 @@ export type PreparePointerIntent =
   | { readonly kind: 'start' }
   /** 点收起的**块头** → 只展开那一块（不改选择）。 */
   | { readonly kind: 'expand'; readonly slot: PrepareSectionKind }
-  /** 点炁机卡：`back` 为真 = 左半边（退一层），假 = 右半边（叠一层）。 */
-  | { readonly kind: 'qiji'; readonly id: string; readonly back: boolean }
+  /** 点炁机卡的**任意位置** → 开 / 关它（整张卡一个含义）。 */
+  | { readonly kind: 'qiji'; readonly id: string }
   /** 点人物 / 对手卡 → 移光标 + 确定（一步到位）。 */
   | { readonly kind: 'pick'; readonly option: 'player' | 'boss'; readonly id: string };
 
@@ -667,7 +669,8 @@ export function pointerIntentOf(
     return isSectionKind(hit.id) ? { kind: 'expand', slot: hit.id } : { kind: 'none' };
   }
   if (hit.kind === 'qiji') {
-    return { kind: 'qiji', id: hit.id, back: halfOfCard(px, hit) === 'left' };
+    /** ⚠️ 整张卡一个含义（哪一半都一样）—— 见 `PreparePointerIntent` 的说明。 */
+    return { kind: 'qiji', id: hit.id };
   }
   return { kind: 'pick', option: hit.kind, id: hit.id };
 }
@@ -678,22 +681,4 @@ function inRect(
   r: { readonly x: number; readonly y: number; readonly w: number; readonly h: number },
 ): boolean {
   return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
-}
-
-/**
- * 一次点击落在卡片的**哪一半**（炁机卡的"加一层 / 退一层"）。
- *
- * ⚠️ 触屏没有 Shift（AGENTS.md §3b 的功能对等）：所以"退一层"必须有
- * **纯指针**的入口 —— 右半 = 加一层（与 Enter 同义），左半 = 退一层
- * （与 Shift+Enter 同义）。
- *
- * ⚠️ 这条中线**在画面上看不出来**（炁机卡是整张名字卡，没有图标也没有
- * 分栏）：所以它是"触屏可用的兜底"，而键盘那条路（Enter / Shift+Enter）
- * 才是主要路径。文案里写清了它（`roster.ui.hintTouch`）。
- */
-export function halfOfCard(
-  px: number,
-  card: { readonly x: number; readonly w: number },
-): 'left' | 'right' {
-  return px < card.x + card.w / 2 ? 'left' : 'right';
 }

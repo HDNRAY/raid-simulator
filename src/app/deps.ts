@@ -20,9 +20,9 @@ import {
   skillsForPlayer,
 } from '../data/content';
 import { DEFAULT_PLAYER_ID, resolvePlayerId } from '../data/roster';
-import { ALL_QIJI, qijiById } from '../data/qiji';
+import { ALL_QIJI } from '../data/qiji';
 import { loadFreeQiji, saveFreeQiji } from './freeQijiStore';
-import { stackCapOf, type FreeQiji } from '../ui/prepareLogic';
+import type { FreeQiji } from '../ui/prepareLogic';
 import { flattenCatalog } from '../i18n/translator';
 import { zhCN } from '../i18n/locales/zh-CN';
 import { resolveOperationMode } from '../render/platform';
@@ -100,21 +100,10 @@ export interface GameDeps {
   readonly freeQiji: FreeQijiHolder;
 }
 
-/** 自由模式炁机层数表的**活持有者**（唯一真相）。 */
+/** 自由模式炁机激活集合的**活持有者**（唯一真相）。 */
 export interface FreeQijiHolder {
   get(): FreeQiji;
   set(next: FreeQiji): void;
-}
-
-/**
- * 一条炁机的层数上限（`maxStacks`，缺省 1）。
- *
- * ⚠️ 走 `ui/prepareLogic.stackCapOf`（**同一个函数**，有单测）：存档校验
- * 与界面上的"再点归零"必须认同一个上限，各写一遍就会出现"存档说 3 层、
- * 界面只让你点到 1 层"这种自相矛盾。
- */
-function qijiCapOf(id: string): number {
-  return stackCapOf(qijiById(id)?.maxStacks);
 }
 
 /**
@@ -263,14 +252,16 @@ export function createGameDeps(): GameDeps {
    * 不存在的炁机"一路静默到 `buildPlayerKit`（那里找不到就丢掉 ——
    * 表现为玩家的某一条**静默失效**）。
    *
-   * ⚠️ 上限也一起校验（`maxStacks` 夹一下）：内容把上限从 3 改成 1 之后，
-   * 老存档不该带着 3 层进战斗。
+   * ⚠️ **老存档（`{id: 层数}`）要能读回来并写回新形状**：`loadFreeQiji`
+   * 认出旧格式时给 `migrated = true`，这里写回一次集合 —— 与
+   * `touchButtons` 的迁移是同一条纪律（照本仓库既有做法）。
    */
-  let freeQiji: FreeQiji = loadFreeQiji(
+  const freeLoad = loadFreeQiji(
     storage,
     ALL_QIJI.map((q) => q.id),
-    (id) => qijiCapOf(id),
   );
+  let freeQiji: FreeQiji = freeLoad.ids;
+  if (freeLoad.migrated) saveFreeQiji(storage, freeQiji);
   const freeQijiHolder: FreeQijiHolder = {
     get: () => freeQiji,
     set: (next) => {

@@ -143,7 +143,7 @@ declare global {
          * ⚠️ 2026-10-13（自由模式改造）`focus` 多了 `'qiji'`、`cursor` 多了
          * `qijiId`（炁机行），并加了 `freeQiji()` / `detail()` / `hover()`
          * 三个探针 —— 它们存在的理由都是"截图证明不了"：
-         *   - `freeQiji()`：**效果叠加**的验收要读"开了几条、各几层"
+         *   - `freeQiji()`：**开关态**的验收要读"哪几条开着"
          *   - `detail()`：截图能看出详情区有字，但"是**谁的**字"读不出来
          *   - `hover()`：headless 下模拟真实指针划过不可靠
          *
@@ -162,8 +162,8 @@ declare global {
             readonly qijiId: string;
           };
         };
-        /** 当前开着的炁机（id → 层数；没开的不出现）。 */
-        freeQiji(): Readonly<Record<string, number>>;
+        /** 当前开着哪几条炁机（激活集合；没开的 id 不出现）。 */
+        freeQiji(): readonly string[];
         /** 详情区此刻显示的是哪一项（`undefined` = 没聚焦任何卡片）。 */
         detail(): { readonly kind: 'player' | 'qiji' | 'boss'; readonly id: string } | undefined;
         /**
@@ -196,10 +196,10 @@ declare global {
         /** 同 ↑ ↓ / Tab：换槽位（`wrap` 为真时环绕）。 */
         moveFocus(delta: number, wrap?: boolean): void;
         /**
-         * 同 Enter：确定光标处那一项；光标在**炁机**上则叠一层
-         * （`back` = Shift+Enter：退一层）；光标在「开始战斗」上则开战。
+         * 同 Enter：确定光标处那一项；光标在**炁机**上则**开 / 关**它；
+         * 光标在「开始战斗」上则开战。
          */
-        confirm(back?: boolean): void;
+        confirm(): void;
         /** 同点击卡片：移光标 + 确定（一步到位）。 */
         pick(kind: 'player' | 'boss', id: string): void;
         /** 直接把焦点放到某个槽位（截图用，省掉"按几次方向键"）。 */

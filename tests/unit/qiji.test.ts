@@ -139,12 +139,17 @@ describe('说明与内容的推导关系（名字的字数 / 字面值不测）'
      * 那是"当时挑的词"，按用户 2026-10-13 的判据已删（UT 不测开发过程）。
      *
      * 但留了一半**有真实后果**的：卡片上就这一行说明，玩家看到的数字只有
-     * 这里。说明里的数值一旦与内容的 `modifier.value` / `maxStacks` 漂移，
-     * 玩家会被**静默误导**（"写着 +30，实际 +20"，不报错）。所以这里改成
-     * **从内容推导**：说明里必须出现内容真正用的那两个数。
+     * 这里。说明里的数值一旦与内容的 `modifier.value` 漂移，玩家会被
+     * **静默误导**（"写着 +30，实际 +20"，不报错）。所以这里改成
+     * **从内容推导**：说明里必须出现内容真正用的那个数。
      *
      * ⚠️ 断言的是 `desc.includes(String(value))`，不是抄一句文案 ——
      * 改词、改标点、改语序都不会红；**只有数值对不上才红**。
+     *
+     * ⚠️ 2026-10-13：**"可叠 N 层"那一半断言已删** —— 说明里不再写层数
+     * （用户纠正："炁机的激活 没有层"，见 `ui/freeQiji.ts`）。`maxStacks`
+     * 本身仍然在（肉鸽那边的"每次战斗后再选一次"），只是**不该写进
+     * 这条说明**。
      */
     const modifierValueOf = (id: string): number | undefined => {
       const qiji = ALL_QIJI.find((q) => q.id === id);
@@ -153,16 +158,14 @@ describe('说明与内容的推导关系（名字的字数 / 字面值不测）'
       const value: unknown = ability.modifier.value;
       return typeof value === 'number' ? value : undefined;
     };
-    const maxStacksOf = (id: string): number | undefined => ALL_QIJI.find((q) => q.id === id)?.maxStacks;
 
     for (const id of ['vitality', 'breath']) {
       const desc = QIJI_CATALOG.get(`qiji.${id}.desc`) ?? '';
       const value = modifierValueOf(id);
-      const maxStacks = maxStacksOf(id);
       expect(value, `${id} 没有 modifier 数值`).toBeDefined();
-      expect(maxStacks, `${id} 没有 maxStacks`).toBeDefined();
       expect(desc, `${id} 的说明里没有内容用的数值 ${String(value)}：${desc}`).toContain(`+${String(value)}`);
-      expect(desc, `${id} 的说明里没有内容用的叠层 ${String(maxStacks)}：${desc}`).toContain(`可叠 ${String(maxStacks)} 层`);
+      /** ⚠️ 自由模式的炁机卡是开关 —— 说明里不许再出现"可叠 N 层"。 */
+      expect(desc, `${id} 的说明里又写回了层数：${desc}`).not.toContain('可叠');
     }
   });
 });

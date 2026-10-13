@@ -11,6 +11,7 @@ import {
   sectionBlockH,
   sectionMaxScroll,
   sectionRowStep,
+  sectionStackH,
   sectionViewportH,
   sectionViewportRows,
   sectionsBottom,
@@ -54,17 +55,27 @@ const QIJI_TODAY = 8;
 const QIJI_MANY = 20;
 
 describe('⚠️ 视口是**常量**：张数不改变三块占的高度，也不推走「开始战斗」', () => {
-  it('炁机 8 条与 20 条：**占的高度一样**（都是视口高）', () => {
+  it('炁机 8 条与 20 条：占的高度都是「内容与视口的较小者」，20 条时 = 视口高', () => {
     const rows = cardRowsOf(QIJI_MANY, PREPARE_LAYOUT.qijiColumns);
     /** 前提：20 条确实摊出**比视口多**的行（否则这条测试什么都没测）。 */
     expect(rows).toBeGreaterThan(PREPARE_LAYOUT.visibleRows);
     expect(sectionBlockH('qiji', countsOf(QIJI_MANY))).toBe(sectionViewportH('qiji'));
-    expect(sectionBlockH('qiji', countsOf(QIJI_TODAY))).toBe(sectionViewportH('qiji'));
+    /**
+     * ⚠️ 2026-10-13 第四轮：视口从 2 行放宽到 3 行（页脚锚定底部换来的余量），
+     * 而今天只有 8 条 = 2 行 —— 所以这一块占的是**内容高**（86），
+     * 视口那 132 只是上限。两种都不该由张数去改别块的位置。
+     */
+    expect(cardRowsOf(QIJI_TODAY, PREPARE_LAYOUT.qijiColumns)).toBeLessThan(
+      PREPARE_LAYOUT.visibleRows,
+    );
+    expect(sectionBlockH('qiji', countsOf(QIJI_TODAY))).toBe(
+      sectionStackH('qiji', countsOf(QIJI_TODAY)),
+    );
   });
 
-  it('【关键】20 条炁机时「开始战斗」**不动**（按钮的 y 取三块里最高的一种展开）', () => {
-    const today = startRect(countsOf(QIJI_TODAY));
-    const many = startRect(countsOf(QIJI_MANY));
+  it('【关键】20 条炁机时「开始战斗」**不动**（它锚定画布底部，不看张数）', () => {
+    const today = startRect();
+    const many = startRect();
     expect(many).toEqual(today);
     /** 而且它仍然在画布内、在三块下面。 */
     expect(many.y).toBeGreaterThan(sectionsBottom(countsOf(QIJI_MANY)));
@@ -174,20 +185,33 @@ describe('⚠️ 光标跟随：换行才滚，而且只滚到"看得见"为止'
     expect(followedCursor(down, lists, counts, NO_SCROLL)).toBeUndefined();
   });
 
-  it('【关键】再 ↓ 到第三行：视角**跟一行**（正好露出那一行）', () => {
+  /**
+   * ⚠️ 这一组**按 `visibleRows` 参数化**（2026-10-13 第四轮：视口 2 → 3 行）：
+   * 判据是"视口内不滚、出了视口才滚一行"，而不是"第二行 / 第三行"这种
+   * 跟着常量走的字面值。视口以后再调，这一组不用改。
+   */
+  const rowsInViewport = PREPARE_LAYOUT.visibleRows;
+
+  it('【关键】视口内最后一行**不滚**，再往下一行才**跟一行**', () => {
     let sel = start();
-    sel = stepCursor(sel, players, bosses, 'down', qiji);
-    sel = stepCursor(sel, players, bosses, 'down', qiji);
-    expect(sel.cursor.qijiId).toBe('q10');
-    const next = followedCursor(sel, lists, counts, NO_SCROLL);
+    /** 走到视口里的**最后一行**（下标 `rowsInViewport − 1`）。 */
+    for (let i = 1; i < rowsInViewport; i += 1) {
+      sel = stepCursor(sel, players, bosses, 'down', qiji);
+      expect(followedCursor(sel, lists, counts, NO_SCROLL)).toBeUndefined();
+    }
+    /** 再 ↓ 一行 = 视口外 → 只滚**一行**（不是"把光标居中"）。 */
+    const beyond = stepCursor(sel, players, bosses, 'down', qiji);
+    const next = followedCursor(beyond, lists, counts, NO_SCROLL);
     expect(next?.qiji).toBe(sectionRowStep('qiji'));
-    /** ⚠️ 只滚**一行**：不是"把光标居中"（那会滚得更多、画面更晃）。 */
     expect(next?.qiji).toBeLessThan(sectionRowStep('qiji') * 2);
   });
 
   it('滚过之后光标所在的那一行**确实在视口里**', () => {
     const step = sectionRowStep('qiji');
-    const sel = stepCursor(stepCursor(start(), players, bosses, 'down', qiji), players, bosses, 'down', qiji);
+    let sel = start();
+    for (let i = 0; i < rowsInViewport; i += 1) {
+      sel = stepCursor(sel, players, bosses, 'down', qiji);
+    }
     const scroll = followedCursor(sel, lists, counts, NO_SCROLL)!;
     const view = sectionViewportRows('qiji', counts, scroll);
     const cards = prepareHitAreas(players, bosses, qiji, 'qiji', scroll).filter((a) => a.kind === 'qiji');
@@ -213,9 +237,14 @@ describe('⚠️ 手指下限仍然是硬约束（视口/滚动没有放松它�
   });
 
   it('人物 / 对手两块：张数决定行数，但**同样不会溢出**（同一套视口）', () => {
-    /** 对手今天 7 张 → 2 行 = 视口，正好放下（与炁机同一条判据）。 */
-    expect(sectionBlockH('boss', { players: 3, bosses: 7, qiji: 8 })).toBe(sectionViewportH('boss'));
-    /** 想象 20 个 Boss：占的高度不变，多出来的靠滚。 */
+    /**
+     * 对手今天 7 张 → 2 行（< 视口 3 行）→ 占的是**内容高**，不是视口高
+     * （`sectionBlockH = min(内容, 视口)`）。再多就靠滚。
+     */
+    expect(sectionBlockH('boss', { players: 3, bosses: 7, qiji: 8 })).toBe(
+      sectionStackH('boss', { players: 3, bosses: 7, qiji: 8 }),
+    );
+    /** 想象 20 个 Boss：占的高度变成视口高，多出来的靠滚。 */
     const many = prepareHitAreas(players, bosses, qijiOf(8), 'boss');
     expect(many.filter((a) => a.kind === 'boss')).toHaveLength(2);
   });
