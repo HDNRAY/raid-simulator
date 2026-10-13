@@ -1117,10 +1117,6 @@ export const zhCN = {
        * 能读的话，比画一个空屏好。
        */
       none: '这一局没有可选的炁机了',
-      /** 已叠满的炁机画成灰色（与「开发中」的卡片皮肤同一条路）。 */
-      maxed: '已叠满',
-      /** 卡片上的解锁进度（`{current}/{required}`，如 `2/3`）。 */
-      progress: '{current}/{required}',
     },
     /**
      * 一局肉鸽结束（通关 / 失败）之后的摘要屏。
@@ -1137,8 +1133,6 @@ export const zhCN = {
       loadout: '本局炁机',
       /** 一个炁机都没选时（理论上只可能发生在"第一场就输"）。 */
       loadoutEmpty: '（无）',
-      /** 叠了 N 层时的后缀（`炁脉自生 ×2`）。 */
-      stacks: '×{stacks}',
       hintContinue: '回选角色',
     },
   },

@@ -209,27 +209,31 @@ describe('炁机候选（两条 `unlock: always` 的兜底恒在）', () => {
     expect(ids).not.toContain('jieShengJi');
   });
 
-  it('选一个 → `chosen` 记 1 层，而它仍是候选（可叠）', () => {
+  it('选一个 → `chosen` 记下**它自己**（没有层数），而它**立刻从候选里消失**', () => {
+    /**
+     * ⚠️ 旧版这条叫"`chosen` 记 1 层，而它仍是候选（可叠）"——
+     * 用户 2026-10-13 推翻了那条语义（"一局只能选一次（不叠加）"），
+     * 所以现在 `chosen` 的元素只有一个 `qijiId`，选过的**不再**是候选。
+     */
     const run = createRunSession({ bossPool: POOL, qijiPool: ALL_QIJI });
     run.begin('player', 1);
     expect(run.chooseQiji('vitality')).toBe(true);
-    expect(run.state()?.chosen).toEqual([{ qijiId: 'vitality', stacks: 1 }]);
-    expect(run.candidates().find((c) => c.qiji.id === 'vitality')?.remainingStacks).toBe(2);
-  });
-
-  it('再选同一个 → **叠层**（不是两条条目）', () => {
-    const run = createRunSession({ bossPool: POOL, qijiPool: ALL_QIJI });
-    run.begin('player', 1);
-    run.chooseQiji('vitality');
-    run.chooseQiji('vitality');
-    expect(run.state()?.chosen).toEqual([{ qijiId: 'vitality', stacks: 2 }]);
-  });
-
-  it('叠满 maxStacks 之后它**不再是候选**', () => {
-    const run = createRunSession({ bossPool: POOL, qijiPool: ALL_QIJI });
-    run.begin('player', 1);
-    for (let i = 0; i < 3; i += 1) run.chooseQiji('vitality');
+    expect(run.state()?.chosen).toEqual([{ qijiId: 'vitality' }]);
     expect(run.candidates().map((c) => c.qiji.id)).not.toContain('vitality');
+  });
+
+  it('⚠️【核心】再选同一个 → **失败**（它已经不在候选里，没有"叠第 2 层"）', () => {
+    /**
+     * 这条同时钉住两件事：
+     *   1. `chooseQiji` 的判据是"**在不在候选里**"（复用 `nextCandidates`），
+     *      所以选过的 id 直接被拒 —— 不是"接受但只记一次"
+     *   2. `chosen` 里**不会出现两条同 id**（数组长度是 1）
+     */
+    const run = createRunSession({ bossPool: POOL, qijiPool: ALL_QIJI });
+    run.begin('player', 1);
+    expect(run.chooseQiji('vitality')).toBe(true);
+    expect(run.chooseQiji('vitality')).toBe(false);
+    expect(run.state()?.chosen).toEqual([{ qijiId: 'vitality' }]);
   });
 
   it('选一个**没解锁 / 不存在**的 → 失败（判定复用候选，不另写一套）', () => {

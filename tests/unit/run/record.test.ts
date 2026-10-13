@@ -84,7 +84,7 @@ function richState(): RunState {
     { outcome: 'victory', events: [used(JIE, 1), dmg(JIE, 12, 2), interrupted(JIE, 3)], flawless: false },
     [qiji('vitality', ALWAYS)],
   );
-  run = { ...run, chosen: [{ qijiId: 'vitality', stacks: 2 }] };
+  run = { ...run, chosen: [{ qijiId: 'vitality' }] };
   run = advanceRun(run, {
     outcome: 'defeat',
     events: [used(JIE, 4), interrupted(JIE, 5)],
@@ -144,7 +144,7 @@ describe('RunState —— 裸 JSON 往返（验收 3 的前半）', () => {
       { won: true, flawless: false },
       { won: false, flawless: false },
     ]);
-    expect(state.chosen).toEqual([{ qijiId: 'vitality', stacks: 2 }]);
+    expect(state.chosen).toEqual([{ qijiId: 'vitality' }]);
     expect(state.status).toBe('defeat');
     expect(state.label).toBe('?runlen=3');
 
@@ -252,7 +252,8 @@ describe('parseRecordedRun —— 坏数据整条丢弃（§11 风险 #9）', ()
     expect(parseRecordedRun({ ...good, state: { ...state, position: 1.5 } })).toBeUndefined();
     expect(parseRecordedRun({ ...good, state: { ...state, status: 'won' } })).toBeUndefined();
     expect(parseRecordedRun({ ...good, state: { ...state, unlocked: [1, 2] } })).toBeUndefined();
-    expect(parseRecordedRun({ ...good, state: { ...state, chosen: [{ qijiId: 'v', stacks: 0 }] } })).toBeUndefined();
+    expect(parseRecordedRun({ ...good, state: { ...state, chosen: [{ qijiId: '' }] } })).toBeUndefined();
+    expect(parseRecordedRun({ ...good, state: { ...state, chosen: [{ qijiId: 1 }] } })).toBeUndefined();
     expect(parseRecordedRun({ ...good, state: { ...state, chosen: [{ stacks: 1 }] } })).toBeUndefined();
   });
 
@@ -589,9 +590,23 @@ describe('parseRecordedRun —— 坏数据整条丢弃（§11 风险 #9）', ()
     ).toBeDefined();
   });
 
-  it('⚠️ `RUN_FORMAT_VERSION` 现在是 2（记录格式加了必填字段），v1 记录被拒', () => {
-    expect(RUN_FORMAT_VERSION).toBe(2);
+  it('⚠️ `RUN_FORMAT_VERSION` 现在是 **3**（`RunChoice` 删了 `stacks`），旧版本一律被拒', () => {
+    /**
+     * 版本号是**记录形状**的号（判据见 `record.ts` 常量说明，与
+     * `REPLAY_FORMAT_VERSION` 那条**不要互相套用**）：
+     *
+     *   - 1 = 初版
+     *   - 2 = `RunBattleRecord` 加了必填的 `flawless`
+     *   - 3 = `RunChoice` **删掉 `stacks`**（2026-10-13：肉鸽"一局只能选
+     *     一次、不叠加"，层数那条线整条没有消费者）
+     *
+     * ⚠️ 断言"旧版本号被 `parseRecordedRun` 拒掉"是这一条的重点：
+     * 一份 v2 的 `chosen: [{qijiId, stacks}]` 过新解析器会**静默丢字段**，
+     * 而版本号让"读不回来"变成一个**明确**的判断（而不是靠运气）。
+     */
+    expect(RUN_FORMAT_VERSION).toBe(3);
     expect(parseRecordedRun({ ...good, runFormatVersion: 1 })).toBeUndefined();
+    expect(parseRecordedRun({ ...good, runFormatVersion: 2 })).toBeUndefined();
     expect(parseRecordedRun({ ...good, runFormatVersion: RUN_FORMAT_VERSION })).toBeDefined();
   });
 });

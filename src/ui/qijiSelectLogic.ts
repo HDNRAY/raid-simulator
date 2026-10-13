@@ -23,8 +23,8 @@
  *
  *   - 选角色屏**一行**、选择是"确定了谁"（与光标分离）
  *   - 本屏可能有**两行**，而"选择"没有延迟 —— 按 Enter / 点卡片**当场生效**
- *     并离开这一屏（§5.3："选了不能换"）。所以这里**没有** selection，
- *     只有 cursor。
+ *     并离开这一屏（§5.3："选了不能换 / 不能取消"）。所以这里**没有**
+ *     selection，只有 cursor。
  *
  * 硬把"没有 selection"塞进 `PrepareSelection` 会造出一个永远为空的选择字段
  * —— 而那个字段下一个人会以为有含义。
@@ -53,20 +53,23 @@ export interface QijiView {
   readonly descKey?: string;
   /** 图标名（`render/icons.ts` 的 `IconName`）。 */
   readonly icon: string;
-  /**
-   * 一局内最多叠几层（`data/qiji.ts` 的 `maxStacks`，缺省 1）。
-   *
-   * 用途：卡片右下角画"还能选几次"（`remaining` 来自候选），
-   * 以及"已叠满"的灰卡判定。
-   */
-  readonly maxStacks?: number;
 }
 
-/** 一个候选：要画的炁机 + 还能选几次。 */
+/**
+ * 一个候选：**只有要画的炁机**。
+ *
+ * ⚠️ 这里**曾经有一个 `remaining`**（"还能选几次"）—— 已删（2026-10-13）。
+ *
+ * 它服务的是"同一个炁机可以再选一次、累积到 `maxStacks`"那一版语义。
+ * 用户把肉鸽定死成"**一局只能选一次（不叠加）**"之后：
+ *
+ *   - 选过的那条**不再进候选**（`core/run/unlock.ts` 的 `nextCandidates`）
+ *   - 能选 = 恒 1 次 —— "还能选几次"这件事**没有第二个取值**
+ *
+ * 所以卡片右下角那个 `0/3` / `2/3` 也整条删掉了（见 `QijiSelectScreen`）。
+ */
 export interface QijiCandidate {
   readonly qiji: QijiView;
-  /** 还能选几次（`maxStacks - 已选层数`）。恒 `>= 1`（`nextCandidates` 保证）。 */
-  readonly remaining: number;
 }
 
 /**
@@ -163,9 +166,9 @@ export const QIJI_SELECT_LAYOUT: QijiLayout = {
    * 地方站**（那正是这次的 bug）。160 让两行卡片占 `150..490`，提示行
    * 落在 508（见 `qijiHintY`），中间留 9px 的呼吸位。
    *
-   * ⚠️ 减到 160 之后卡片内部仍然排得下（三段文字：名字 +30、说明
-   * +72/+92、右下角"已叠满" `h − 24 = +136`）—— 这三处是**内容相对
-   * 卡片顶边**的偏移（见 `QijiSelectScreen.redraw`），不随卡片高变化。
+   * ⚠️ 减到 160 之后卡片内部仍然排得下（两段文字：名字 +30、说明
+   * +72/+92）—— 这两处是**内容相对卡片顶边**的偏移（见
+   * `QijiSelectScreen.redraw`），不随卡片高变化。
    */
   cardH: 160,
   gap: 20,

@@ -77,8 +77,8 @@ function openingRun(runSeed: number, playerId = 'player') {
   return startRun({ runSeed, playerId, order: shuffle(BOSSES, runSeed) });
 }
 
-/** 最小假炁机（判定只读 `id` / `unlock` / `maxStacks`，见 unlock.test.ts）。 */
-function qiji(id: string, unlock: QijiUnlock, maxStacks?: number): QijiEntity {
+/** 最小假炁机（判定只读 `id` / `unlock`，见 unlock.test.ts）。 */
+function qiji(id: string, unlock: QijiUnlock): QijiEntity {
   return {
     id,
     kind: 'qiji',
@@ -87,7 +87,6 @@ function qiji(id: string, unlock: QijiUnlock, maxStacks?: number): QijiEntity {
     category: 'offense',
     unlock,
     abilities: [],
-    ...(maxStacks === undefined ? {} : { maxStacks }),
   };
 }
 
@@ -425,7 +424,7 @@ describe('失败 = 全丢（§2.4 / §12 决议 #1）', () => {
       { outcome: 'victory', events: [interrupted(JIE, 1)], flawless: false },
       [qiji('vitality', ALWAYS)],
     );
-    run = { ...run, chosen: [{ qijiId: 'vitality', stacks: 1 }] };
+    run = { ...run, chosen: [{ qijiId: 'vitality' }] };
     const fresh = dropRunProgress(run);
     expect(fresh.position).toBe(1);
     expect(fresh.status).toBe('active');

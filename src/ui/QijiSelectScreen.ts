@@ -11,8 +11,11 @@
  *     `core/run/unlock.ts` 的 `nextCandidates`）。没解锁的**不出现**。
  *   - **这一屏只在第一场打完之后出现**：开局那条路（`startRoguelikeRun`）
  *     直接进战斗 —— 判据在 `phaseFlow`，不在这里。
- *   - **选 1 个生效**，而且**选了不能换**（§5.3）—— 所以本屏没有"反选 /
- *     取消"，Enter / 点卡片当场生效并离开。
+ *   - **选 1 个生效**，而且**选了不能换 / 不能取消**（§5.3）—— 所以本屏
+ *     没有"反选 / 取消"，Enter / 点卡片当场生效并离开。
+ *   - **一局只能选一次（不叠加）**：选过的那条**不再出现在候选里**
+ *     （`nextCandidates` 按 `chosen` 过滤），所以卡片上**没有** `0/3`
+ *     这类"还能选几次"的角标（那个字段已删，见 `qijiSelectLogic`）。
  *
  * ==================================================================
  * 交互：与其它选择屏同一套（键盘与触屏**对等**，AGENTS.md §3b）
@@ -25,8 +28,13 @@
  *     （箭头是**必需的** —— 触屏按不出 `Esc`）
  *
  * ==================================================================
- * ⚠️ 卡片排版：每张卡三段（名字 / 说明 / 层数）
+ * ⚠️ 卡片排版：每张卡两段（名字 / 说明，最多两行）
  * ==================================================================
+ *
+ * ⚠️ 第三段（右下角的"还能选几次" / "已叠满"）**已删**（2026-10-13）：
+ * 肉鸽改成"一局只能选一次、不叠加"之后，候选里的每一条**恒只能选 1 次**，
+ * 那个角标永远没有东西可写（`maxStacks` / `remainingStacks` 都删了）。
+ * 留一个永远为空的 Label 只会让下一个人以为还有层数。
  *
  * ⚠️ 说明里的换行是**内容里的 `\n`**（i18n 的字符串），渲染层按它切行、
  * 每行一个 `Label` —— 不是让 Pixi 自动换行。理由：Pixi 的 `wordWrap`
@@ -61,8 +69,8 @@ export interface QijiSelectScreenOptions {
    * **现在能选什么** —— 取值函数，不是快照。
    *
    * ⚠️ 它是**活的**：这一屏可能被打开多次（每场战斗后一次），而每次的
-   * 候选都不一样（统计涨了、解锁多了、叠满了）。快照一份会让第二次打开
-   * 显示第一次的候选。
+   * 候选都不一样（统计涨了 → 有新解锁的；上一屏刚选走的**不再出现**）。
+   * 快照一份会让第二次打开显示第一次的候选。
    *
    * 数据由 app 层从 `runSession.candidates()` + `data/qiji.ts` 拼好之后
    * 传进来（`QijiCandidate` 只带渲染要的字段）—— 本屏**不认识**
@@ -84,13 +92,11 @@ export interface QijiSelectScreenOptions {
 /** 本屏要拼上去的**键名**（键名不进 i18n，见 AGENTS.md §3b）。 */
 const QIJI_KEY_HINT = '← → · Enter';
 
-/** 每张卡的固定 Label 槽位（名字 / 说明 2 行 / 层数）。 */
+/** 每张卡的固定 Label 槽位（名字 / 说明最多两行）。 */
 interface QijiCardLabels {
   readonly name: Label;
   /** 说明最多两行（第二行常驻、空着就不显示字）。 */
   readonly desc: readonly [Label, Label];
-  /** 右下角"还能选几次"（叠满时写「已叠满」）。 */
-  readonly stacks: Label;
 }
 
 export class QijiSelectScreen {
@@ -287,15 +293,8 @@ export class QijiSelectScreen {
       color: PALETTE.textDim,
       anchorX: 0.5,
     });
-    const stacks = new Label(pixi, {
-      x: 0,
-      y: 0,
-      size: FONT.tiny,
-      color: PALETTE.textDim,
-      anchorX: 1,
-    });
-    this.root.addChild(name.root, desc0.root, desc1.root, stacks.root);
-    return { name, desc: [desc0, desc1], stacks };
+    this.root.addChild(name.root, desc0.root, desc1.root);
+    return { name, desc: [desc0, desc1] };
   }
 
   private redraw(): void {
@@ -326,7 +325,6 @@ export class QijiSelectScreen {
         card.name.set('');
         card.desc[0].set('');
         card.desc[1].set('');
-        card.stacks.set('');
         return;
       }
 
@@ -372,26 +370,6 @@ export class QijiSelectScreen {
       card.desc[0].root.y = area.y + 72;
       card.desc[1].root.x = centerX;
       card.desc[1].root.y = area.y + 92;
-
-      /**
-       * 右下角：**还能选几次**（叠满写「已叠满」）。
-       *
-       * 缺省 `maxStacks = 1` 的炁机永远显示"×1"很吵 —— 所以只有
-       * `remaining > 1`（= 可叠、还没满）或"已满"时才写字。
-       */
-      const max = candidate.qiji.maxStacks ?? 1;
-      const stacksText =
-        candidate.remaining <= 0
-          ? t('screen.qijiSelect.maxed')
-          : max > 1
-            ? t('screen.qijiSelect.progress', {
-                current: String(max - candidate.remaining),
-                required: String(max),
-              })
-            : '';
-      card.stacks.set(stacksText);
-      card.stacks.root.x = area.x + area.w - 12;
-      card.stacks.root.y = area.y + area.h - 24;
     });
   }
 }

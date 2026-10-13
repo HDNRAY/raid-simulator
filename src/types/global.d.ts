@@ -256,9 +256,9 @@ declare global {
        * **选炁机屏 + 一局结束屏**（P3；调试用）。
        *
        * ⚠️ 存在的理由（截图证明不了的两件事）：
-       *   1. "候选集合对不对"（解锁了哪些、叠满了没有）—— 尤其那条**反面**
-       *      验收"没到 3 次时它【不】出现"：截图上"少一张卡"与"画漏了一张"
-       *      完全一样。
+       *   1. "候选集合对不对"（解锁了哪些、**已经选过的那条在不在里面**）——
+       *      尤其那两条反面验收："没到 3 次时它【不】出现"、"**选过之后它不再
+       *      出现**"。截图上"少一张卡"与"画漏了一张"完全一样。
        *   2. "一局结束屏是哪一局"—— 通关 / 失败的文案长得像，位置与装备
        *      必须能从状态读。
        *
@@ -298,7 +298,7 @@ declare global {
           readonly position: number;
           readonly status: string;
           readonly unlocked: readonly string[];
-          readonly chosen: readonly { readonly qijiId: string; readonly stacks: number }[];
+          readonly chosen: readonly { readonly qijiId: string }[];
           readonly battles: readonly { readonly won: boolean; readonly flawless: boolean }[];
         } | null;
         /** 相位序列（每次 `applyPhase` 追加一条；**不清理**）。 */

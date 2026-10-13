@@ -34,11 +34,15 @@ import {
  * ⚠️ 不测颜色 / 字号 / 文案 —— 那是渲染层的事，看图（AGENTS.md §4）。
  */
 
-/** 造一个候选（只需要 id；`QijiView` 的其它字段本测试不关心）。 */
-function candidate(id: string, extra: Partial<QijiView> = {}, remaining = 1): QijiCandidate {
+/**
+ * 造一个候选（只需要 id；`QijiView` 的其它字段本测试不关心）。
+ *
+ * ⚠️ 候选**只有** `qiji` 一个字段（2026-10-13 起：肉鸽一局只能选一次，
+ * 所以没有"还能选几次"那个 `remaining`）。
+ */
+function candidate(id: string, extra: Partial<QijiView> = {}): QijiCandidate {
   return {
     qiji: { id, nameKey: `qiji.${id}.name`, icon: 'icon', ...extra },
-    remaining,
   };
 }
 
@@ -336,7 +340,6 @@ describe('⚠️ 提示行不与卡片重叠（用户报的那个 UI bug，2026-
   it('命中区与提示行**不相交**（"点卡片"不该点到提示行上，反之亦然）', () => {
     const candidates: readonly QijiCandidate[] = Array.from({ length: QIJI_SELECT_SLOTS }, (_, i) => ({
       qiji: { id: `q${i}`, nameKey: 'k', icon: 'i' } satisfies QijiView,
-      remaining: 1,
     }));
     const hintTop = qijiHintY(QIJI_SELECT_LAYOUT) - BOX(13) / 2;
     for (const area of qijiHitAreas(candidates, QIJI_SELECT_LAYOUT)) {

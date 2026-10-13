@@ -355,8 +355,9 @@ export function createGame(o: CreateGameDeps): GameHandle {
      * **自由模式的炁机**（2026-10-13）：池子从内容表读，激活状态由
      * `d.freeQiji`（启动时读存档的那个活持有者）持有。
      *
-     * ⚠️ 只给 `id` / `nameKey`：这一屏的炁机是**开关**，不看 `maxStacks`
-     * （那是肉鸽的字段，见 `ui/prepareOptions.ts`）。
+     * ⚠️ 只给 `id` / `nameKey`：这一屏的炁机是**开关**，**没有层数**
+     * （见 `ui/prepareOptions.ts`；肉鸽那边的 `maxStacks` 字段已整条删除，
+     * 2026-10-13：一局只能选一次、不叠加）。
      */
     qijiOptions: ALL_QIJI.map((q) => ({ id: q.id, nameKey: q.nameKey })),
     prepareDetailContext: (free) => prepareDetailContext(free),

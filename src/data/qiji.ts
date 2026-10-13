@@ -308,6 +308,13 @@ export const QIJI_FOCUS_BOOST: QijiEntity = {
  * W6 做完之后这一条的**数据不用改**，改的只是 `buildPlayerKit` 里那一步。
  *
  * 数值 +30（§5.4 表的建议值；用户原话"如果 30 血只能选 1 次，就多加几个兜底"）。
+ *
+ * ⚠️ **一局只能选一次**（用户 2026-10-13 定死，原话："肉鸽也改成一局
+ * 只能选一次（不叠加）"）—— 所以这里**没有** `maxStacks`
+ * （那个字段已整条删除，见 `core/types/qiji.ts` 的作废段）。
+ * 用户当年那句"如果 30 血只能选 1 次，就**多加几个兜底**"的答案就是
+ * 池子里有**多条** `unlock: always` 的通用炁机（今天两条，见下面的池子），
+ * 而不是"同一条叠 3 层"。
  */
 export const QIJI_VITALITY: QijiEntity = {
   id: 'vitality',
@@ -319,8 +326,6 @@ export const QIJI_VITALITY: QijiEntity = {
   rarity: 'common',
   /** 开局即解锁（**但第一场打完才出现选择屏** —— 那是 `runSession` 的事）。 */
   unlock: { kind: 'always', of: [] },
-  /** 叠 3 层（§5.4）：选满一维之后被迫看向机制炁机（§11 风险 #2 的缓解）。 */
-  maxStacks: 3,
   abilities: [
     {
       kind: 'modifier',
@@ -351,7 +356,6 @@ export const QIJI_BREATH: QijiEntity = {
   category: 'generic',
   rarity: 'common',
   unlock: { kind: 'always', of: [] },
-  maxStacks: 2,
   abilities: [
     {
       kind: 'modifier',

@@ -40,20 +40,6 @@ import type { QijiEntity, QijiSkillTweak } from '../core/types/qiji';
 import type { StatKey, StatModifier } from '../core/types';
 import type { ComboWindowSpec } from '../core/combat/comboWindow';
 
-/**
- * 一局里**已经选了生效**的一个炁机（`RunState.chosen` 的元素）。
- *
- * ⚠️ 形状与 `core/run/types.ts` 的 `RunChoice` **刻意同构**，但不 import 它：
- * `core/run` 是"一局肉鸽的账本"，`data/` 是内容 —— 让内容层为了一个形状
- * 去依赖账本层会造出方向相反的 import。两边都是 `{ qijiId, stacks }`，
- * 而**唯一需要它们一致的地方是 app 层**（`runSession`），那里传参时会
- * 被编译器检查。
- */
-export interface ChosenQiji {
-  readonly qijiId: string;
-  readonly stacks: number;
-}
-
 /** 一场战斗的玩家输入（§5.5 的 `BattleKit`）。 */
 export interface PlayerKit {
   /** 属性管线的基底（`CreateBattleOptions.baseStats` 的玩家那一份）。 */
@@ -92,7 +78,22 @@ export interface PlayerKit {
  *     再存一份就是**同一件事的第二份表达**（会漂）
  */
 
-/** 一局肉鸽里"已经生效"的炁机（定义 + 层数）。 */
+/**
+ * 一局里"已经生效"的炁机（定义 + 层数）。
+ *
+ * ⚠️ **`stacks` 不来自 `RunState.chosen`**：`chosen` 的元素只有一个
+ * `qijiId`（2026-10-13 起 —— 肉鸽"一局只能选一次、不叠加"，
+ * 层数字段整条删除，见 `RunChoice` 的说明）。
+ *
+ * 保留这个字段是因为**它是本函数的入参形状**，而两个模式的填充方式不同：
+ *
+ *   - **肉鸽**：每条恒 `1`（一局只能选一次）
+ *   - **自由模式**：也恒 `1`（那张卡是开关，见 `ui/freeQiji.ts`）
+ *
+ * 所以今天的调用方**全都传 1**。它是"效果只生效一次"的那条保证的落点：
+ * 谁敢按"既然没层就随便给个 3"来改，一条炁机的效果会**静默翻倍**
+ * （`freeQiji.ts` 里记着同一个坑）。
+ */
 export interface ActiveQiji {
   readonly def: QijiEntity;
   readonly stacks: number;
@@ -149,8 +150,8 @@ export function buildPlayerKit(
 
     /**
      * ⚠️ **层数不参与**：`skillTweak` 说的都是**绝对值**（代价 −20、
-     * 增伤变成 100%），叠第二层没有任何语义。所以这里每条只收一份，
-     * 哪怕 `stacks > 1`（这类炁机不写 `maxStacks`，默认 1 层）。
+     * 增伤变成 100%），叠第二层没有任何语义 —— 所以这里每条只收一份，
+     * 哪怕调用方传了 `stacks > 1`（今天的调用方全都传 1，见 `ActiveQiji`）。
      */
     if (def.skillTweak !== undefined) skillTweaks.push(def.skillTweak);
   }

@@ -1,7 +1,8 @@
 /**
  * 解锁判定 + 每场战斗后的候选生成。**全部是纯函数。**
  *
- * 设计稿：`docs/specs/2026-10-12-roguelike.md` §5.2 / §5.3 / §5.4。
+ * 设计稿：`docs/specs/2026-10-12-roguelike.md` §5.2 / §5.3（§5.3 的
+ * "可叠到 `maxStacks`"那一版已作废，见那里的"作废"段）。
  *
  * 本文件回答三个问题，一个不多：
  *   1. 某个炁机**解锁了没有**？（`isUnlocked` —— 求值 `QijiUnlock`）
@@ -162,37 +163,23 @@ export function unlockProgress(unlock: QijiUnlock, stats: UnlockStats): UnlockPr
 /**
  * 一个候选炁机。
  *
- * ⚠️ **不在这里给"已叠几层"** —— 那是 `RunState.chosen` 的事，而且
- * 一个候选要显示"当前 1 层 / 上限 3"时，两份数据必须来自同一个地方。
- * `nextCandidates` 的调用方（P3 的 `QijiSelect`）自己从 `state.chosen`
- * 读层数即可。把 `stacks` 复制进候选里 = 多一个会与 `chosen` 漂开的
- * 真相源。
+ * ⚠️ **只有"是哪一条"**（`qiji`）—— 这里**没有**"还能选几次"。
+ *
+ * ==================================================================
+ * ⚠️ 这里**曾经**有一个 `remainingStacks`（`maxStacks - 已选层数`）—— 已删
+ * ==================================================================
+ *
+ * 那个字段服务的是"同一个炁机可以再选一次、累积到 `maxStacks`"那一版
+ * 语义（§5.3 的初稿）。用户 2026-10-13 把肉鸽的语义定死成
+ * "**一局只能选一次（不叠加）**"，于是：
+ *
+ *   - 候选 = "已解锁 **且没选过**" 的那些（`nextCandidates` 过滤）
+ *   - 能选几条就是几条，每条**恒是 1 次** —— 没有"还剩几次"这回事
+ *
+ * 留一个恒为 1 的 `remainingStacks` 只会让下一个读它的人以为还有层数。
  */
 export interface Candidate {
   readonly qiji: QijiEntity;
-  /** 还能选几次（`maxStacks - 已选层数`）。恒 `>= 1`。 */
-  readonly remainingStacks: number;
-}
-
-/** 某个炁机在一局肉鸽里最多能选几层（默认 1，§5.3）。 */
-export function maxStacksOf(qiji: QijiEntity): number {
-  return qiji.maxStacks ?? 1;
-}
-
-/**
- * 已经选了几层（没选过 = 0）。
- *
- * ⚠️ 这里的 `chosen` 参数形状**刻意不写成 `RunChoice`**（虽然它就是）：
- * 解锁层只需要"id + 层数"这两个字段，写成结构化的最小形状之后，
- * 测试可以直接喂 `[{ qijiId: 'a', stacks: 2 }]` 而不用构造整个 `RunState`。
- * 这是本仓库"接口形状由消费者声明"（`core/types/ids.ts`）的同一条用法。
- */
-export function stacksOf(
-  chosen: readonly { readonly qijiId: string; readonly stacks: number }[],
-  qijiId: string,
-): number {
-  const entry = chosen.find((choice) => choice.qijiId === qijiId);
-  return entry?.stacks ?? 0;
 }
 
 /**
@@ -204,26 +191,28 @@ export function stacksOf(
  * 所以这里的顺序就是传入 `pool` 的顺序（也就是内容表的顺序），
  * 没有任何二次排序。
  *
- * 过滤规则（§5.3 的决议）：
+ * 过滤规则（2026-10-13 用户定死，见 §5.3 的"作废"段）：
  *   - **没解锁** → 不出现（`unlock` 求值）
- *   - **已叠满** → 不出现（`maxStacks`，默认 1）
+ *   - **已经选过 / 已生效** → 不出现（`chosen` —— 一局只能选一次，不叠加）
  *   - 其余全出现 —— 包括解锁了但这次不想选的（选 1 个 ≠ 只给 1 个）
  *
- * @param pool 全部炁机（内容表，P0 没有；测试直接构造）
+ * ⚠️ 第二条**不是**"叠满了"：`chosen` 是这一局的永久事实（选了不能取消），
+ * 所以"在 `chosen` 里"就是"这一局再也没有它"。
+ *
+ * @param pool 全部炁机（内容表）
  * @param stats 这一场结束后**已经累加过**的两份统计（先 `advanceRun` 再调它）
- * @param chosen 已经选了生效的（`RunState.chosen`）
+ * @param chosen 已经选了生效的（`RunState.chosen` —— 只有 id）
  */
 export function nextCandidates(
   pool: readonly QijiEntity[],
   stats: UnlockStats,
-  chosen: readonly { readonly qijiId: string; readonly stacks: number }[],
+  chosen: readonly { readonly qijiId: string }[],
 ): Candidate[] {
   const candidates: Candidate[] = [];
   for (const qiji of pool) {
     if (!isUnlocked(qiji, stats)) continue;
-    const remaining = maxStacksOf(qiji) - stacksOf(chosen, qiji.id);
-    if (remaining <= 0) continue;
-    candidates.push({ qiji, remainingStacks: remaining });
+    if (chosen.some((choice) => choice.qijiId === qiji.id)) continue;
+    candidates.push({ qiji });
   }
   return candidates;
 }

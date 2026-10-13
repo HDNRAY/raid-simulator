@@ -31,8 +31,10 @@ import { PLAYER_ROSTER } from '../../src/data/roster';
  *   - 多条可以同时开着
  *   - 效果**只生效一次**（`stacks: 1`，见 `freeQijiChoices`）
  *
- * ⚠️ 肉鸽那边的 `maxStacks` **不在本文件的范围**：那是"每次战斗后再选一次"
- * 的累积（`core/run` 消费），与"一次激活几层"是两件事。
+ * ⚠️ 肉鸽那边**没有层数**（2026-10-13：用户"肉鸽也改成一局只能选一次
+ * （不叠加）"）—— 它的 `maxStacks` 字段**已整条删除**。所以"层数"这件事
+ * 今天**两个模式都不存在**；本文件与肉鸽唯一的共同点是最终都进
+ * `buildPlayerKit`（那里的 `stacks` 入参两个模式都恒为 1）。
  */
 
 const players = [{ id: 'player' }, { id: 'kaili' }];
@@ -80,10 +82,10 @@ describe('炁机激活：**开关**（没有层数）', () => {
     expect(free).toEqual(['vitality', 'breath', 'jieShengJi']);
   });
 
-  it('⚠️ 切换**不读也不看** `maxStacks`（那是肉鸽的字段）', () => {
+  it('⚠️ 切换只有开 / 关，**没有层数**（连点 4 次 = 开 关 开 关）', () => {
     /**
-     * 内容里 `vitality` 的 `maxStacks = 3`，而这里连点 4 次应当是
-     * 开 / 关 / 开 / 关 —— 层数一个字都不参与。
+     * 这一条防的是"激活退化成 `id → 层数`"那个旧形状（它当年造出过
+     * "点卡片左半减一层、0 层时什么都不做"的 bug）。
      */
     let free: readonly string[] = [];
     const states: boolean[] = [];

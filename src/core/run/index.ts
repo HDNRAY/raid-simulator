@@ -85,9 +85,7 @@ export {
   diffUnlocked,
   evalUnlock,
   isUnlocked,
-  maxStacksOf,
   nextCandidates,
-  stacksOf,
   unlockedIds,
   unlockProgress,
 } from './unlock';

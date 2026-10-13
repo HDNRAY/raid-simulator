@@ -137,7 +137,7 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
     readonly victory: boolean;
     readonly position: number;
     readonly length: number;
-    readonly loadout: readonly { readonly nameKey: string; readonly stacks: number }[];
+    readonly loadout: readonly { readonly nameKey: string }[];
   };
 } {
   const { state } = d;
@@ -170,32 +170,41 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
   });
 
   /**
-   * 这一局**已经选了生效**的炁机（定义 + 层数）。
+   * 这一局**已经选了生效**的炁机（定义）。
    *
-   * ⚠️ 它是 `RunState.chosen`（只存 `{ qijiId, stacks }`）的**展开**：
-   * 战斗装配要的是定义（`abilities` / `comboWindow`），而 `RunState` 里
+   * ⚠️ 它是 `RunState.chosen`（只存 `{ qijiId }`）的**展开**：战斗装配要的
+   * 是定义（`abilities` / `comboWindow` / `skillTweak`），而 `RunState` 里
    * 只有 id。展开只在这一处，所以"某个 id 在不在池子里"只有一个答案。
+   *
+   * ⚠️ **没有层数**（2026-10-13）：肉鸽一局只能选一次、不叠加
+   * （用户原话："肉鸽也改成一局只能选一次（不叠加）"）。所以下面给
+   * `buildPlayerKit` 的每一份都**恒是 1 次**。
    */
-  const activeQiji = (): readonly { readonly def: QijiEntity; readonly stacks: number }[] => {
+  const activeQiji = (): readonly QijiEntity[] => {
     const state = runSession.state();
     /**
-     * ⚠️ **自由模式那一支**（没有进行中的一局）：读题面注入的层数表，
-     * 按 `ALL_QIJI` 的顺序翻译成"定义 + 层数"。
+     * ⚠️ **自由模式那一支**（没有进行中的一局）：读题面注入的激活集合，
+     * 按 `ALL_QIJI` 的顺序翻译。
      *
-     * ⚠️ 两个模式**共用同一个翻译出口**（`freeQijiChoices` → `qijiById`）：
-     * 肉鸽那边是 `RunState.chosen`，自由这边是玩家在备战屏点出来的表 ——
-     * 差别只在"谁来填这张表"，效果本身走的是同一个 `buildPlayerKit`。
+     * ⚠️ 两个模式**共用同一个翻译出口**（`freeQijiChoices` / `qijiById` —
+     * 这里两边都走 `qijiById`）：肉鸽那边是 `RunState.chosen`，
+     * 自由这边是玩家在备战屏点出来的表 —— 差别只在"谁来填这张表"，
+     * 效果本身走的是同一个 `buildPlayerKit`。
+     *
+     * ⚠️ 自由模式的"开 / 关"语义**一个字都没改**：`freeQijiChoices`
+     * 仍然按内容表顺序给出选中的那些（那里的 `stacks` 是
+     * `buildPlayerKit` 入参形状要求的，恒 1）。
      */
     if (state === undefined) {
       return freeQijiChoices(d.freeQiji(), ALL_QIJI).flatMap((choice) => {
         const def = qijiById(choice.qijiId);
-        return def === undefined ? [] : [{ def, stacks: choice.stacks }];
+        return def === undefined ? [] : [def];
       });
     }
     return state.chosen.flatMap((choice) => {
       /** ⚠️ 走 `qijiById`（内容表自己的 id→定义 查找）而不是在这里再写一遍 find。 */
       const def = qijiById(choice.qijiId);
-      return def === undefined ? [] : [{ def, stacks: choice.stacks }];
+      return def === undefined ? [] : [def];
     });
   };
 
@@ -205,8 +214,16 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
    * ⚠️ 自由模式（没有进行中的一局）时 `activeQiji()` 是空数组 ——
    * `buildPlayerKit(playerId)` 于是与"今天"逐字相同（`caps` = 角色的、
    * `modifiers` = 空、`comboWindows` = 空）。
+   *
+   * ⚠️ 每条炁机的 `stacks` **恒为 1**（肉鸽一局只能选一次、自由模式是
+   * 开关）—— 见 `activeQiji` 的说明。`buildPlayerKit` 的入参形状要求
+   * 一个数，所以这里是那唯一一处"写 1"的翻译点。
    */
-  const playerKit = (playerId: string): PlayerKit => buildPlayerKit(playerId, activeQiji());
+  const playerKit = (playerId: string): PlayerKit =>
+    buildPlayerKit(
+      playerId,
+      activeQiji().map((def) => ({ def, stacks: 1 })),
+    );
 
   /**
    * **界面路由的唯一落实点**：把 `phase` 写进状态，并一次性重设
@@ -454,9 +471,8 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
         nameKey: candidate.qiji.nameKey,
         icon: candidate.qiji.icon,
         ...(candidate.qiji.descKey === undefined ? {} : { descKey: candidate.qiji.descKey }),
-        ...(candidate.qiji.maxStacks === undefined ? {} : { maxStacks: candidate.qiji.maxStacks }),
       };
-      return { qiji, remaining: candidate.remainingStacks };
+      return { qiji };
     });
 
   /**
@@ -488,7 +504,7 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
     readonly victory: boolean;
     readonly position: number;
     readonly length: number;
-    readonly loadout: readonly { readonly nameKey: string; readonly stacks: number }[];
+    readonly loadout: readonly { readonly nameKey: string }[];
   } => {
     const run = runSession.state();
     if (run === undefined) {
@@ -506,7 +522,7 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
       victory: run.status === 'victory',
       position,
       length,
-      loadout: activeQiji().map(({ def, stacks }) => ({ nameKey: def.nameKey, stacks })),
+      loadout: activeQiji().map((def) => ({ nameKey: def.nameKey })),
     };
   };
 

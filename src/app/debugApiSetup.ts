@@ -253,7 +253,7 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
           position: run.position,
           status: run.status,
           unlocked: [...run.unlocked],
-          chosen: run.chosen.map((c) => ({ qijiId: c.qijiId, stacks: c.stacks })),
+          chosen: run.chosen.map((c) => ({ qijiId: c.qijiId })),
           battles: outcomes.map((b) => ({ won: b.won, flawless: b.flawless })),
         };
       },

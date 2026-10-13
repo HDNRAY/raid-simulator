@@ -17,6 +17,7 @@ import { FIXED_SEED, OUTPUT_PRIORITY, DODGE_SKILL_ID, makeGoldenEngineOptions, p
 import type { Action, StatKey } from '../../src/core/types';
 import type { EventDef } from '../../src/core/events';
 import type { CreateBattleOptions } from '../../src/core/combat/battleOptions';
+import type { QijiEntity } from '../../src/core/types/qiji';
 
 /**
  * **一局肉鸽跑完一圈**（P2 的 `?runlen=N` + P3 的炁机选择）—— 应用层接线。
@@ -101,16 +102,28 @@ function battleOptionsWithKit(
   };
 }
 
-/** 会话里已经生效的炁机（`phaseFlow.activeQiji` 的同一段逻辑）。 */
-function activeQiji(
-  session: ReturnType<typeof createRunSession>,
-): readonly { readonly def: (typeof ALL_QIJI)[number]; readonly stacks: number }[] {
+/**
+ * 会话里已经生效的炁机**定义**（`phaseFlow.activeQiji` 的同一段逻辑）。
+ *
+ * ⚠️ `RunState.chosen` 的元素只有一个 `qijiId`（2026-10-13 起没有 `stacks`
+ * —— 肉鸽"一局只能选一次、不叠加"），所以这里给的是定义数组；
+ * 喂给 `buildPlayerKit` 时由调用方补上恒为 1 的 `stacks`。
+ */
+function activeQiji(session: ReturnType<typeof createRunSession>): readonly QijiEntity[] {
   const state = session.state();
   if (state === undefined) return [];
   return state.chosen.flatMap((choice) => {
     const def = ALL_QIJI.find((q) => q.id === choice.qijiId);
-    return def === undefined ? [] : [{ def, stacks: choice.stacks }];
+    return def === undefined ? [] : [def];
   });
+}
+
+/** 这一局此刻的玩家装配（`phaseFlow.playerKit` 的同一段逻辑）。 */
+function kitOf(session: ReturnType<typeof createRunSession>, playerId = 'player'): PlayerKit {
+  return buildPlayerKit(
+    playerId,
+    activeQiji(session).map((def) => ({ def, stacks: 1 })),
+  );
 }
 
 describe('`?runlen=2`：跑完一圈（逻辑层，真引擎）', () => {
@@ -153,7 +166,7 @@ describe('`?runlen=2`：跑完一圈（逻辑层，真引擎）', () => {
 
     /** ---------- 选「加血上限」---------- */
     expect(session.chooseQiji('vitality')).toBe(true);
-    const kit = buildPlayerKit('player', activeQiji(session));
+    const kit = kitOf(session);
     expect(kit.caps.hp).toBe(150 + 30);
 
     /** ---------- 第 2 场：带上炁机 ---------- */
@@ -200,7 +213,7 @@ describe('`?runlen=2`：跑完一圈（逻辑层，真引擎）', () => {
     const b1 = playBattle(makeGoldenEngineOptions());
     expect(session.advance(b1.outcome, b1.events, b1.flawless).kind).toBe('selectQiji');
     session.chooseQiji('vitality');
-    const kit = buildPlayerKit('player', activeQiji(session));
+    const kit = kitOf(session);
 
     const boss2 = session.bossId();
     expect(boss2).toBe('lust');
@@ -227,6 +240,118 @@ describe('`?runlen=2`：跑完一圈（逻辑层，真引擎）', () => {
     expect(session.state()?.status).toBe('defeat');
     expect(session.state()?.position).toBe(1);
     expect(session.state()?.chosen).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * ⚠️ 肉鸽的炁机语义：**一局只能选一次（不叠加）** + **选了不能取消**
+ * ------------------------------------------------------------------ *
+ *
+ * 用户 2026-10-13 的两条原话（一起定死了肉鸽的语义）：
+ *
+ *   > **肉鸽也改成一局只能选一次（不叠加）**
+ *   > **而且肉鸽里是不能把已经激活的再取消的**
+ *
+ * 下面四条是这块语义的**正反实测**，全部走**真引擎 + 真 `advanceRun`**
+ * （与上面那条 `?runlen=2` 同一条路），而不是喂假统计：
+ *
+ *   1. 选过一条 → 它**不再出现在候选里**
+ *   2. 反面：没选过的**仍在**候选里
+ *   3. **不能取消**：提交一个大数字 999 也改不回去（同时把"再选一次"
+ *      那条路钉死 —— 它返回 false，而不是悄悄回滚 / 叠层）
+ *   4. **不叠加**：选过一次之后再打一场，效果**不翻倍**（给数字）
+ * ------------------------------------------------------------------ */
+
+describe('炁机：一局只能选一次（不叠加）· 选了不能取消（真引擎）', () => {
+  /** 两场同一 Boss（一局的场数被夹在 `1..池子长度`；理由见上面那条 describe）。 */
+  const TWO = ['meiichiro', 'meiichiro'] as const;
+
+  /** 起一局、打完第 1 场（真引擎），返回会话与那一场的输入。 */
+  function afterFirstBattle(): {
+    readonly session: ReturnType<typeof createRunSession>;
+    readonly b1: ReturnType<typeof playBattle>;
+  } {
+    const session = createRunSession({ bossPool: TWO, qijiPool: ALL_QIJI, runLength: 2 });
+    session.begin('player', 4242);
+    const b1 = playBattle(makeGoldenEngineOptions());
+    expect(b1.outcome).toBe('victory');
+    expect(session.advance(b1.outcome, b1.events, b1.flawless).kind).toBe('selectQiji');
+    return { session, b1 };
+  }
+
+  it('⚠️ 选过的那条**不再出现在候选里**（同一屏 + 下一场都验）', () => {
+    const { session, b1 } = afterFirstBattle();
+    expect(session.candidates().map((c) => c.qiji.id)).toContain('vitality');
+
+    expect(session.chooseQiji('vitality')).toBe(true);
+    expect(session.candidates().map((c) => c.qiji.id)).not.toContain('vitality');
+
+    /** 再打完第 2 场（真引擎）之后，它**仍然**不在候选里（永久事实）。 */
+    const kit = kitOf(session);
+    const boss2 = session.bossId() ?? 'meiichiro';
+    const b2 = playBattle(battleOptionsWithKit('player', boss2, kit, battleSeed(4242, 2)));
+    expect(session.advance(b2.outcome, b2.events, b2.flawless).kind).toBe('runOver');
+    expect(session.candidates().map((c) => c.qiji.id)).not.toContain('vitality');
+    expect(b1.outcome).toBe('victory');
+  });
+
+  it('⚠️ 反面：**没选过的**仍在候选里（滤的判据是"这个 id"）', () => {
+    const { session } = afterFirstBattle();
+    session.chooseQiji('vitality');
+    const ids = session.candidates().map((c) => c.qiji.id);
+    expect(ids).toContain('breath');
+    expect(ids).not.toContain('vitality');
+  });
+
+  it('⚠️ **不能取消**：所有能想到的路都改不回去，`chosen` 只有一条', () => {
+    /**
+     * "能想到的路"逐条对应到代码：
+     *
+     *   - **再选一次**（键盘 Enter / 触屏点卡片最后都走这里）→ `false`
+     *   - **反选 / 取消** → **没有这条路**：`runSession` 上没有
+     *     `unchoose` / `remove` / `clearChoice` 之类的方法（类型上就不存在）
+     *   - **`Esc` / 返回箭头** → 整个一局作废（回选角色），**不是**"取消选择"
+     *   - **点别的候选** → 那是"选另一个"，`chosen` 只增不减
+     */
+    const { session } = afterFirstBattle();
+    expect(session.chooseQiji('vitality')).toBe(true);
+
+    expect(session.chooseQiji('vitality')).toBe(false); // 再选一次 = 取消不了
+    expect(session.state()?.chosen).toEqual([{ qijiId: 'vitality' }]);
+
+    expect(session.chooseQiji('breath')).toBe(true); // 选另一个不是"换掉"
+    expect(session.state()?.chosen.map((c) => c.qijiId)).toEqual(['vitality', 'breath']);
+
+    session.clear(); // 返回 / 放弃 = 整局丢掉，不是"把已经激活的取消"
+    expect(session.state()).toBeUndefined();
+  });
+
+  it('⚠️ **不叠加**：选过一次「固本培元」之后再打一场，血上限**不翻倍**（给数字）', () => {
+    const { session } = afterFirstBattle();
+    expect(session.chooseQiji('vitality')).toBe(true);
+
+    /**
+     * ⚠️ `stacks` 是 `buildPlayerKit` 的入参形状、肉鸽这边**恒为 1**。
+     * 这条断言把它钉在**数字**上：若哪天有人按"既然没层就叠满"改成 2，
+     * 这里会变成 `+60`（210）而不是 `+30`（180）。
+     */
+    const modifiers = kitOf(session).modifiers;
+    const fromVitality = modifiers.filter((m) => m.sourceKey === 'qiji.vitality');
+    expect(fromVitality).toHaveLength(1);
+    expect(fromVitality[0]?.value).toBe(30);
+    expect(kitOf(session).caps.hp).toBe(150 + 30);
+
+    /** 打完第 2 场（真引擎）之后，`chosen` 仍然只有一条 —— 没有"又叠一层"。 */
+    const b2 = playBattle(
+      battleOptionsWithKit('player', session.bossId() ?? 'meiichiro', kitOf(session), battleSeed(4242, 2)),
+    );
+    expect(session.advance(b2.outcome, b2.events, b2.flawless).kind).toBe('runOver');
+    expect(session.state()?.chosen).toEqual([{ qijiId: 'vitality' }]);
+
+    /** 再装配一次（= 下一场会用的那份）：`+30` **还是 +30**。 */
+    const after = kitOf(session);
+    expect(after.caps.hp).toBe(180);
+    expect(after.modifiers.filter((m) => m.sourceKey === 'qiji.vitality')).toHaveLength(1);
   });
 });
 

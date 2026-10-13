@@ -42,7 +42,7 @@ export interface RunOverSummary {
   /** 这一局一共几场。 */
   readonly length: number;
   /** 本局选了的炁机（名字 key + 层数）。 */
-  readonly loadout: readonly { readonly nameKey: string; readonly stacks: number }[];
+  readonly loadout: readonly { readonly nameKey: string }[];
 }
 
 export interface RunOverScreenOptions {
@@ -211,7 +211,13 @@ export class RunOverScreen {
     this.loadoutTitle.set(t('screen.runOver.loadout'));
 
     /**
-     * 本局带的炁机：`名字 ×层数`（层数为 1 时不写后缀 —— "×1" 是噪音）。
+     * 本局带的炁机：**名字**（一局只能选一次、不叠加，所以**没有**"×N"）。
+     *
+     * ⚠️ 旧版这里写"层数为 1 时不写后缀 —— ×1 是噪音"，那是 `maxStacks`
+     * 还在的时候。字段删掉之后（用户 2026-10-13："肉鸽也改成一局只能
+     * 选一次（不叠加）"），层数恒为 1，于是"后缀"整条没有了含义 ——
+     * 留着就是"同一件事的第二份表达"（AGENTS.md §2）。
+     *
      * 一个都没有时写一句"（无）"（只可能发生在"第一场就输"）。
      */
     this.loadout.forEach((row, i) => {
@@ -220,8 +226,7 @@ export class RunOverScreen {
         row.set(i === 0 && summary.loadout.length === 0 ? t('screen.runOver.loadoutEmpty') : '');
         return;
       }
-      const suffix = entry.stacks > 1 ? ` ${t('screen.runOver.stacks', { stacks: String(entry.stacks) })}` : '';
-      row.set(`${t(entry.nameKey)}${suffix}`);
+      row.set(t(entry.nameKey));
     });
 
     const keys = this.options.showKeyHints() ? t('screen.keyHint', { keys: RUN_OVER_KEY_HINT }) : '';

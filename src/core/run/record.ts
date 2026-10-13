@@ -17,9 +17,9 @@
  *
  * ⚠️ 为什么是"整条丢弃"而不是"逐字段回落到默认值"：半个存档比没有存档
  * 更危险。一局肉鸽的状态里 `order` / `position` / `chosen` 是**互相
- * 约束**的（`chosen` 的层数上限来自内容表、`position` 必须落在 `order`
- * 的范围里）。只修其中一半会造出一个"引擎会相信、但内部矛盾"的状态，
- * 而那种状态的报错点离原因很远（表现为某一场的 Boss 是 `undefined`）。
+ * 约束**的（`position` 必须落在 `order` 的范围里、`chosen` 的每个 id
+ * 至多出现一次）。只修其中一半会造出一个"引擎会相信、但内部矛盾"的
+ * 状态，而那种状态的报错点离原因很远（表现为某一场的 Boss 是 `undefined`）。
  *
  * ==================================================================
  * ⚠️ 与 `src/core/run.ts` 的 `RecordedRun` **不是**一回事
@@ -68,8 +68,30 @@ import type { RunBattleRecord, RunChoice, RunRecord, RunState, RunStatus } from 
  *   （`Q-e` 的"满血对账"需要它；详见 `RunBattleRecord.flawless`）。
  *   ⚠️ 因为 `RunRecord` **从来没有被真正写出去过**（存档是 P7），
  *   这一次 +1 **没有任何要兼容的旧数据** —— 它纯粹是"形状变了就改号"。
+ * - **3** = `RunChoice` **删掉了 `stacks`**（2026-10-13）。
+ *
+ *   ⚠️ **判据是"形状变了"，不是"引擎语义变了"** —— 所以它**必须** +1，
+ *   哪怕这次改动一个引擎行为都没碰。反过来，若按"它不参与判定 /
+ *   肉鸽的层数反正恒为 1，所以不用 +1"来论证，那正是本段开头点名的
+ *   那个**套错了的判据**（`REPLAY_FORMAT_VERSION` 的）。
+ *
+ *   **依据**（三件事同时成立，任何一件都足以 +1）：
+ *     1. **字段被删了**：v2 的 `state.chosen[]` 每项是 `{qijiId, stacks}`，
+ *        v3 是 `{qijiId}` —— 这就是记录**形状**的变化
+ *     2. **语义也变了**：`chosen` 从"id + 层数（可累积到 `maxStacks`）"
+ *        变成"一局里每个 id 至多一次的**集合**"。旧记录里的
+ *        `stacks: 3` 在新代码里**没有含义**（不是"= 1 层"）
+ *     3. **解析器会真的丢掉旧记录**：v2 的记录带 `stacks`，
+ *        而 `parseChoices` 只认 `qijiId` —— 一份 v2 的 `chosen`
+ *        过 `parseRunState` 之后层数静默消失（`{qijiId:'vitality',stacks:3}`
+ *        ⇒ `{qijiId:'vitality'}`）。**不 +1 的话这就是静默数据丢失**：
+ *        玩家的存档读得回来、但内容变了，且没有任何东西报错
+ *
+ *   ⚠️ 与 1 → 2 一样，**没有任何 v2 记录存在**（存档是 P7），所以这次
+ *   +1 同样没有要兼容的旧数据 —— 改号是为了"形状与语义的每一个版本
+ *   都有一个明确的号"，而不是为了迁移。
  */
-export const RUN_FORMAT_VERSION = 2 as const;
+export const RUN_FORMAT_VERSION = 3 as const;
 
 /* ================================================================== *
  * 1. 序列化
@@ -429,6 +451,16 @@ function parseBattleOutcomeRecords(
   return out;
 }
 
+/**
+ * 解析 `chosen`：**每一项只有一个非空 `qijiId`**（`RUN_FORMAT_VERSION: 3`
+ * 起没有 `stacks` —— 用户 2026-10-13 定死"一局只能选一次，不叠加"，
+ * 见 `RunChoice` 的说明）。
+ *
+ * ⚠️ **不校验"id 有没有重复"**（与 `unlocked` 同一条）：生成路径
+ * （`lifecycle.ts` / `runSession.chooseQiji`）保证每个 id 至多一条，
+ * 这里若顺手"去个重"就会掩盖"生成路径写错了"这种真正该在测试里
+ * 暴露的问题。解析器的职责是**形状**，不是替生成路径背书。
+ */
 function parseChoices(raw: unknown): RunChoice[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const out: RunChoice[] = [];
@@ -436,10 +468,8 @@ function parseChoices(raw: unknown): RunChoice[] | undefined {
     const source = asRecord(entry);
     if (source === undefined) return undefined;
     const qijiId = source['qijiId'];
-    const stacks = source['stacks'];
     if (typeof qijiId !== 'string' || qijiId.length === 0) return undefined;
-    if (typeof stacks !== 'number' || !Number.isInteger(stacks) || stacks < 1) return undefined;
-    out.push({ qijiId, stacks });
+    out.push({ qijiId });
   }
   return out;
 }

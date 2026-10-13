@@ -37,12 +37,12 @@ import type { PixiCtor } from './primitives';
  *
  * ⚠️ 与 `core/types/qiji.ts` 的 `QijiEntity` **刻意不同**（结构性类型）：
  * 这一屏只用得到"叫什么"，而 `QijiEntity` 带着 `abilities` / `unlock` /
- * `comboWindow` / `maxStacks` 那些战斗期（与**肉鸽**）的知识。收窄之后
+ * `comboWindow` / `skillTweak` 那些战斗期（与**肉鸽**）的知识。收窄之后
  * 单测可以喂 2 个字面量。
  *
- * ⚠️ **没有 `maxStacks`**：备战屏的炁机是**开关**，没有层数
- * （见 `ui/freeQiji.ts` 的文件头）。肉鸽那边的 `maxStacks` 是另一件事，
- * 由 `core/run` 消费，与本屏无关。
+ * ⚠️ **没有层数**：备战屏的炁机是**开关**，没有层数（见 `ui/freeQiji.ts`
+ * 的文件头）。⚠️ 肉鸽那边的 `maxStacks` **已经整条删除**（2026-10-13：
+ * 一局只能选一次、不叠加），所以"炁机的层数"这件事**两个模式都没有了**。
  */
 export interface PrepareQijiOption {
   readonly id: string;

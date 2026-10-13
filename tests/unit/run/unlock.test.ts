@@ -5,9 +5,7 @@ import type { QijiEntity, QijiUnlock } from '../../../src/core/types/qiji';
 import {
   evalUnlock,
   isUnlocked,
-  maxStacksOf,
   nextCandidates,
-  stacksOf,
   unlockedIds,
   unlockProgress,
 } from '../../../src/core/run/unlock';
@@ -21,7 +19,7 @@ import { reduceBattleStats, type BattleStats } from '../../../src/core/run/stats
  * §5.2 的方向修正之后不再有计数器 —— 统计是事件流的只读派生，
  * 所以这里也照"喂事件"的形状写，与 `lifecycle.test.ts` 一致。
  *
- * 炁机用**最小的假对象**：判定只读 `id` / `unlock` / `maxStacks`，
+ * 炁机用**最小的假对象**：判定只读 `id` / `unlock`，
  * 所以不必给每个假炁机补齐 `nameKey` / `icon` / `abilities` / `category`。
  */
 
@@ -103,7 +101,7 @@ function evalRun(unlock: QijiUnlock, events: readonly EventDef[]): boolean {
   return evalUnlock(unlock, statsFor(events));
 }
 
-function qiji(id: string, unlock: QijiUnlock, maxStacks?: number): QijiEntity {
+function qiji(id: string, unlock: QijiUnlock): QijiEntity {
   return {
     id,
     kind: 'qiji',
@@ -113,7 +111,6 @@ function qiji(id: string, unlock: QijiUnlock, maxStacks?: number): QijiEntity {
     category: 'offense',
     unlock,
     abilities: [],
-    ...(maxStacks === undefined ? {} : { maxStacks }),
   };
 }
 
@@ -406,8 +403,8 @@ describe('isUnlocked / unlockedIds', () => {
 
 describe('nextCandidates —— 每场战斗后的候选生成', () => {
   const POOL: readonly QijiEntity[] = [
-    qiji('vitality', ALWAYS, 3),
-    qiji('breath', ALWAYS, 2),
+    qiji('vitality', ALWAYS),
+    qiji('breath', ALWAYS),
     qiji('jieDeriveStrike', JIE_3),
   ];
 
@@ -438,60 +435,57 @@ describe('nextCandidates —— 每场战斗后的候选生成', () => {
     ]);
   });
 
-  it('已叠满的从候选里消失（maxStacks 默认 1）', () => {
-    const chosen = [{ qijiId: 'vitality', stacks: 3 }];
+  it('⚠️【核心】选过的那条**不再进候选**（一局只能选一次，不叠加）', () => {
+    /**
+     * 用户 2026-10-13 定死："**肉鸽也改成一局只能选一次（不叠加）**"。
+     *
+     * 旧语义是"同一个通用炁机可以再选一次、累积到 `maxStacks`"，
+     * 所以这条用例当时叫"已叠满的从候选里消失"。现在**只要选过就消失**，
+     * 与"叠了几层"无关（那个字段已经不存在了）。
+     */
+    const chosen = [{ qijiId: 'vitality' }];
     expect(nextCandidates(POOL, statsFor([]), chosen).map((c) => c.qiji.id)).toEqual(['breath']);
   });
 
-  it('remainingStacks 反映还能选几次', () => {
-    const candidates = nextCandidates(POOL, statsFor([]), [{ qijiId: 'vitality', stacks: 2 }]);
-    const vitality = candidates.find((c) => c.qiji.id === 'vitality');
-    expect(vitality?.remainingStacks).toBe(1);
-    // 没选过的按上限
-    expect(candidates.find((c) => c.qiji.id === 'breath')?.remainingStacks).toBe(2);
-    // 默认上限 1
+  it('⚠️【反面】**没选过的仍在候选里**（选一条 ≠ 把别的也吞掉）', () => {
+    /**
+     * 这条是上一条的反面：滤的判据必须是"**这个 id 在不在 `chosen` 里**"，
+     * 不是"选过一条就把候选清空 / 少一条"之类的近似实现。
+     */
+    const chosen = [{ qijiId: 'vitality' }];
+    const ids = nextCandidates(POOL, statsFor([]), chosen).map((c) => c.qiji.id);
+    expect(ids).toContain('breath');
+    expect(ids).not.toContain('vitality');
+  });
+
+  it('⚠️ 选过的是**永久**的：统计再涨也不会让它回到候选里', () => {
+    /**
+     * 与解锁判定（`isUnlocked`）无关：`jieDeriveStrike` 这次**确实解锁了**，
+     * 但因为已经选过，它仍然不该出现 —— "解锁"与"还能不能选"是两件事。
+     */
+    const chosen = [{ qijiId: 'jieDeriveStrike' }];
     expect(
-      nextCandidates(POOL, statsFor(interrupts(JIE, 3)), []).find(
-        (c) => c.qiji.id === 'jieDeriveStrike',
-      )?.remainingStacks,
-    ).toBe(1);
+      nextCandidates(POOL, statsFor(interrupts(JIE, 9)), chosen).map((c) => c.qiji.id),
+    ).toEqual(['vitality', 'breath']);
   });
 
-  it('解锁了但叠满 → 不出现（两个条件都要满足才进候选）', () => {
-    const chosen = [{ qijiId: 'vitality', stacks: 3 }, { qijiId: 'jieDeriveStrike', stacks: 1 }];
-    expect(nextCandidates(POOL, statsFor(interrupts(JIE, 9)), chosen).map((c) => c.qiji.id)).toEqual([
-      'breath',
-    ]);
-  });
-
-  it('P0 的兜底保证：候选永不为空（只要池子里有 always 的通用炁机）', () => {
-    // §5.4 / §12 决议 #12："已解锁只有 1 个时跳过选择屏"不会发生。
-    // 这条把那个保证写成一个**可失败的**断言：池子里只要有 always，
-    // 无论计数器多难看、选了多少次，候选都还有东西。
-    const generic = [qiji('vitality', ALWAYS, 3), qiji('breath', ALWAYS, 2)];
-    let chosen: { qijiId: string; stacks: number }[] = [];
-    for (let round = 0; round < 5; round += 1) {
+  it('全选完（每条恰好一次）之后候选为空 —— 每一步都只剩没选过的', () => {
+    /**
+     * §5.4 / §12 决议 #12 的兜底保证在这里的样子：只要**还有**没选过的
+     * `always` 通用炁机，候选就非空（不会出现"假选择屏"）；
+     * 而**全部选完之后**候选必然为空（一局只能选一次，没有"再叠一层"）。
+     */
+    const generic = [qiji('vitality', ALWAYS), qiji('breath', ALWAYS)];
+    let chosen: { qijiId: string }[] = [];
+    for (let round = 0; round < 2; round += 1) {
       const candidates = nextCandidates(generic, statsFor([]), chosen);
       expect(candidates.length).toBeGreaterThan(0);
       const first = candidates[0];
       if (first === undefined) break;
-      const stacks = stacksOf(chosen, first.qiji.id) + 1;
-      chosen = [...chosen.filter((c) => c.qijiId !== first.qiji.id), { qijiId: first.qiji.id, stacks }];
+      chosen = [...chosen, { qijiId: first.qiji.id }];
     }
-    // 5 次之后（生命 3 + 炁回复 2 = 5 层全满）候选才可能空
+    // 两条通用炁机各选一次 = 池子全用过 → 候选空
+    expect(chosen.map((c) => c.qijiId)).toEqual(['vitality', 'breath']);
     expect(nextCandidates(generic, statsFor([]), chosen)).toEqual([]);
-  });
-});
-
-describe('maxStacksOf / stacksOf', () => {
-  it('默认 1 层', () => {
-    expect(maxStacksOf(qiji('a', ALWAYS))).toBe(1);
-    expect(maxStacksOf(qiji('a', ALWAYS, 3))).toBe(3);
-  });
-
-  it('没选过 = 0；选了多层照实报', () => {
-    expect(stacksOf([], 'vitality')).toBe(0);
-    expect(stacksOf([{ qijiId: 'vitality', stacks: 2 }], 'vitality')).toBe(2);
-    expect(stacksOf([{ qijiId: 'vitality', stacks: 2 }], 'breath')).toBe(0);
   });
 });

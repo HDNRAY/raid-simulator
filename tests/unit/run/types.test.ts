@@ -54,7 +54,6 @@ describe('QijiEntity —— 真的满足 GameEntity（§5.1 选继承的全部�
     category: 'generic',
     rarity: 'common',
     unlock: { kind: 'always', of: [] },
-    maxStacks: 3,
     // ⚠️ 写成对象字面量直接赋给 `QijiEntity.abilities` / `.pool`，
     // **不加** `satisfies`：字段本身的类型就是检查（`satisfies` 在这里
     // 只是同一件事的第二遍声明，多一处会漂的重复）。
@@ -117,19 +116,6 @@ describe('QijiEntity —— 真的满足 GameEntity（§5.1 选继承的全部�
       ],
     };
     expect(JSON.parse(JSON.stringify([damageBased, combo]))).toEqual([damageBased, combo]);
-  });
-
-  it('maxStacks 是可选的（缺省 = 1 的语义在 unlock.ts 里）', () => {
-    const noStacks: QijiEntity = {
-      id: 'breath',
-      kind: 'qiji',
-      nameKey: 'qiji.breath.name',
-      icon: 'char_focus',
-      category: 'generic',
-      unlock: { kind: 'always', of: [] },
-      abilities: [],
-    };
-    expect(noStacks.maxStacks).toBeUndefined();
   });
 
   it('炁机整体可 JSON 往返（内容将来要被校验器/注册表读，必须先能序列化）', () => {

@@ -147,9 +147,9 @@ describe('说明与内容的推导关系（名字的字数 / 字面值不测）'
      * 改词、改标点、改语序都不会红；**只有数值对不上才红**。
      *
      * ⚠️ 2026-10-13：**"可叠 N 层"那一半断言已删** —— 说明里不再写层数
-     * （用户纠正："炁机的激活 没有层"，见 `ui/freeQiji.ts`）。`maxStacks`
-     * 本身仍然在（肉鸽那边的"每次战斗后再选一次"），只是**不该写进
-     * 这条说明**。
+     * （用户纠正："炁机的激活 没有层"，见 `ui/freeQiji.ts`）。
+     * ⚠️ 同日稍后 `maxStacks` **整条字段也删了**（用户："肉鸽也改成一局
+     * 只能选一次（不叠加）"）—— 所以现在**没有任何**"层"可以写进说明。
      */
     const modifierValueOf = (id: string): number | undefined => {
       const qiji = ALL_QIJI.find((q) => q.id === id);
@@ -174,13 +174,23 @@ describe('说明与内容的推导关系（名字的字数 / 字面值不测）'
  * 第 3 条规则：两个开局就解锁的兜底
  * ------------------------------------------------------------------ */
 
-describe('兜底①「加血上限」：`maxHp +30`、可叠 3 层', () => {
+describe('兜底①「加血上限」：`maxHp +30`、一局只能选一次', () => {
   it('是 `unlock: always`（开局就在池子里）', () => {
     expect(QIJI_VITALITY.unlock).toEqual({ kind: 'always', of: [] });
   });
 
-  it('maxStacks = 3（§5.4：叠满一维之后被迫看向机制炁机）', () => {
-    expect(QIJI_VITALITY.maxStacks).toBe(3);
+  it('⚠️ 落点是 `modifier: maxHp`，**不再是**"叠 3 层"那件事', () => {
+    /**
+     * 用户 2026-10-13 推翻了"同一个通用炁机可以再选一次、累积到上限"
+     * （"肉鸽也改成一局只能选一次（不叠加）"），`maxStacks` 字段**整条
+     * 删除**（见 `core/types/qiji.ts` 的作废段）。
+     *
+     * ⚠️ 这一条**不再**去断言"`maxStacks` 是 `undefined`"：那个字段在
+     * 类型上已经不存在，写 `QIJI_VITALITY.maxStacks` 会直接**编译失败**
+     * —— "字段没了"是 `tsc` 保证的，比一条运行期断言更硬。这里改成断言
+     * 它**留下的是哪条效果**（+30 血上限），那才是这一条炁机的内容。
+     */
+    expect(QIJI_VITALITY.abilities).toHaveLength(1);
   });
 
   it('效果是**一条** `maxHp` 的 `add` 修正（不是"改 caps"的专属字段）', () => {
@@ -199,10 +209,9 @@ describe('兜底①「加血上限」：`maxHp +30`、可叠 3 层', () => {
   });
 });
 
-describe('兜底②「炁回复速度」：`energyRegen +10`、可叠 2 层', () => {
-  it('是 `unlock: always`、maxStacks = 2', () => {
+describe('兜底②「炁回复速度」：`energyRegen +10`、一局只能选一次', () => {
+  it('是 `unlock: always`（没有 `maxStacks` —— 见上一条的说明）', () => {
     expect(QIJI_BREATH.unlock).toEqual({ kind: 'always', of: [] });
-    expect(QIJI_BREATH.maxStacks).toBe(2);
   });
 
   it('⚠️ 数值是 **10 的整数倍**（引擎按逻辑步 `floor(x/10)` 结算）', () => {
@@ -267,8 +276,9 @@ describe('三条「派生 击」：解锁条件是"**本局**用了 3 次"', () 
         expect(qiji.comboWindow?.buff.id).toBe('combo-window');
       });
 
-      it('默认 maxStacks = 1（不写 = 只能选一次，§5.3 的节拍）', () => {
-        expect(qiji.maxStacks).toBeUndefined();
+      it('⚠️ 没有 `maxStacks`（一局只能选一次；字段已删 —— 类型上就没有它）', () => {
+        /** 与上面 `vitality` 那条同一个判据：`tsc` 已经保证了字段不存在。 */
+        expect(Object.keys(qiji)).not.toContain('maxStacks');
       });
     });
   }

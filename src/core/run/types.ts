@@ -137,12 +137,31 @@ export interface RunBattleRecord {
   readonly flawless: boolean;
 }
 
-/** 已选生效的一个炁机（带层数）。 */
+/**
+ * 已选生效的一个炁机。
+ *
+ * ==================================================================
+ * ⚠️ 这里**曾经有一个 `stacks`** —— 已删（2026-10-13）
+ * ==================================================================
+ *
+ * 它与 `QijiEntity.maxStacks`（也已删）是**同一件事的两半**：
+ * "同一个炁机可以再选一次、累积到上限"（§5.3 的初稿）。
+ *
+ * 用户 2026-10-13 把肉鸽的语义定死成 **"一局只能选一次（不叠加）"**
+ * 与 **"选了不能取消"**，于是层数这条线整条没有了消费者：
+ *
+ *   - `nextCandidates` 把"已经选过的"从候选里滤掉（不是"叠满"）
+ *   - 一个 id 在一局里**最多出现一次** —— 数组本身就编码了这件事
+ *
+ * 留一个恒为 1 的 `stacks` 会让下一个读它的人以为还有层数
+ * （AGENTS.md §2 的"重复：同一件事有第二份表达 → 删"）。
+ *
+ * ⚠️ 这一次删除**动了记录形状**，所以 `RUN_FORMAT_VERSION` 2 → 3
+ * （判据与依据写在 `record.ts` 的常量说明里）。
+ */
 export interface RunChoice {
-  /** 炁机的 `QijiEntity.id`。 */
+  /** 炁机的 `QijiEntity.id`。**一局里每个 id 至多一条**。 */
   readonly qijiId: EntityId;
-  /** 层数。默认上限是 1，可选多次的（通用炁机）> 1。 */
-  readonly stacks: number;
 }
 
 /**
@@ -174,7 +193,13 @@ export interface RunState {
   readonly battleStats: BattleStats;
   /** 这一局曾经解锁过的炁机 id（**只增不减**，保序便于 diff / 哈希）。 */
   readonly unlocked: readonly EntityId[];
-  /** 已经选了生效的炁机（**不能换**，§5.3，所以也是只增不减）。 */
+  /**
+   * 已经选了生效的炁机（**不能换 / 不能取消**，§5.3，所以只增不减）。
+   *
+   * ⚠️ 它是**集合语义**（一局里每个 id 至多一条）：候选生成会把
+   * "已经选过的"滤掉，所以"选了两次同一条"从结构上不可能
+   * （见 `unlock.ts` 的 `nextCandidates`）。
+   */
   readonly chosen: readonly RunChoice[];
   /**
    * 可选标签（调试 / `?order=a,b` 复现某个局面时用）。
