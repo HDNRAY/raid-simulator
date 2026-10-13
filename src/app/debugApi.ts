@@ -24,6 +24,20 @@
  * 类型从 `ui/settings/logic` 取（**类型**，编译期擦除，不构成运行期依赖）。
  */
 import type { SettingsTab } from '../ui/settings/tabs';
+import type { PanelTextMetric } from '../ui/settings/panelTextProbe';
+
+/**
+ * ⚠️ **必须把 Pixi 对象在页面里拍平成纯数据**（`toPlain`），不能直接把
+ * `panelText()` 的返回值交给 `Runtime.evaluate` 的 `returnByValue`。
+ *
+ * 实测过的坑：Pixi v8 的文字对象把 `style` / `worldTransform` 挂在**原型
+ * getter** 上，而 CDP 的值序列化只认对象自己的属性 —— 于是脚本读到的
+ * `fontSize` / `x` / `y` 全是 `-1`（"探针说 -1"看起来像"字号没设"，
+ * 排查方向直接跑偏）。
+ */
+function toPlainText(metrics: readonly PanelTextMetric[]): PanelTextMetric[] {
+  return metrics.map((t) => ({ ...t }));
+}
 
 /** 备战界面暴露给调试的最小面（`PrepareScreen` 满足它）。 */
 export interface PrepareDebugTarget {
@@ -195,6 +209,17 @@ export interface SettingsDebugTarget {
       readonly rows: number;
       readonly lines: readonly number[];
     };
+    /** 面板当前用的缩放系数（`settingsScale` 钳位之后的）。 */
+    panelScale(): { readonly uiScale: number; readonly panelScale: number };
+    /** 面板里的**可见文字**（字号 / 坐标 / 前 24 字）。 */
+    panelText(): readonly PanelTextMetric[];
+    /** 面板外框 + 详情区的矩形（"没溢出画布"的判据）。 */
+    panelLayout(): {
+      readonly panel: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+      readonly detail: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+      readonly gridBottom: number;
+      readonly hintTop: number;
+    };
   };
 }
 
@@ -284,6 +309,24 @@ export function settingsDebugApi(
     setButtonFocused(focused: boolean): void;
     /** 当前这一屏的齿轮此刻是否持有键盘焦点。 */
     buttonFocused(): boolean;
+    /**
+     * **面板的缩放状态**（`uiScale` = 滑块那个值，`panelScale` = 面板实际
+     * 用的系数）。
+     *
+     * ⚠️ 两个数**不是**同一个：竖向预算把面板钳在 `PANEL_SCALE_MAX`
+     * （见 `ui/settings/settingsScale.ts` 文件头）。验证脚本要断言的是
+     * **两个**——只报一个就没法区分"滑块没生效"与"钳位生效了"。
+     */
+    panelScale(): { readonly uiScale: number; readonly panelScale: number };
+    /** 面板里的可见文字（字号 / 坐标）——"字变大了没有"的硬证据。 */
+    panelText(): readonly PanelTextMetric[];
+    /** 面板外框 + 详情区矩形（"外框没动、没溢出画布"的判据）。 */
+    panelLayout(): {
+      readonly panel: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+      readonly detail: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+      readonly gridBottom: number;
+      readonly hintTop: number;
+    };
   };
 } {
   return {
@@ -305,6 +348,17 @@ export function settingsDebugApi(
         return c === undefined ? null : { ...c };
       },
       detailScroll: () => ({ ...getSettings().probes.detailScroll() }),
+      panelScale: () => ({ ...getSettings().probes.panelScale() }),
+      panelText: () => toPlainText(getSettings().probes.panelText()),
+      panelLayout: () => {
+        const l = getSettings().probes.panelLayout();
+        return {
+          panel: { ...l.panel },
+          detail: { ...l.detail },
+          gridBottom: l.gridBottom,
+          hintTop: l.hintTop,
+        };
+      },
       trace: () => [...getSettings().settingsTrace],
       setButtonFocused: (focused) => {
         const gear = getGear();

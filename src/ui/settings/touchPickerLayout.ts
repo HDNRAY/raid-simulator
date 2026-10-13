@@ -33,7 +33,7 @@
  * `scrollWindow` —— 不另写一套。
  */
 
-import { SETTINGS_PANEL, TOUCH_PICKER } from './settingsGeometry';
+import { currentSettingsMetrics, touchPickerArea } from './settingsScale';
 import { scrollOffset, visibleWindow } from '../scrollWindow';
 import type { Rect } from './logic';
 
@@ -85,21 +85,24 @@ export function pickerCapacity(): number {
 export function pickerMetrics(count: number): PickerMetrics {
   const cols = TOUCH_PICKER_COLS;
   const rows = pickerRows(count);
-  const availW = TOUCH_PICKER.w - GAP_X * (cols - 1);
-  const availH = TOUCH_PICKER.bottom - TOUCH_PICKER.top - GAP_Y * (rows - 1);
+  const area = touchPickerArea();
+  const availW = area.w - GAP_X * (cols - 1);
+  /**
+   * ⚠️ 可用高度从 `touchPickerArea()` 取（它跟着缩放走）—— 老式子用的是
+   * 底座常量（`TOUCH_PICKER.bottom - TOP`），缩放之后会与格阵下沿脱节。
+   */
+  const availH = area.h - GAP_Y * (rows - 1);
   const cellW = Math.floor(availW / cols);
+  /**
+   * ⚠️ 格高的上下限也跟缩放走：`44` 是**手指可点下限**，UI 缩放调大时
+   * 这个下限不该反而变小（它是物理约束，不是排版偏好）。
+   */
+  const k = currentSettingsMetrics().k;
   const cellH = Math.min(
-    PICKER_MAX_CELL_H,
-    Math.max(PICKER_MIN_CELL_H, Math.floor(availH / rows)),
+    Math.round(PICKER_MAX_CELL_H * k),
+    Math.max(Math.round(PICKER_MIN_CELL_H * k), Math.floor(availH / rows)),
   );
-  return {
-    cols,
-    rows,
-    cellW,
-    cellH,
-    x: SETTINGS_PANEL.x + TOUCH_PICKER.x,
-    y: SETTINGS_PANEL.y + TOUCH_PICKER.top,
-  };
+  return { cols, rows, cellW, cellH, x: area.x, y: area.y };
 }
 
 /**
@@ -109,12 +112,7 @@ export function pickerMetrics(count: number): PickerMetrics {
  * 指针停在缝上时滚轮会**漏给页面**（表现成"有时候滚得动、有时候不行"）。
  */
 export function pickerAreaRect(): Rect {
-  return {
-    x: SETTINGS_PANEL.x + TOUCH_PICKER.x,
-    y: SETTINGS_PANEL.y + TOUCH_PICKER.top,
-    w: TOUCH_PICKER.w,
-    h: TOUCH_PICKER.bottom - TOUCH_PICKER.top,
-  };
+  return touchPickerArea();
 }
 
 /** 第 `cellIndex` 个格子（**窗口内**的下标，不是技能表里的下标）。 */

@@ -41,6 +41,7 @@ import { FONT } from '../layout';
 import { Label, type PixiCtor } from '../primitives';
 import { PALETTE } from '../../render/theme';
 import { pickerCapacity, pickerCellRect, pickerMetrics } from './touchPickerLayout';
+import { scaledFont } from './settingsScale';
 import type { KeyRow } from './rows';
 import type { TranslateFn } from '../../i18n/translator';
 
@@ -86,7 +87,7 @@ export class TouchSkillPicker {
       const name = new Label(this.pixi, {
         x: 0,
         y: 0,
-        size: FONT.warn,
+        size: scaledFont(FONT.warn),
         color: PALETTE.text,
         kai: true,
         anchorX: 0.5,
@@ -95,7 +96,7 @@ export class TouchSkillPicker {
       const badge = new Label(this.pixi, {
         x: 0,
         y: 0,
-        size: FONT.tiny,
+        size: scaledFont(FONT.tiny),
         color: PALETTE.textDim,
         anchorX: 0,
         anchorY: 0,
@@ -107,6 +108,22 @@ export class TouchSkillPicker {
 
   setVisible(visible: boolean): void {
     this.root.visible = visible;
+  }
+
+  /**
+   * **UI 缩放变了**：格子几何（由 `touchPickerLayout.pickerMetrics` 从当前
+   * 缩放算出来）与字号都要重排。
+   *
+   * ⚠️ 只重排几何与字号，**不碰窗口偏移** —— 那是面板的状态（缩放不该把
+   * 玩家滚到一半的技能表拉回顶部）。
+   */
+  relayout(): void {
+    const nameSize = scaledFont(FONT.warn);
+    const badgeSize = scaledFont(FONT.tiny);
+    for (const chip of this.chips) {
+      chip.name.setSize(nameSize);
+      chip.badge.setSize(badgeSize);
+    }
   }
 
   /** 第 `cellIndex` 个格子的圆心（调试探针 / 脚本点真实位置用）。 */

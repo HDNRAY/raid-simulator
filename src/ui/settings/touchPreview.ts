@@ -31,24 +31,11 @@ import {
   touchButtonCenter,
   touchLayoutBounds,
 } from '../../render/touchGeometry';
-import { SETTINGS_PANEL, TOUCH_PREVIEW } from './settingsGeometry';
-
-interface Box {
-  readonly x: number;
-  readonly y: number;
-  readonly w: number;
-  readonly h: number;
-}
-
-/** 双弧真正占的那块区域（预览区去掉顶部的说明行）。 */
-function arcBox(): Box {
-  return {
-    x: SETTINGS_PANEL.x + TOUCH_PREVIEW.x,
-    y: SETTINGS_PANEL.y + TOUCH_PREVIEW.top + TOUCH_PREVIEW.captionH,
-    w: TOUCH_PREVIEW.w,
-    h: TOUCH_PREVIEW.h - TOUCH_PREVIEW.captionH,
-  };
-}
+import {
+  currentSettingsMetrics,
+  touchPreviewArcBox,
+  touchPreviewCaptionPos,
+} from './settingsScale';
 
 interface Transform {
   readonly scale: number;
@@ -60,27 +47,35 @@ interface Transform {
 }
 
 /**
- * 变换只依赖常量，所以在模块加载时算一次（纯函数、无副作用）。
- * ⚠️ 但仍然走一个函数取值 —— 将来若预览区域随 UI 缩放变化，改这里一处即可。
+ * 变换**按当前缩放缓存**：它依赖 `TOUCH_PREVIEW` 那块区域，而那块现在
+ * 跟着 UI 缩放变（`settingsScale.touchPreviewArcBox`）。
+ *
+ * ⚠️ 缓存键是 `k` —— 缩放一变就重算，值没变就复用（这条路径每次命中测试
+ * 与每帧绘制都会走，不缓存会白算）。
  */
-function computeTransform(): Transform {
+let cachedK = Number.NaN;
+let cached: Transform | undefined;
+
+function transform(): Transform {
+  const m = currentSettingsMetrics();
+  if (cached !== undefined && cachedK === m.k) return cached;
   const bounds = touchLayoutBounds();
-  const box = arcBox();
+  const box = touchPreviewArcBox();
   /**
    * ⚠️ **等比**（取两个方向的小者）：非等比会把双弧拉成椭圆，
    * 于是"预览里在右下、实战里跑到右上"。
    */
   const scale = Math.min(box.w / bounds.w, box.h / bounds.h);
-  return {
+  cached = {
     scale,
     cx: box.x + box.w / 2,
     cy: box.y + box.h / 2,
     boundsCx: bounds.cx,
     boundsCy: bounds.cy,
   };
+  cachedK = m.k;
+  return cached;
 }
-
-const TRANSFORM = computeTransform();
 
 /** 某个槽位圆心在**画布坐标**里的位置（超出容量返回 `undefined`）。 */
 export function previewSlotCenter(
@@ -88,15 +83,16 @@ export function previewSlotCenter(
 ): { readonly x: number; readonly y: number } | undefined {
   const world = touchButtonCenter(index);
   if (world === undefined) return undefined;
+  const t = transform();
   return {
-    x: TRANSFORM.cx + (world.x - TRANSFORM.boundsCx) * TRANSFORM.scale,
-    y: TRANSFORM.cy + (world.y - TRANSFORM.boundsCy) * TRANSFORM.scale,
+    x: t.cx + (world.x - t.boundsCx) * t.scale,
+    y: t.cy + (world.y - t.boundsCy) * t.scale,
   };
 }
 
 /** 预览里键位圆的半径（按同一个比例缩放）。 */
 export function previewSlotRadius(): number {
-  return (TOUCH_BUTTON_DIAMETER / 2) * TRANSFORM.scale;
+  return (TOUCH_BUTTON_DIAMETER / 2) * transform().scale;
 }
 
 /**
@@ -107,12 +103,12 @@ export function previewSlotRadius(): number {
  * "触屏键位"四个字离那组按钮很远）。坐标空间必须与槽位一致。
  */
 export function previewCaptionX(): number {
-  return SETTINGS_PANEL.x + TOUCH_PREVIEW.x;
+  return touchPreviewCaptionPos().x;
 }
 
 /** 顶部说明行的 y。 */
 export function previewCaptionY(): number {
-  return SETTINGS_PANEL.y + TOUCH_PREVIEW.top;
+  return touchPreviewCaptionPos().y;
 }
 
 /**

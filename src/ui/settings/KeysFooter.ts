@@ -37,6 +37,7 @@ import { FONT } from '../layout';
 import { Label, type PixiCtor } from '../primitives';
 import { PALETTE } from '../../render/theme';
 import { hintLineY, mnemonicKeyOf, resetButtonRect, SETTINGS_PANEL } from './logic';
+import { scaledFont } from './settingsScale';
 import { keyEditHint } from './keyNames';
 import { ResetDefaultButton } from './ResetDefaultButton';
 import type { TranslateFn } from '../../i18n/translator';
@@ -72,12 +73,11 @@ export class KeysFooter {
   ) {
     this.root = new pixi.Container();
     const x = SETTINGS_PANEL.x;
-    const y = SETTINGS_PANEL.y;
 
     this.hintState = new Label(pixi, {
       x: x + 16,
-      y: y + hintLineY(0),
-      size: FONT.small,
+      y: hintLineY(0),
+      size: scaledFont(FONT.small),
       color: PALETTE.textDim,
     });
     /**
@@ -87,15 +87,29 @@ export class KeysFooter {
      */
     this.hintKeys = new Label(pixi, {
       x: x + 16,
-      y: y + hintLineY(1),
-      size: FONT.tiny,
+      y: hintLineY(1),
+      size: scaledFont(FONT.tiny),
       color: PALETTE.textDim,
     });
 
-    this.reset = new ResetDefaultButton(pixi, resetButtonRect());
+    this.reset = new ResetDefaultButton(pixi, resetButtonRect);
     this.root.addChild(this.hintState.root, this.hintKeys.root, this.reset.root);
     /** 文案是**固定**的（这一块恢复键盘键位）—— 不随设备变。 */
     this.reset.setText(translate('settings.keysReset'));
+  }
+
+  /**
+   * **UI 缩放变了**：两行提示的位置 / 行高 / 字号 + 恢复按钮都要重排。
+   *
+   * ⚠️ 位置**每次都从 `../logic` 取当前几何**（那里转发 `settingsScale`），
+   * 不在本组件里缓存 —— 缓存会让"缩放了、提示还停在旧行高上"。
+   */
+  relayout(): void {
+    this.hintState.root.y = hintLineY(0);
+    this.hintKeys.root.y = hintLineY(1);
+    this.hintState.setSize(scaledFont(FONT.small));
+    this.hintKeys.setSize(scaledFont(FONT.tiny));
+    this.reset.relayout();
   }
 
   /**

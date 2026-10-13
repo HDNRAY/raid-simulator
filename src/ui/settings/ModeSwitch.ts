@@ -30,6 +30,7 @@ import { Label, type PixiCtor } from '../primitives';
 import { PALETTE } from '../../render/theme';
 import { operationModeLabelKey, OPERATION_MODE_ORDER } from './operationModeRow';
 import { operationModeLabelPos, operationModeRect } from './logic';
+import { scaledFont } from './settingsScale';
 import type { OperationMode } from '../../render/platform';
 import type { TranslateFn } from '../../i18n/translator';
 
@@ -43,6 +44,8 @@ export class ModeSwitch {
   readonly root: Container;
 
   private readonly buttons: ModeButtonView[] = [];
+  /** 「操作方式」那一行的标签 —— 缩放时它也要换字号。 */
+  private readonly caption: Label;
 
   constructor(
     pixi: PixiCtor,
@@ -53,9 +56,10 @@ export class ModeSwitch {
     const caption = new Label(pixi, {
       x: pos.x,
       y: pos.y,
-      size: FONT.small,
+      size: scaledFont(FONT.small),
       color: PALETTE.textDim,
     });
+    this.caption = caption;
     this.root.addChild(caption.root);
 
     for (const [index] of OPERATION_MODE_ORDER.entries()) {
@@ -64,7 +68,7 @@ export class ModeSwitch {
       const label = new Label(pixi, {
         x: rect.x + rect.w / 2,
         y: rect.y + rect.h / 2 - 9,
-        size: FONT.body,
+        size: scaledFont(FONT.body),
         color: PALETTE.text,
         anchorX: 0.5,
       });
@@ -75,6 +79,12 @@ export class ModeSwitch {
 
   setVisible(visible: boolean): void {
     this.root.visible = visible;
+  }
+
+  /** **UI 缩放变了**：这一行的位置不跟 k，只有字号跟。 */
+  relayout(): void {
+    this.caption.setSize(scaledFont(FONT.small));
+    for (const button of this.buttons) button.label.setSize(scaledFont(FONT.body));
   }
 
   /**

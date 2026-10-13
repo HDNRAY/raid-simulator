@@ -208,6 +208,17 @@ export const KEY_GRID_BOTTOM_TOUCH =
 export const DETAIL_TOP_GAP = 10;
 
 /**
+ * 同一个留白在**面板相对**坐标里的值（= `DETAIL_TOP_GAP`）。
+ *
+ * ⚠️ 两个名字不是重复：`DETAIL_TOP_GAP` 是**画布**口径（`DETAIL_TOP` 由它
+ * 拼出来），而 `settingsScale.computeSettingsMetrics` 是在**面板相对**坐标里
+ * 重新推一条随缩放走的详情区上沿 —— 那边不能去读画布口径的那个常量
+ * （它已经把 `SETTINGS_PANEL.y` 加进去了）。所以这里显式再给一个名字，
+ * 把"同一个留白"这件事写在两处**同一行**上，免得下一个人以为它们无关。
+ */
+export const KEY_GRID_INSET_BOTTOM_GAP = DETAIL_TOP_GAP;
+
+/**
  * **详情区的顶边**（画布坐标）—— 桌面（键盘）那套。
  *
  * = `SETTINGS_PANEL.y + KEY_GRID_BOTTOM + DETAIL_TOP_GAP` = `10 + 184 + 10`
@@ -492,6 +503,26 @@ export const OPERATION_MODE_ROW = {
 export function hintLineY(index = 0): number {
   return HINT_BLOCK_TOP + index * HINT_LINE.height;
 }
+
+/**
+ * tab 按钮那一行（面板相对；**钉死，不随 UI 缩放变**）。
+ *
+ * ⚠️ 它住在叶子（而不是 `logic.ts`）是因为 `./settingsScale` 要按它算 tab
+ * 矩形的 x —— 而那个模块也必须是叶子（否则与 `logic.ts` 构成环）。
+ * 与 `KEY_GRID` / `RESET_BUTTON` 同一条做法，`logic.ts` 照旧转发。
+ */
+export const TAB_BAR = { y: 40, w: 88, h: 30, gap: 8, x: 16 } as const;
+
+/**
+ * 右上角的**关闭按钮**（面板相对）。
+ *
+ * ⚠️ 原先「关闭」只是一个 `Label`、**完全没有命中测试** —— 点它什么也不会
+ * 发生（需求："设置弹窗里的『关闭』点了没反应"）。给一个比文字略大的
+ * 点击区（文字约 24×16），让它好点中。
+ *
+ * ⚠️ 与 `TAB_BAR` 同一个理由住在这里（`./settingsScale` 要它算矩形）。
+ */
+export const CLOSE_BUTTON = { right: 12, top: 7, w: 40, h: 22 } as const;
 
 /**
  * 底部区域的上沿（面板相对）= 详情区的**底边**。

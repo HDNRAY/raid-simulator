@@ -29,6 +29,7 @@ import { Label, type PixiCtor } from '../primitives';
 import { PALETTE } from '../../render/theme';
 import { TOUCH_BUTTON_CAPACITY } from '../../render/touchGeometry';
 import { touchResetButtonRect } from './logic';
+import { scaledFont } from './settingsScale';
 import { ResetDefaultButton } from './ResetDefaultButton';
 import {
   previewCaptionX,
@@ -69,12 +70,12 @@ export class TouchSlotPreview {
     this.caption = new Label(pixi, {
       x: previewCaptionX(),
       y: previewCaptionY(),
-      size: FONT.small,
+      size: scaledFont(FONT.small),
       color: PALETTE.textDim,
     });
     this.root.addChild(this.caption.root);
 
-    this.reset = new ResetDefaultButton(pixi, touchResetButtonRect());
+    this.reset = new ResetDefaultButton(pixi, touchResetButtonRect);
     this.reset.setText(translate('settings.touchReset'));
     this.root.addChild(this.reset.root);
 
@@ -90,7 +91,7 @@ export class TouchSlotPreview {
       const name = new Label(pixi, {
         x: center.x,
         y: center.y,
-        size: FONT.body,
+        size: scaledFont(FONT.body),
         color: PALETTE.text,
         anchorX: 0.5,
         anchorY: 0.5,
@@ -99,7 +100,7 @@ export class TouchSlotPreview {
       const num = new Label(pixi, {
         x: center.x - r * 0.62,
         y: center.y - r * 0.72,
-        size: FONT.tiny,
+        size: scaledFont(FONT.tiny),
         color: PALETTE.textDim,
         anchorX: 0.5,
         anchorY: 0.5,
@@ -112,6 +113,38 @@ export class TouchSlotPreview {
   /** 当前选中的键位（没有则 `undefined`）。 */
   get selected(): number | undefined {
     return this.selectedIndex;
+  }
+
+  /**
+   * **UI 缩放变了**：整块的几何（圆心 / 半径 / 说明行 / 它自己那个按钮）
+   * 与字号都要重排。
+   *
+   * ⚠️ **一个坐标都不许手摆**（AGENTS.md §3b）：圆心一律从 `./touchPreview`
+   * 取（那里是从 `render/touchGeometry` 的同一份双弧几何等比变换过来的），
+   * 所以"预览里第 3 个键位在哪"与"战斗里第 3 个按钮在哪"结构上不可能不一致。
+   *
+   * ⚠️ 只改几何与字号，**不动 `selectedIndex`**（缩放不该把玩家选中的键位
+   * 清掉）。
+   */
+  relayout(): void {
+    const captionPos = { x: previewCaptionX(), y: previewCaptionY() };
+    this.caption.root.x = captionPos.x;
+    this.caption.root.y = captionPos.y;
+    this.caption.setSize(scaledFont(FONT.small));
+    this.reset.relayout();
+    const r = previewSlotRadius();
+    for (const [i, slot] of this.slots.entries()) {
+      const center = previewSlotCenter(i);
+      if (center === undefined) continue;
+      /** ⚠️ `slot.x/y/r` 是**探针与命中**读的那份几何，必须跟着换。 */
+      this.slots[i] = { ...slot, x: center.x, y: center.y, r };
+      slot.name.root.x = center.x;
+      slot.name.root.y = center.y;
+      slot.name.setSize(scaledFont(FONT.body));
+      slot.num.root.x = center.x - r * 0.62;
+      slot.num.root.y = center.y - r * 0.72;
+      slot.num.setSize(scaledFont(FONT.tiny));
+    }
   }
 
   setVisible(visible: boolean): void {

@@ -20,6 +20,7 @@ import { FONT } from '../layout';
 import { Label, type PixiCtor } from '../primitives';
 import { PALETTE } from '../../render/theme';
 import { KEY_GRID_CAPACITY, keyCellRect, keyGridMetrics, rowsCapacity } from './logic';
+import { scaledFont } from './settingsScale';
 import { keyLabel as formatKey } from './logic';
 import type { KeyRow } from './rows';
 import type { TranslateFn } from '../../i18n/translator';
@@ -118,14 +119,14 @@ export class KeyGrid {
       const name = new Label(this.pixi, {
         x: rect.x + 12,
         y: rect.y + 12,
-        size: FONT.warn,
+        size: scaledFont(FONT.warn),
         color: PALETTE.text,
         kai: true,
       });
       const key = new Label(this.pixi, {
         x: rect.x + rect.w - 12,
         y: rect.y + 14,
-        size: FONT.body,
+        size: scaledFont(FONT.body),
         color: PALETTE.textDim,
         anchorX: 1,
       });
@@ -145,7 +146,7 @@ export class KeyGrid {
       const slot = new Label(this.pixi, {
         x: rect.x + 8,
         y: rect.y + 4,
-        size: FONT.tiny,
+        size: scaledFont(FONT.tiny),
         color: PALETTE.textDim,
         anchorX: 0,
         anchorY: 0,
@@ -172,6 +173,31 @@ export class KeyGrid {
   /** 面板切页时调用 —— 不是按键页就整块藏起来。 */
   setVisible(visible: boolean): void {
     this.root.visible = visible;
+  }
+
+  /**
+   * **UI 缩放变了**：格子尺寸 + 三个角上的字号一起重排。
+   *
+   * ⚠️ 字号**不能只靠 `update()` 里那条"重排"**：那条只改 `x`/`y`，
+   * 字号是建 `Label` 时定下的（`scaledFont`）—— 不重设就会出现
+   * "格子变高了、字还是原来那么大"。
+   *
+   * ⚠️ 容量**不会**因为缩放变小：列数（4）与行数（2）都没动，8 个可绑技能
+   * 仍然一屏配得到（见 `settingsGeometry.KEY_GRID.cols`）。缩放只改行高，
+   * 而竖向预算已经保证"2 行 + 底部三样"放得下（`settingsScale` 文件头）。
+   */
+  relayout(): void {
+    const metrics = keyGridMetrics(this.metricsShowKeyHints);
+    if (this.cells.length !== rowsCapacity(metrics)) this.buildCells(rowsCapacity(metrics));
+    this.layoutCells(metrics);
+    const nameSize = scaledFont(FONT.warn);
+    const keySize = scaledFont(FONT.body);
+    const slotSize = scaledFont(FONT.tiny);
+    for (const cell of this.cells) {
+      cell.name.setSize(nameSize);
+      cell.key.setSize(keySize);
+      cell.slot.setSize(slotSize);
+    }
   }
 
   /**

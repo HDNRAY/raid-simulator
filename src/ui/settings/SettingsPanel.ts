@@ -27,10 +27,7 @@ import { TouchSlotPreview } from './TouchSlotPreview';
 import { SkillDetail } from './SkillDetail';
 import { SettingsFrame } from './SettingsFrame';
 import { KeysFooter } from './KeysFooter';
-import type { KeyRow } from './rows';
 import { ScaleSlider } from './ScaleSlider';
-import type { PixiCtor } from '../primitives';
-import type { TranslateFn } from '../../i18n/translator';
 import {
   INITIAL_FOCUS,
   keyGridMetrics,
@@ -40,83 +37,21 @@ import {
   type SettingsFocus,
 } from './logic';
 import { buildFocusContext, rehomeFocus } from './panelFocus';
+import { PanelScaleSync } from './panelScaleSync';
 import { pickerScroll } from './touchPickerLayout';
-import { capsOf, type OperationMode } from '../../render/platform';
+import { capsOf } from '../../render/platform';
 import type { SettingsOrigin, SettingsTab } from './tabs';
+/**
+ * ⚠️ 面板的**对外契约**（`SettingsPanelOptions`）住在本文件？不 ——
+ * 它整块搬到了 `./panelOptions`（这个文件顶到 700 行，AGENTS.md §3 的
+ * 横向切割：那是"面板要哪些能力"这一个关注点，与"面板怎么工作"没有交集）。
+ * 这里只转发类型，外部 import 路径不变。
+ */
+import type { SettingsPanelOptions } from './panelOptions';
+export type { SettingsPanelOptions } from './panelOptions';
 
 export type { SettingsTab, SettingsOrigin };
 export type { KeyRow } from './rows';
-
-export interface SettingsPanelOptions {
-  readonly pixi: PixiCtor;
-  /**
-   * ⚠️ **必须带上 `params`**。
-   *
-   * 这里原先写的是 `(key: string) => string` —— 于是所有拿它去满足
-   * `buildKeyRows`（那边要 `(key, params?) => string`）的地方都会
-   * **静默丢掉第二个参数**（TS 允许"参数更少"的函数赋值给"参数更多"的类型），
-   * 界面上就显示出 `{seconds}` / `{value} {resource}` 这些占位符本身 ✗
-   *
-   * 类型收窄本身**不是错**，但它把"丢参数"从"显而易见的 bug"变成了
-   * "编译器保证正确的写法"。宽到 `params` 才能让实现无处可躲。
-   */
-  readonly translate: TranslateFn;
-  /** 读取当前键位表 */
-  readonly getRows: () => readonly KeyRow[];
-  /** 改键：把某个技能的键改成 `key` */
-  readonly onRebind: (skillId: string, key: string) => void;
-  /** 交换两个按钮位的技能（见 `app/bindingActions.ts` 的区别说明）。 */
-  readonly onSwapSlots: (from: number, to: number) => void;
-  /** 恢复默认键位 */
-  readonly onResetKeys: () => void;
-  /**
-   * 进入/退出**捕获模式**。
-   *
-   * 捕获期间输入层不再把按键当技能 —— 这是必须的：否则玩家
-   * 按 `Esc` 想取消改键，技能会真的放出去。
-   */
-  readonly onCapture: (handler: ((key: string) => void) | undefined) => void;
-  /** 关闭弹窗 */
-  readonly onClose: () => void;
-  /**
-   * **当前操作方式**（键盘 / 触屏）—— 全应用**唯一**的那个 flag。
-   *
-   * ⚠️ 面板用它回答三件事（都从这一个值派生，没有第二个来源）：
-   *   - 「按键」页画**键盘块**还是**触屏块**（`caps.touch`）
-   *   - 要不要拼键名提示（`caps.showKeyHints`）
-   *   - 「通用」页那个选择器该亮哪一个
-   *
-   * ⚠️ 是**函数**：玩家能在「通用」页当场切过去，快照会停在构造那一刻。
-   */
-  readonly getOperationMode: () => OperationMode;
-  /**
-   * 玩家在「通用」页切了操作方式。
-   *
-   * ⚠️ 面板**不自己写**（`GameState.operationMode` / 存档 / 换哪一份键位表
-   * 分属不同模块）—— 落点在 `app/game.ts` 的 `applyOperationMode`，
-   * 它切完会回调面板重画（`setOperationMode`）。
-   */
-  readonly onOperationMode: (mode: OperationMode) => void;
-  /**
-   * **触屏键位表**（**下标 = 键位号**，`''` = 空键位）。**从 `GameState` 读**，
-   * 不在面板里留副本 —— 与键位表同一条纪律。
-   */
-  readonly getTouchSlots?: (() => readonly string[]) | undefined;
-  /**
-   * 两步交互的落点：**把这个技能绑到那个键位**（交换 / 顶掉的判定在
-   * `slotActions`，这里只管把结果写下去）。
-   */
-  readonly onAssignTouchSlot?: ((slot: number, skillId: string) => void) | undefined;
-  /** 取下某个键位上的技能。 */
-  readonly onClearTouchSlot?: ((slot: number) => void) | undefined;
-  /** 「触屏默认」= 恢复默认键位表（截到容量）。 */
-  readonly onResetTouchButtons?: (() => void) | undefined;
-  /** 读当前 UI 缩放倍数（1 = 自动适配） */
-  readonly getUiScale: () => number;
-  /** UI 缩放变了（调用方负责把它应用到画布尺寸上） */
-  readonly onUiScale: (value: number) => void;
-}
-
 
 export class SettingsPanel {
   readonly root: Container;
@@ -224,6 +159,17 @@ export class SettingsPanel {
    * 所以整块在 `./panelNotice`（这个文件顶到 700 行上限）。
    */
   private readonly notice = new PanelNotice();
+  /**
+   * 上一次**已经排过版**的面板系数。
+   *
+   * ⚠️ 它是"要不要重排"的判据（`syncScale()`）：指针拖滑块时每一帧都会
+   * 进来，不比较就会每帧重排（每帧重折一遍技能说明、重设一遍字号）。
+   */
+  /**
+   * **缩放同步器**（`./panelScaleSync`）：它持有"上一次排过版的系数"，
+   * 面板只负责在每次重画前叫它一声。
+   */
+  private readonly scaleSync: PanelScaleSync;
 
   constructor(private readonly options: SettingsPanelOptions) {
     const { pixi } = options;
@@ -258,8 +204,15 @@ export class SettingsPanel {
     this.footer = parts.footer;
     this.scaleSlider = parts.slider;
 
+    this.scaleSync = new PanelScaleSync({
+      uiScale: () => this.options.getUiScale(),
+      parts,
+    });
+
     this.probes = makeSettingsProbes({
       showKeyHints: () => this.showKeyHintsNow,
+      uiScale: () => this.options.getUiScale(),
+      root: () => this.root,
       detailScroll: () => this.detail.scrollState(),
       slotCenter: (index) => this.preview.centerOf(index),
       rowCount: () => this.options.getRows().length,
@@ -639,6 +592,12 @@ export class SettingsPanel {
   }
 
   private redraw(): void {
+    /**
+     * ⚠️ **先同步缩放**：几何、字号、命中区都读 `settingsScale` 的当前值。
+     * 判据与重排清单整块在 `./panelScaleSync`（这个文件顶到 700 行，
+     * AGENTS.md §3 的横向切割）。
+     */
+    this.scaleSync.sync();
     /**
      * ⚠️ **先给焦点"换家 + 钳下标"**：玩家在备战界面换角色之后技能表会变
      * （用户 2026-10-12："根据当前选的人，设置里决定显示谁的技能"），

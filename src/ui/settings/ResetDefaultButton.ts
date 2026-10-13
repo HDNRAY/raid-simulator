@@ -34,6 +34,7 @@ import type { Container, Graphics } from 'pixi.js';
 import { FONT } from '../layout';
 import { Label, type PixiCtor } from '../primitives';
 import { PALETTE } from '../../render/theme';
+import { scaledFont } from './settingsScale';
 import type { Rect } from './logic';
 
 export class ResetDefaultButton {
@@ -43,21 +44,42 @@ export class ResetDefaultButton {
   private readonly label: Label;
   private text = '';
   private focused = false;
+  /** 当前的矩形（缩放会换它 —— 见 `relayout`）。 */
+  private rect: Rect;
 
   constructor(
     pixi: PixiCtor,
-    private readonly rect: Rect,
+    /**
+     * 矩形的**取值函数**（不是快照）：按钮的 y / h 跟着 UI 缩放走，
+     * 快照会让"缩放了、按钮还停在旧位置"（那就点不中了）。
+     */
+    private readonly rectOf: () => Rect,
   ) {
+    this.rect = rectOf();
     this.root = new pixi.Container();
     this.gfx = new pixi.Graphics();
     this.label = new Label(pixi, {
-      x: rect.x + rect.w / 2,
-      y: rect.y + 4,
-      size: FONT.small,
+      x: this.rect.x + this.rect.w / 2,
+      y: this.rect.y + 4,
+      size: scaledFont(FONT.small),
       color: PALETTE.text,
       anchorX: 0.5,
     });
     this.root.addChild(this.gfx, this.label.root);
+    this.draw();
+  }
+
+  /**
+   * **UI 缩放变了**：取一份新矩形、重设字号、重画。
+   *
+   * ⚠️ 与 `SettingsFrame.relayout` 同一条纪律：位置**每次都从几何模块取**
+   * （不在本组件里缓存一份会过期的副本）。
+   */
+  relayout(): void {
+    this.rect = this.rectOf();
+    this.label.setSize(scaledFont(FONT.small));
+    this.label.root.x = this.rect.x + this.rect.w / 2;
+    this.label.root.y = this.rect.y + 4;
     this.draw();
   }
 

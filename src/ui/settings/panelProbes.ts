@@ -28,6 +28,8 @@
 
 import { keyCellRect, keyGridMetrics } from './logic';
 import { pickerCellRect, pickerMetrics } from './touchPickerLayout';
+import { currentSettingsMetrics, type SettingsMetrics } from './settingsScale';
+import { collectPanelText, type PanelTextMetric } from './panelTextProbe';
 
 /** 详情区的滚动状态（见 `SkillDetail.scrollState`）。 */
 export interface DetailScrollState {
@@ -41,6 +43,31 @@ export interface SettingsProbes {
   /** 按键轨迹（环形缓冲，最多 40 行）。 */
   readonly trace: string[];
   pushTrace(line: string): void;
+  /**
+   * **面板当前的缩放状态**（玩家设的倍数 + 面板实际用的系数）。
+   *
+   * ⚠️ 两个数**都必须有**：它们现在是**两个**值（竖向预算把面板钳在
+   * `PANEL_SCALE_MAX`），只报一个会让"我调了 200%、面板为什么只大了 1.6 倍"
+   * 变成一句没有数字的争论。见 `settingsScale` 文件头。
+   */
+  panelScale(): { readonly uiScale: number; readonly panelScale: number };
+  /**
+   * **面板里的可见文字**（字号 / 世界坐标 / 前 24 字）——
+   * "字到底变大了没有"的唯一硬证据（截图看不出 1.2 与 1.6 的差别）。
+   */
+  panelText(): readonly PanelTextMetric[];
+  /**
+   * 面板**外框 + 详情区**的矩形（证明"外框没动、内容在预算内"）。
+   *
+   * ⚠️ 它是"面板没有溢出画布"的直接判据：外框是固定 640×520 居中，
+   * 而缩放只动**里面**的行 —— 这一条探针把那个不变式写出来。
+   */
+  panelLayout(): {
+    readonly panel: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+    readonly detail: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+    readonly gridBottom: number;
+    readonly hintTop: number;
+  };
   detailScroll(): DetailScrollState;
   cellCenter(index: number): { readonly x: number; readonly y: number };
   slotCenter(index: number): { readonly x: number; readonly y: number } | undefined;
@@ -51,6 +78,10 @@ export interface SettingsProbes {
 export interface SettingsProbesDeps {
   /** 当前是否显示键名 —— 它决定网格度量，探针必须**同一份**。 */
   readonly showKeyHints: () => boolean;
+  /** 玩家设的 UI 缩放（面板实际用的系数由 `settingsScale` 钳位）。 */
+  readonly uiScale: () => number;
+  /** 面板的容器根（遍历它取可见文字）。 */
+  readonly root: () => unknown;
   readonly detailScroll: () => DetailScrollState;
   readonly slotCenter: (index: number) => { readonly x: number; readonly y: number } | undefined;
   /** 技能池大小（技能面的几何按它算几行 —— 与渲染同一份）。 */
@@ -69,6 +100,24 @@ export function makeSettingsProbes(d: SettingsProbesDeps): SettingsProbes {
       if (trace.length > TRACE_CAPACITY) trace.shift();
     },
     detailScroll: () => d.detailScroll(),
+    panelScale() {
+      return { uiScale: d.uiScale(), panelScale: currentSettingsMetrics().k };
+    },
+    panelText: () => collectPanelText(d.root()),
+    panelLayout() {
+      const m: SettingsMetrics = currentSettingsMetrics();
+      return {
+        panel: { x: m.panelX, y: m.panelY, w: 640, h: 520 },
+        detail: {
+          x: m.panelX + 16,
+          y: m.detailTop,
+          w: 400,
+          h: Math.max(1, m.detailBottom - m.detailTop),
+        },
+        gridBottom: m.gridBottom,
+        hintTop: m.hintTop,
+      };
+    },
     /**
      * 第 `index` 个技能格的圆心（逻辑坐标）—— 验证脚本注入真实点击用。
      *

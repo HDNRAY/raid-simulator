@@ -29,6 +29,7 @@ import { Label, type PixiCtor } from '../primitives';
 import { PALETTE } from '../../render/theme';
 import { UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP, clampUiScale } from '../../render/scaling';
 import { uiScaleSliderRect } from './logic';
+import { scaledFont } from './settingsScale';
 import type { TranslateFn } from '../../i18n/translator';
 
 export interface ScaleSliderOptions {
@@ -62,7 +63,7 @@ export class ScaleSlider {
     this.name = new Label(pixi, {
       x: rect.x,
       y: rect.y,
-      size: FONT.body,
+      size: scaledFont(FONT.body),
       color: PALETTE.text,
       anchorY: 0.5,
     });
@@ -74,7 +75,7 @@ export class ScaleSlider {
     this.value = new Label(pixi, {
       x: rect.x + rect.w,
       y: rect.y,
-      size: FONT.body,
+      size: scaledFont(FONT.body),
       color: PALETTE.text,
       anchorX: 1,
       anchorY: 0.5,
@@ -82,6 +83,13 @@ export class ScaleSlider {
 
     this.root.addChild(this.gfx, this.name.root, this.value.root);
     this.root.visible = false;
+    this.redraw();
+  }
+
+  /** **UI 缩放变了**：这一行的位置不跟 k，只有字号跟。 */
+  relayout(): void {
+    this.name.setSize(scaledFont(FONT.body));
+    this.value.setSize(scaledFont(FONT.body));
     this.redraw();
   }
 

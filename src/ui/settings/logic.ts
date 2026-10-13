@@ -24,11 +24,27 @@
  * 共享几何常量（**叶子模块**，见那里的说明 —— 留在这会造循环依赖）。
  * 转发出去，外部 import 路径不变。
  */
-import { SETTINGS_PANEL, RESET_BUTTON, TOUCH_PREVIEW, TOUCH_RESET_BUTTON, OPERATION_MODE_ROW } from './settingsGeometry';
 import { MNEMONIC_KEYS } from './keyNames';
 import type { OperationMode } from '../../render/platform';
 import { OPERATION_MODE_ORDER } from './operationModeRow';
 import { pickerCellAt, pickerMetrics } from './touchPickerLayout';
+/**
+ * ⚠️ **缩放后的几何**（这一轮加的 UI 缩放）—— 命中测试与绘制必须读**同一份**，
+ * 所以实现在 `./settingsScale`（唯一写入路径 + 当前读数都在那里），
+ * 本文件只 import 自己算命中要用的那几个，并把外部要的**转发**出去。
+ */
+import {
+  closeButtonRect,
+  insidePanel,
+  keyCellRect,
+  gridCapacityFor,
+  gridMetricsFor,
+  modeButtonRect,
+  resetButtonRect,
+  sliderRect,
+  tabRect,
+  touchResetButtonRect,
+} from './settingsScale';
 /**
  * ⚠️ `tab` 的**可见集合**是"按从哪打开取值"的（用户 2026-10-12：
  * "首页点开的设置，可以不要 按键tab"），真相在 `./tabs`。这里只转发类型，
@@ -68,9 +84,48 @@ export {
   TOUCH_RESET_BUTTON,
   TOUCH_PICKER,
   OPERATION_MODE_ROW,
-  hintLineY,
   bottomAreaTop,
 } from './settingsGeometry';
+/**
+ * **缩放后的几何**（矩形 + 网格度量 + 行位置）—— 实现收在 `./settingsScale`，
+ * 这里转发，外部 import 路径不变。
+ *
+ * ⚠️ 转发的是**函数**（不是值）：缩放一变，同一份函数返回的矩形就跟着变
+ * —— 于是"命中测试"与"绘制"永远读的是同一个当前值。
+ */
+export {
+  closeButtonRect,
+  detailContentRect,
+  detailViewport,
+  gridBottomFor,
+  gridCapacityFor,
+  gridMetricsFor,
+  hintLineY,
+  insidePanel,
+  keyCellRect,
+  modeButtonRect,
+  modeLabelPos,
+  resetButtonRect,
+  sliderRect,
+  tabRect,
+  touchPickerArea,
+  touchPreviewArcBox,
+  touchPreviewCaptionPos,
+  touchResetButtonRect,
+} from './settingsScale';
+export type { MetricsRect, ScaledGridMetrics, SettingsMetrics } from './settingsScale';
+/** tab 行 / 关闭按钮的**底座常量**（`SettingsFrame` 从本文件取）。 */
+export { TAB_BAR, CLOSE_BUTTON } from './settingsGeometry';
+/**
+ * ⚠️ 两个**老名字**：`operationModeRect` / `operationModeLabelPos` 是
+ * 「通用」页操作方式选择器的几何，`ModeSwitch` 从本文件 import 它们。
+ * 实现搬到了 `./settingsScale`（新名字是 `modeButtonRect` / `modeLabelPos`），
+ * 这里转发老名字，调用点不用动。
+ */
+export {
+  modeButtonRect as operationModeRect,
+  modeLabelPos as operationModeLabelPos,
+} from './settingsScale';
 /**
  * 操作方式选择器的**顺序与文案**（`./operationModeRow`）—— 命中测试、
  * 绘制、面板三处都要那张表，转发一次省得各写一遍路径。
@@ -92,63 +147,26 @@ export { INITIAL_FOCUS, cycleZone, moveFocus, resolveActivate } from './focus';
 export { visibleTabs, preferredTab, tabAt, tabIsVisible, ALL_SETTINGS_TABS } from './tabs';
 export type { SettingsOrigin, SettingsTab } from './tabs';
 /**
- * ⚠️ 既 import 又 export：本文件内部要用它们（`keyGridStateOf`
- * 之类），而外部 import 路径不变。`export ... from` 不产生本地绑定。
+ * ⚠️ **格阵几何**（`KEY_GRID_CAPACITY` / `keyGridMetrics` / `rowsCapacity`）
+ * 的实现收在 `./settingsScale`（缩放后的行高**只有**那一处），
+ * `./keyGridLayout` 转发老名字。这里 import 自己算命中要用的两个，
+ * 并把外部要的转发出去。
  */
-import {
-  KEY_GRID_CAPACITY,
-  keyCellRect,
-  keyGridMetrics,
-  rowsCapacity,
-  type GridMetrics,
-} from './keyGridLayout';
 import { UI_SCALE_MAX, UI_SCALE_MIN, clampUiScale } from '../../render/scaling';
 
 /* ------------------------------------------------------------------ *
  * 几何
- * ------------------------------------------------------------------ */
-
-
-export const TAB_BAR = { y: 40, w: 88, h: 30, gap: 8, x: 16 } as const;
-/**
- * 键位行的几何。
+ * ------------------------------------------------------------------ *
+ * ⚠️ 这一块的**实现在 `./settingsScale`**（这一轮加了 UI 缩放：几何现在
+ * 依赖"面板能用多大"，那是 `settingsScale` 的唯一关注点）。
  *
- * `h: 30` 而不是 26：技能名是**中文单字**，而中文字形比拉丁字母高
- * （没有 x-height 那种短字框）。26px 行高配 15px 字体时，
- * 字的上下会被行的边界压住 —— 实测 `getBounds()` 只报 16px 高，
- * 但实际字形更高，所以看起来"被裁切"。
- *
- * 留出 30px 之后有足够余量，同时每行的 `textY` 再往下偏 2px，
- * 让视觉重心落在行的中间而不是贴着上沿。
- */
-/**
- * 键位行的几何。
- *
- * `h: 30` 而不是 26：技能名是**中文单字**，字形比拉丁字母高。
- * `textY: 6` 让文字在行内垂直居中（行高 30、字高约 16，余量上下各 7）。
- */
-/**
- * 技能键位用 **grid** 排布。
- *
- * ------------------------------------------------------------------
- * 为什么从"一列清单"改成 grid
- * ------------------------------------------------------------------
- *
- * 早期是每行一个技能的单列清单。但技能会越来越多 ——
- * 单列的话 15 个技能就需要 15×30 = 450px 高度，弹窗会高得离谱。
- * grid 每行放 3 个，同样 15 个技能只要 5 行。
- *
- * 每个格子 = 技能字 + 它当前的按键，上下排布。
+ * 本文件**转发**，外部 import 路径不变 —— 与 `keyNames` / `rebind` /
+ * `focus` 同一做法。转发而不在这里实现，是因为命中测试（本文件）与绘制
+ * （`KeyGrid` / `SkillDetail` / …）**必须**读同一份缩放后的几何；
+ * 各算一份就是"看着能点、点不中"。
  */
 
-
-/** 提示文字那一行的顶部（在按钮上方）。 */
-/**
- * 「通用」页上的 UI 缩放 slider。
- *
- * ⚠️ 它**只在通用页**出现，而 tab 行/恢复按钮两页都有 ——
- * 所以焦点模型要能表达"这一页有没有 slider"（`hasSlider`）。
- */
+/** 「通用」页 UI 缩放滑块的行（面板相对）—— 位置**不跟 k**（不在竖向预算里）。 */
 export const UI_SCALE_SLIDER = {
   x: 16,
   /**
@@ -163,113 +181,21 @@ export const UI_SCALE_SLIDER = {
   h: 24,
 } as const;
 
-/** slider 在弹窗坐标系里的矩形。 */
-export function uiScaleSliderRect(): {
-  readonly x: number;
-  readonly y: number;
-  readonly w: number;
-  readonly h: number;
-} {
-  return {
-    x: SETTINGS_PANEL.x + UI_SCALE_SLIDER.x,
-    y: SETTINGS_PANEL.y + UI_SCALE_SLIDER.top,
-    w: UI_SCALE_SLIDER.w,
-    h: UI_SCALE_SLIDER.h,
-  };
-}
 
 
 
 
-
-
-export interface Rect {
-  readonly x: number;
-  readonly y: number;
-  readonly w: number;
-  readonly h: number;
-}
-
-export function tabRect(index: number): Rect {
-  return {
-    x: SETTINGS_PANEL.x + TAB_BAR.x + index * (TAB_BAR.w + TAB_BAR.gap),
-    y: SETTINGS_PANEL.y + TAB_BAR.y,
-    w: TAB_BAR.w,
-    h: TAB_BAR.h,
-  };
-}
 
 /**
- * 第 `index` 个技能格的矩形（按 grid 排布）。
- *
- * 先算"第几行第几列"，再换算坐标 —— 这样调用方只需要一个下标，
- * 不必知道列数。
+ * 一个矩形（画布逻辑坐标）—— 定义收在 `./settingsScale`，这里**既 import
+ * 又 export**（本文件的 `contains` 要用它，而外部 import 路径不变）。
+ * ⚠️ `export ... from` 不产生本地绑定，所以必须分两步写。
  */
-
-
-export function resetButtonRect(): Rect {
-  return {
-    x: SETTINGS_PANEL.x + RESET_BUTTON.x,
-    y: SETTINGS_PANEL.y + SETTINGS_PANEL.h - RESET_BUTTON.bottom - RESET_BUTTON.h,
-    w: RESET_BUTTON.w,
-    h: RESET_BUTTON.h,
-  };
-}
-
-/**
- * **触屏那一份**「恢复默认」的矩形（贴在键位预览下面）。
- *
- * ⚠️ 与 `resetButtonRect()` 是**两个块各自的按钮**（不再"按设备分流"）：
- * 哪个按钮被点，就恢复它所在那一块 —— 见 `settingsGeometry.RESET_BUTTON`
- * 里那段"为什么不再是同一个按钮"。
- */
-export function touchResetButtonRect(): Rect {
-  return {
-    x: SETTINGS_PANEL.x + TOUCH_RESET_BUTTON.x,
-    y: SETTINGS_PANEL.y + TOUCH_PREVIEW.top + TOUCH_PREVIEW.h + TOUCH_RESET_BUTTON.gap,
-    w: TOUCH_RESET_BUTTON.w,
-    h: TOUCH_RESET_BUTTON.h,
-  };
-}
-
-/**
- * 「通用」页**操作方式**选择器里第 `index` 个按钮的矩形（0 = 键盘、1 = 触屏）。
- *
- * ⚠️ 顺序就是 `ui/settings/operationMode.KEYS_VIEWS` 那张表 —— 命中测试与
- * 绘制都从它取，不各写一遍三元表达式。
- */
-export function operationModeRect(index: number): Rect {
-  return {
-    x:
-      SETTINGS_PANEL.x +
-      OPERATION_MODE_ROW.x +
-      index * (OPERATION_MODE_ROW.w + OPERATION_MODE_ROW.gap),
-    y: SETTINGS_PANEL.y + OPERATION_MODE_ROW.top,
-    w: OPERATION_MODE_ROW.w,
-    h: OPERATION_MODE_ROW.h,
-  };
-}
-
-/** 「操作方式」那行标签的位置（画布坐标，左上角）。 */
-export function operationModeLabelPos(): { readonly x: number; readonly y: number } {
-  return {
-    x: SETTINGS_PANEL.x + OPERATION_MODE_ROW.x,
-    y: SETTINGS_PANEL.y + OPERATION_MODE_ROW.labelTop,
-  };
-}
+import type { MetricsRect } from './settingsScale';
+export type Rect = MetricsRect;
 
 export function contains(rect: Rect, px: number, py: number): boolean {
   return px >= rect.x && px <= rect.x + rect.w && py >= rect.y && py <= rect.y + rect.h;
-}
-
-/** 点是否落在弹窗内（用于"点外部关闭"）。 */
-export function insidePanel(px: number, py: number): boolean {
-  return (
-    px >= SETTINGS_PANEL.x &&
-    px <= SETTINGS_PANEL.x + SETTINGS_PANEL.w &&
-    py >= SETTINGS_PANEL.y &&
-    py <= SETTINGS_PANEL.y + SETTINGS_PANEL.h
-  );
 }
 
 /* ------------------------------------------------------------------ *
@@ -377,9 +303,9 @@ export function hitTest(
      * ⚠️ 顺序**无所谓**（两者不重叠），但都排在 tab 判断之后 ——
      * 与老的滑块判定同一条纪律。
      */
-    if (contains(uiScaleSliderRect(), px, py)) return { kind: 'scaleSlider' };
+    if (contains(sliderRect(), px, py)) return { kind: 'scaleSlider' };
     for (const [index, mode] of OPERATION_MODE_ORDER.entries()) {
-      if (contains(operationModeRect(index), px, py)) return { kind: 'operationMode', mode };
+      if (contains(modeButtonRect(index), px, py)) return { kind: 'operationMode', mode };
     }
     return { kind: 'none' };
   }
@@ -416,8 +342,8 @@ export function hitTest(
    * ⚠️ 用**当前模式**的度量与容量 —— 渲染那边（`KeyGrid`）就是这么算的，
    * 两处必须同源。
    */
-  const metrics = keyGridMetrics(options.showKeyHints !== false);
-  const capacity = rowsCapacity(metrics);
+  const metrics = gridMetricsFor(options.showKeyHints !== false);
+  const capacity = gridCapacityFor(metrics);
   for (const [i, skillId] of options.rowSkillIds.entries()) {
     if (i >= capacity) break;
     if (contains(keyCellRect(i, metrics), px, py)) return { kind: 'keyRow', skillId };
@@ -518,34 +444,21 @@ export function resolveKeyAction(key: string, capturing: boolean): KeyAction {
 }
 
 /**
- * 右上角的**关闭按钮**。
- *
- * ⚠️ 原先「关闭」只是一个 `Label`，**完全没有命中测试** ——
- * 点它什么也不会发生（需求："设置弹窗里的『关闭』点了没反应"）。
- * 点面板外的空白能关，但那不是玩家会去点的地方。
- *
- * 给一个比文字略大的点击区（文字约 24×16），让它好点中。
- */
-export const CLOSE_BUTTON = { right: 12, top: 7, w: 40, h: 22 } as const;
-
-export function closeButtonRect(): Rect {
-  return {
-    x: SETTINGS_PANEL.x + SETTINGS_PANEL.w - CLOSE_BUTTON.right - CLOSE_BUTTON.w,
-    y: SETTINGS_PANEL.y + CLOSE_BUTTON.top,
-    w: CLOSE_BUTTON.w,
-    h: CLOSE_BUTTON.h,
-  };
-}
-
-
-/**
  * 详情区（可滚的那块）在**画布坐标**里的矩形。
  *
- * ⚠️ 实现在 `./keyGridLayout.skillDetailViewport()` —— 它的顶边是"格阵
- * 下沿"，要知道网格度量；而 `logic.ts` 已经向下依赖 `keyGridLayout`
- * （网格几何那一摊），所以这里**转发**，外部 import 路径不变。
+ * ⚠️ 实现在 `./settingsScale.detailViewport()` —— 它的顶边是"格阵下沿"，
+ * 而格阵行高**跟缩放走**，所以那一份几何是缩放模型的一部分。
+ * 这里只保留**老名字**转发，外部 import 路径不变。
  */
-export { skillDetailViewport as skillDetailRect } from './keyGridLayout';
+export { detailViewport as skillDetailRect } from './settingsScale';
+
+/**
+ * 「通用」页 UI 缩放滑块的矩形 —— **老名字**（`ScaleSlider` / `panelInput`
+ * 都从本文件 import 它）。实现是 `./settingsScale.sliderRect()`。
+ */
+export function uiScaleSliderRect(): Rect {
+  return sliderRect();
+}
 
 /**
  * 鼠标点击滑块时，由**横坐标**反算出倍数。
@@ -555,7 +468,7 @@ export { skillDetailViewport as skillDetailRect } from './keyGridLayout';
  * 结果**钳到合法范围并对齐步长**（与键盘调值是同一套约束）。
  */
 export function uiScaleFromPointer(px: number): number {
-  const rect = uiScaleSliderRect();
+  const rect = sliderRect();
   const trackX = rect.x + 4;
   const trackW = rect.w - 8;
   const t = trackW <= 0 ? 0 : (px - trackX) / trackW;
@@ -564,8 +477,9 @@ export function uiScaleFromPointer(px: number): number {
 }
 
 /**
- * 网格几何搬到了 `./keyGridLayout`（几何与交互解析是两件事，而
- * `logic.ts` 顶到了 700 行上限）。这里**转发**，外部 import 不变。
+ * 网格几何（容量 / 度量 / 格子矩形）的实现收在 `./settingsScale`
+ * （缩放后的行高**只有**那一处）。这里保留**老名字**转发，
+ * 外部 import 不变 —— `./keyGridLayout` 是同一条转发。
  */
-export { KEY_GRID_CAPACITY, keyCellRect, keyGridMetrics, rowsCapacity };
-export type { GridMetrics };
+export { KEY_GRID_CAPACITY, keyGridMetrics, rowsCapacity } from './keyGridLayout';
+export type { GridMetrics } from './keyGridLayout';

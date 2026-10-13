@@ -459,9 +459,20 @@ describe('标签只出现在详情区，不占技能格', () => {
     // （实现已抽到 `SkillDetail.ts`，所以整层拼接后再匹配）
     const detail = readFileSync(new URL('../../src/ui/settings/SkillDetail.ts', import.meta.url), 'utf8');
     const all = src + detail;
-    /** ⚠️ 标签与**名字同一行**（`line(0,…)`）—— 需求"tags 放右边"。 */
-    expect(all).toMatch(/this\.tags = line\(0, FONT\.tiny/);
-    expect(all).toMatch(/this\.tags\.set\(tags\)/);
+    /**
+     * ⚠️ 标签与**名字同一行**（`line(0,…)`）—— 需求"tags 放右边"。
+     *
+     * ⚠️ 2026-10-13：字号那一段被包进了 `scaledFont(...)`（面板要响应 UI
+     * 缩放）—— 断言因此放宽一格：**仍是 `line(0, …)`、仍是 `FONT.tiny`**，
+     * 中间那层缩放包装不算改变这条不变量。
+     */
+    expect(all).toMatch(/this\.tags = line\(0, scaledFont\(FONT\.tiny\)/);
+    /**
+     * ⚠️ 2026-10-13：赋值改走 `applyText(...)`（换技能与**缩放**两条路共用
+     * 一次摆位）—— 断言于是写成"tags 一定被 set"，而不是它恰好在 `render`
+     * 里被 set（那是实现细节，不是这条不变量）。
+     */
+    expect(all).toMatch(/this\.tags\.set\(/);
     /**
      * ⚠️ 文案 key 现在是**完整 i18n key**（不再拼 `settings.hintTags.`
      * 前缀）：控制类提示取的是那个 debuff 自己的 `nameKey`

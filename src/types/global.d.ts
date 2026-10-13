@@ -81,6 +81,35 @@ declare global {
         setButtonFocused(focused: boolean): void;
         /** 齿轮按钮此刻是否持有键盘焦点。 */
         buttonFocused(): boolean;
+        /**
+         * **面板的缩放状态**：`uiScale` 是滑块上那个值，`panelScale` 是面板
+         * **实际**用的系数。
+         *
+         * ⚠️ 两个数**不是**同一个 —— 竖向预算把面板钳在 `PANEL_SCALE_MAX`
+         * （`ui/settings/settingsScale.ts` 文件头写着推导）。验证脚本两个都要
+         * 断言：只报一个就分不清"滑块没生效"与"钳位生效了"。
+         */
+        panelScale(): { readonly uiScale: number; readonly panelScale: number };
+        /**
+         * 面板里的**可见文字**（字号 / 世界坐标 / 前 24 字）。
+         *
+         * ⚠️ 这是"字到底变大了没有"的唯一硬证据：截图上 1.2 与 1.6 的差别
+         * 看不出来，而源码里那个 `scaledFont(...)` 也证明不了这一帧真的
+         * 落成了那个值（字号是各部件在 `relayout()` 时写进 Pixi 的）。
+         */
+        panelText(): readonly {
+          readonly text: string;
+          readonly fontSize: number;
+          readonly x: number;
+          readonly y: number;
+        }[];
+        /** 面板外框 + 详情区矩形（"外框没动、没溢出画布"的判据）。 */
+        panelLayout(): {
+          readonly panel: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+          readonly detail: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+          readonly gridBottom: number;
+          readonly hintTop: number;
+        };
       };
       probe(): {
         tick: number;

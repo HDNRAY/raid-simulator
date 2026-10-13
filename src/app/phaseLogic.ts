@@ -144,6 +144,76 @@ export const CONTROL_VISIBILITY = {
 } as const;
 
 /**
+ * **整屏界面的键** —— stage 上"一屏一棵"的那几棵不透明满屏子树。
+ *
+ * ⚠️ 它与 `Phase` **是两个类型**（虽然现在值恰好一一对应）：`phase` 是
+ * "现在在哪一屏"，而"哪一屏由哪个相位点亮"是下面那张表**写出来的**事实。
+ * 拆开之后，"两个相位共用一屏"这种设计是**表里多写一行**，而不是一个
+ * 必须先改类型才能表达的东西。
+ */
+export type ScreenKey = 'home' | 'characterSelect' | 'prepare' | 'battle';
+
+/**
+ * **哪个相位点亮哪一屏** —— 这是"谁该可见"的**唯一判据**。
+ *
+ * ==================================================================
+ * 为什么它是一张表，而不是 `applyPhase` 里的四条 `phase === '…'`
+ * ==================================================================
+ *
+ * 原先 `applyPhase` 里写的是：
+ *
+ * ```ts
+ * state.home?.setVisible(phase === 'home');
+ * state.select?.setVisible(phase === 'characterSelect');
+ * state.prepare?.setVisible(phase === 'prepare');
+ * d.scene.root.visible = phase === 'battle';
+ * ```
+ *
+ * 它**只有一处写入点**（这点一直是对的），但"哪一屏对应哪个相位"这件事
+ * 被摊成了四段各自的字面量。加一个相位时，编译器**不会**提醒任何一处
+ * —— 表现是"切过去之后一屏都不显示"（黑屏），而不是编译错误。
+ *
+ * 收成 `Record<Phase, ScreenKey>` 之后：`Phase` 加一个值 → **编译期**
+ * 立刻要求这里补一行。这是"判据只有一处"从纪律变成机器检查的那一步。
+ *
+ * ⚠️ **不导出这张表本身**：导出的判据只有 `screenVisibilityOf`
+ * （一份**完整的**显隐向量）。表 + 一个"从表摊平"的函数都暴露出去，
+ * 就又多了一条可能被绕过的路。
+ *
+ * ⚠️ **`applyPhase` 只许读 `screenVisibilityOf`**：任何地方再手写一句
+ * `setVisible(phase === '…')` 就是把这张表拆成了两份真相 —— 而两份真相
+ * 漂移的样子正是"两个界面同时可见"（本仓库踩过的那类）。
+ */
+const STAGE_SCREEN: Readonly<Record<Phase, ScreenKey>> = {
+  home: 'home',
+  characterSelect: 'characterSelect',
+  prepare: 'prepare',
+  battle: 'battle',
+};
+
+/**
+ * 某个相位下**四个整屏界面各自的显隐**（`applyPhase` 把这份结果原样落实）。
+ *
+ * 之所以给的是"整份显隐"而不是"哪一屏在场"：`applyPhase` 需要**同时**
+ * 说出"谁可见"与"谁不可见"（只写可见的那一个，其余就会停在上一屏的
+ * 状态上 —— `setVisible(false)` 必须被显式执行）。于是"唯一判据"必须是
+ * 一份**完整的**显隐向量。
+ *
+ * ⚠️ 不变量（`tests/unit/phaseVisibility.test.ts` 盯着它）：**每个相位
+ * 恰好点亮一个界面**。两个同时为真 = 两个整屏界面重叠（本仓库的经典
+ * bug 形状）；一个都不为真 = 黑屏。
+ */
+export function screenVisibilityOf(phase: Phase): Readonly<Record<ScreenKey, boolean>> {
+  const onStage = STAGE_SCREEN[phase];
+  return {
+    home: onStage === 'home',
+    characterSelect: onStage === 'characterSelect',
+    prepare: onStage === 'prepare',
+    battle: onStage === 'battle',
+  };
+}
+
+/**
  * 设置面板是**从哪打开的** —— 决定它能显示哪几页。
  *
  * ==================================================================

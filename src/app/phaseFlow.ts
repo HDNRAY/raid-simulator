@@ -31,7 +31,7 @@
 import { BOSS_POOL, resolveBossId, resolvePlayerId } from '../data/roster';
 import { createRunSession } from './runSession';
 import { switchPlayerProfile } from './playerKeys';
-import { phaseFromEscape } from './phaseLogic';
+import { phaseFromEscape, screenVisibilityOf } from './phaseLogic';
 import type { BattleLoop } from './battleLoop';
 import type { GameState } from './flow';
 import type { ContentRegistry } from '../core/content/registry';
@@ -120,10 +120,18 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
    */
   const applyPhase = (phase: 'home' | 'characterSelect' | 'prepare' | 'battle'): void => {
     state.phase = phase;
-    state.home?.setVisible(phase === 'home');
-    state.select?.setVisible(phase === 'characterSelect');
-    state.prepare?.setVisible(phase === 'prepare');
-    d.scene.root.visible = phase === 'battle';
+    /**
+     * ⚠️ **判据只有一处**：`phase → 四屏显隐`整块在
+     * `phaseLogic.screenVisibilityOf`（纯函数、有单测）。这里只负责
+     * **落实**（把四个布尔写给四个对象），不再自己写 `phase === '…'`
+     * —— 那会把"哪一屏对应哪个相位"拆成两份真相，而两份真相漂移的样子
+     * 正是"两个界面同时可见"。
+     */
+    const show = screenVisibilityOf(phase);
+    state.home?.setVisible(show.home);
+    state.select?.setVisible(show.characterSelect);
+    state.prepare?.setVisible(show.prepare);
+    d.scene.root.visible = show.battle;
   };
 
   /**

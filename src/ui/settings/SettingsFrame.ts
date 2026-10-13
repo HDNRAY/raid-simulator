@@ -16,6 +16,7 @@ import { Label, Panel, type PixiCtor } from '../primitives';
 import { PALETTE } from '../../render/theme';
 import type { TranslateFn } from '../../i18n/translator';
 import { ALL_SETTINGS_TABS, CLOSE_BUTTON, SETTINGS_PANEL, mnemonicKeyOf, tabRect } from './logic';
+import { currentSettingsMetrics, scaledFont } from './settingsScale';
 /**
  * ⚠️ **可见的 tab 是参数**（首页只有「通用」）：外框不能自己去算，
  * 那会造出第二份判据（`ui/settings/tabs.ts` 的 `visibleTabs` 才是真相）。
@@ -52,6 +53,8 @@ export class SettingsFrame {
   readonly closeHint: Label;
 
   private readonly title: Label;
+  /** 底板（缩放不改外框，所以它建一次就够 —— 见 `settingsScale` 文件头）。 */
+  private readonly panel: Panel;
   /**
    * tab 按钮按**容量**建好，显隐由 `update` 决定 —— 于是"首页少一个 tab"
    * 不需要销毁/重建 Pixi 对象（那正是"切来源后画面错位"的来源）。
@@ -63,10 +66,15 @@ export class SettingsFrame {
     private readonly translate: TranslateFn,
   ) {
     this.root = new pixi.Container();
-    const x = SETTINGS_PANEL.x;
-    const y = SETTINGS_PANEL.y;
+    const m = currentSettingsMetrics();
+    const x = m.panelX;
+    const y = m.panelY;
 
-    const panel = new Panel(pixi, {
+    /**
+     * ⚠️ 面板底座**建一次**（缩放不改外框 —— 理由写在 `settingsScale` 文件头），
+     * 所以这里是 `Panel` 而不是每帧重画。
+     */
+    this.panel = new Panel(pixi, {
       x,
       y,
       w: SETTINGS_PANEL.w,
@@ -79,18 +87,18 @@ export class SettingsFrame {
     this.title = new Label(pixi, {
       x: x + 16,
       y: y + 10,
-      size: FONT.title,
+      size: scaledFont(FONT.title),
       color: PALETTE.text,
       kai: true,
     });
     this.closeHint = new Label(pixi, {
       x: x + SETTINGS_PANEL.w - CLOSE_BUTTON.right,
       y: y + CLOSE_BUTTON.top + 3,
-      size: FONT.small,
+      size: scaledFont(FONT.small),
       color: PALETTE.textDim,
       anchorX: 1,
     });
-    this.root.addChild(panel.root, this.title.root, this.closeHint.root);
+    this.root.addChild(this.panel.root, this.title.root, this.closeHint.root);
 
     /* ---- tab 按钮 ---- */
     /**
@@ -105,7 +113,7 @@ export class SettingsFrame {
       const label = new Label(pixi, {
         x: rect.x + rect.w / 2,
         y: rect.y + 6,
-        size: FONT.body,
+        size: scaledFont(FONT.body),
         color: PALETTE.textDim,
         anchorX: 0.5,
         kai: true,
@@ -116,6 +124,29 @@ export class SettingsFrame {
 
     this.title.set(this.translate('settings.title'));
     this.closeHint.set(this.translate('settings.close'));
+  }
+
+  /**
+   * **UI 缩放变了**：标题 / 关闭 / 各 tab 的字号与落位重排。
+   *
+   * ⚠️ 外框（`Panel`）**不动**：面板底座宽高不跟 k（画布只比它高 20px ——
+   * 见 `settingsScale` 文件头那段"为什么不能整体乘系数"）。
+   * 动的只有字与 tab 内文字的位置。
+   */
+  relayout(): void {
+    const m = currentSettingsMetrics();
+    this.title.root.x = m.panelX + 16;
+    this.title.root.y = m.panelY + 10;
+    this.title.setSize(scaledFont(FONT.title));
+    this.closeHint.root.x = m.panelX + SETTINGS_PANEL.w - CLOSE_BUTTON.right;
+    this.closeHint.root.y = m.panelY + CLOSE_BUTTON.top + 3;
+    this.closeHint.setSize(scaledFont(FONT.small));
+    for (const [i, button] of this.tabButtons.entries()) {
+      const rect = tabRect(i);
+      button.label.root.x = rect.x + rect.w / 2;
+      button.label.root.y = rect.y + 6;
+      button.label.setSize(scaledFont(FONT.body));
+    }
   }
 
   /**

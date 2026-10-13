@@ -72,7 +72,12 @@ import { FONT } from '../layout';
 import { Label, type PixiCtor } from '../primitives';
 import { wrapText, type MeasureText } from './wrapText';
 import { FONT_FAMILY, PALETTE, css } from '../../render/theme';
-import { skillDetailContentRect, skillDetailViewport } from './keyGridLayout';
+import {
+  currentSettingsMetrics,
+  detailContentRect,
+  detailViewport,
+  scaledFont,
+} from './settingsScale';
 import { DESC_MAX_LINES, contentRowVisible } from './detailWindow';
 import {
   clampOffset,
@@ -98,8 +103,13 @@ import type { TranslateFn } from '../../i18n/translator';
  * Pixi 的 `Text` 实际占高远大于字号：13px 的字量出来是 **22px**
  * （行高 ≠ 字号）。原先四行用 22 就是三次实测（14 / 15 / 18 都叠字）的
  * 结果。现在说明会折行，所以这个数同时是"折行后的行距"与"滚动的单位"。
+ *
+ * ⚠️ 它现在**跟 UI 缩放走**（`settingsScale` 的 `lineH`）—— 字号放大了
+ * 行距不放大就会叠字，而叠字是"看不清"而不是"紧凑"。基准仍是那个量出来的 22。
  */
-const LINE_H = 22;
+function lineH(): number {
+  return currentSettingsMetrics().lineH;
+}
 
 /** 滚动条：轨道宽 / 最小滑块高（与复盘面板同一套视觉参数）。 */
 const SCROLLBAR_W = 3;
@@ -123,7 +133,7 @@ const SCROLLBAR_PAD = 10;
  * **把最后一行裁掉**（差的就是那 2×padding）。
  */
 function viewRows(): number {
-  return Math.max(1, Math.floor(skillDetailContentRect().h / LINE_H));
+  return Math.max(1, Math.floor(detailContentRect().h / lineH()));
 }
 
 export class SkillDetail {
@@ -163,12 +173,21 @@ export class SkillDetail {
   private dragCarry = 0;
   /** 量文本宽度的注入（折行用；`wrapText` 不认识 Pixi）。 */
   private readonly measure: MeasureText;
+  /**
+   * 上一次渲染的**原始文本**（未折行）—— `relayout()` 重折时要用它。
+   *
+   * ⚠️ 存的是"说明原文 + 名字 + 标签 + 代价"，不是折好的行：缩放一变，
+   * 折行结果就作废了（行是拿旧字号量出来的）。
+   */
+  private last:
+    | { readonly name: string; readonly tags: string; readonly stats: string; readonly desc: string }
+    | undefined;
 
   constructor(
     pixi: PixiCtor,
     private readonly translate: TranslateFn,
   ) {
-    const inner = skillDetailContentRect();
+    const inner = detailContentRect();
     this.root = new pixi.Container();
 
     /** 背景 + 滚动条：压在文字下面（先 addChild）。 */
@@ -185,24 +204,24 @@ export class SkillDetail {
     this.root.addChild(this.content);
 
     const line = (row: number, size: number, color: number): Label =>
-      new Label(pixi, { x: 0, y: row * LINE_H, size, color });
-    this.name = line(0, FONT.body, PALETTE.text);
+      new Label(pixi, { x: 0, y: row * lineH(), size, color });
+    this.name = line(0, scaledFont(FONT.body), PALETTE.text);
     /**
      * 标签行取**优先级最高的那一个**标签的颜色 —— 一行小字里混两种颜色
      * 会更乱，而标签本来就是"最该注意的那条"提示。
      */
-    this.tags = line(0, FONT.tiny, PALETTE.douqi.bright);
+    this.tags = line(0, scaledFont(FONT.tiny), PALETTE.douqi.bright);
     /**
      * 代价行（消耗 · 冷却 · 施放）。
      *
      * ⚠️ 初始 y 只是占位：真的位置在 `render` 里按**说明折了几行**算
      * （说明可能占 1~4 行）。
      */
-    this.stats = line(2, FONT.tiny, PALETTE.textDim);
+    this.stats = line(2, scaledFont(FONT.tiny), PALETTE.textDim);
     this.moreHint = new Label(pixi, {
       x: 0,
       y: 0,
-      size: FONT.tiny,
+      size: scaledFont(FONT.tiny),
       color: PALETTE.textFaint,
       anchorX: 1,
     });
@@ -212,7 +231,7 @@ export class SkillDetail {
      */
     this.measureText = new pixi.Text({
       text: '',
-      style: { fontFamily: FONT_FAMILY, fontSize: FONT.tiny },
+      style: { fontFamily: FONT_FAMILY, fontSize: scaledFont(FONT.tiny) },
     });
     this.measure = (text) => {
       this.measureText.text = text;
@@ -223,7 +242,7 @@ export class SkillDetail {
         text: '',
         style: {
           fontFamily: FONT_FAMILY,
-          fontSize: FONT.tiny,
+          fontSize: scaledFont(FONT.tiny),
           fill: css(PALETTE.textDim),
         },
       });
@@ -257,7 +276,7 @@ export class SkillDetail {
    * 两处各减一次就会让最长的那行压在滚动条上。
    */
   private descWidth(): number {
-    return Math.max(1, skillDetailContentRect().w - SCROLLBAR_PAD);
+    return Math.max(1, detailContentRect().w - SCROLLBAR_PAD);
   }
 
   /** 能不能滚（内容比可视区多）。 */
@@ -295,8 +314,97 @@ export class SkillDetail {
     this.offset = 0;
     this.drag = null;
     this.frame.clear();
-    this.content.y = skillDetailContentRect().y;
+    this.content.y = detailContentRect().y;
     this.content.visible = false;
+  }
+
+  /**
+   * **缩放变了**：重设字号 → 重新量宽 → 重新折行 → 重新摆位。
+   *
+   * ⚠️ 折行**必须**重来：行是拿 `measure` 量出来的，字号一变，同一段文字
+   * 折的行数就变了（不重折 = 按旧字号折、按新字号画 → 长行溢出）。
+   *
+   * ⚠️ 字号**只在真的变了才设**（`Label.setSize` 内部短路，Pixi 的
+   * `fontSize` 一变就重新光栅化纹理 —— 那是每帧路径上不能有的开销）。
+   */
+  relayout(): void {
+    const size = scaledFont(FONT.tiny);
+    this.name.setSize(scaledFont(FONT.body));
+    this.tags.setSize(size);
+    this.stats.setSize(size);
+    this.moreHint.setSize(size);
+    this.measureText.style.fontSize = size;
+    for (const t of this.descLines) t.style.fontSize = size;
+    if (this.last === undefined) return;
+    /** ⚠️ 缩放变了但技能没变：**保留**当前滚动位置（`resetScroll: false`）。 */
+    this.applyText(this.last, false);
+  }
+
+  /** 按**当前字号**把一段说明折成行（`render` 与 `relayout` 共用）。 */
+  private wrapDescription(desc: string): readonly string[] {
+    return wrapText({
+      text: desc,
+      width: this.descWidth(),
+      measure: this.measure,
+      /**
+       * ⚠️ **放开**（2026-10-12 用户："放开"）：上限**只**由
+       * `DESC_MAX_LINES` 决定。
+       *
+       * 修之前这里是 `Math.min(DESC_MAX_LINES, viewRows() - 2)` ——
+       * 那个 `viewRows() - 2` 让 `total ≤ viewRows()` **结构上恒成立**，
+       * 于是 `scrollable()` 永远为假：滚轮 / 拖拽 / 滚动条 / 方向提示
+       * **四样全都走不到**，超长说明只是被静默截断。推导见
+       * `./detailWindow` 的文件头。
+       *
+       * ⚠️ 放开之后裁剪**不能再靠折行兜**（行数真的会比一屏多）——
+       * 改由 `clipToWindow` 按 `offset` 逐行判可见性，见那里。
+       */
+      maxLines: DESC_MAX_LINES,
+    });
+  }
+
+  /**
+   * 把**文本与摆位**套上去（换技能 / 缩放变了都走它）。
+   *
+   * ⚠️ 标签行（tags）的 x 依赖名字的**实际渲染宽度**，所以它在 `this.name`
+   * 设完之后才定位 —— 顺序反了会用到上一帧的宽度。
+   */
+  private applyText(
+    t: { readonly name: string; readonly tags: string; readonly stats: string; readonly desc: string },
+    /** 换了技能 = `true`（滚回顶部）；缩放变了 = `false`（留在原处）。 */
+    resetScroll: boolean,
+  ): void {
+    this.name.set(t.name);
+    this.tags.set(t.tags);
+    this.stats.set(t.stats);
+    this.wrapped = this.wrapDescription(t.desc);
+
+    const TAG_GAP = 10;
+    this.tags.root.x = this.name.root.width + TAG_GAP;
+    this.tags.root.y = 0;
+
+    /**
+     * ⚠️ 代价行必须**按说明折了几行**往下摆 —— 写死 `y = LINE_H * 2`
+     * 会在说明折成 2 行时被压住（这一轮踩过）。
+     */
+    const descRows = this.descRows();
+    this.stats.root.y = lineH() * (1 + descRows);
+    for (let i = 0; i < this.descLines.length; i += 1) {
+      const line = this.descLines[i];
+      if (line === undefined) continue;
+      /** ⚠️ 超出折行数的行**清空**（否则会留着上一个技能的尾巴）。 */
+      line.text = this.wrapped[i] ?? '';
+      line.y = lineH() * (1 + i);
+    }
+
+    this.totalRows = this.rowsOf(descRows);
+    /**
+     * ⚠️ 换了技能必须**滚回顶部**（否则短说明会停在上一个的滚动位置上）；
+     * 只是缩放变了则**保留**位置（`clampOffset` 会按新的行数钳好）。
+     */
+    this.offset = clampOffset(resetScroll ? 0 : this.offset, this.totalRows, viewRows());
+    this.applyOffset();
+    this.root.visible = true;
   }
 
   /** 显示某个技能的详情。 */
@@ -341,64 +449,12 @@ export class SkillDetail {
       .filter((x): x is string => x !== undefined && x !== '')
       .join('   ');
 
-    this.name.set(t(row.nameKey));
-    this.tags.set(tags);
-    this.stats.set(stats);
     /**
      * 说明**自己折行**（不靠 Pixi 的 `wordWrap`）—— 折出来的行要**逐行
      * 画**，这样才能只画看得见的那几行（裁剪不依赖渲染器，见 `./wrapText`）。
      */
-    this.wrapped = wrapText({
-      text: desc,
-      width: this.descWidth(),
-      measure: this.measure,
-      /**
-       * ⚠️ **放开**（2026-10-12 用户："放开"）：上限**只**由
-       * `DESC_MAX_LINES` 决定。
-       *
-       * 修之前这里是 `Math.min(DESC_MAX_LINES, viewRows() - 2)` ——
-       * 那个 `viewRows() - 2` 让 `total ≤ viewRows()` **结构上恒成立**，
-       * 于是 `scrollable()` 永远为假：滚轮 / 拖拽 / 滚动条 / 方向提示
-       * **四样全都走不到**，超长说明只是被静默截断。推导见
-       * `./detailWindow` 的文件头。
-       *
-       * ⚠️ 放开之后裁剪**不能再靠折行兜**（行数真的会比一屏多）——
-       * 改由 `clipToWindow` 按 `offset` 逐行判可见性，见那里。
-       */
-      maxLines: DESC_MAX_LINES,
-    });
-
-    /**
-     * ⚠️ 标签的 x 依赖名字的**实际渲染宽度**（`root.width`），所以必须
-     * 先 `set` 名字再定位标签 —— 顺序反了会用到上一帧的宽度。
-     *
-     * 需求："设置里选中的技能，里面显示 tags 会把描述往下推，我觉得不好，
-     * 优化一下 layout，比如 tags 放右边，或者下面。" → 放右边，不占行。
-     */
-    const TAG_GAP = 10;
-    this.tags.root.x = this.name.root.width + TAG_GAP;
-    this.tags.root.y = 0;
-
-    /**
-     * ⚠️ 代价行必须**按说明折了几行**往下摆 —— 写死 `y = LINE_H * 2`
-     * 会在说明折成 2 行时被压住（这一轮踩过）。
-     */
-    const descRows = this.descRows();
-    this.stats.root.y = LINE_H * (1 + descRows);
-    for (let i = 0; i < this.descLines.length; i += 1) {
-      const line = this.descLines[i];
-      if (line === undefined) continue;
-      /** ⚠️ 超出折行数的行**清空**（否则会留着上一个技能的尾巴）。 */
-      line.text = this.wrapped[i] ?? '';
-      line.y = LINE_H * (1 + i);
-    }
-
-    this.totalRows = this.rowsOf(descRows);
-    /** 换了技能：滚回顶部（否则短说明会停在上一个的滚动位置上）。 */
-    this.offset = clampOffset(0, this.totalRows, viewRows());
-    this.applyOffset();
-    this.drawFrame();
-    this.root.visible = true;
+    this.last = { name: t(row.nameKey), tags, stats, desc };
+    this.applyText(this.last, true);
   }
 
   /**
@@ -459,7 +515,7 @@ export class SkillDetail {
   private drawMoreHint(): void {
     if (!this.scrollable()) return;
     /** ⚠️ 摆在内框的右下角（外框那圈是 padding，提示贴到边上就白加了）。 */
-    const vp = skillDetailContentRect();
+    const vp = detailContentRect();
     /**
      * ⚠️ 按**当前偏移**选方向：滚到底时还说"往下滚"就是在骗人
      * （玩家会一直拖）。两条都在 `settings.*` 里（i18n 规范 I1）。
@@ -483,7 +539,7 @@ export class SkillDetail {
     const rows = viewRows();
     this.offset = clampOffset(this.offset, this.totalRows, rows);
     /** ⚠️ 从**内框**顶开始上移（留白不参与滚动 —— 它是边框，不是内容）。 */
-    this.content.y = skillDetailContentRect().y - this.offset * LINE_H;
+    this.content.y = detailContentRect().y - this.offset * lineH();
     this.clipToWindow();
     this.drawFrame();
   }
@@ -498,7 +554,7 @@ export class SkillDetail {
 
   /** 清空重画（面板每帧的 `redraw` 会调它）。 */
   private drawFrame(): void {
-    const vp = skillDetailViewport();
+    const vp = detailViewport();
     const g = this.frame;
     g.clear();
     this.moreHint.set('');
@@ -574,7 +630,7 @@ export class SkillDetail {
   pointerMove(pointerId: number, logicalY: number): void {
     const drag = this.drag;
     if (drag === null || pointerId !== drag.id) return;
-    const dy = (drag.logicalY - logicalY) / LINE_H;
+    const dy = (drag.logicalY - logicalY) / lineH();
     this.drag = { id: pointerId, logicalY };
     this.dragCarry += dy;
     const whole = Math.trunc(this.dragCarry);
