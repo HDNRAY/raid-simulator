@@ -61,6 +61,14 @@ export class BossCastBarPart implements FramePart {
      * 现在边框恒为红色（构造时定下），只界定"这是一条威胁读条"。
      */
     this.castBar.setNameColor(cast.interruptible ? PALETTE.interrupt.bright : 0x30c8d0);
+    /**
+     * ⚠️ **霸体 ⇒ 边框彩虹**（用户："霸体技能，能不能给边框搞个彩色渐变？"）。
+     * 判据用 `interruptImmune` 那条**状态**提示（而不是"能不能打断"）——
+     * 两者今天恰好等价，但语义不同：霸体是"打不断"，不可打断是"这招不让断"。
+     */
+    this.castBar.setArmored((cast.hintTags ?? []).includes('settings.hintTags.interruptImmune'));
+    /** ⚠️ **引导 ⇒ 进度条换色**（用户点名）。 */
+    this.castBar.setChannel(cast.channel === true);
     this.castBar.update(cast.progress);
   }
 }

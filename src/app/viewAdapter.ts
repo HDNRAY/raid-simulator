@@ -567,6 +567,8 @@ function toCombatantView(
       progress,
       interruptible: cast.interruptible && !armored,
       remainingMs: Math.max(0, nextHit - elapsedMs),
+      /** ⚠️ 从**技能定义**推：引导是技能自己的声明（引擎不读它，UI 读）。 */
+      ...(skill?.kind === 'activeSkill' && skill.channel !== undefined ? { channel: true } : {}),
       ...(hintTags.length === 0 ? {} : { hintTags }),
     };
   }

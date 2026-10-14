@@ -83,6 +83,15 @@ export interface CombatantView {
     /** 0..1 */
     readonly progress: number;
     readonly interruptible: boolean;
+    /**
+     * **这是"引导"**（技能声明了 `channel`）。
+     *
+     * 用户 2026-10-14："引导技能 记得进度条换点颜色"。
+     * ⚠️ 引擎**不读** `channel`（引导窗口今天就是那条读条，见
+     * `content/capabilityAudit.ts` 的说明）—— **唯一的消费者是这个字段**
+     * （渲染层据此换填充色）。所以它不是"死字段"，而是"只被 UI 消费"。
+     */
+    readonly channel?: boolean;
     /** 还要多久命中（ms）—— 预警文案用 */
     readonly remainingMs: number;
     /**

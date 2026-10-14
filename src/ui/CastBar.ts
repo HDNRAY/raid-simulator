@@ -31,6 +31,7 @@
  */
 
 import { Text } from 'pixi.js';
+import { rainbowColors } from './rainbow';
 import type { Container, Graphics } from 'pixi.js';
 import { FONT_FAMILY } from '../render/theme';
 import { FONT } from './layout';
@@ -40,8 +41,16 @@ export interface CastBarOptions {
   readonly pixi: PixiCtor;
   /** ⚠️ 可变：UI 缩放会重设它（见 `setRect`） */
   rect: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
-  /** 填充色（纯色，无渐变） */
+  /** 填充色（纯色，无渐变）——**普通读条**用它 */
   readonly fill: number;
+  /**
+   * **引导**的填充色（缺省 = 用 `fill`）。
+   *
+   * 用户 2026-10-14："引导技能 记得 **进度条 换点颜色**"。
+   * 引导与普通读条在引擎里是同一条读条（`ChannelDef` 今天只有 UI 读它，
+   * 见 `capabilityAudit`），所以"不一样"只能靠**颜色**表达。
+   */
+  readonly channelFill?: number;
   /** 底槽色（"还没走完"的那一段） */
   readonly track: number;
   /**
@@ -59,6 +68,9 @@ export interface CastBarOptions {
 }
 
 /** 圆角半径：4px 的面板配 2px 已经够圆。 */
+/** 彩虹描边的分段数（见 `drawRainbowBorder`）。 */
+const SEGMENTS = 48;
+
 const RADIUS = 2;
 
 /**
@@ -77,6 +89,12 @@ export class CastBar {
   private readonly bg: Graphics;
   private readonly fillGfx: Graphics;
   private readonly border: Graphics;
+  /** 当前是不是引导（决定填充色）。 */
+  private channel = false;
+  /** 当前是不是霸体（决定边框画纯色还是彩虹）。 */
+  private armored = false;
+  /** 强制下一次 `update()` 重画（换色 / 换边框之后置上）。 */
+  private dirty = true;
   private readonly nameText: Text;
   private readonly timeText: Text;
   /**
@@ -179,6 +197,32 @@ export class CastBar {
   }
 
   /**
+   * **这条读条是不是"引导"**（用户："引导技能 记得进度条换点颜色"）。
+   *
+   * ⚠️ 换色要**强制重画**（见 `update` 里的 `dirty`）：否则进度没动时
+   * 颜色不会自己更新。
+   */
+  setChannel(on: boolean): void {
+    if (this.channel === on) return;
+    this.channel = on;
+    this.dirty = true;
+  }
+
+  /**
+   * **霸体**：把描边从纯色换成**彩色渐变**（用户："霸体技能，能不能给边框
+   * 搞个彩色渐变？"）。
+   *
+   * ⚠️ 判据用"**这个读条是不是霸体**"（`interruptImmune` 提示），
+   * 而不是"能不能打断" —— 两者今天恰好等价，但语义不同（见 `viewAdapter`
+   * 里 `armored` 的注释）。
+   */
+  setArmored(on: boolean): void {
+    if (this.armored === on) return;
+    this.armored = on;
+    this.dirty = true;
+  }
+
+  /**
    * 画描边。
    *
    * ⚠️ **路径内移 0.5px** —— 这是"上下边框看不见"的另一个原因。
@@ -196,9 +240,69 @@ export class CastBar {
   private drawBorder(color: number): void {
     const { x, y, w, h } = this.options.rect;
     this.border.clear();
+    /** 霸体 ⇒ **彩虹分段**（纯色那条路照旧，两者只在这里分叉）。 */
+    if (this.armored) {
+      this.drawRainbowBorder();
+      return;
+    }
     this.border
       .roundRect(x + HALF_PIXEL, y + HALF_PIXEL, w - 1, h - 1, RADIUS)
       .stroke({ color, width: 1 });
+  }
+
+  /**
+   * **彩虹描边**：把圆角矩形的轮廓切成 `SEGMENTS` 段，每段一个色相。
+   *
+   * ⚠️ Pixi 的 `stroke()` 只吃纯色 ⇒ 渐变只能这样近似（理由写在
+   * `ui/rainbow.ts` 的文件头）。段数取 48：够密（肉眼看不出折线）又够便宜
+   * （每条读条每帧最多 48 次 stroke）。
+   *
+   * ⚠️ 采样点**沿轮廓等距**（按周长比例），不是按边长 —— 否则长短边上的
+   * 色彩推进速度不同，看起来像"某一边特别花"。
+   */
+  private drawRainbowBorder(): void {
+    const { x, y, w, h } = this.options.rect;
+    const left = x + HALF_PIXEL;
+    const top = y + HALF_PIXEL;
+    const right = x + w - HALF_PIXEL;
+    const bottom = y + h - HALF_PIXEL;
+    /** 圆角矩形的周长（四段直线 + 四个四分之一圆）。 */
+    const straight = Math.max(0, right - left - 2 * RADIUS) * 2 +
+      Math.max(0, bottom - top - 2 * RADIUS) * 2;
+    const arcs = 2 * Math.PI * RADIUS;
+    const total = Math.max(1, straight + arcs);
+    const colors = rainbowColors(SEGMENTS);
+    const pointAt = (t: number): readonly [number, number] => {
+      /** 按周长把 `t`(0..1) 映射到轮廓上的一点。走四个边 + 四个圆角。 */
+      const arcLen = (Math.PI / 2) * RADIUS;
+      const sideH = Math.max(0, right - left - 2 * RADIUS);
+      const sideV = Math.max(0, bottom - top - 2 * RADIUS);
+      let d = t * total;
+      // 上边（左圆角之后）
+      if (d <= arcLen) return [left + RADIUS - Math.cos(d / RADIUS) * RADIUS, top + RADIUS - Math.sin(d / RADIUS) * RADIUS];
+      d -= arcLen;
+      if (d <= sideH) return [left + RADIUS + d, top];
+      d -= sideH;
+      if (d <= arcLen) return [right - RADIUS + Math.sin(d / RADIUS) * RADIUS, top + RADIUS - Math.cos(d / RADIUS) * RADIUS];
+      d -= arcLen;
+      if (d <= sideV) return [right, top + RADIUS + d];
+      d -= sideV;
+      if (d <= arcLen) return [right - RADIUS + Math.cos(d / RADIUS) * RADIUS, bottom - RADIUS + Math.sin(d / RADIUS) * RADIUS];
+      d -= arcLen;
+      if (d <= sideH) return [right - RADIUS - d, bottom];
+      d -= sideH;
+      if (d <= arcLen) return [left + RADIUS - Math.sin(d / RADIUS) * RADIUS, bottom - RADIUS + Math.cos(d / RADIUS) * RADIUS];
+      d -= arcLen;
+      return [left, bottom - RADIUS - d];
+    };
+    for (let i = 0; i < SEGMENTS; i += 1) {
+      const from = pointAt(i / SEGMENTS);
+      const to = pointAt((i + 1) / SEGMENTS);
+      this.border
+        .moveTo(from[0], from[1])
+        .lineTo(to[0], to[1])
+        .stroke({ color: colors[i] ?? 0xffffff, width: 1 });
+    }
   }
 
   /**
@@ -221,7 +325,13 @@ export class CastBar {
    */
   update(progress: number): void {
     const safe = Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : 0;
-    if (Math.abs(safe - this.lastProgress) < 0.002) return;
+    /**
+     * ⚠️ **换色必须强制重画**：进度没变时下面那行会早退（省重绘），
+     * 于是 `setChannel` / `setArmored` 之后要等进度动一下才看得见颜色 ——
+     * 表现成"有时候颜色不对"。所以那两个 setter 会把 `lastProgress` 清掉。
+     */
+    if (!this.dirty && Math.abs(safe - this.lastProgress) < 0.002) return;
+    this.dirty = false;
     this.lastProgress = safe;
 
     const { x, y, w, h } = this.options.rect;
@@ -232,7 +342,7 @@ export class CastBar {
     if (filled > 0 && innerH > 0) {
       this.fillGfx
         .rect(x + INSET, y + INSET, filled, innerH)
-        .fill({ color: this.options.fill, alpha: 1 });
+        .fill({ color: this.channel ? (this.options.channelFill ?? this.options.fill) : this.options.fill, alpha: 1 });
     }
     /**
      * 每次改完填充**重画一遍描边**。

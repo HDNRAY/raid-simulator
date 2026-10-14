@@ -366,6 +366,13 @@ export const LUST_BIND: ActiveSkillDef = {
     },
   ],
   castTime: logicMs(20),
+  /**
+   * ⚠️ **`channel` 今天只有 UI 读它**（引擎侧零消费者 —— "引导窗口"就是
+   * 上面那条 `castTime`）。它存在的意义是让**读条条换个颜色**（用户：
+   * "引导技能 记得进度条换点颜色"）。对账记在
+   * `core/content/capabilityAudit.ts`，**别以为它改了战斗行为**。
+   */
+  channel: { durationMs: logicMs(20), tickIntervalMs: logicMs(20) },
   cooldown: logicMs(90),
   cost: [],
   /**
