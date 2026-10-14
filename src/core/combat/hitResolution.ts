@@ -46,6 +46,7 @@ import { casterGainsDouqiFromDamage } from './holds';
 import {
   actsOnVictim,
   absorbShieldDamage,
+  firePostHitHooks,
   applyStunEffect,
   applyThornReflect,
   transferResources,
@@ -142,12 +143,6 @@ export interface HitResolutionContext {
  * 不是把整个 `HitDef` 塞进来 —— 载荷越大，"哪些字段在哪个 hook 上有值"
  * 越难说清。
  */
-export interface HitPayload {
-  readonly sourceId?: string;
-  readonly amount?: number;
-  readonly skillId?: string;
-}
-
 export function resolveHit(
   ctx: HitResolutionContext,
   actor: Combatant,
@@ -395,20 +390,18 @@ export function resolveHit(
     }
 
     /**
-     * **整次命中结算完成后**派发 `onHitTaken`（见 `triggers.ts` 顶部
-     * "为什么只在结算已完成处派发"）。
-     *
-     * ⚠️ 条件是"**真的掉血了**"（`taken > 0`）：被闪避 / 被免伤的命中
-     * **不算受伤** —— 否则"闪避"反而会白送对手一个印记，与直觉相反
-     * （设计 §3.3）。
+     * **整次命中结算完成后**的一对钩子（`onHitTaken` / `onHitDealt`）——
+     * 判据（`taken > 0`）与理由收在 `effectOps.firePostHitHooks`。
      */
-    if (taken > 0) {
-      runTriggers(ctx, target.id, 'onHitTaken', {
-        sourceId: actor.id,
-        amount: taken,
-        skillId: skill.id,
-      });
-    }
+    firePostHitHooks({
+      ctx,
+      actor,
+      target,
+      skillId: skill.id,
+      taken,
+      /** ⚠️ 在这里绑好 `ctx`（它本来就是 `HitResolutionContext`）—— 见那边的说明。 */
+      runTriggers: (ownerId, hook, payload) => runTriggers(ctx, ownerId, hook, payload),
+    });
 
     /**
      * **荆棘反伤**：受击者身上带 `reflectFraction` 时，按比例把**实际受到

@@ -22,7 +22,8 @@
 import type { BuffDef, Combatant, EventDef, SkillDef } from '../types';
 import { aggregateFlags, applyBuff } from '../buffs';
 import { applyDamage, changeResource, computeDamage } from './index';
-import type { HitPayload, HitResolutionContext } from './hitResolution';
+import type { HitPayload } from '../types/triggers';
+import type { HitResolutionContext } from './hitResolution';
 
 /**
  * `battleState` 能提供的东西（只声明真正用到的）。

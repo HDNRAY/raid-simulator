@@ -27,7 +27,7 @@
  * ⚠️ 这个文件**不决定**"这一局装哪一套"之外的事 —— 那是 app 层的选择。
  */
 
-import type { Behavior, Combatant, SkillDef, StatKey } from '../core/types';
+import type { Behavior, Combatant, SkillDef, StatKey, BuffDef } from '../core/types';
 import { applyBuff } from '../core/buffs';
 import { DOUQI_MAX, ENERGY_MAX, HP_MAX, skillsForPlayer } from './content';
 import { KAILI_HP } from './kits/kaili';
@@ -141,9 +141,30 @@ export function playerCapsFor(id: string): {
  */
 export function makePlayer(
   id: string,
-  options?: { readonly kit?: { readonly caps: { readonly hp: number; readonly energy: number; readonly douqi: number } } },
+  options?: {
+    readonly kit?: {
+      readonly caps: { readonly hp: number; readonly energy: number; readonly douqi: number };
+      /**
+       * **炁机带来的常驻 buff**（「黑闪」的节拍那条）。
+       *
+       * ⚠️ 与 `innateBuffsFor`（Boss 的固有 buff）是**同一时刻、同一种东西**
+       * —— 都在战斗开始**之前**存在，所以 `appliedAtTick` 从 0 起算。
+       */
+      readonly passiveBuffs?: readonly BuffDef[];
+    };
+  },
 ): Combatant {
   const caps = options?.kit?.caps ?? playerCapsFor(id);
+  /**
+   * ⚠️ 先建一个"只有 buffs 字段"的空壳再 `applyBuff`：`applyBuff` 只读
+   * `buffs` 决定"复用还是新建实例"，而这里要建的对象**还没建好**
+   * （与 `innateBuffsFor` 用 `EMPTY_FOR_INNATE` 是同一个理由）。
+   */
+  const innateBuffs = (options?.kit?.passiveBuffs ?? []).reduce<Combatant['buffs']>(
+    (acc, def) => applyBuff({ ...EMPTY_FOR_INNATE, id, side: 'ally', buffs: acc }, def, id, 0).buffs,
+    [],
+  );
+
   return {
     id,
     /** 显示名来自 roster（需求："这个人物目前就叫 林晚风"）。 */
@@ -153,7 +174,7 @@ export function makePlayer(
     resources: { hp: caps.hp, energy: caps.energy, douqi: 0 },
     counters: {},
     basePrimary: { strength: 120, agility: 100, intelligence: 110, spirit: 100 },
-    buffs: [],
+    buffs: innateBuffs,
     cooldowns: {},
     casts: [],
     uses: {},

@@ -37,7 +37,7 @@
 
 import { PLAYER_BASE, playerCapsFor } from './units';
 import type { QijiEntity, QijiSkillTweak } from '../core/types/qiji';
-import type { StatKey, StatModifier } from '../core/types';
+import type { BuffDef, StatKey, StatModifier } from '../core/types';
 import type { ComboWindowSpec } from '../core/combat/comboWindow';
 
 /** 一场战斗的玩家输入（§5.5 的 `BattleKit`）。 */
@@ -63,6 +63,16 @@ export interface PlayerKit {
    * 装配那边一个分支都不进，单场 / 自由模式 / 黄金重放完全不变。
    */
   readonly skillTweaks: readonly QijiSkillTweak[];
+  /**
+   * **选了炁机之后、整局挂在玩家身上的 buff**（2026-10-14 加）。
+   *
+   * ⚠️ **这个位置曾经有过一个 `innate` 字段，当时被删掉了** —— 理由是
+   * "没有任何消费者"（见下面那段沿革注释）。现在「黑闪」来了、消费者出现了，
+   * 所以它回来。**顺序是有意的：先有需要，再有字段。**
+   *
+   * 空数组时装配那边一个分支都不进 ⇒ 单场 / 自由模式 / 黄金重放逐字不变。
+   */
+  readonly passiveBuffs: readonly BuffDef[];
 }
 
 /*
@@ -124,6 +134,7 @@ export function buildPlayerKit(
   const modifiers: StatModifier[] = [];
   const comboWindows: ComboWindowSpec[] = [];
   const skillTweaks: QijiSkillTweak[] = [];
+  const passiveBuffs: BuffDef[] = [];
   /** `maxHp` 的累加值 —— 最后加进 `caps.hp`（见文件头第 2 条）。 */
   let bonusHp = 0;
 
@@ -156,6 +167,14 @@ export function buildPlayerKit(
      * 增伤变成 100%），给第二条同名关系没有任何语义。
      */
     if (def.skillTweak !== undefined) skillTweaks.push(def.skillTweak);
+
+    /**
+     * ⚠️ 常驻 buff **按条收集**（与 `skillTweak` 的"每条只收一份"不同）：
+     * 它说的是"**给我挂这条**"，两条不同的炁机各挂一条是有意义的；
+     * 而同一条给两次由 `chosen` 的条数表达（§5.3 的"一局只能选一次"
+     * 让这在肉鸽里不会发生，自由模式的开关也不会）。
+     */
+    if (def.passiveBuffs !== undefined) passiveBuffs.push(...def.passiveBuffs);
   }
 
   return {
@@ -164,5 +183,6 @@ export function buildPlayerKit(
     modifiers,
     comboWindows,
     skillTweaks,
+    passiveBuffs,
   };
 }

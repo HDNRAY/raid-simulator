@@ -36,15 +36,25 @@ const QIJI_KEYS = new Set(QIJI_CATALOG.keys());
 /** 三条"派生"的炁机（用户点名的那三条）。 */
 const DERIVED = ALL_QIJI.filter((q) => q.comboWindow !== undefined);
 
-/** 三条**改技能本身**的炁机（2026-10-13 新增：避回缠 / 凝减耗 / 凝增伤）。 */
+/** 改技能本身的炁机（避回缠 / 凝减耗 / 凝增伤 / 斩法）。 */
 const TWEAKED = ALL_QIJI.filter((q) => q.skillTweak !== undefined);
 
+/** 靠"装一条常驻 buff"生效的炁机（今天只有「黑闪」）。 */
+const PASSIVE = ALL_QIJI.filter((q) => q.passiveBuffs !== undefined);
+
 describe('炁机池：数量与形状', () => {
-  it('一共 8 条：2 条兜底 + 3 条派生 + 3 条改技能', () => {
-    expect(ALL_QIJI).toHaveLength(8);
+  it('一共 10 条：2 条兜底 + 3 条派生 + 4 条改技能 + 1 条装 buff', () => {
+    /**
+     * ⚠️ 2026-10-14 加了**两条**「用 30 次」的（拳 → 黑闪、斩 → 斩法）：
+     *   - 「黑闪」**不改技能**，它靠 `passiveBuffs` 装一条常驻 buff
+     *     ⇒ 落在下面的 `PASSIVE` 那一类
+     *   - 「斩法」是 `skillTweak`（读条减半 + 伤害 +30%）⇒ `TWEAKED` 变 4 条
+     */
+    expect(ALL_QIJI).toHaveLength(10);
     expect(DERIVED).toHaveLength(3);
-    expect(TWEAKED).toHaveLength(3);
+    expect(TWEAKED).toHaveLength(4);
     expect(ALL_QIJI.filter((q) => q.unlock.kind === 'always')).toHaveLength(2);
+    expect(PASSIVE).toHaveLength(1);
   });
 
   it('每条都是 `kind: "qiji"`（W8 的类型那一半：不再是假 kind）', () => {
@@ -56,7 +66,7 @@ describe('炁机池：数量与形状', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('`qijiById` 认全部 5 条，未知 id 给 undefined', () => {
+  it('`qijiById` 认全部 10 条，未知 id 给 undefined', () => {
     for (const qiji of ALL_QIJI) expect(qijiById(qiji.id)?.id).toBe(qiji.id);
     expect(qijiById('nope')).toBeUndefined();
   });
@@ -351,8 +361,13 @@ describe('三条 `skillTweak`：解锁条件 + 效果形状', () => {
   const cost = qijiById('ningShenJuQi') as QijiEntity;
   const boost = qijiById('ningShenRuDao') as QijiEntity;
 
-  it('恰好三条，且都**不带** `comboWindow`（两类炁机不混）', () => {
-    expect(TWEAKED.map((q) => q.id).sort()).toEqual(['biShiJiXu', 'ningShenJuQi', 'ningShenRuDao']);
+  it('恰好四条，且都**不带** `comboWindow`（两类炁机不混）', () => {
+    expect(TWEAKED.map((q) => q.id).sort()).toEqual([
+      'biShiJiXu',
+      'ningShenJuQi',
+      'ningShenRuDao',
+      'zhanFa',
+    ]);
     for (const qiji of TWEAKED) expect(qiji.comboWindow).toBeUndefined();
   });
 

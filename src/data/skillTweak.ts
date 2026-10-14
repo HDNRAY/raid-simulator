@@ -27,8 +27,9 @@
  * 与 `kits/combo.ts` 之于 `comboWindow` 是同一种分工。
  */
 
+import { LOGIC_TICK_MS } from '../core/loopConstants';
 import type { QijiSkillTweak } from '../core/types/qiji';
-import type { SkillDef, BuffDef } from '../core/types';
+import type { Effect, SkillDef, BuffDef } from '../core/types';
 
 /* ================================================================== *
  * 把内容层的改动落到技能定义上（`skillTweaks` 的**唯一**解释点）
@@ -102,6 +103,8 @@ export function applySkillTweaks(
   const onUse = new Map<string, QijiSkillTweak['onUse']>();
   /** 逐 buff 收集覆盖值（按 stat）。 */
   const buffValues = new Map<string, Map<string, number>>();
+  /** 逐技能收集"读条倍率 / 伤害倍率"（「砍」，2026-10-14）。 */
+  const scales = new Map<string, { castTimeScale?: number; damageScale?: number }>();
 
   for (const tweak of tweaks) {
     if (!tables.skills.has(tweak.skillId)) fail(tweak, 'skill not found in this role\'s skill table');
@@ -115,6 +118,19 @@ export function applySkillTweaks(
     if (tweak.onUse !== undefined) {
       if (onUse.has(tweak.skillId)) fail(tweak, 'two onUse entries for the same skill');
       onUse.set(tweak.skillId, tweak.onUse);
+    }
+
+    if (tweak.castTimeScale !== undefined || tweak.damageScale !== undefined) {
+      /**
+       * ⚠️ **同一个技能写了两条倍率 = 抛错**（与 `onUse` 同一条判据）：
+       * "哪一条生效"没有答案，而"相乘"也不是显然的语义 ⇒ 不让它变成一个
+       * 事后才发现的漂移。
+       */
+      if (scales.has(tweak.skillId)) fail(tweak, 'two scale entries for the same skill');
+      scales.set(tweak.skillId, {
+        ...(tweak.castTimeScale === undefined ? {} : { castTimeScale: tweak.castTimeScale }),
+        ...(tweak.damageScale === undefined ? {} : { damageScale: tweak.damageScale }),
+      });
     }
 
     for (const override of tweak.buffOverrides ?? []) {
@@ -139,7 +155,7 @@ export function applySkillTweaks(
   for (const [skillId, skill] of tables.skills) {
     const deltas = costDeltas.get(skillId);
     const effect = onUse.get(skillId);
-    skills.set(skillId, applyToSkill(skill, deltas, effect, buffs));
+    skills.set(skillId, applyToSkill(skill, deltas, effect, buffs, scales.get(skillId)));
   }
 
   return { skills, buffs };
@@ -188,6 +204,8 @@ function applyToSkill(
   deltas: ReadonlyMap<string, number> | undefined,
   effect: QijiSkillTweak['onUse'],
   buffs: ReadonlyMap<string, BuffDef>,
+  /** 「砍」那两个倍率（缺省 = 不动）。 */
+  scale: { castTimeScale?: number; damageScale?: number } | undefined,
 ): SkillDef {
   /** 这条技能里哪些 grant 的 buff 被覆盖过（按 id 找新对象）。 */
   const abilities = skill.abilities.map((ability) => {
@@ -197,7 +215,12 @@ function applyToSkill(
     return { ...ability, buff: replaced };
   });
 
-  if (deltas === undefined && effect === undefined && abilities.every((a, i) => a === skill.abilities[i])) {
+  if (
+    deltas === undefined &&
+    effect === undefined &&
+    scale === undefined &&
+    abilities.every((a, i) => a === skill.abilities[i])
+  ) {
     return skill;
   }
 
@@ -236,9 +259,57 @@ function applyToSkill(
       .filter((entry): entry is { resource: string; value: number } => entry.value !== undefined);
   }
 
+  /**
+   * 读条倍率：`castTime × castTimeScale`，**四舍五入到逻辑步**
+   * （`logicMs` 的粒度）—— 不到网格上的值会被 `assertValidContent` 拦下，
+   * 所以这里**主动对齐**，而不是留一个"内容挑错了就崩"的坑。
+   */
+  const castTime =
+    scale?.castTimeScale === undefined
+      ? skill.castTime
+      : roundToLogicStep(skill.castTime * scale.castTimeScale);
+
+  /**
+   * 伤害倍率：乘在**所有 `hits` 里的伤害效果**上。
+   * 非伤害效果（buff / 搬运资源）一律不动 —— 那些不是"伤害"。
+   */
+  const hits =
+    scale?.damageScale === undefined
+      ? skill.hits
+      : skill.hits.map((hit) => ({
+          ...hit,
+          effects: hit.effects.map((fx) => scaleDamageEffect(fx, scale.damageScale ?? 1)),
+        }));
+
   return {
     ...skill,
+    castTime,
+    hits,
     cost,
     abilities: effect === undefined ? abilities : [...abilities, effect],
   };
+}
+
+/**
+ * 把一个效果里的**伤害**乘上倍率；不是伤害效果就原样返回（同一个引用）。
+ *
+ * ⚠️ 单独一个具名函数（而不是内联的嵌套三元）：`Effect` 是联合类型，
+ * 内联写在 `map` 里会让 TS 推不出那个成员（`damage` 可选）—— 而这里
+ * 用 `kind !== 'damage'` 收窄之后，返回的仍然是**同一个成员**。
+ */
+function scaleDamageEffect(fx: Effect, factor: number): Effect {
+  if (fx.kind !== 'damage' || fx.damage === undefined) return fx;
+  /**
+   * ⚠️ **只认数字伤害**（与 `costDeltas` 只认数字代价是同一条纪律）：
+   * 表达式伤害在编译期拿不到值，乘不了 ⇒ 直接抛错，而不是静默不生效。
+   */
+  if (typeof fx.damage.base !== 'number') {
+    throw new Error('qiji skillTweak: damage base is an Expr, cannot scale it');
+  }
+  return { ...fx, damage: { ...fx.damage, base: fx.damage.base * factor } };
+}
+
+/** 把毫秒对齐到逻辑步网格（`LOGIC_TICK_MS`）—— `assertValidContent` 的要求。 */
+function roundToLogicStep(ms: number): number {
+  return Math.round(ms / LOGIC_TICK_MS) * LOGIC_TICK_MS;
 }

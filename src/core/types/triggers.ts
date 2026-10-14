@@ -102,6 +102,26 @@ export type HookFilter =
   | { readonly by: 'skill'; readonly skillId?: SkillId; readonly tag?: SkillTag }
   | { readonly by: 'buff'; readonly buffId: BuffId };
 
+/**
+ * 一次**钩子事件**带的信息（`onHitTaken` / `onBuffApplied` … 共用的载荷）。
+ *
+ * ⚠️ 2026-10-14 从 `combat/hitResolution.ts` 搬到这里：它本来就是
+ * "钩子的载荷形状"，放在命中管线那个文件里既让那个文件贴着 700 行上限，
+ * 也让 `TriggerPayload extends HitPayload` 要先绕一趟。
+ *
+ * ⚠️ `buffId` 是 2026-10-14 补的：`onBuffApplied` / `onBuffExpired` 原先
+ * 只带 `sourceId`，**根本分不出是哪条 buff 的事件** —— 于是内容无法写
+ * "**当「节拍」过期时**……"（「黑闪」要的正是这一条）。事件本身一直有
+ * `buffId`，是载荷漏了。
+ */
+export interface HitPayload {
+  readonly sourceId?: string;
+  readonly amount?: number;
+  readonly skillId?: string;
+  /** **哪条 buff**（`onBuffApplied` / `onBuffExpired` 用）。 */
+  readonly buffId?: string;
+}
+
 export interface TriggerDef {
   readonly on: Hook;
   readonly filter?: HookFilter;

@@ -523,3 +523,62 @@ export function absorbShieldDamage(args: {
     broken: result.broken,
   };
 }
+
+/* ================================================================== *
+ * 7. 命中结算完成后的**一对钩子**（受击 / 出手）
+ * ================================================================== */
+
+/**
+ * 整次命中结算完成后，派发 `onHitTaken` 与 `onHitDealt`。
+ *
+ * ==================================================================
+ * 为什么这一对必须**挨着**、而且要抽出来
+ * ==================================================================
+ *
+ * 两条挂在**相反的人**身上，但**共用同一条判据**（`taken > 0` ——
+ * "真的掉血了"）：
+ *
+ * | 钩子 | 挂在谁身上 | 用户要它做什么 |
+ * |---|---|---|
+ * | `onHitTaken` | **挨打的人** | 受伤触发（印记 / 反伤 / 「怒火」层数）|
+ * | `onHitDealt` | **打出去的人** | 「黑闪」的"**我打中了**这一拳" |
+ *
+ * ⚠️ 判据必须一致：被闪避 / 被免伤的那一击**两边都不算** —— 否则空挥会
+ * 刷新黑闪的节拍计时（用户要的是"**打中**拳"，不是"按了拳"）。
+ * 把两条放在**同一个函数**里，是为了让"它们共用判据"这件事**没法被改漏**
+ * （分成两处 `if` 的话，下一个人只改一处就会漂）。
+ */
+export function firePostHitHooks(args: {
+  readonly ctx: EffectEvalContext;
+  readonly actor: Combatant;
+  readonly target: Combatant;
+  readonly skillId: string;
+  /** 这一击**实际造成的伤害**（0 = 没打中，两条钩子都不派发）。 */
+  readonly taken: number;
+  /**
+   * `runTriggers`（由 `hitResolution` 传进来 —— 避免本文件反向依赖 triggers）。
+   *
+   * ⚠️ **它不收 `ctx`**：调用方在自己的闭包里绑好那个上下文。这样本文件
+   * 只需要 `EffectEvalContext`（它已经有的那个窄类型），**不需要把窄类型
+   * 断言成宽类型**（AGENTS.md §1：cast 是最后手段）。
+   */
+  readonly runTriggers: (
+    ownerId: string,
+    hook: 'onHitTaken' | 'onHitDealt',
+    payload: { sourceId?: string; targetId?: string; amount: number; skillId: string },
+  ) => void;
+}): void {
+  const { actor, target, skillId, taken, runTriggers } = args;
+  if (taken <= 0) return;
+
+  runTriggers(target.id, 'onHitTaken', {
+    sourceId: actor.id,
+    amount: taken,
+    skillId,
+  });
+  runTriggers(actor.id, 'onHitDealt', {
+    targetId: target.id,
+    amount: taken,
+    skillId,
+  });
+}

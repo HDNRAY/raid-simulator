@@ -56,6 +56,7 @@ import type { QijiEntity } from '../core/types/qiji';
 import { COMBO_WINDOW, comboWindowFor } from './kits/combo';
 import { DODGE_CHARGE } from './kits/dodgeCharge';
 import { FOCUS_BUFF } from './kits/shared';
+import { HEISHAN_WATCHER, PUNCH_SKILL_ID } from './kits/heishan';
 
 /* ================================================================== *
  * 1. 三条「派生 击」：炁机 = **关系**（源技能 → 击）
@@ -365,6 +366,76 @@ export const QIJI_BREATH: QijiEntity = {
 };
 
 /* ================================================================== *
+ * 4. 两条「用 30 次」解锁的炁机（2026-10-14 用户点名）
+ * ================================================================== *
+ *
+ * 设计稿：`docs/specs/2026-10-12-roguelike.md` §5.6。
+ *
+ * ⚠️ **解锁条件零新代码**：`statAtLeast` + `skillUses` + `scope:'run'`
+ * 都是既有机器（§5.2.1 / §5.2.2）—— 30 次用出去就解锁。
+ *
+ * ⚠️ 它们是**两条**（拳 / 斩各一条），与前面"同一个技能解锁两条"
+ * （凝减耗 + 凝增伤）不同：这里**没有任何共享条件**。
+ */
+
+/**
+ * **「黑闪」** —— 拳 30 次解锁。
+ *
+ * 效果全在那条**常驻 buff** 里（`kits/heishan.ts`）：打中拳 → 挂 1.2 秒
+ * 节拍 → 节拍到期开 0.1 秒窗口 → 落在窗口里的那一拳**伤害 ×2**，而且它
+ * 又刷新节拍 ⇒ **保持 1.2 秒的节拍就能一直连**。
+ *
+ * ⚠️ 这是 `QijiEntity.passiveBuffs` 的**第一个消费者**（用户："这个也是
+ * 用 buff 实现，记录上一次时间"）—— 此前三条出口都挂不了 buff。
+ */
+export const QIJI_HEISHAN: QijiEntity = {
+  id: 'heiShan',
+  kind: 'qiji',
+  nameKey: 'qiji.heiShan.name',
+  descKey: 'qiji.heiShan.desc',
+  icon: 'char_attack',
+  category: 'offense',
+  rarity: 'rare',
+  unlock: {
+    kind: 'statAtLeast',
+    stat: { s: 'skillUses', skillId: PUNCH_SKILL_ID, scope: 'run' },
+    value: 30,
+  },
+  abilities: [],
+  passiveBuffs: [HEISHAN_WATCHER],
+};
+
+/**
+ * **「斩法」** —— 斩 30 次解锁：**读条减半 + 伤害 +30%**。
+ *
+ * ⚠️ 落点是 `skillTweak`（改**技能定义本身**），与「凝」那两条同一条路。
+ * ⚠️ **读条 500ms 的一半是 250ms —— 落在 0.1 秒刻度之外**，而刻度是硬
+ * 规则（`content/timeGrid.ts`：显示与实现必须同刻度）⇒ `applySkillTweaks`
+ * 会把它对齐到**最近的刻度 300ms**（= 减 40%）。那 50ms 的差是**刻度的
+ * 代价**，理由写在 `data/skillTweak.ts` 的 `roundToLogicStep` 上。
+ */
+export const QIJI_ZHAN: QijiEntity = {
+  id: 'zhanFa',
+  kind: 'qiji',
+  nameKey: 'qiji.zhanFa.name',
+  descKey: 'qiji.zhanFa.desc',
+  icon: 'char_attack',
+  category: 'offense',
+  rarity: 'rare',
+  unlock: {
+    kind: 'statAtLeast',
+    stat: { s: 'skillUses', skillId: 'attack', scope: 'run' },
+    value: 30,
+  },
+  abilities: [],
+  skillTweak: {
+    skillId: 'attack',
+    castTimeScale: 0.5,
+    damageScale: 1.3,
+  },
+};
+
+/* ================================================================== *
  * 4. 池子
  * ================================================================== */
 
@@ -387,6 +458,8 @@ export const ALL_QIJI: readonly QijiEntity[] = [
   QIJI_DODGE_CHARGE,
   QIJI_FOCUS_COST,
   QIJI_FOCUS_BOOST,
+  QIJI_HEISHAN,
+  QIJI_ZHAN,
 ];
 
 /** 按 id 取一个炁机（`chosen` 里存的是 id，记录 / UI 要还原定义）。 */

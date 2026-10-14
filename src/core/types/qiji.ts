@@ -215,6 +215,30 @@ export interface QijiEntity extends GameEntity {
    * 表达不了。
    */
   readonly skillTweak?: QijiSkillTweak;
+  /**
+   * **选了它之后，整局挂在玩家身上的一条（或几条）buff**（2026-10-14）。
+   *
+   * ==================================================================
+   * 为什么需要它（这是它存在的全部理由）
+   * ==================================================================
+   *
+   * 用户对「黑闪」的要求是："**这个也是用 buff 实现，记录上一次时间**" ——
+   * 而"一个炁机带来的机制"此前只有三条出口，**都挂不了 buff**：
+   *
+   * | 出口 | 能做什么 | 为什么不行 |
+   * |---|---|---|
+   * | `abilities[].modifier` | 改**玩家属性** | 属性管线碰不到"打中时挂个东西" |
+   * | `comboWindow` | 接回一条**派生关系** | 它只服务"源技能 → 派生技" |
+   * | `skillTweak` | 改**某个技能的定义** | 改不了"整局陪着我的那条 buff" |
+   *
+   * ⚠️ 这与 `PlayerKit` 里**曾经有过、后来被删掉**的 `innate` 字段是同一
+   * 个位置 —— 当时删它的理由是"**没有消费者**"（`data/kit.ts` 的注释记着）。
+   * 现在消费者来了（黑闪），所以它回来：**先有需要，再有字段**。
+   *
+   * ⚠️ 生效范围 = **整局**（选了就一直挂着），与 buff 自己的 `duration`
+   * 无关 —— 内容那边写 `duration: Infinity`。
+   */
+  readonly passiveBuffs?: readonly BuffDef[];
 }
 
 /**
@@ -325,6 +349,26 @@ export interface QijiSkillTweak {
    * ⚠️ 只覆盖 `value`，其余字段（`sourceKey` / `namespace` / `tier`）
    * 保持原样，所以溯源面板仍然认得它。
    */
+  /**
+   * **读条时间 × 这个系数**（「砍」的"读条少一半" = `0.5`，2026-10-14）。
+   *
+   * ⚠️ 与 `costDeltas` 同一种做法（改的是 `SkillDef` 的字段，属性管线
+   * 碰不到它）。⚠️ 它改的是**技能自己的 `castTime`**，与 `haste`
+   * （玩家属性、`hastedCastTime` 夹在 [0, 0.5]）是**两条独立的路**：
+   * 这条不受那个夹紧限制，两者会**叠乘**。
+   *
+   * ⚠️ 结果必须落在逻辑步网格上（引擎的 `assertValidContent` 会拦下
+   * 不在网格上的值）—— 所以内容那边要挑"乘完仍对齐"的数。
+   */
+  readonly castTimeScale?: number;
+  /**
+   * **伤害 × 这个系数**（「砍」的"伤害 +30%" = `1.3`，2026-10-14）。
+   *
+   * ⚠️ 乘在 `DamageSpec.base` 上，**所有 `hits` 里的伤害效果**都乘
+   * （一条技能多个 hit 时每个都乘）。非伤害效果（buff / 资源搬运）
+   * 一律不动 —— 那些不是"伤害"。
+   */
+  readonly damageScale?: number;
   readonly buffOverrides?: readonly {
     readonly buffId: BuffId;
     readonly modifiers: readonly {

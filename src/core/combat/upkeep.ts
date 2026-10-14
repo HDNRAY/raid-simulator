@@ -29,7 +29,7 @@
 import { expireBuffs, regenerateResources, type UpkeepContext } from './encounterLifecycle';
 import { tickHolds, type HoldsContext } from './holds';
 import type { BuffHookDispatch, BuffHookName } from './buffHookDispatch';
-import type { HitPayload } from './hitResolution';
+import type { HitPayload } from '../types/triggers';
 import type { EventDef } from '../types';
 
 /** 收尾流程需要的引擎能力。 */

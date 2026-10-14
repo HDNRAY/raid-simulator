@@ -133,6 +133,11 @@ function collectNestedAbilities(
 export const SUPPORTED_HOOKS: readonly Hook[] = [
   'onCastFinish',
   'onTick',
+  /**
+   * ⚠️ 2026-10-14 新增（**黑闪**是第一个消费者）：挂在**打出去的人**身上，
+   * 与 `onHitTaken` 共用"真的掉血了"那条判据。派发点见 `hitResolution`。
+   */
+  'onHitDealt',
   'onHitTaken',
   'onCritDealt',
   'onBuffApplied',

@@ -28,7 +28,8 @@
  */
 
 import type { Ability, Combatant, TargetRule, TriggerDef } from '../types';
-import type { HitResolutionContext, HitPayload } from './hitResolution';
+import type { HitPayload } from '../types/triggers';
+import type { HitResolutionContext } from './hitResolution';
 import { evaluateCondition } from './index';
 
 /**
@@ -63,6 +64,15 @@ export const SUPPORTED_HOOKS: readonly string[] = [
    * 管 —— 所以"按时间、随机间隔"这两件事都不用引擎再懂一遍。
    */
   'onTick',
+  /**
+   * ⚠️ 2026-10-14 新增（**黑闪**是第一个消费者）。
+   *
+   * 与 `onHitTaken` 是**一对**：那条挂在**挨打的人**身上，这条挂在
+   * **打出去的人**身上。两个判据都是"**真的掉血了**"（`taken > 0`）——
+   * 被闪避 / 被免伤的那一击**不算打中**，所以黑闪的节拍不会被空挥刷新
+   * （用户："**打中**拳"）。
+   */
+  'onHitDealt',
   'onHitTaken',
   'onCritDealt',
   'onBuffApplied',
@@ -78,6 +88,14 @@ export function isSupportedHook(hook: string): boolean {
 export interface TriggerPayload extends HitPayload {
   /** 递归深度（由派发方维护，调用者不要传）。 */
   readonly depth?: number;
+  /**
+   * **这一击打的是谁**（`onHitDealt` 用；挨打那一侧不需要，因为它自己
+   * 就是"目标"）。
+   *
+   * ⚠️ 「黑闪」要它来判断"这一拳是不是拳"其实靠 `skillId`，所以这个字段
+   * 今天只是把"打中了谁"如实带上 —— 免得下一个要看它的人以为漏了。
+   */
+  readonly targetId?: string;
   /**
    * **这一串能力要用的自定义数值**（缺省 0）。
    *
@@ -123,6 +141,7 @@ export function runTriggers(
     for (let i = 0; i < triggers.length; i += 1) {
       const trigger = triggers[i];
       if (trigger === undefined || trigger.on !== hook) continue;
+      if (!hookFilterMatches(ctx, ownerId, trigger.filter, payload)) continue;
 
       const key = triggerKey(trigger, i);
       /** 内建 CD：防抖（设计里反伤给 1s）。 */
@@ -336,6 +355,50 @@ export function runAbilities(
  * 群体目标在"受伤触发"的语境里没有意义，返回 `undefined` 让调用方跳过 ——
  * 硬实现只会引入没人验证过的分支。
  */
+/**
+ * **`TriggerDef.filter` 真的会被求值吗** —— 2026-10-14 之前**不会**。
+ *
+ * ⚠️ 这个字段**类型里有、全仓没有一处读它**（与 `interruptImmune` /
+ * `ccImmune` / `damageTakenMult` / `onTick` / `damageMultBoost` 是同一类病：
+ * 写上去不报错、引擎当没看见）。「黑闪」需要"**只认拳**"，才把它接上。
+ *
+ * 四条判据（`HookFilter` 的四支）：
+ *
+ * | filter | 成立条件 |
+ * |---|---|
+ * | `{by:'self'}` | 事件的 `sourceId` = 我自己 |
+ * | `{by:'other'}` | 有 `sourceId` 且**不是**我自己 |
+ * | `{by:'skill'}` | 事件的 `skillId` 匹配（给了 `tag` 时还要 tag 匹配）|
+ * | `{by:'buff'}` | 事件的 `buffId` 匹配 |
+ *
+ * ⚠️ 缺字段时**一律不成立**（不是"放行"）：内容写了 `by:'buff'` 而事件
+ * 没带 `buffId` 时，宁可它不触发（能被测试发现），也不要它**每次都触发**。
+ */
+function hookFilterMatches(
+  ctx: HitResolutionContext,
+  ownerId: string,
+  filter: TriggerDef['filter'],
+  payload: TriggerPayload,
+): boolean {
+  if (filter === undefined) return true;
+  switch (filter.by) {
+    case 'self':
+      return payload.sourceId === ownerId;
+    case 'other':
+      return payload.sourceId !== undefined && payload.sourceId !== ownerId;
+    case 'skill': {
+      if (payload.skillId === undefined) return false;
+      if (filter.skillId !== undefined && payload.skillId !== filter.skillId) return false;
+      if (filter.tag === undefined) return true;
+      /** ⚠️ 查不到技能定义 ⇒ **不成立**（见上面那条"缺字段一律不放行"）。 */
+      const skill = ctx.skillDef?.(payload.skillId);
+      return skill?.tags?.includes(filter.tag) ?? false;
+    }
+    case 'buff':
+      return payload.buffId === filter.buffId;
+  }
+}
+
 function whoOf(
   ctx: HitResolutionContext,
   ownerId: string,

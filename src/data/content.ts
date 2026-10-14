@@ -52,6 +52,7 @@ import { COMBO_WINDOW, STRIKE } from './kits/combo';
  * 放哪一边都会造出方向不对的 import（推导在 `kits/dodgeCharge.ts` 的文件头）。
  */
 import { DODGE_CHARGE } from './kits/dodgeCharge';
+import { HEISHAN_BEAT, HEISHAN_WATCHER, HEISHAN_WINDOW } from './kits/heishan';
 import {
   FLASH_IFRAME,
   KAILI_SKILLS,
@@ -378,6 +379,13 @@ export const ALL_BUFFS: readonly BuffDef[] = [
   GUARD_THRESHOLD_BUFF,
   FOCUS_BUFF,
   SUNDER_DEBUFF,
+  /**
+   * 「黑闪」（炁机 `heiShan`）的三条：常驻被动（记录"拳打中了"）+
+   * 节拍（1.2 秒计时）+ 窗口（0.1 秒、伤害 ×2）。
+   */
+  HEISHAN_WATCHER,
+  HEISHAN_BEAT,
+  HEISHAN_WINDOW,
   /**
    * ⚠️ 共享的三样（前摇标记 / 狂暴 / 倒地）**由 `bossShared.ts` 定义、
    * 在这里单独列出** —— 它们**不在**任何 Boss 自己的 `*_BUFFS` 里

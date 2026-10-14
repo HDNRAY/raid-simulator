@@ -38,7 +38,7 @@
  */
 
 import type { EventDef } from '../types';
-import type { HitPayload } from './hitResolution';
+import type { HitPayload } from '../types/triggers';
 
 /**
  * 一次 `drain` 最多处理多少个 buff 事件。
@@ -86,9 +86,9 @@ export class BuffHookDispatch {
       processed += 1;
       if (event === undefined) continue;
       if (event.kind === 'buffApplied') {
-        sink(event.targetId, 'onBuffApplied', { sourceId: event.sourceId });
+        sink(event.targetId, 'onBuffApplied', { sourceId: event.sourceId, buffId: event.buffId });
       } else if (event.kind === 'buffExpired') {
-        sink(event.targetId, 'onBuffExpired', { sourceId: event.sourceId });
+        sink(event.targetId, 'onBuffExpired', { sourceId: event.sourceId, buffId: event.buffId });
       }
     }
   }

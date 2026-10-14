@@ -212,10 +212,16 @@ describe('哪些 hook 真的会被派发', () => {
       'onBuffApplied',
       'onBuffExpired',
       'onCritDealt',
+      /**
+       * ⚠️ 2026-10-14 新增（「黑闪」是第一个消费者）：挂在**打出去的人**
+       * 身上的那一条，与 `onHitTaken` 共用"真的掉血了"的判据。
+       */
+      'onHitDealt',
       'onHitTaken',
       /** ⚠️ 2026-10-14：「贪婪」的「弱点」开始用"按时间"的钩子。 */
       'onTick',
     ]);
+    expect(isSupportedHook('onHitDealt')).toBe(true);
     expect(isSupportedHook('onHitTaken')).toBe(true);
     expect(isSupportedHook('onCritDealt')).toBe(true);
     expect(isSupportedHook('onBuffApplied')).toBe(true);

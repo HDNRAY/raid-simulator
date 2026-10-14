@@ -181,6 +181,8 @@ const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
   'gluttony-shield': 'gluttony.shield.name',
   'gluttony-count': 'gluttony.count.name',
   'gluttony-sated': 'gluttony.sated.name',
+  /** 「黑闪」的窗口（那条 0.1 秒的翻倍）。节拍是隐藏的，不用登记。 */
+  'heishan-window': 'buff.heishanWindow.name',
   'combo-window': 'buffShort.comboWindow',
   knockdown: 'buffShort.knockdown',
   /** 色欲的眩晕与印记（不登记就会显示中性兜底「？」）。 */
