@@ -105,10 +105,36 @@ export function computeStatsFor(
     for (const buff of combatant.buffs) {
       const def = buff.def ?? options.buffs.get(buff.defId);
       if (!def?.modifiers) continue;
-      for (const modifier of def.modifiers) {
-        modifiers.push(
-          modifier.namespace ? modifier : { ...modifier, namespace: buff.defId },
-        );
+      /**
+       * ⚠️ **按层展开**（每层推一条修正），不是一个实例只贡献一次。
+       *
+       * ==================================================================
+       * 为什么（2026-10-14，用户点名）
+       * ==================================================================
+       *
+       * 原先这里**不展开**：一个 buff 实例的 `modifiers` 无论几层都只贡献
+       * 一次。于是"每层 +1 点/秒回血"这种写法**静默地只生效一份** ——
+       * 懒惰的「怠惰」涨到 9 层却只回 1 点/秒（实测过）。
+       *
+       * 用户的原始口径本来就是**按层**：
+       *   - 懒惰："**回血先按最大 9 层**"
+       *   - 贪婪："9 层、**每层**全面一点点（回血 / 全技能伤害 / 读条时间）"
+       *
+       * ⚠️ 与 `damageMultBoost` 的展开（本文件下面那段）是同一条规则，
+       * 只是那条是"每层乘"，这条是"照 `op` 走"：
+       *   - `op: 'add'` ⇒ 每层各加一次（`+1` × 9 层 = `+9`）
+       *   - `op: 'mult'` ⇒ 每层各乘一次 ⇒ **指数**（`×2` × 9 层 = `512`）
+       *     后者正是懒惰要的 `2^层数`。
+       *
+       * ⚠️ `Math.max(1, …)`：层数恒 ≥ 1，写成它是为了"万一"（与
+       * `damageMultBoost` 那段的写法保持一致）。
+       */
+      for (let i = 0; i < Math.max(1, buff.stacks); i += 1) {
+        for (const modifier of def.modifiers) {
+          modifiers.push(
+            modifier.namespace ? modifier : { ...modifier, namespace: buff.defId },
+          );
+        }
       }
     }
 

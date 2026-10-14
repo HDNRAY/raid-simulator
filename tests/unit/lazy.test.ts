@@ -153,23 +153,32 @@ describe('「怠惰」：每 3 秒没挨打 +1 层，**挨一次打清零**（�
     expect(idleStacks(e)).toBe(LAZY_IDLE.maxStacks);
   });
 
-  it('层数封顶之后，「怠惰」那条修正仍然在（每层 +1 是内容声明的）', () => {
+  it('⚠️ **「怠惰」的修正是按层展开的**（9 层 = 9 份 +1，不是只算一份）', () => {
     /**
-     * ⚠️ **只断言到"它还在 +1"**，不在这里验"9 层 = +9"。
+     * ⚠️ 这条以前是**已知缺口**："`BuffDef.modifiers` 不按层展开，所以 9 层
+     * 只贡献 +1" —— 2026-10-14 补上了按层展开（`core/combat/stats.ts`），
+     * 所以断言现在收紧成**真实行为**。
      *
-     * 原因：`BuffDef.modifiers` 的层数展开**不是按层重复**（一个 buff 实例
-     * 的 `modifiers` 只贡献一次），所以"每层 +1"目前是**内容写法**
-     * （`op:'add', value:1`）—— 要让 9 层真的 +9，需要"按层展开"那条路
-     * （`damageMultBoost` 是显式按层推的，见 `core/combat/stats.ts`）。
-     * 这里是**已知的缺口**，不是本 Boss 的实现问题 —— 留给"回血机制"
-     * 那一轮一起定（要么给 `hpRegen` 也按层展开，要么用别的表达）。
+     * ⚠️ 判据从**内容**取（`LAZY_IDLE.modifiers` 的声明值 × 层数），
+     * 不写死数字 —— 数值调了这条照样绿，机制坏了才红。
      */
     const e = engineWith({ boss: withBuff({}, [LAZY_IDLE_PASSIVE, LAZY_BASE_REGEN]) });
     for (let i = 0; i < LAZY_IDLE.maxStacks * 3 * 60; i += 1) e.tick([]);
-
     expect(idleStacks(e), '层数封顶').toBe(LAZY_IDLE.maxStacks);
-    expect(e.statsOf('boss').hpRegen, '基础 1 + 「怠惰」那一层').toBeGreaterThanOrEqual(2);
+
+    const perStack = (LAZY_IDLE.modifiers ?? [])
+      .filter((m) => m.stat === 'hpRegen')
+      .reduce((sum, m) => sum + (typeof m.value === 'number' ? m.value : 0), 0);
+    const base = (LAZY_BASE_REGEN.modifiers ?? [])
+      .filter((m) => m.stat === 'hpRegen')
+      .reduce((sum, m) => sum + (typeof m.value === 'number' ? m.value : 0), 0);
+    expect(perStack, '内容里应当声明了每层 +1 回血').toBeGreaterThan(0);
+    expect(e.statsOf('boss').hpRegen, '基础 + 每层各一份').toBeCloseTo(
+      base + perStack * LAZY_IDLE.maxStacks,
+      6,
+    );
   });
+
 });
 
 /* ================================================================== *
