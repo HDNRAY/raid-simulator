@@ -3,7 +3,7 @@ import { PRIDE_BEHAVIORS } from '../../src/data/bossPride';
 import { createRegistry } from '../../src/core/content/registry';
 import { ALL_BUFFS, ALL_SKILLS, DOUQI_MAX, ENERGY_MAX } from '../../src/data/content';
 import { GUARD_THRESHOLD } from '../../src/data/balance';
-import { BOSS_HP_DISPLAY } from '../../src/data/entities/bossHp';
+import { PRIDE_HP } from '../../src/data/prideBoss';
 import { LIN_WANFENG_HP } from '../../src/data/kits/linwanfeng';
 import { flattenCatalog } from '../../src/i18n/translator';
 import { zhCN } from '../../src/i18n/locales/zh-CN';
@@ -91,8 +91,8 @@ export const PLAYER_CAPS = {
   energy: ENERGY_MAX,
   douqi: DOUQI_MAX,
 } as const;
-/** Boss 血量。取值依据见 `data/entities/bossHp.ts`（实测出来的）。 */
-export const BOSS_CAPS = { hp: BOSS_HP_DISPLAY, energy: 0, douqi: 0 } as const;
+/** Boss 血量。取值依据见 `data/prideBoss.ts`（实测出来的）。 */
+export const BOSS_CAPS = { hp: PRIDE_HP, energy: 0, douqi: 0 } as const;
 
 /**
  * 玩家基础属性。
@@ -200,7 +200,7 @@ export const GOLDEN_OUTCOME = {
    * 它记录了「倒地」这个机制的副作用，对下一个人仍然有用。
    * 它描述的不是当前内容。
    *
-   * ⚠️ **当前平衡的实测数字在 `src/data/entities/bossHp.ts`**（那里跟着
+   * ⚠️ **当前平衡的实测数字在 `src/data/prideBoss.ts`**（那里跟着
    * 数值改动一起更新）。要比较"这次改动变了多少"，读那一份，不要读这里。
    *
    * 实测（规范策略）—— **2026-10-10 加了「倒地」重新标定**：

@@ -44,7 +44,7 @@
  * | 炁机 | 名字 / 说明 | 内容实体的 `nameKey` / `descKey`（i18n 里已有） |
  * | 炁机 | 已激活没有 | 激活集合（`ui/freeQiji.ts`：开关，没有层数） |
  * | Boss | 名字 | `data/roster.BOSS_ROSTER` 的 `nameKey` |
- * | Boss | 生命上限 | `data/units.BOSS_CAPS.hp` |
+ * | Boss | 生命上限 | `bossHpFor(id)`（`data/bossDefs.ts`） |
  * | Boss | 招式 | `data/units.behaviorsFor(id)` → `ALL_SKILLS` |
  * | Boss | 招式说明 | `descKey` + `app/descParams.descParamsOf()`（模板参数） |
  *

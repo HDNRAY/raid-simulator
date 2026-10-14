@@ -101,3 +101,13 @@ export const KNOCKDOWN: BuffDef = {
    */
   flags: { restrictToTags: ['dodge'] },
 };
+
+/**
+ * 三个 Boss **共享**的 buff（前摇标记 / 狂暴 / 倒地）。
+ *
+ * ⚠️ 它们**不属于任何单个 Boss 的 `*_BUFFS`** —— 那样会被注册两次
+ * （`DUP_ID`）。`content.ts` 注册这一组；而每个 Boss 的**定义**
+ * （`bossDefs`）把它们带进"这个 Boss 会用到的全部 buff"那一份里。
+ */
+export const BOSS_SHARED_BUFFS: readonly BuffDef[] = [BOSS_TELEGRAPH, BOSS_ENRAGE, KNOCKDOWN];
+

@@ -38,9 +38,10 @@
  */
 
 import type { Behavior, BuffDef, Expr, SkillDef } from '../core/types';
+import type { BossDef } from './bossDefs';
 import { logicMs } from '../core/loopConstants';
 import { S } from './scale';
-import { BOSS_ENRAGE, BOSS_TELEGRAPH } from './bossShared';
+import { BOSS_TELEGRAPH } from './bossShared';
 
 /* ================================================================== *
  * 1. 「见红」：殁留下的口子（受到的伤害 +30%）
@@ -289,6 +290,8 @@ export const JEALOUSY_BUFFS: readonly BuffDef[] = [
   tel('jealousy-flame', logicMs(14)),
 ];
 
+
+
 /**
  * 行为：**狂暴 + 招牌走 CD + 三招走轮转**。
  *
@@ -312,4 +315,23 @@ export const JEALOUSY_BEHAVIORS: readonly Behavior[] = [
   },
 ];
 
-export { BOSS_ENRAGE };
+
+/* ================================================================== *
+ * 「嫉妒」的**定义**
+ * ================================================================== */
+
+/**
+ * ⚠️ 血量与另外两个 Boss **暂时相同**（420）—— 见 `LUST_HP` 的同一条说明：
+ * 那个数是傲慢实测出来的，嫉妒自己的值等实测之后填。
+ */
+export const JEALOUSY_HP = 420;
+
+export const JEALOUSY_BOSS: BossDef = {
+  id: 'envy',
+  hp: JEALOUSY_HP,
+  nameKey: 'envy.name',
+  skills: JEALOUSY_SKILLS,
+  buffs: JEALOUSY_BUFFS,
+  behaviors: JEALOUSY_BEHAVIORS,
+};
+

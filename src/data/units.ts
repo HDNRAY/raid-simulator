@@ -29,13 +29,13 @@
 
 import type { Behavior, Combatant, SkillDef, StatKey } from '../core/types';
 import { applyBuff } from '../core/buffs';
-import { BOSS_HP_DISPLAY } from './entities/bossHp';
 import { DOUQI_MAX, ENERGY_MAX, HP_MAX, skillsForPlayer } from './content';
 import { KAILI_HP } from './kits/kaili';
 import { LIN_WANFENG_HP } from './kits/linwanfeng';
 import { LUST_BEHAVIORS, LUST_PASSIVE } from './lustBoss';
 import { JEALOUSY_BEHAVIORS } from './jealousyBoss';
 import { PRIDE_BEHAVIORS } from './bossPride';
+import { bossHpFor } from './bossDefs';
 import { BOSS_ROSTER, PLAYER_ROSTER, findEntry } from './roster';
 
 /**
@@ -112,13 +112,6 @@ export function playerCapsFor(id: string): {
   return { hp: playerHpFor(id), energy: ENERGY_MAX, douqi: DOUQI_MAX };
 }
 
-/**
- * Boss 资源上限。
- *
- * 血量取值依据见 `data/entities/bossHp.ts` —— 那是实测出来的
- * （玩家 214 DPS vs Boss 66 DPS），不是拍脑袋定的。
- */
-export const BOSS_CAPS = { hp: BOSS_HP_DISPLAY, energy: 0, douqi: 0 };
 
 /**
  * 造一个玩家单位。
@@ -223,8 +216,8 @@ export function makeBoss(id: string, options?: { readonly noAi?: boolean }): Com
     id,
     nameKey: findEntry(BOSS_ROSTER, id)?.nameKey ?? 'boss.name',
     side: 'enemy',
-    caps: { ...BOSS_CAPS },
-    resources: { hp: BOSS_CAPS.hp, energy: 0, douqi: 0 },
+    caps: { hp: bossHpFor(id), energy: 0, douqi: 0 },
+    resources: { hp: bossHpFor(id), energy: 0, douqi: 0 },
     counters: {},
     basePrimary: { strength: 400, agility: 200, intelligence: 300, spirit: 200 },
     cooldowns: {},

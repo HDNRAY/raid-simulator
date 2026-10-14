@@ -14,7 +14,7 @@ import {
 import { makeCombatant } from './helpers';
 import { OUTPUT_PRIORITY, PLAYER_CAPS, makeGoldenEngineOptions, planPriority } from '../golden/fixtures';
 import type { Action, BattleState, Behavior, BuffDef, SkillDef } from '../../src/core/types';
-import { BOSS_HP_DISPLAY } from '../../src/data/entities/bossHp';
+import { PRIDE_HP } from '../../src/data/prideBoss';
 
 /**
  * 「傲慢」的**随机选招**与**三把刀的内容数值**。
@@ -277,8 +277,8 @@ describe('「傲慢」的半血「回补」：一次性、可打断', () => {
        * 血量翻到 420 之后它没跟着走，于是"回 126"被上限截断，
        * 测试报的是"回血没生效"，而真相是**夹具过期了**。
        */
-      caps: { hp: BOSS_HP_DISPLAY, energy: 0, douqi: 0 },
-      resources: { hp: BOSS_HP_DISPLAY, energy: 0, douqi: 0 },
+      caps: { hp: PRIDE_HP, energy: 0, douqi: 0 },
+      resources: { hp: PRIDE_HP, energy: 0, douqi: 0 },
       /**
        * 空行为表：让 Boss 不会自己出招，测试完全控制它的施法。
        *

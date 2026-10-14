@@ -27,7 +27,7 @@ import { buildKeyRows } from '../../src/app/keyRows';
 import { flattenCatalog, translator } from '../../src/i18n/translator';
 import { zhCN } from '../../src/i18n/locales/zh-CN';
 import { ALL_BUFFS, ALL_SKILLS, PLAYER_SKILL_IDS } from '../../src/data/content';
-import { BOSS_CAPS } from '../../src/data/units';
+import { bossHpFor } from '../../src/data/bossDefs';
 import { createRegistry } from '../../src/core/content/registry';
 import { DEFAULT_BINDINGS } from '../../src/input/keyboard';
 import { FLASH } from '../../src/data/kits/kaili';
@@ -351,11 +351,11 @@ describe('傲慢的招式说明：全部回到 `SkillDef`', () => {
 
   it('「回补」：比例与点数都从回血量推', () => {
     const skill = skillOf('boss-mend');
-    const text = render(skill, BOSS_CAPS.hp);
+    const text = render(skill, bossHpFor('meiichiro'));
     const heal = selfHealOf(skill);
     expect(text, '前摇来自 `castTime`').toContain(String(displaySeconds(skill.castTime)));
     expect(text, '比例 = 回血量 / 上限').toContain(
-      String(Math.round((heal / BOSS_CAPS.hp) * 100)),
+      String(Math.round((heal / bossHpFor('meiichiro')) * 100)),
     );
     expect(text, '点数来自 `resource.delta`').toContain(String(heal));
   });
@@ -373,8 +373,8 @@ describe('傲慢的招式说明：全部回到 `SkillDef`', () => {
   });
 
   it('⚠️ 变异：回补的 `delta` 改了 → 文案变成对应的比例 / 点数', () => {
-    const text = render(withResourceDelta(skillOf('boss-mend'), 210), BOSS_CAPS.hp);
-    expect(text, '比例要跟着变异走').toContain(String(Math.round((210 / BOSS_CAPS.hp) * 100)));
+    const text = render(withResourceDelta(skillOf('boss-mend'), 210), bossHpFor('meiichiro'));
+    expect(text, '比例要跟着变异走').toContain(String(Math.round((210 / bossHpFor('meiichiro')) * 100)));
     expect(text, '点数要跟着变异走').toContain('210');
   });
 });

@@ -22,7 +22,7 @@
  * | 显示 | 来源 |
  * |---|---|
  * | 名字 | `data/roster.BOSS_ROSTER[].nameKey` |
- * | 生命上限 | `data/units.BOSS_CAPS.hp`（420，展示刻度） |
+ * | 生命上限 | `bossHpFor(id)` —— **那个 Boss 自己的定义**（`data/bossDefs.ts`） |
  * | 招式列表 | `data/units.behaviorsFor(id)` 的行为数组里出现的 `skillId` |
  * | 招式名 | `SkillDef.nameKey` |
  * | 招式说明 | `SkillDef.descKey` + `app/descParams.descParamsOf()` |
@@ -40,7 +40,8 @@
 
 import { ALL_SKILLS, BOSS_SKILL_IDS, PENDING_SKILLS } from '../data/content';
 import { BOSS_ROSTER, PLAYER_ROSTER, findEntry, isDeveloping } from '../data/roster';
-import { BOSS_CAPS, behaviorsFor, playerHpFor, playerSkillsFor } from '../data/units';
+import { bossHpFor } from '../data/bossDefs';
+import { behaviorsFor, playerHpFor, playerSkillsFor } from '../data/units';
 import { qijiById } from '../data/qiji';
 import { descParamsOf } from './descParams';
 import { descTemplateOf } from './keyRows';
@@ -49,7 +50,7 @@ import type { QijiEntity } from '../core/types/qiji';
 import type { SkillDef } from '../core/types';
 
 /** 一个技能 → 详情区要的那一行（名字 + 说明 + 模板参数）。 */
-function skillRow(skill: SkillDef): DetailSkillRow {
+function skillRow(skill: SkillDef, /** 那个技能**属于谁**的血上限（`{percent}` 的分母）。 */ maxHp: number): DetailSkillRow {
   const descKey = skill.descKey;
   const template = descKey === undefined ? undefined : descTemplateOf(descKey);
   /**
@@ -60,13 +61,13 @@ function skillRow(skill: SkillDef): DetailSkillRow {
    * 走"不带参数"的那条快路，占位符照样原样出现 —— 两种坏结果一样，
    * 但空对象让"这一行总是有参数"这个类型前提成立。
    *
-   * ⚠️ `maxHp` 传 `BOSS_CAPS.hp`：`{percent}` 只在**回血类**技能上出现
+   * ⚠️ `maxHp` 传**这个 Boss 自己的**上限：`{percent}` 只在**回血类**技能上出现
    * （傲慢的「回补」），而那个比例的分母就是 Boss 的血上限
    * （`descParamsOf` 的文档写了这条）。玩家技能里没有 `{percent}`，
    * 所以这个值对它们无副作用。
    */
   const params =
-    template === undefined ? {} : (descParamsOf(skill, template, BOSS_CAPS.hp) ?? {});
+    template === undefined ? {} : (descParamsOf(skill, template, maxHp) ?? {});
   return {
     kind: 'skill',
     /**
@@ -149,8 +150,8 @@ export function prepareDetailContext(free: {
     bossById: bossUnit,
     qijiById: qijiShape,
     playerHp: playerHpFor,
-    bossHp: () => BOSS_CAPS.hp,
-    playerSkills: (id) => playerSkillsFor(id).map(skillRow),
+    bossHp: bossHpFor,
+    playerSkills: (id) => playerSkillsFor(id).map((s) => skillRow(s, playerHpFor(id))),
     /**
      * ⚠️ **开发中的 Boss 返回空数组**（见文件头）：`behaviorsFor` 对它们
      * 返回的是傲慢的表，照实列就是假信息。
@@ -160,7 +161,7 @@ export function prepareDetailContext(free: {
         ? []
         : bossSkillIds(id).flatMap((sid) => {
             const skill = skillById(sid);
-            return skill === undefined ? [] : [skillRow(skill)];
+            return skill === undefined ? [] : [skillRow(skill, bossHpFor(id))];
           }),
     developing: isDeveloping,
     qijiOn: (id) => free.on(id),

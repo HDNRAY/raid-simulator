@@ -44,8 +44,7 @@
  */
 
 import type { BuffDef, SkillDef } from '../core/types';
-import { LUST_BUFFS, LUST_SKILLS } from './lustBoss';
-import { JEALOUSY_BUFFS, JEALOUSY_SKILLS } from './jealousyBoss';
+import { BOSS_BUFFS, BOSS_SKILLS } from './bossDefs';
 import { COMBO_WINDOW, STRIKE } from './kits/combo';
 /**
  * ⚠️ 蓄势（「避实击虚」的 buff）来自它**自己的文件** —— 它是
@@ -120,7 +119,7 @@ export {
 } from './kits/dodgeCharge';
 
 export { C, S } from './scale';
-import { BOSS_ENRAGE, BOSS_TELEGRAPH, KNOCKDOWN } from './bossShared';
+import { BOSS_SHARED_BUFFS } from './bossShared';
 /**
  * ⚠️ 只 import **本文件自己要用**的两个汇总（`ALL_SKILLS` / `ALL_BUFFS`）；
  * 逐个技能的转发走下面的 `export { ... } from`。
@@ -129,7 +128,6 @@ import { BOSS_ENRAGE, BOSS_TELEGRAPH, KNOCKDOWN } from './bossShared';
  * 变成"import 了但没用到"（`export ... from` 是从源模块重新导出，
  * 不经过本地绑定），`noUnusedLocals` 会报错。
  */
-import { PRIDE_BUFFS, PRIDE_SKILLS } from './bossPride';
 
 /**
  * Boss 的内容从各自的内容文件**转发**，外部 import 路径不变。
@@ -292,7 +290,7 @@ export const PLAYER_SKILL_IDS: ReadonlySet<string> = new Set(
  * 一个不该存在的事实）。所以那一处改成读本集合。
  */
 export const BOSS_SKILL_IDS: ReadonlySet<string> = new Set(
-  [...PRIDE_SKILLS, ...LUST_SKILLS, ...JEALOUSY_SKILLS].map((s) => s.id),
+  BOSS_SKILLS.map((s) => s.id),
 );
 
 /**
@@ -331,9 +329,8 @@ export const DERIVED_SKILL_IDS: ReadonlySet<string> = new Set(['strike']);
 export const ALL_SKILLS: readonly SkillDef[] = [
   ...PLAYER_SKILLS,
   ...PENDING_SKILLS.map((p) => p.skill),
-  ...PRIDE_SKILLS,
-  ...LUST_SKILLS,
-  ...JEALOUSY_SKILLS,
+  /** ⚠️ 三个 Boss 的技能都由 `bossDefs` 聚合（**只有一处**，见那个文件头）。 */
+  ...BOSS_SKILLS,
 ];
 
 /** 玩家技能里"某个角色带哪一套"的**定义**（不含「击」那种派生技）。 */
@@ -381,21 +378,17 @@ export const ALL_BUFFS: readonly BuffDef[] = [
   GUARD_THRESHOLD_BUFF,
   FOCUS_BUFF,
   SUNDER_DEBUFF,
-  BOSS_TELEGRAPH,
-  BOSS_ENRAGE,
-  ...PRIDE_BUFFS,
-  ...LUST_BUFFS,
-  ...JEALOUSY_BUFFS,
   /**
-   * 「倒地」（Boss 的「碾压」给玩家的）。
+   * ⚠️ 共享的三样（前摇标记 / 狂暴 / 倒地）**由 `bossShared.ts` 定义、
+   * 在这里单独列出** —— 它们**不在**任何 Boss 自己的 `*_BUFFS` 里
+   * （否则会被 `...BOSS_BUFFS` 再注册一次 → `DUP_ID`）。
    *
-   * ⚠️ 必须注册进 `ALL_BUFFS` —— 内容校验器与 `registry.buffs` 都读它，
-   * 漏了会导致"引擎认识这个 buff，但 hittest/校验看不到"。
-   *
-   * ⚠️ 它**不在** `PRIDE_BUFFS` 里：两个 Boss 都会用到它（设计 §6.4 的
-   * "共享"边界），所以它由 `bossShared.ts` 定义、在这里单独列出。
+   * ⚠️ 但 Boss 的**定义**（`bossDefs`）里要把它们带上：那是"这个 Boss
+   * 的技能会用到的全部 buff"，与"注册表里有哪些"是两个问题。
    */
-  KNOCKDOWN,
+  ...BOSS_SHARED_BUFFS,
+  /** 三个 Boss **各自**的 buff（不含共享那三样，见上面的说明）。 */
+  ...BOSS_BUFFS,
   /**
    * 蓄势（「避实击虚」的 buff）。
    *

@@ -49,3 +49,29 @@
  */
 
 export const BOSS_HP_DISPLAY = 420;
+
+/* ================================================================== *
+ * 「傲慢」的**定义**（每个 Boss 自己一套：血量 / 名字 / 技能 / buff / 行为）
+ * ================================================================== */
+
+import type { BossDef } from './bossDefs';
+import { PRIDE_BEHAVIORS, PRIDE_BUFFS, PRIDE_SKILLS } from './bossPride';
+
+/**
+ * ⚠️ **血量住在"这个 Boss 自己的文件"里**（2026-10-14 改）。
+ *
+ * 原先它是 `data/entities/bossHp.ts` 的全局常量 `BOSS_HP_DISPLAY`，
+ * 而那是个**借来的形状**：7 个 Boss 共用同一个上限 ⇒ 「懒惰」要的
+ * "高血量"没有地方写（那是 W6）。现在每个 Boss 拿自己的数，
+ * 420 只是**傲慢**的值（它本来就是为傲慢实测出来的）。
+ */
+export const PRIDE_HP = BOSS_HP_DISPLAY;
+
+export const PRIDE_BOSS: BossDef = {
+  id: 'meiichiro',
+  hp: PRIDE_HP,
+  nameKey: 'boss.name',
+  skills: PRIDE_SKILLS,
+  buffs: [...PRIDE_BUFFS],
+  behaviors: PRIDE_BEHAVIORS,
+};

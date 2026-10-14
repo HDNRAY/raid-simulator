@@ -818,7 +818,7 @@ export const zhCN = {
      *
      *   前摇  `castTime`（`logicMs(25)`）
      *   比例  `resource.delta / 上限`（126 / 420 = 30，上限由
-     *         `BOSS_CAPS.hp` 传入 —— 比例**不是**技能自己的字段）
+     *         `bossHpFor(id)` 传入 —— 比例**不是**技能自己的字段）
      *   点数  `resource.delta`（`S(126)`）
      */
     mend: {

@@ -20,6 +20,7 @@
  */
 
 import type { Behavior, BuffDef, SkillDef } from '../core/types';
+import type { BossDef } from './bossDefs';
 import { logicMs } from '../core/loopConstants';
 import { S } from './scale';
 
@@ -393,6 +394,8 @@ export const LUST_BUFFS: readonly BuffDef[] = [
   LUST_BIND_THORNS,
 ];
 
+
+
 /* ------------------------------------------------------------------ *
  * 行为（轮转）
  * ------------------------------------------------------------------ */
@@ -452,3 +455,24 @@ export const LUST_BEHAVIORS: readonly Behavior[] = [
     ],
   },
 ];
+
+/* ================================================================== *
+ * 「色欲」的**定义**
+ * ================================================================== */
+
+/**
+ * ⚠️ 血量与另外两个 Boss **暂时相同**（420）。它不是"实测出来的那个
+ * 420"—— 那个数是**傲慢**的（为本文件里没有的东西标定过）。
+ * 色欲自己的值等实测之后填（现在先与傲慢同量级）。
+ */
+export const LUST_HP = 420;
+
+export const LUST_BOSS: BossDef = {
+  id: 'lust',
+  hp: LUST_HP,
+  nameKey: 'lust.name',
+  skills: LUST_SKILLS,
+  buffs: LUST_BUFFS,
+  behaviors: LUST_BEHAVIORS,
+};
+
