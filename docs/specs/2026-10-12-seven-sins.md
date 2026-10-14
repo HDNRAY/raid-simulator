@@ -243,6 +243,39 @@
    （一个实例只贡献一次），所以"每层 ×2"表达不出来 ⇒ 要那条引擎改动
    （它同时是「暴怒」每层 +5% haste 的前提）。
 
+### 10.5 落地计划（2026-10-14 推导清楚，待写代码）
+
+⚠️ **「懒惰」的重做与"被动改成被动技能"是同一件事**（共用同一批接线），
+所以一起做。推导出来的三处依赖：
+
+```
+「怠惰」= PassiveSkillDef（一条被动技能）+ 它授予的「怠惰」buff
+   ① 基础 1 点/秒      → 被动技能的 abilities 里一条 `modifier`
+                          （{stat:'hpRegen', op:'add', value:1}）
+   ② 层数 → ×2^层      → 那条 buff 的 `modifiers` 里 `{op:'mult', value:2}`
+                          （**按层展开**已在 2026-10-14 做好，
+                           见 `core/combat/stats.ts`）
+   ③ 初始 1 层 / 3 秒不挨打 +1 / 挨打回 1 层
+                      → buff 的触发器：`onTick`（CD 3 秒、`when: 没有「刚挨打」）
+                        + `onHitTaken`（挂「刚挨打」3 秒；并 removeBuff + grant 1 层）
+```
+
+⚠️ **为什么要 `modifier` 而不能把"基础 1"也塞进那条 buff**：`modifiers` 现在
+**按层展开**，所以塞进 buff 会变成 `1 × 层数`（1 层 2、2 层 8……）而不是
+`2^层数`（1 层 2、2 层 4）。基础那一份必须是**不随层数走**的来源 ⇒ 被动技能的
+`modifier`。
+
+⇒ 于是需要**两条接线**（这也是第 3 项要的东西）：
+
+| 接线 | 落点 | 做什么 |
+|---|---|---|
+| 被动技能的 `grant` | `data/units.ts` 的 `makeBoss` | 开战时把 buff 挂上 |
+| 被动技能的 `modifier` | `app/battleSetup.ts` 的 `passiveModifiers` | 把被动技能的属性修正并进那一局（现在那里**只有玩家** `[[playerId, kit.modifiers]]`）|
+
+⚠️ 顺带：`BossDef.passives` 的类型要从 `BuffDef[]` 换成 `PassiveSkillDef[]`，
+并**删掉 `innateBuffsFor` 里对色欲的特判后门**（那正是"五个 Boss 的被动都是死的"
+的成因）。
+
 ### 10.4 与「暴怒」的关系
 
 | Boss | 一句话 |
