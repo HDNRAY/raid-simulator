@@ -83,7 +83,14 @@ describe('「敛财」：每层伤害 / 回血 / 读条一起变强，且卡在 
       boss: withBuff({}, GREED_HOARD, max),
       skills: [],
     });
-    const expected = (GREED_HOARD.damageMultBoost ?? 1) ** max;
+    /**
+     * ⚠️ `damageMultBoost` 现在可以是 `Expr`（"任意逻辑增伤"，2026-10-14）——
+     * 「敛财」用的是**数字**那一档，所以这里收窄一下（这条正是"数字那条路
+     * 的展开规则"的断言，不能因为类型放宽就失去它）。
+     */
+    const boost = GREED_HOARD.damageMultBoost;
+    expect(typeof boost, '「敛财」应当用数字倍率').toBe('number');
+    const expected = (typeof boost === 'number' ? boost : 1) ** max;
     expect(statsOf(e, 'boss').damageMult).toBeCloseTo(expected, 6);
   });
 

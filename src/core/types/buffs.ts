@@ -2,7 +2,7 @@
 
 import type { BuffId, CombatantId, LocaleKey, SkillId } from './ids';
 import type { Ability } from './abilities';
-import type { StatModifier } from './stats';
+import type { Expr, StatModifier } from './stats';
 import type { SkillTag, TriggerDef } from './triggers';
 
 /* ================================================================== *
@@ -296,7 +296,23 @@ export interface BuffDef {
    * "这个单位的输出整体 ×N"，与"某条修正贡献多少"不是一回事 ——
    * 后者参与修正池聚合，前者是一个整体开关。
    */
-  readonly damageMultBoost?: number;
+  /**
+   * **增伤倍率**：`op: 'mult'` 的语义（`1.5` = 伤害 ×1.5），**逐层相乘**。
+   *
+   * ⚠️ **可以是 `Expr`**（2026-10-14 放宽，用户点名："buff 需要一个**按照
+   * 任意逻辑增伤**的机制"）—— 走的是**修正树本来就有**的那条动态路
+   * （`stats/pipeline.ts`：`typeof value === 'number'` 之外一律
+   * `evalExpr(value, ctx)`，注释写着"可为表达式 → 动态重算"）。
+   *
+   * ⇒ 所以引擎**没有为它新开一条路**：`stats.ts` 照旧每层推一条
+   * `op:'mult'` 的 `damageMult` 修正，只是 `value` 现在允许是表达式。
+   * ⚠️ **别在别处再乘一次**（我第一版在命中结算处补乘了一次，结果
+   * 变成 1.5² —— 被测试当场抓住）。
+   *
+   * 典型用法（「懒惰」的残血增伤）：
+   * `{ e: 'add', of: [{ e: 'const', value: 1 }, { e: 'missingResourceRatio', who: 'self', resource: 'hp' }] }`
+   */
+  readonly damageMultBoost?: number | Expr;
   /**
    * **挂上时，这层壳有多厚**（写进 `BuffInstance.absorb`；缺省 = 不是壳）。
    *

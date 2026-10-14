@@ -4,7 +4,7 @@ import { BattleEngine } from '../../src/core/combat/battleState';
 import { createRegistry } from '../../src/core/content/registry';
 import { applyBuff } from '../../src/core/buffs';
 import { ALL_BUFFS, ALL_SKILLS } from '../../src/data/content';
-import { LAZY_BEHAVIORS, LAZY_BLUNT, LAZY_IDLE, LAZY_IDLE_PASSIVE, LAZY_IDLE_SKILL, LAZY_PRESSURE, LAZY_RECENT_HIT, LAZY_SLEEP, LAZY_SLEEP_SKILL } from '../../src/data/lazyBoss';
+import { LAZY_BEHAVIORS, LAZY_BLUNT, LAZY_IDLE, LAZY_IDLE_PASSIVE, LAZY_IDLE_SKILL, LAZY_LOW_HP_RAGE, LAZY_LOW_HP_RAGE_SKILL, LAZY_PRESSURE, LAZY_RECENT_HIT, LAZY_SLEEP, LAZY_SLEEP_SKILL } from '../../src/data/lazyBoss';
 import type { BuffDef, Combatant, SkillDef, StatKey } from '../../src/core/types';
 import { logicMs } from '../../src/core/loopConstants';
 import { makeCombatant, makeSkillDef } from './helpers';
@@ -327,7 +327,7 @@ function playerSleeping(e: BattleEngine): boolean {
  * 4. 两招都按**已损失的血量百分比**加成（2026-10-14 用户改的口径）
  * ================================================================== */
 
-describe('「钝击 / 重压」都吃"损失血量百分比"', () => {
+describe('「残血增伤」是**一条被动**（不是塞在技能里的第二段伤害）', () => {
   const damageSpecs = (skill: { readonly hits: readonly { readonly effects: readonly unknown[] }[] }) =>
     skill.hits
       .flatMap((h) => h.effects)
@@ -336,30 +336,77 @@ describe('「钝击 / 重压」都吃"损失血量百分比"', () => {
           typeof e === 'object' && e !== null && (e as { kind?: string }).kind === 'damage',
       );
 
-  it('🎯 **两招都有"按损失比"的加成段**（少了 50% 血 ⇒ 伤害 +50%）', () => {
+  it('🎯 两招各自**只有一段**伤害，而且 base 是**数字**', () => {
     /**
-     * 用户 2026-10-14："**2 个技能都吃损失血量，而且是吃百分比**，
-     * 比如少了 50% 血 伤害加成就是 50%"。
+     * ⚠️ 2026-10-14 改：加成**不再**塞在技能里（那会让面板上看不见它、
+     * 而且一次攻击算两段命中）。现在只留一段伤害。
      *
-     * 判据是**机制**（不是数值）：每招两段伤害 ——
-     *   ① 第一段是**数字** base（`{damage}` 模板参数要读它）
-     *   ② 第二段是**表达式** base（读"已损失血量百分比"）
-     * ⚠️ 数值调了照样绿；"第二段丢了 / 第一段变成表达式"才红。
+     * ⚠️ base 必须是**数字**：`descParams.firstDamageOf` 只认数字，
+     * 写成表达式会把详情里的 `{damage}` 变成**原样占位符**（静默坏）。
      */
     for (const skill of [LAZY_BLUNT, LAZY_PRESSURE]) {
       const specs = damageSpecs(skill);
-      expect(specs.length, `${skill.id} 应当有两段伤害`).toBe(2);
-      expect(typeof specs[0]?.damage.base, `${skill.id} 第一段必须是数字`).toBe('number');
-      expect(typeof specs[1]?.damage.base, `${skill.id} 第二段必须是表达式`).toBe('object');
+      expect(specs.length, `${skill.id} 只该有一段伤害`).toBe(1);
+      expect(typeof specs[0]?.damage.base, `${skill.id} 的 base 必须是数字`).toBe('number');
     }
   });
 
-  it('⚠️ 详情里的 `{damage}` **仍然取得到**（第一段是数字的直接后果）', () => {
+  it('🎯 加成住在**被动**里：`damageMultBoost` 是一个读"已损失血量"的表达式', () => {
     /**
-     * ⚠️ 这是个**静默坏**的坑：`descParams.firstDamageOf` 只认**数字**
-     * base。如果哪天有人把第一段也改成表达式，详情页就会把 `{damage}`
-     * **原样显示出来** —— 而单测不会红（除非有这一条）。
+     * 用户 2026-10-14："伤害受 已损失血量加成 这个 **能改成单独被动吗**"
+     * ⇒ 判据是**机制**（谁提供加成），不是数值：
+     *   - 有一条被动技能，它授予那条隐藏 buff
+     *   - 那条 buff 的 `damageMultBoost` 是 **Expr**（不是数字）
      */
+    const grants = LAZY_LOW_HP_RAGE_SKILL.abilities.filter((a) => a.kind === 'grant');
+    expect(grants.length, '「残血增伤」应当是一条 grant 被动').toBe(1);
+    expect(
+      LAZY_LOW_HP_RAGE_SKILL.abilities.some(
+        (a) => a.kind === 'grant' && a.buff === LAZY_LOW_HP_RAGE,
+      ),
+      '它授予的必须是那条动态增伤 buff',
+    ).toBe(true);
+    expect(typeof LAZY_LOW_HP_RAGE.damageMultBoost, '倍率必须是表达式').toBe('object');
+  });
+
+  it('⚠️ **端到端**：它剩一半血 ⇒ 打出来的伤害是满血时的 **1.5 倍**', () => {
+    /**
+     * 这条才是"引擎那条路真的通了"的证明（`core/combat/dynamicBoost.ts`）。
+     * 判据写成**比值**：1.5 是用户给的口径（"少了 50% 血 伤害加成就是 50%"）。
+     */
+    /**
+     * ⚠️ 用本文件自己的夹具 `engineWith`（它直接返回 `BattleEngine`）——
+     * 玩家的血从快照里读，不要另开一套读数口径。
+     */
+    const playerHp = (e: ReturnType<typeof engineWith>): number =>
+      e.snapshot.combatants.find((c) => c.id === 'player')?.resources.hp ?? 0;
+    const damageAt = (hpRatio: number): number => {
+      const e = engineWith({
+        boss: withBuff(
+          {
+            caps: { hp: 900, energy: 0, douqi: 0 },
+            resources: { hp: Math.max(1, Math.round(900 * hpRatio)), energy: 0, douqi: 0 },
+          },
+          [LAZY_LOW_HP_RAGE],
+        ),
+      });
+      const before = playerHp(e);
+      e.tick([{ type: 'useSkill', skillId: 'lazy-blunt', atTick: e.snapshot.tick }], 'boss');
+      /**
+       * 跑满前摇：钝击 1.0 秒，而 `tick()` 是 **60Hz 物理刻度**
+       * （逻辑步每 6 tick 一次）⇒ 需要 60+ 帧（给足余量取 70）。
+       */
+      for (let i = 0; i < 70; i += 1) e.tick([]);
+      e.drainEvents();
+      return before - playerHp(e);
+    };
+    const full = damageAt(1);
+    const half = damageAt(0.5);
+    expect(full, '满血时应当有伤害').toBeGreaterThan(0);
+    expect(half / full, '少一半血 ⇒ 伤害 ×1.5').toBeCloseTo(1.5, 1);
+  });
+
+  it('⚠️ 详情里的 `{damage}` **仍然取得到**（第一段是数字的直接后果）', () => {
     for (const skill of [LAZY_BLUNT, LAZY_PRESSURE]) {
       const template = descTemplateOf(skill.descKey ?? '');
       expect(template, `${skill.id} 没有文案模板`).toBeTruthy();

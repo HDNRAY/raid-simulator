@@ -19,9 +19,10 @@
  * 三条互锁的机制（用户 2026-10-14 的设计）
  * ==================================================================
  *
- * 1. **开局只有半血**（上限 500 / 开局 250）—— 正好喂饱它自己的第 2 条
- * 2. **「重压」按它自己损失的血量加成**（`missingResourceRatio`）：
- *    它越残越痛 ⇒ 你**不能**先把它打残再慢慢磨
+ * 1. **满血开局**（上限 500）—— ⚠️ 曾经是"开局半血"，2026-10-14 删掉
+ *    （理由见 `LAZY_HP` 上面那段：换了百分比口径之后它变成常驻 +50%）
+ * 2. **被动「残血增伤」**：按它**已损失的血量百分比**增伤
+ *    （少了 50% 血 ⇒ 伤害 ×1.5）⇒ 它越残越痛，你**不能**先打残再慢慢磨
  * 3. **「怠惰」被动**：每秒回 1 点，而且**每 3 秒没挨打就 +1 层**
  *    （n 层 = n+1 点/秒）—— **挨一次打清零**
  *
@@ -260,25 +261,15 @@ export const LAZY_BLUNT: ActiveSkillDef = {
   hits: [
     {
       at: logicMs(10),
-      effects: [
-        /**
-         * ⚠️ **两段式**：第一段保持**数字** base（`{damage}` 模板参数照旧
-         * 取得到 —— `descParams.firstDamageOf` 只认数字），第二段是加成。
-         *
-         * 用户 2026-10-14："**2 个技能都吃损失血量，而且是吃百分比**，
-         * 比如少了 50% 血 伤害加成就是 50%"。⇒ 加成 = `base × 损失比`
-         * （`missingResourceRatio` 就是那个 0..1 的百分比）。
-         */
-        { kind: 'damage', damage: { base: S(18), canCrit: false, countsAsHit: true } },
-        {
-          kind: 'damage',
-          damage: {
-            base: { e: 'mul', of: [{ e: 'const', value: S(18) }, HP_LOSS] },
-            canCrit: false,
-            countsAsHit: true,
-          },
-        },
-      ],
+      /**
+       * ⚠️ **只有一段伤害**（2026-10-14）：按损失血量的加成不再塞在这里，
+       * 而走**被动**「残血增伤」（`LAZY_LOW_HP_RAGE`）—— 于是**面板上看得到**，
+       * 而且一击只有一段命中。
+       *
+       * ⚠️ base 保持**数字**：`descParams.firstDamageOf` 只认数字，写成表达式
+       * 会把详情里的 `{damage}` 变成原样占位符。
+       */
+      effects: [{ kind: 'damage', damage: { base: S(20), canCrit: false, countsAsHit: true } }],
     },
   ],
   targeting: { mode: 'primaryEnemy' },
@@ -324,36 +315,8 @@ export const LAZY_PRESSURE: ActiveSkillDef = {
   hits: [
     {
       at: logicMs(16),
-      effects: [
-        {
-          kind: 'damage',
-          damage: { base: S(24), canCrit: false, countsAsHit: true },
-        },
-        /**
-         * ⚠️ **加成段**（用户 2026-10-14 改的规则）：
-         * "**2 个技能都吃损失血量，而且是吃百分比**，比如少了 50% 血
-         * 伤害加成就是 50%"。
-         *
-         * ⇒ 加成 = `base × 损失比`，于是总伤害 = `base × (1 + 损失比)`
-         * （少了 50% 血 ⇒ 24 + 12 = **36**）。
-         *
-         * ⚠️ **旧的"×40 封顶"已删**：那是"按损失血量"的另一种口径
-         * （绝对加成、有上限），与新规则不是一回事。
-         *
-         * ⚠️ 为什么拆两段而不是写进同一个 `DamageSpec`：`DamageSpec.scaling`
-         * 是 `stat × ratio` 的**线性**项，而这里要的是"读一个表达式"；
-         * 拆两段是**最窄**的写法（不动 `DamageSpec` 的形状）。第一段保持
-         * 数字 base 也是有意的（见钝击那段的说明）。
-         */
-        {
-          kind: 'damage',
-          damage: {
-            base: { e: 'mul', of: [{ e: 'const', value: S(24) }, HP_LOSS] },
-            canCrit: false,
-            countsAsHit: true,
-          },
-        },
-      ],
+      /** ⚠️ **只有一段伤害** —— 加成走被动「残血增伤」（同钝击那段说明）。 */
+      effects: [{ kind: 'damage', damage: { base: S(30), canCrit: false, countsAsHit: true } }],
     },
   ],
   targeting: { mode: 'primaryEnemy' },
@@ -399,9 +362,48 @@ export const LAZY_SLEEP_SKILL: ActiveSkillDef = {
   interruptible: true,
 };
 
+/**
+ * **「残血增伤」** —— 它**已损失的血量百分比**直接变成增伤倍率。
+ *
+ * 用户 2026-10-14：
+ * > 2个技能都吃 损失血量，而且是吃百分比，比如少了50%血 伤害加成就是50%
+ * > …其实 伤害受 已损失血量加成 这个 **能改成单独被动吗**
+ * > buff 需要一个 **按照任意逻辑增伤** 的机制，可以改引擎
+ *
+ * ⚠️ 这是**第一条走 `Expr` 的 `damageMultBoost`**：那个字段原先只能写数字，
+ * 于是这条机制只能"在每条技能里塞第二段伤害"去凑 —— 结果是**面板上看不见**
+ * （它明明是一条被动），而且**一次攻击算两段命中**（两次 `onHitTaken`）。
+ *
+ * ⇒ 现在它是**一条被动**，对**所有**招式生效，一击只有一段伤害。
+ */
+export const LAZY_LOW_HP_RAGE: BuffDef = {
+  id: 'lazy-low-hp-rage',
+  nameKey: 'lazy.lowHpRage.name',
+  icon: 'char_attack',
+  polarity: 'buff',
+  hidden: true,
+  duration: Number.POSITIVE_INFINITY,
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+  /** `1 + 已损失血量百分比`（少了 50% 血 ⇒ ×1.5），**没有上限**。 */
+  damageMultBoost: { e: 'add', of: [{ e: 'const', value: 1 }, HP_LOSS] },
+};
+
+/** **「残血增伤」被动技能**（整场挂着，见 `LAZY_LOW_HP_RAGE`）。 */
+export const LAZY_LOW_HP_RAGE_SKILL: PassiveSkillDef = {
+  id: 'lazy-low-hp-rage-source',
+  kind: 'passive',
+  nameKey: 'lazy.lowHpRage.name',
+  descKey: 'lazy.lowHpRage.desc',
+  icon: 'char_attack',
+  abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: LAZY_LOW_HP_RAGE }],
+  tags: [],
+};
+
 export const LAZY_SKILLS: readonly SkillDef[] = [LAZY_BLUNT, LAZY_PRESSURE, LAZY_SLEEP_SKILL];
 
 export const LAZY_BUFFS: readonly BuffDef[] = [
+  LAZY_LOW_HP_RAGE,
   LAZY_SLEEP,
   LAZY_IDLE,
   LAZY_IDLE_PASSIVE,
@@ -441,14 +443,19 @@ export const LAZY_BEHAVIORS: readonly Behavior[] = [
 ];
 
 /**
- * ⚠️ **上限 500 / 开局 250**（用户 2026-10-14 指定）。
+ * **上限 500，满血开局**。
  *
- * 开局半血是**有意的**：它一上来就喂饱自己那条"按损失血量加成"。
- * 所以「懒惰」的战斗形状是"**一开场它就比平时痛**"，而随着你打它，
- * 它一边变痛一边回血更快 —— 逼你**集中爆发**而不是慢慢磨。
+ * ⚠️ **2026-10-14 改：开局不再半血**（原来是 250/500）。
+ *
+ * 原因是一次**机制相互作用**（实测逼出来的）：「残血增伤」是**按已损失血量
+ * 百分比**增伤的被动 —— 于是"开局半血"意味着它**从第一帧起就常驻 +50% 伤害**，
+ * 参考策略在 **17.5 秒**就被打死（`bossFights` 那条"活过 20 秒"的守卫当场红）。
+ *
+ * ⚠️ 而"开局半血"这条设定**本来就是为旧机制服务的**（旧的加成是"绝对量 + 上限"，
+ * 半血刚好喂饱它、又不会失控）。口径换成百分比之后那条理由就**失效**了 ——
+ * 所以这不是"绕开问题"，是**把过时的设定清掉**（用户 2026-10-14 拍板）。
  */
 export const LAZY_HP = 500;
-export const LAZY_START_HP = 250;
 
 /**
  * **「怠惰」= 一条被动技能**（用户："基础回血不是单独的被动，**就是怠惰本身**"）。
@@ -477,7 +484,6 @@ export const LAZY_IDLE_SKILL: PassiveSkillDef = {
 export const LAZY_BOSS: BossDef = {
   id: 'sloth',
   hp: LAZY_HP,
-  startHp: LAZY_START_HP,
   nameKey: 'sloth.name',
   skills: LAZY_SKILLS,
   buffs: LAZY_BUFFS,
@@ -485,6 +491,6 @@ export const LAZY_BOSS: BossDef = {
    * ⚠️ **整场都在的被动**（开战前就挂上）。与 `buffs` 分开的理由见
    * `BossDef.passives` —— 这里的每一条都是**引擎真的会挂**的。
    */
-  passives: [LAZY_IDLE_SKILL],
+  passives: [LAZY_IDLE_SKILL, LAZY_LOW_HP_RAGE_SKILL],
   behaviors: LAZY_BEHAVIORS,
 };

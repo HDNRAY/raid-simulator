@@ -45,21 +45,12 @@ import { runAbilities, runTriggers } from './triggers';
 import { absorbedByOf, withAbsorbedByBuffId } from './avoidedSource';
 import { casterGainsDouqiFromDamage } from './holds';
 import {
-  actsOnVictim,
-  absorbShieldDamage,
-  firePostHitHooks,
-  applyStunEffect,
-  applyThornReflect,
-  transferResources,
+  actsOnVictim, absorbShieldDamage, firePostHitHooks, applyStunEffect,
+  applyThornReflect, transferResources,
 } from './effectOps';
 import {
-  applyDamage,
-  applyHeal,
-  changeResource,
-  computeDamage,
-  computeHeal,
-  evaluateCondition,
-  flatBlocked,
+  applyDamage, applyHeal, changeResource, computeDamage, computeHeal,
+  evaluateCondition, flatBlocked,
 } from './index';
 import type { BattleState } from '../types';
 
