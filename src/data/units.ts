@@ -287,9 +287,15 @@ function innateBuffsFor(id: string): Combatant['buffs'] {
   let acc: Combatant['buffs'] = [];
   for (const passive of bossDefById(id).passives) {
     for (const ability of passive.abilities) {
+      /**
+       * ⚠️ `modifier`（"被动改属性"）**不在这里**处理 —— 它要进那一局的
+       * `passiveModifiers`（`app/battleSetup.ts`），而 `makeBoss` 只造
+       * `Combatant`、拿不到那份 Map。**两条路按 kind 分派**，谁也别吞谁。
+       */
+      if (ability.kind === 'modifier') continue;
       if (ability.kind !== 'grant') {
         throw new Error(
-          `boss passive ${passive.id}: only 'grant' is supported here (got '${ability.kind}')`,
+          `boss passive ${passive.id}: only 'grant' / 'modifier' are supported (got '${ability.kind}')`,
         );
       }
       acc = applyBuff({ ...EMPTY_FOR_INNATE, id, side: 'enemy', buffs: acc }, ability.buff, id, 0).buffs;

@@ -4,13 +4,7 @@ import { BattleEngine } from '../../src/core/combat/battleState';
 import { createRegistry } from '../../src/core/content/registry';
 import { applyBuff } from '../../src/core/buffs';
 import { ALL_BUFFS, ALL_SKILLS } from '../../src/data/content';
-import {
-  LAZY_BASE_REGEN,
-  LAZY_IDLE,
-  LAZY_IDLE_PASSIVE,
-  LAZY_SLEEP,
-  LAZY_SLEEP_PASSIVE,
-} from '../../src/data/lazyBoss';
+import { LAZY_BEHAVIORS, LAZY_IDLE, LAZY_IDLE_PASSIVE, LAZY_IDLE_SKILL, LAZY_RECENT_HIT, LAZY_SLEEP, LAZY_SLEEP_SKILL } from '../../src/data/lazyBoss';
 import type { BuffDef, Combatant, SkillDef, StatKey } from '../../src/core/types';
 import { logicMs } from '../../src/core/loopConstants';
 import { makeCombatant, makeSkillDef } from './helpers';
@@ -39,6 +33,14 @@ const i18nKeys = new Set([
 function engineWith(args: {
   readonly boss: Partial<Combatant>;
   readonly skills?: readonly SkillDef[];
+  /**
+   * Boss 的**基础属性**（缺省空）。
+   *
+   * ⚠️ 只有需要观察"乘算修正"的用例才传它 —— 例如「怠惰」的每层 ×2 需要一个
+   * **非 0 的基数**才看得出来（`0 × 2^9 = 0`）。真实战斗里那个基数由
+   * 「怠惰」被动技能的 `modifier` 提供（`LAZY_IDLE_SKILL`）。
+   */
+  readonly bossBase?: Partial<Record<StatKey, number>>;
 }): BattleEngine {
   const registry = createRegistry(
     { entities: [], skills: [...ALL_SKILLS, ...(args.skills ?? [])], buffs: [...ALL_BUFFS] },
@@ -61,7 +63,7 @@ function engineWith(args: {
     skills: registry.skills,
     baseStats: new Map<string, Partial<Record<StatKey, number>>>([
       ['player', {}],
-      ['boss', {}],
+      ['boss', args.bossBase ?? {}],
     ]),
     passiveModifiers: new Map(),
   });
@@ -101,7 +103,16 @@ function hitSkill(damage: number): SkillDef {
  * ================================================================== */
 
 describe('「怠惰」：每 3 秒没挨打 +1 层，**挨一次打清零**（新能力 `removeBuff`）', () => {
-  const HOST = [LAZY_IDLE_PASSIVE, LAZY_BASE_REGEN];
+  /**
+   * ⚠️ **不再挂"基础回血"那条 buff** —— 它已经被并进「怠惰」（用户：
+   * "基础回血不是单独的被动，就是怠惰本身"）：基础那 1 点现在写在
+   * `LAZY_IDLE_SKILL.abilities` 的 `modifier` 里，由开战装配接进
+   * `passiveModifiers`（不是 buff）。
+   *
+   * ⚠️ 所以这些单测**测的是层数那条路**（buff 层数 → `2^层数`）；
+   * "基础 1 点/秒"由 `bossFights` 的整场测试与 `§10.5` 的装配覆盖。
+   */
+  const HOST = [LAZY_IDLE_PASSIVE];
 
   it('不挨打就一层层涨；**每层之间约 3 秒**', () => {
     /**
@@ -123,7 +134,7 @@ describe('「怠惰」：每 3 秒没挨打 +1 层，**挨一次打清零**（�
     expect(idleStacks(e), '刚过 3 秒 → 第 2 层').toBe(2);
   });
 
-  it('🎯 挨一次打 → **层数清零**（这条钉住新加的 `removeBuff` 能力）', () => {
+  it('🎯 挨一次打 → **回到 1 层**（用户："挨打回到1层"，不是清零）', () => {
     const e = engineWith({ boss: withBuff({}, HOST), skills: [hitSkill(5)] });
     /** 先让它涨到 3 层。 */
     for (let i = 0; i < 9 * 60 + 10; i += 1) e.tick([]);
@@ -132,18 +143,22 @@ describe('「怠惰」：每 3 秒没挨打 +1 层，**挨一次打清零**（�
     e.tick([{ type: 'useSkill', skillId: 'test-hit', atTick: e.snapshot.tick }], 'player');
     e.drainEvents();
 
-    expect(idleStacks(e), '挨打之后应该一层不剩').toBe(0);
+    /**
+     * ⚠️ 语义是"**回到 1 层**"（用户 2026-10-14 定），所以是 `removeBuff`
+     * **之后再 grant 一层** —— 判据因此是 1，不是 0。
+     */
+    expect(idleStacks(e), '挨打之后回到 1 层').toBe(1);
   });
 
-  it('清零之后**重新开始涨**（不是从此不涨了）', () => {
+  it('回到 1 层之后**重新开始涨**（不是从此不涨了）', () => {
     const e = engineWith({ boss: withBuff({}, HOST), skills: [hitSkill(5)] });
     for (let i = 0; i < 4 * 60; i += 1) e.tick([]);
     e.tick([{ type: 'useSkill', skillId: 'test-hit', atTick: e.snapshot.tick }], 'player');
     e.drainEvents();
-    expect(idleStacks(e)).toBe(0);
+    expect(idleStacks(e), '回到 1 层').toBe(1);
 
     for (let i = 0; i < 3 * 60 + 5; i += 1) e.tick([]);
-    expect(idleStacks(e)).toBe(1);
+    expect(idleStacks(e), '不挨打就继续涨').toBe(2);
   });
 
   it(`层数**封顶**（内容声明的 ${LAZY_IDLE.maxStacks} 层）`, () => {
@@ -162,19 +177,31 @@ describe('「怠惰」：每 3 秒没挨打 +1 层，**挨一次打清零**（�
      * ⚠️ 判据从**内容**取（`LAZY_IDLE.modifiers` 的声明值 × 层数），
      * 不写死数字 —— 数值调了这条照样绿，机制坏了才红。
      */
-    const e = engineWith({ boss: withBuff({}, [LAZY_IDLE_PASSIVE, LAZY_BASE_REGEN]) });
+    const e = engineWith({
+      boss: withBuff({}, [LAZY_IDLE_PASSIVE]),
+      /** ⚠️ 基数 1 = 真实战斗里「怠惰」被动技能给的那条 `modifier`（+1/秒）。 */
+      bossBase: { hpRegen: 1 },
+    });
     for (let i = 0; i < LAZY_IDLE.maxStacks * 3 * 60; i += 1) e.tick([]);
     expect(idleStacks(e), '层数封顶').toBe(LAZY_IDLE.maxStacks);
 
-    const perStack = (LAZY_IDLE.modifiers ?? [])
-      .filter((m) => m.stat === 'hpRegen')
-      .reduce((sum, m) => sum + (typeof m.value === 'number' ? m.value : 0), 0);
-    const base = (LAZY_BASE_REGEN.modifiers ?? [])
-      .filter((m) => m.stat === 'hpRegen')
-      .reduce((sum, m) => sum + (typeof m.value === 'number' ? m.value : 0), 0);
-    expect(perStack, '内容里应当声明了每层 +1 回血').toBeGreaterThan(0);
-    expect(e.statsOf('boss').hpRegen, '基础 + 每层各一份').toBeCloseTo(
-      base + perStack * LAZY_IDLE.maxStacks,
+    /**
+     * ⚠️ 现在那条 buff 是 **`op: 'mult'`（每层 ×2）** ⇒ 期望值不是"加法"而是
+     * **指数**：`hpRegen = 基础 1 × 2^层数`（用户："2^层数"）。
+     * 判据仍然**从内容取**（那条修正的声明值），不写死数字。
+     */
+    const perStackMult = (LAZY_IDLE.modifiers ?? [])
+      .filter((m) => m.stat === 'hpRegen' && m.op === 'mult')
+      .reduce((acc, m) => acc * (typeof m.value === 'number' ? m.value : 1), 1);
+    expect(perStackMult, '内容里应当声明了每层 ×2').toBeGreaterThan(1);
+    /**
+     * ⚠️ **判据用比值**：基础那 1 点由「怠惰」**被动技能的 `modifier`** 提供
+     * （`LAZY_IDLE_SKILL`），而本夹具只挂 buff、不走开战装配 ⇒ 这里的
+     * `hpRegen` 只有"层数那条 buff"的贡献。所以验的是**每层各乘一次**：
+     * 满层 / 单层 = `mult^(满层−1)`。
+     */
+    expect(e.statsOf('boss').hpRegen, '基数 1 × 每层各乘一次').toBeCloseTo(
+      perStackMult ** LAZY_IDLE.maxStacks,
       6,
     );
   });
@@ -182,28 +209,33 @@ describe('「怠惰」：每 3 秒没挨打 +1 层，**挨一次打清零**（�
 });
 
 /* ================================================================== *
- * 2. 基础回血：与层数无关的那 1 点/秒
+ * 2b. 「怠惰」的**两半**：基础那 1 点 + 层数那条buff
  * ================================================================== */
 
-describe('基础回血：**永远** 1 点/秒（与「怠惰」层数无关）', () => {
-  it('没有任何「怠惰」层数时，静置 1 秒也回 1 点', () => {
+describe('「怠惰」的结构：基础回血**就是怠惰本身**', () => {
+  it('🎯 「基础 1 点/秒」在**被动技能的 `modifier`** 里，不是第二个被动', () => {
     /**
-     * ⚠️ `hpRegen` 的口径是**每秒**，引擎按逻辑步（每 6 tick）结算 ——
-     * 而"每秒 1 点"落到每步是 **0.1**，走 `regenDebt` 的**小数额度**
-     * 攒够 1 个整点才真回 1 点。所以第 **55** 个 tick 才会看到 +1。
-     * 这条钉住"那 0.1 没被丢掉"。
+     * 用户："**基础回血不是单独的被动，就是怠惰本身**"。
+     *
+     * ⚠️ 而且它**不能**写进那条 buff 的 `modifiers`：那个会**按层展开**，
+     * 结果会是 `1 × 层数` 而不是那条 `mult` 给的 `2^层数`。
      */
-    const e = engineWith({
-      boss: withBuff(
-        { caps: { hp: 100, energy: 0, douqi: 0 }, resources: { hp: 50, energy: 0, douqi: 0 } },
-        [LAZY_BASE_REGEN],
-      ),
-    });
-    expect(idleStacks(e)).toBe(0);
-    expect(e.statsOf('boss').hpRegen).toBe(1);
+    const mods = LAZY_IDLE_SKILL.abilities.filter((a) => a.kind === 'modifier');
+    expect(mods.length, '「怠惰」应当带一条属性修正').toBe(1);
+    const grants = LAZY_IDLE_SKILL.abilities.filter((a) => a.kind === 'grant');
+    expect(grants.length, '「怠惰」还应当授予层数那条 buff').toBe(1);
+  });
 
-    for (let i = 0; i < 55; i += 1) e.tick([]);
-    expect(bossOf(e)?.resources.hp, '10 个逻辑步 = 1 秒 = 1 点').toBe(51);
+  it('🎯 「3 秒不挨打才涨」靠一条 3 秒的「刚挨打」标记判（不是靠时长）', () => {
+    const tick = (LAZY_IDLE_PASSIVE.triggers ?? []).find((t) => t.on === 'onTick');
+    expect(tick, '要有一条 onTick').toBeDefined();
+    expect(tick?.cooldownMs, 'CD 就是那个"3 秒"').toBe(logicMs(30));
+    expect(tick?.when).toEqual({
+      kind: 'notHasBuff',
+      who: 'self',
+      buffId: LAZY_RECENT_HIT.id,
+    });
+    expect(LAZY_RECENT_HIT.duration, '标记活 3 秒').toBe(logicMs(30));
   });
 });
 
@@ -217,34 +249,44 @@ describe('「睡眠」：玩家锁死，且**它也不攻击**', () => {
     expect(LAZY_SLEEP.duration, '10 秒 = logicMs(100)').toBe(logicMs(100));
   });
 
-  it('「睡眠」由被动按 12 秒的节拍挂上，而**不是**轮转里的一招', () => {
+  it('🎯 「睡眠」是**轮转里的一条技能**（用户："睡眠技"）—— 不是被动挂的', () => {
     /**
-     * ⚠️ 它必须是"突然睡着"而不是"看到它读条"：
-     * 所以它是 `onTick` 触发器（`LAZY_SLEEP_PASSIVE`），而玩家挂到的
-     * debuff 是 `LAZY_SLEEP`。两者**不是同一个 buff**。
+     * ⚠️ 这条**纠正过我自己的实现**：第一版把睡眠做成了"一条被动每 12 秒
+     * 挂个 debuff"，而用户说的是"**睡眠技**" —— 技能才有前摇（看得见）、
+     * 才进轮转、才谈得上"可不可以打断"。
      */
-    const triggers = LAZY_SLEEP_PASSIVE.triggers ?? [];
-    expect(triggers.map((t) => t.on)).toEqual(['onTick']);
-    expect(triggers[0]?.cooldownMs, '12 秒 > 睡眠的 10 秒（醒了才会再睡）').toBe(logicMs(120));
+    expect(LAZY_SLEEP_SKILL.kind).toBe('activeSkill');
+    expect(LAZY_SLEEP_SKILL.castTime, '有前摇（不是瞬发）').toBeGreaterThan(0);
+    expect(
+      LAZY_SLEEP_SKILL.cooldown,
+      '12 秒 > 睡眠的 10 秒（醒了才会再睡一次）',
+    ).toBeGreaterThan(LAZY_SLEEP.duration);
+
+    /** 它真的在轮转里（判据从内容取，不写死招式名）。 */
+    const inRotation = LAZY_BEHAVIORS.some(
+      (b) => b.kind === 'rotation' && b.steps.some((step) => step.skillId === LAZY_SLEEP_SKILL.id),
+    );
+    expect(inRotation, '「睡眠」必须在轮转里').toBe(true);
+
+    /** ⚠️ 而且那一招**不造成伤害**（它只负责把人睡过去）。 */
+    const damages = LAZY_SLEEP_SKILL.hits.flatMap((h) => h.effects).filter((e) => e.kind === 'damage');
+    expect(damages, '「睡眠」不该有伤害效果').toEqual([]);
   });
 
   it('玩家睡着的那些 tick 里，Boss 一次都没出手', () => {
     const e = engineWith({
+      /**
+       * ⚠️ **用真的行为表**：睡眠现在由「睡眠」那条**技能**产生
+       * （以前挂在被动上），所以这里不能再手写一份轮转 —— 直接跑它的
+       * `LAZY_BEHAVIORS`，让"睡着"真的发生。
+       */
       boss: withBuff(
         {
           caps: { hp: 500, energy: 0, douqi: 0 },
           resources: { hp: 250, energy: 0, douqi: 0 },
-          behaviors: [
-            {
-              kind: 'rotation',
-              steps: [
-                { skillId: 'lazy-pressure', when: { kind: 'notHasBuff', who: 'target', buffId: LAZY_SLEEP.id } },
-                { skillId: 'lazy-blunt', when: { kind: 'notHasBuff', who: 'target', buffId: LAZY_SLEEP.id } },
-              ],
-            },
-          ],
+          behaviors: LAZY_BEHAVIORS,
         },
-        [LAZY_SLEEP_PASSIVE, LAZY_BASE_REGEN],
+        [LAZY_IDLE_PASSIVE],
       ),
     });
 

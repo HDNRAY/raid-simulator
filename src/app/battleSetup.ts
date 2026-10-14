@@ -57,6 +57,7 @@
 import { BattleLoop } from './battleLoop';
 import { slotsFromBindings } from './viewAdapter';
 import { makeBoss, makePlayer } from '../data/units';
+import { bossDefById } from '../data/bossDefs';
 import { buildPlayerKit, type PlayerKit } from '../data/kit';
 import { applySkillTweaks } from '../data/skillTweak';
 import { playerSkillIdsFor } from '../data/content';
@@ -296,7 +297,25 @@ export function createStartBattle(d: StartBattleDeps): () => BattleLoop {
          * 现在它是 `buildPlayerKit` 的产物之一；空 `chosen` 时又是空数组，
          * 所以单场路径逐字不变。
          */
-        passiveModifiers: new Map<string, readonly StatModifier[]>([[playerId, kit.modifiers]]),
+        /**
+         * ⚠️ **Boss 也有一份**（2026-10-14 加）：它的**被动技能**里
+         * `kind: 'modifier'` 的那些能力（例如「懒惰」的「怠惰」给的基础
+         * +1 点/秒回血）。`makeBoss` 只造 `Combatant`、拿不到这份 Map，所以
+         * 两条路按 kind 分派：`grant` 归 `makeBoss`、`modifier` 归这里。
+         *
+         * ⚠️ 没有被动技能的 Boss ⇒ 空数组 ⇒ 与今天逐字相同。
+         */
+        passiveModifiers: new Map<string, readonly StatModifier[]>([
+          [playerId, kit.modifiers],
+          [
+            bossId,
+            bossDefById(bossId).passives.flatMap((passive) =>
+              passive.abilities.flatMap((ability) =>
+                ability.kind === 'modifier' ? [ability.modifier] : [],
+              ),
+            ),
+          ],
+        ]),
         /**
          * ⚠️ **派生窗口的产出者**（「截 / 卸 / 闪」成功时开窗 → 「击」可用）。
          *

@@ -99,33 +99,6 @@ export const LAZY_SLEEP: BuffDef = {
   },
 };
 
-/**
- * 挂「睡眠」的**常驻被动**（隐藏，12 秒一次）。
- *
- * ⚠️ 为什么用**被动 + `onTick`** 而不是轮转里的一招：
- *   - 睡眠期间 Boss 不出招（行为里被 `when` 挡住），所以它**不能**是轮转技
- *     —— 否则"每 10 秒一次"会变成"看到它读条"（那就不再是"突然睡着"）
- *   - 12 秒 > 睡眠的 10 秒 ⇒ **一次睡眠结束之后才可能再来一次**
- *     （不会"醒了立刻又睡"）
- */
-export const LAZY_SLEEP_PASSIVE: BuffDef = {
-  id: 'lazy-sleep-passive',
-  nameKey: 'lazy.name',
-  icon: 'lazy_sleep',
-  polarity: 'buff',
-  hidden: true,
-  duration: Number.POSITIVE_INFINITY,
-  maxStacks: 1,
-  stacking: { mode: 'refresh' },
-  triggers: [
-    {
-      on: 'onTick',
-      cooldownMs: logicMs(120),
-      then: [{ kind: 'grant', target: { mode: 'primaryEnemy' }, buff: LAZY_SLEEP }],
-    },
-  ],
-};
-
 /* ================================================================== *
  * 2. 「怠惰」：挨打清零的层数（每层 +1 点/秒回血）
  * ================================================================== */
@@ -143,7 +116,7 @@ export const LAZY_SLEEP_PASSIVE: BuffDef = {
  * ⚠️ **上限 9 层**（用户 2026-10-14："回血先按最大 9 层"）——
  * "不挨打就一直涨"到 9 层封顶（最狠 10 点/秒）。**那个数就是平衡旋钮。**
  *
- * ⚠️ 基础那 1 点/秒**不在这里**：它走 `LAZY_BASE_REGEN`（另一个 buff）。
+ * ⚠️ 基础那 1 点/秒**不在这里**：它走「怠惰」被动技能的 `modifier`（见 `LAZY_IDLE_SKILL`）。
  * 分开的理由：一个是"永远在"，一个是"不挨打才涨"，而 `modifiers` 的层数
  * 展开是**按 buff 实例**算的 —— 合成一个会让"0 层"变成"没有回血"。
  */
@@ -153,10 +126,6 @@ export const LAZY_IDLE: BuffDef = {
   icon: 'lazy_idle',
   polarity: 'buff',
   color: 0x8ad0a0,
-  /**
-   * ⚠️ 层数**没有设计上限**，这个数只防"类型上的无穷"。
-   * 它是**平衡旋钮**：想压住它的回复速度就把它调小（3~5）。
-   */
   /**
    * ⚠️ **时长必须长于触发间隔**（触发每 3 秒一次，这里给 60 秒）。
    *
@@ -171,21 +140,33 @@ export const LAZY_IDLE: BuffDef = {
   duration: logicMs(600),
   maxStacks: 9,
   stacking: { mode: 'stackRefresh', max: 9 },
-  /** 每层 +1 点/秒（按层展开，见 `core/combat/stats.ts` 的同一条纪律）。 */
-  modifiers: [{ stat: 'hpRegen', op: 'add', value: 1, sourceKey: 'lazy.idle.name' }],
+  /**
+   * ⚠️ **每层 ×2**（`op: 'mult'`，不是 `add`）—— 回血 = **2^层数**：
+   * 1 层 = 2 点/秒、9 层 = **512 点/秒**（用户 2026-10-14 定的）。
+   *
+   * ⚠️ **"基础 1 点/秒"不在这里**：`modifiers` 是**按层展开**的，把基础那份
+   * 写进来会变成 `1 × 层数`（1 层 2、2 层 8…）而不是 `2^层数`（1 层 2、2 层 4）。
+   * 基础那一份由「怠惰」**被动技能的 `modifier`** 提供（见 `LAZY_IDLE_SKILL`）。
+   */
+  modifiers: [{ stat: 'hpRegen', op: 'mult', value: 2, sourceKey: 'lazy.idle.name' }],
 };
 
-/** 基础回血：**永远** 1 点/秒（与层数无关）。 */
-export const LAZY_BASE_REGEN: BuffDef = {
-  id: 'lazy-base-regen',
-  nameKey: 'lazy.baseRegen.name',
+/**
+ * 「刚挨打」——一条**只活 3 秒**的隐藏标记（每次挨打刷新）。
+ *
+ * ⚠️ 它的存在是为了表达"**最近 3 秒没挨打**"这件事：引擎里没有"距离上次
+ * 挨打多久"这个量（`onHitTaken` 只说"刚被打了"），所以用"一条会过期的标记"
+ * 反过来说 —— 与「怠惰」的 `onTick` 那条配对。
+ */
+export const LAZY_RECENT_HIT: BuffDef = {
+  id: 'lazy-recent-hit',
+  nameKey: 'lazy.name',
   icon: 'lazy_idle',
   polarity: 'buff',
   hidden: true,
-  duration: Number.POSITIVE_INFINITY,
+  duration: logicMs(30),
   maxStacks: 1,
   stacking: { mode: 'refresh' },
-  modifiers: [{ stat: 'hpRegen', op: 'add', value: 1, sourceKey: 'lazy.baseRegen.name' }],
 };
 
 /**
@@ -218,13 +199,32 @@ export const LAZY_IDLE_PASSIVE: BuffDef = {
   stacking: { mode: 'refresh' },
   triggers: [
     {
+      /**
+       * ⚠️ **只在不挨打时涨**（用户："3 秒不挨打变 2 层"）。
+       *
+       * 判据是"身上**没有**「刚挨打」" —— 那个标记由下面那条 `onHitTaken`
+       * 挂上、3 秒后自然过期。所以这一条 tick 到点时，只有"最近 3 秒真的
+       * 没挨打"才会加层 ✓（CD 就是那个"3 秒"）。
+       */
       on: 'onTick',
       cooldownMs: logicMs(30),
+      when: { kind: 'notHasBuff', who: 'self', buffId: 'lazy-recent-hit' },
       then: [{ kind: 'grant', target: { mode: 'self' }, buff: LAZY_IDLE }],
     },
     {
+      /**
+       * **挨打 → 回到 1 层**（用户："挨打回到1层"）。
+       *
+       * ⚠️ 顺序：先挂「刚挨打」（把 tick 那条堵住），再 **removeBuff**
+       * （把所有层清掉）**然后 grant 一层** —— 于是结果正好是**1 层**，
+       * 而不是 0 层（`removeBuff` 是整条摘掉）。
+       */
       on: 'onHitTaken',
-      then: [{ kind: 'removeBuff', target: { mode: 'self' }, buffId: LAZY_IDLE.id }],
+      then: [
+        { kind: 'grant', target: { mode: 'self' }, buff: LAZY_RECENT_HIT },
+        { kind: 'removeBuff', target: { mode: 'self' }, buffId: LAZY_IDLE.id },
+        { kind: 'grant', target: { mode: 'self' }, buff: LAZY_IDLE },
+      ],
     },
   ],
 };
@@ -333,16 +333,50 @@ export const LAZY_PRESSURE: ActiveSkillDef = {
  * 4. 定义
  * ================================================================== */
 
-export const LAZY_SKILLS: readonly SkillDef[] = [LAZY_BLUNT, LAZY_PRESSURE];
+/**
+ * **「睡眠」= 一条真正的技能**（用户："**睡眠技** 10 秒"）。
+ *
+ * ⚠️ 它以前被做成了"一条被动每 12 秒挂个 debuff"—— 那是错的：
+ * 技能才有前摇（**看得见**）、才进轮转、才谈得上"可不可以打断"。
+ *
+ * ⚠️ 读条 **1.2 秒**、冷却 **12 秒**（> 睡眠的 10 秒 ⇒ **一次睡眠结束之后
+ * 才可能再来一次**，不会"醒了立刻又睡"）。
+ * ⚠️ 命中效果是 `grantBuff`（**默认作用在挨打者身上** ⇒ 挂到玩家），
+ * 不是"伤害" —— 这一招不造成伤害。
+ */
+export const LAZY_SLEEP_SKILL: ActiveSkillDef = {
+  id: 'lazy-sleep',
+  kind: 'activeSkill',
+  nameKey: 'lazy.sleep.name',
+  descKey: 'lazy.sleep.desc',
+  icon: 'lazy_sleep',
+  abilities: [
+    { kind: 'grant', on: 'castStart', target: { mode: 'self' }, buff: tel('lazy-sleep', logicMs(12)) },
+  ],
+  castTime: logicMs(12),
+  cooldown: logicMs(120),
+  cost: [],
+  hits: [
+    {
+      at: logicMs(12),
+      effects: [{ kind: 'grantBuff', buff: LAZY_SLEEP }],
+    },
+  ],
+  targeting: { mode: 'primaryEnemy' },
+  tags: [],
+  interruptible: true,
+};
+
+export const LAZY_SKILLS: readonly SkillDef[] = [LAZY_BLUNT, LAZY_PRESSURE, LAZY_SLEEP_SKILL];
 
 export const LAZY_BUFFS: readonly BuffDef[] = [
   LAZY_SLEEP,
-  LAZY_BASE_REGEN,
-  LAZY_IDLE_PASSIVE,
-  LAZY_SLEEP_PASSIVE,
   LAZY_IDLE,
+  LAZY_IDLE_PASSIVE,
+  LAZY_RECENT_HIT,
   tel('lazy-blunt', logicMs(10)),
   tel('lazy-pressure', logicMs(16)),
+  tel('lazy-sleep', logicMs(12)),
 ];
 
 /**
@@ -362,6 +396,12 @@ export const LAZY_BEHAVIORS: readonly Behavior[] = [
   {
     kind: 'rotation',
     steps: [
+      /**
+       * ⚠️ **「睡眠」要摆在最前面**：轮转是"取第一个成立的"，而它是这一套
+       * 里唯一带 12 秒冷却的那个 —— 冷却一好就该轮到它。
+       * ⚠️ 它**不带** `when: ASLEEP`：那一招正是用来把玩家睡着的。
+       */
+      { skillId: 'lazy-sleep' },
       { skillId: 'lazy-pressure', when: ASLEEP },
       { skillId: 'lazy-blunt', when: ASLEEP },
     ],
@@ -379,38 +419,26 @@ export const LAZY_HP = 500;
 export const LAZY_START_HP = 250;
 
 /**
- * ⚠️ **懒惰这三条被动是本轮"机械转换"的产物**（为了满足 `BossDef.passives`
- * 换成的 `PassiveSkillDef[]`），**下一条改动就会重做它们**：
- *   - 「睡眠」要变成**一条真正的技能**（进轮转、带前摇）—— 用户："睡眠技"
- *   - 「基础回血」要**并进「怠惰」**（用户："基础回血不是单独的被动，就是怠惰本身"）
- *   - 「怠惰」要改成 **2^层数**（现在还是"每层 +1"）
+ * **「怠惰」= 一条被动技能**（用户："基础回血不是单独的被动，**就是怠惰本身**"）。
  *
- * 所以这里的名字/结构是**临时的**，别照它写文档。
+ * 它是**一条**东西，里面两半：
+ *   ① `modifier` → 基础 **1 点/秒**（**不随层数走** —— 所以不能写进那条
+ *      buff 的 `modifiers`，那个会按层展开）
+ *   ② `grant`    → 那条记层数的「怠惰」buff（每层 ×2 ⇒ 回血 `2^层数`）
  */
-export const LAZY_SLEEP_CYCLE_SKILL: PassiveSkillDef = {
-  id: 'lazy-sleep-cycle',
-  kind: 'passive',
-  nameKey: 'lazy.sleep.name',
-  icon: 'lazy_sleep',
-  abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: LAZY_SLEEP_PASSIVE }],
-  tags: [],
-};
-
-export const LAZY_IDLE_TICKS_SKILL: PassiveSkillDef = {
-  id: 'lazy-idle-ticks',
+export const LAZY_IDLE_SKILL: PassiveSkillDef = {
+  id: 'lazy-idle',
   kind: 'passive',
   nameKey: 'lazy.idle.name',
+  descKey: 'lazy.idle.desc',
   icon: 'lazy_idle',
-  abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: LAZY_IDLE_PASSIVE }],
-  tags: [],
-};
-
-export const LAZY_BASE_REGEN_SKILL: PassiveSkillDef = {
-  id: 'lazy-base-regen-passive',
-  kind: 'passive',
-  nameKey: 'lazy.baseRegen.name',
-  icon: 'lazy_idle',
-  abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: LAZY_BASE_REGEN }],
+  abilities: [
+    {
+      kind: 'modifier',
+      modifier: { stat: 'hpRegen', op: 'add', value: 1, sourceKey: 'lazy.idle.name' },
+    },
+    { kind: 'grant', target: { mode: 'self' }, buff: LAZY_IDLE_PASSIVE },
+  ],
   tags: [],
 };
 
@@ -425,6 +453,6 @@ export const LAZY_BOSS: BossDef = {
    * ⚠️ **整场都在的被动**（开战前就挂上）。与 `buffs` 分开的理由见
    * `BossDef.passives` —— 这里的每一条都是**引擎真的会挂**的。
    */
-  passives: [LAZY_SLEEP_CYCLE_SKILL, LAZY_IDLE_TICKS_SKILL, LAZY_BASE_REGEN_SKILL],
+  passives: [LAZY_IDLE_SKILL],
   behaviors: LAZY_BEHAVIORS,
 };
