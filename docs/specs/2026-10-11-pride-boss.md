@@ -35,7 +35,7 @@
 
 | 事实 | 值 | 证据 |
 |---|---|---|
-| 玩家血量 / Boss 血量 | 100 / **210** | `data/units.ts:52`、`data/entities/bossHp.ts:32` |
+| 玩家血量 / Boss 血量 | 100 / **210** | `data/units.ts:52`、`data/prideBoss.ts`（2026-10-14 从 `entities/bossHp.ts` 改名） |
 | 官方难度基线 | "会闪避"的玩家胜、**剩 65 血**；"只按攻"的纯进攻**败**，Boss 剩 30 血 | `tests/golden/fixtures.ts:125-186`（GOLDEN_OUTCOME，926 tick） |
 | 旧 Boss 轮转实际出招 | 5 次，玩家只挨到 **1–2 次**（靠闪避） | 同上（A/B 实测表） |
 | 时限 / 狂暴 | 180s / 120s 时伤害 ×2 | `core/ai/index.ts:250-251` |
