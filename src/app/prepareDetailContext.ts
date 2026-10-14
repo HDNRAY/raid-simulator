@@ -39,6 +39,7 @@
  */
 
 import { ALL_SKILLS, BOSS_SKILL_IDS, PENDING_SKILLS } from '../data/content';
+import { bossDefById } from '../data/bossDefs';
 import { BOSS_ROSTER, PLAYER_ROSTER, findEntry, isDeveloping } from '../data/roster';
 import { bossHpFor } from '../data/bossDefs';
 import { behaviorsFor, playerHpFor, playerSkillsFor } from '../data/units';
@@ -163,6 +164,24 @@ export function prepareDetailContext(free: {
             const skill = skillById(sid);
             return skill === undefined ? [] : [skillRow(skill, bossHpFor(id))];
           }),
+    /**
+     * **常驻被动**：直接取 `BossDef.passives` —— 那是"引擎真的会挂"的那份
+     * 清单（理由见 `DetailContext.bossPassives`）。
+     *
+     * ⚠️ 开发中的 Boss 仍然返回空（与 `bossSkills` 同一条判据）：它们的
+     * `passives` 是空数组，所以这里不需要再判一次 `isDeveloping`。
+     */
+    bossPassives: (id) =>
+      /**
+       * ⚠️ `BuffDef` **没有** `descKey`（只有 `nameKey`）—— 被动那几行的
+       * 说明暂时留空。要写"这条被动干什么"得给 `BuffDef` 加一个
+       * `descKey`（那是另一件事：全仓 buff 的文案都还没走这条路）。
+       */
+      bossDefById(id).passives.map((buff) => ({
+        kind: 'skill' as const,
+        nameKey: buff.nameKey ?? buff.id,
+        descParams: {},
+      })),
     developing: isDeveloping,
     qijiOn: (id) => free.on(id),
   };

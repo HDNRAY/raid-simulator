@@ -32,13 +32,13 @@ import { applyBuff } from '../core/buffs';
 import { DOUQI_MAX, ENERGY_MAX, HP_MAX, skillsForPlayer } from './content';
 import { KAILI_HP } from './kits/kaili';
 import { LIN_WANFENG_HP } from './kits/linwanfeng';
-import { LUST_BEHAVIORS, LUST_PASSIVE } from './lustBoss';
+import { LUST_BEHAVIORS } from './lustBoss';
 import { JEALOUSY_BEHAVIORS } from './jealousyBoss';
 import { GREED_BEHAVIORS } from './greedBoss';
 import { LAZY_BEHAVIORS } from './lazyBoss';
 import { GLUTTONY_BEHAVIORS } from './gluttonyBoss';
 import { PRIDE_BEHAVIORS } from './bossPride';
-import { bossHpFor, bossStartHpFor } from './bossDefs';
+import { bossDefById, bossHpFor, bossStartHpFor } from './bossDefs';
 import { BOSS_ROSTER, PLAYER_ROSTER, findEntry } from './roster';
 
 /**
@@ -271,8 +271,10 @@ export function makeBoss(id: string, options?: { readonly noAi?: boolean }): Com
  * 从 0 起算。永久 buff 不看这个值，但要保持一致（否则重放会有细微差异）。
  */
 function innateBuffsFor(id: string): Combatant['buffs'] {
-  if (id !== 'lust') return [];
-  return applyBuff(EMPTY_FOR_INNATE, LUST_PASSIVE, id, 0).buffs;
+  return bossDefById(id).passives.reduce<Combatant['buffs']>(
+    (acc, def) => applyBuff({ ...EMPTY_FOR_INNATE, id, side: 'enemy', buffs: acc }, def, id, 0).buffs,
+    [],
+  );
 }
 
 /**

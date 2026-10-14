@@ -573,6 +573,12 @@ export const zhCN = {
         /** 正文里那一小段的分节标题（Boss 的招式列表）。 */
         skills: '招式',
         /**
+         * Boss 的**常驻被动**（与"招式"并列的第二段）。
+         *
+         * 用户 2026-10-14："boss详情里，不止要显示 主动技能····被动技能也要写出来"。
+         */
+        passives: '被动',
+        /**
          * 炁机的开关态（**两行**：它是开关，没有层数
          * —— 用户 2026-10-13 明确纠正，见 `ui/freeQiji.ts`）。
          */
@@ -625,6 +631,17 @@ export const zhCN = {
    * id（`envy`）与内容前缀（`jealousy`）历史上不是一个词，改名会让
    * roster 与素材 slot 一起漂。两行都留着，改显示值时**两行一起改**。
    */
+  /**
+   * ⚠️ **`envy.name` 与内容前缀 `jealousy` 是刻意的重复**（这一段注释
+   * 一直写着"两行都留着"，但 2026-10-14 实测**它其实丢了** ——
+   * 自由模式界面上直接显示成 `envy.name`）。
+   *
+   * 判据：Boss 的 id 是 `envy`（`data/roster.ts`），备战/详情读 `envy.name`；
+   * 而技能 id 前缀是 `jealousy-` ⇒ 内容推导出来的 key 是 `jealousy.*`。
+   * 改显示值时**两行一起改**。现在有单测钉住"每个 roster 条目的 nameKey
+   * 都能解析"（`tests/unit/rosterI18n.test.ts`），所以不会再悄悄丢。
+   */
+  envy: { name: '嫉妒' },
   jealousy: {
     name: '嫉妒',
     /**
@@ -705,6 +722,11 @@ export const zhCN = {
    * `lazy.*`（见 `content/validate.ts` 的 `toSubject`）。所以**两行都在**：
    * `sloth.name` 给备战界面，`lazy.*` 给内容。
    */
+  /**
+   * ⚠️ 同上：Boss id 是 `sloth`（roster 读 `sloth.name`），而技能 id 前缀
+   * 是 `lazy-` ⇒ 两行都要在。（2026-10-14 之前 `sloth.name` **也是丢的**。）
+   */
+  sloth: { name: '懒惰' },
   lazy: {
     name: '懒惰',
     /**

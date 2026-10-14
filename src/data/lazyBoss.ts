@@ -337,10 +337,7 @@ export const LAZY_SKILLS: readonly SkillDef[] = [LAZY_BLUNT, LAZY_PRESSURE];
 
 export const LAZY_BUFFS: readonly BuffDef[] = [
   LAZY_SLEEP,
-  LAZY_SLEEP_PASSIVE,
   LAZY_IDLE,
-  LAZY_BASE_REGEN,
-  LAZY_IDLE_PASSIVE,
   tel('lazy-blunt', logicMs(10)),
   tel('lazy-pressure', logicMs(16)),
 ];
@@ -385,5 +382,10 @@ export const LAZY_BOSS: BossDef = {
   nameKey: 'sloth.name',
   skills: LAZY_SKILLS,
   buffs: LAZY_BUFFS,
+  /**
+   * ⚠️ **整场都在的被动**（开战前就挂上）。与 `buffs` 分开的理由见
+   * `BossDef.passives` —— 这里的每一条都是**引擎真的会挂**的。
+   */
+  passives: [LAZY_BASE_REGEN, LAZY_IDLE_PASSIVE, LAZY_SLEEP_PASSIVE],
   behaviors: LAZY_BEHAVIORS,
 };

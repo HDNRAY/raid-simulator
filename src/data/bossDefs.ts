@@ -61,6 +61,32 @@ export interface BossDef {
   readonly nameKey: LocaleKey;
   readonly skills: readonly SkillDef[];
   /**
+   * **整场都在的常驻被动**（开战前就挂在它身上）。
+   *
+   * ==================================================================
+   * ⚠️ 这个字段的来历：一个**真的 bug**（2026-10-14 发现并修掉）
+   * ==================================================================
+   *
+   * 在此之前，被动只写在 `buffs` 里 —— 而 `buffs` 是"**这个 Boss 的技能
+   * 会用到的全部 buff**"（含前摇标记、一次性标记），引擎**从不去挂它们**。
+   * 于是：
+   *
+   *   - `innateBuffsFor` 只对**色欲**一个人特判挂了 `LUST_PASSIVE`
+   *   - **其余五个 Boss 的被动全部是死的** ✗
+   *
+   * 实测症状（当时）：一整场跟「懒惰」打完，玩家**从没被睡到过**
+   * （`被睡 tick 数 = 0`）—— 它的核心机制整个没跑。
+   *
+   * ⚠️ 为什么单测没抓住：那些 Boss 的单测都是**手工挂 buff** 再验行为
+   * （`withBuff({}, [LAZY_IDLE_PASSIVE])`），于是"到底有没有人挂它"
+   * 从来不在判据里。与「暴食的血盾」那一次是同一个形状
+   * （`tests/unit/bossFights.test.ts` 的文件头记着）。
+   *
+   * ⇒ 现在：**被动有它自己的字段**，"整场都在"这件事不再靠猜
+   * （判据是"它有没有被技能授予"，猜不得）。
+   */
+  readonly passives: readonly BuffDef[];
+  /**
    * 这个 Boss **自己**的 buff。
    *
    * ⚠️ **不含**共享的三样（前摇标记 / 狂暴 / 倒地）—— 那三样由
@@ -88,6 +114,13 @@ export function bossDefOf(id: string): BossDef | undefined {
   return BY_ID.get(id);
 }
 
+/** 同上，但**找不到就抛**（用于"这个 id 一定存在"的路径，例如 `makeBoss`）。 */
+export function bossDefById(id: string): BossDef {
+  const def = BY_ID.get(id);
+  if (def === undefined) throw new Error(`unknown boss id: ${id}`);
+  return def;
+}
+
 /**
  * 某个 Boss 的血量上限。
  *
@@ -113,4 +146,7 @@ export function bossStartHpFor(id: string): number {
 /** 需要落进内容注册表的全部 Boss 技能 / buff（三个 Boss 的合集）。 */
 export const BOSS_SKILLS: readonly SkillDef[] = BOSS_DEFS.flatMap((b) => [...b.skills]);
 
-export const BOSS_BUFFS: readonly BuffDef[] = BOSS_DEFS.flatMap((b) => [...b.buffs]);
+export const BOSS_BUFFS: readonly BuffDef[] = BOSS_DEFS.flatMap((b) => [
+  ...b.buffs,
+  ...b.passives,
+]);

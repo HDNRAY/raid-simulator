@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { RunRecorder } from '../../src/core/run';
 import type { Action, BattleState } from '../../src/core/types';
 import { makeBoss, makePlayer } from '../../src/data/units';
+import { BOSS_DEFS } from '../../src/data/bossDefs';
 import {
   DODGE_SKILL_ID,
   OUTPUT_PRIORITY,
@@ -181,5 +182,66 @@ describe('多 seed 复核（排除"只是这个种子不好"）', () => {
     // eslint-disable-next-line no-console
     console.table(rows);
     expect(rows).toHaveLength(BOSSES.length * 3);
+  });
+});
+
+/* ================================================================== *
+ * ⚠️ 契约：Boss 声明的**常驻被动**必须真的被挂上
+ * ================================================================== */
+
+describe('⚠️ 契约：`BossDef.passives` 真的会挂在它身上', () => {
+  /**
+   * ==================================================================
+   * 这一条抓的是一个**真的、而且躲了很久的 bug**（2026-10-14）
+   * ==================================================================
+   *
+   * 在此之前被动只写在 `buffs` 里，而引擎**从不挂 `buffs`**
+   * （那是"技能会用到的全部 buff"）—— 只有色欲被 `innateBuffsFor`
+   * 特判挂过。于是**五个 Boss 的被动全是死的**：
+   *
+   *   - 「懒惰」一整场**从没睡到过玩家**（实测 `被睡 tick 数 = 0`）
+   *   - 「贪婪」的「弱点」从不出现
+   *   - 「暴食」的「饕餮」计数从不累加
+   *
+   * ⚠️ **为什么单测没抓住**：那些 Boss 的单测都是**手工挂 buff** 再验行为
+   * （`withBuff({}, [LAZY_IDLE_PASSIVE])`）—— 于是"到底有没有人挂它"
+   * 从来不在判据里。与「暴食的血盾」是同一个形状。
+   */
+  it('每个 Boss 开战时身上都有它声明的每一条被动', () => {
+    for (const def of BOSS_DEFS) {
+      const onBody = new Set(makeBoss(def.id).buffs.map((b) => b.defId));
+      const missing = def.passives.map((p) => p.id).filter((id) => !onBody.has(id));
+      expect(missing, `${def.id} 的被动没被挂上`).toEqual([]);
+    }
+  });
+
+  it('⚠️ 而且要**刚够**：开场身上不该有技能才会授予的那些 buff', () => {
+    /**
+     * 反向判据：如果哪天有人图省事把整张 `buffs` 都挂上，玩家一开战就会
+     * 看到前摇标记 / 一次性印记。这条会把那种"顺手多挂"挡回去。
+     */
+    for (const def of BOSS_DEFS) {
+      const declaredPassive = new Set(def.passives.map((p) => p.id));
+      const onBody = makeBoss(def.id).buffs.map((b) => b.defId);
+      const extra = onBody.filter((id) => !declaredPassive.has(id));
+      expect(extra, `${def.id} 开场多挂了不该挂的`).toEqual([]);
+    }
+  });
+
+  it('🎯 端到端：「懒惰」在一整场里**真的睡到了玩家**（这条曾经是 0）', () => {
+    const player = makePlayer('player');
+    const boss = makeBoss('sloth');
+    const recorder = new RunRecorder(
+      makeGoldenEngineOptions(3, { combatants: [player, boss], bossId: 'sloth' }),
+    );
+    const plan = referencePlan();
+    let slept = 0;
+    for (let i = 0; i < 60 * 400; i += 1) {
+      const state = recorder.state;
+      if (state.status !== 'running') break;
+      if (state.combatants.some((c) => c.buffs.some((b) => b.defId === 'lazy-sleep'))) slept += 1;
+      recorder.step(plan(state.tick, state));
+    }
+    expect(slept, '「睡眠」一次都没生效 —— 被动又断了').toBeGreaterThan(0);
   });
 });

@@ -356,7 +356,6 @@ export const GLUTTONY_SKILLS: readonly SkillDef[] = [
 export const GLUTTONY_BUFFS: readonly BuffDef[] = [
   GLUTTONY_SATED,
   GLUTTONY_COUNT,
-  GLUTTONY_COUNT_PASSIVE,
   GLUTTONY_SHIELD,
   tel('gluttony-bite', logicMs(8)),
   tel('gluttony-gorge', logicMs(16)),
@@ -385,6 +384,11 @@ export const GLUTTONY_BOSS: BossDef = {
   nameKey: 'gluttony.name',
   skills: GLUTTONY_SKILLS,
   buffs: GLUTTONY_BUFFS,
+  /**
+   * ⚠️ **整场都在的被动**（开战前就挂上）。与 `buffs` 分开的理由见
+   * `BossDef.passives` —— 这里的每一条都是**引擎真的会挂**的。
+   */
+  passives: [GLUTTONY_COUNT_PASSIVE],
   behaviors: GLUTTONY_BEHAVIORS,
 };
 

@@ -209,6 +209,16 @@ export interface DetailContext {
   readonly playerSkills: (id: string) => readonly DetailSkillRow[];
   /** 这个 Boss 的招式（**开发中的 Boss 返回空数组**，见文件头）。 */
   readonly bossSkills: (id: string) => readonly DetailSkillRow[];
+  /**
+   * 这个 Boss 的**常驻被动**（开战前就挂在它身上那几条）。
+   *
+   * ⚠️ 取自 `BossDef.passives` —— **不是**从 `buffs` 里猜"哪条像被动"。
+   * 那个字段是 2026-10-14 为了修一个真 bug 才加的（见它的说明）：
+   * 在此之前被动混在 `buffs` 里，而引擎**从来不挂 `buffs`**，
+   * 于是五个 Boss 的被动全是死的。现在"会被挂的"与"被技能授予的"
+   * 是两份**明确的**清单，详情区照实各显示一节。
+   */
+  readonly bossPassives: (id: string) => readonly DetailSkillRow[];
   /** 这个 id 是不是"开发中"。 */
   readonly developing: (id: string) => boolean;
   /**
@@ -283,7 +293,20 @@ function bossDetail(id: string, ctx: DetailContext): DetailModel | undefined {
     /** ⚠️ 不设 `portraitId`：Boss 没有配对的对话头像（见文件头）。 */
     rows: soon
       ? [{ kind: 'text', key: 'roster.ui.developing', dim: true }]
-      : [{ kind: 'text', key: 'roster.ui.detail.skills', dim: true }, ...ctx.bossSkills(id)],
+      : [
+          { kind: 'text', key: 'roster.ui.detail.skills', dim: true },
+          ...ctx.bossSkills(id),
+          /**
+           * ⚠️ **被动单独一节**（用户 2026-10-14 要求）。它就是
+           * `BossDef.passives` —— 那几条**开战前就挂着**的。
+           */
+          ...(ctx.bossPassives(id).length === 0
+            ? []
+            : [
+                { kind: 'text' as const, key: 'roster.ui.detail.passives', dim: true },
+                ...ctx.bossPassives(id),
+              ]),
+        ],
   };
 }
 

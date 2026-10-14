@@ -390,7 +390,6 @@ export const LUST_SKILLS: readonly SkillDef[] = [LUST_HUM, LUST_ENTANGLE, LUST_C
 export const LUST_BUFFS: readonly BuffDef[] = [
   LUST_MARK,
   LUST_STUN,
-  LUST_PASSIVE,
   LUST_BIND_THORNS,
 ];
 
@@ -473,6 +472,11 @@ export const LUST_BOSS: BossDef = {
   nameKey: 'lust.name',
   skills: LUST_SKILLS,
   buffs: LUST_BUFFS,
+  /**
+   * ⚠️ **整场都在的被动**（开战前就挂上）。与 `buffs` 分开的理由见
+   * `BossDef.passives` —— 这里的每一条都是**引擎真的会挂**的。
+   */
+  passives: [LUST_PASSIVE],
   behaviors: LUST_BEHAVIORS,
 };
 

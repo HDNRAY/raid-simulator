@@ -37,6 +37,8 @@ const ctx: DetailContext = {
   bossSkills: () => [
     { kind: 'skill', nameKey: 'boss.cleave.name', descKey: 'boss.cleave.desc', descParams: { cast: 1, damage: 20 } },
   ],
+  /** ⚠️ 让这一组专测"招式"那一段：被动给空数组（被动那一段另有单测）。 */
+  bossPassives: () => [],
   developing: (id) => id === 'daixuan',
   /** ⚠️ 只有两种取值：开着 / 没开（激活是开关，没有层数）。 */
   qijiOn: (id) => id === 'vitality',
