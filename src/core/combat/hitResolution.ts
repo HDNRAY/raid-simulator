@@ -470,7 +470,29 @@ export function applyHitEffects(
 
     if (effect.kind === 'grantBuff' && effect.buff) {
       const who = effect.target?.mode === 'self' ? actor : target;
-      const applied = applyBuff(ctx.current(who.id), effect.buff, actor.id, ctx.state.tick);
+      /**
+       * ⚠️ 带上 `custom`（「血盾」记"**这次偷了多少**"）—— 它可以是一个
+       * 表达式，与 `transfer` 读**同一个**式子 ⇒ 两个数必然一致。
+       * 求值走 `evalExpr`（`HitResolutionContext` 已经实现它，见 `effectOps`
+       * 的 `EffectEvalContext`）。
+       */
+      const customValue =
+        effect.custom === undefined
+          ? undefined
+          : typeof effect.custom === 'number'
+            ? effect.custom
+            : ctx.evalExpr(effect.custom, { self: actor.id, target: target.id });
+      /**
+       * ⚠️ `custom` **同时写进 `absorbValue`**：对「血盾」那种 buff 来说
+       * "这次偷了多少"就是"这层壳能挡多少" —— 而那是**运行期**才知道的数，
+       * 静态的 `BuffDef.absorbValue` 表达不了。别的 buff 带 `custom` 时
+       * 多写一个 `absorbValue` 没有副作用（它们本来就不吃伤害）。
+       */
+      const def =
+        customValue === undefined
+          ? effect.buff
+          : { ...effect.buff, custom: customValue, absorbValue: customValue };
+      const applied = applyBuff(ctx.current(who.id), def, actor.id, ctx.state.tick);
       ctx.replaceCombatant({ ...ctx.current(who.id), buffs: applied.buffs });
       ctx.events.push({
         kind: 'buffApplied',

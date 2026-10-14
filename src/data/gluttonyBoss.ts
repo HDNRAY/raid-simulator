@@ -190,8 +190,13 @@ export const GLUTTONY_SHIELD: BuffDef = {
   maxStacks: 1,
   stacking: { mode: 'replace' },
   /**
-   * ⚠️ 初始厚度 10（"最少 10 点"那条的下限）—— 真正的厚度由
-   * `GLUTTONY_STEAL_PASSIVE` 每次挂的时候用 `grant.custom` 覆盖。
+   * ⚠️ **`absorbValue` 说明不了这里的厚度**：壳的耐久 = **这次偷到的数**
+   * （每次都不一样），而那是**运行期**才知道的 ⇒ 由「啃噬·血」那条
+   * `grantBuff` 的 `custom` 带进来，引擎在 `grantBuff` 里把它**同时写进**
+   * `absorb`（见 `hitResolution`：`absorb: custom` 与 `custom: custom`）。
+   *
+   * 所以这里的 10 只是**兜底**（万一有别的路挂了它）—— 「啃噬·血」那条
+   * 路不会用它。
    */
   absorbValue: 10,
   /**
@@ -226,52 +231,6 @@ function grabRatio(pool: 'energy' | 'douqi'): Expr {
   };
 }
 
-export const GLUTTONY_GRAB_ENERGY: SkillDef = {
-  id: 'gluttony-grab-energy',
-  kind: 'activeSkill',
-  nameKey: 'gluttony.grabEnergy.name',
-  descKey: 'gluttony.grabEnergy.desc',
-  icon: 'boss_empower',
-  abilities: [
-    { kind: 'grant', on: 'castStart', target: { mode: 'self' }, buff: tel('gluttony-grab-energy', logicMs(6)) },
-  ],
-  castTime: logicMs(6),
-  cooldown: logicMs(30),
-  cost: [],
-  hits: [
-    {
-      at: logicMs(6),
-      effects: [{ kind: 'transfer', transfer: { pool: 'energy', amount: grabRatio('energy') } }],
-    },
-  ],
-  targeting: { mode: 'primaryEnemy' },
-  tags: ['melee'],
-  interruptible: true,
-};
-
-export const GLUTTONY_GRAB_DOUQI: SkillDef = {
-  id: 'gluttony-grab-douqi',
-  kind: 'activeSkill',
-  nameKey: 'gluttony.grabDouqi.name',
-  descKey: 'gluttony.grabDouqi.desc',
-  icon: 'boss_empower',
-  abilities: [
-    { kind: 'grant', on: 'castStart', target: { mode: 'self' }, buff: tel('gluttony-grab-douqi', logicMs(6)) },
-  ],
-  castTime: logicMs(6),
-  cooldown: logicMs(30),
-  cost: [],
-  hits: [
-    {
-      at: logicMs(6),
-      effects: [{ kind: 'transfer', transfer: { pool: 'douqi', amount: grabRatio('douqi') } }],
-    },
-  ],
-  targeting: { mode: 'primaryEnemy' },
-  tags: ['melee'],
-  interruptible: true,
-};
-
 /**
  * 「啃噬·血」：偷血 → 变壳（5 秒）。
  *
@@ -297,7 +256,24 @@ export const GLUTTONY_GRAB_HP: SkillDef = {
   hits: [
     {
       at: logicMs(10),
-      effects: [{ kind: 'transfer', transfer: { pool: 'hp', amount: GRAB_HP_AMOUNT } }],
+      effects: [
+        /** 先偷（这一步扣玩家、把同样的数补给施法者）。 */
+        { kind: 'transfer', transfer: { pool: 'hp', amount: GRAB_HP_AMOUNT } },
+        /**
+         * ⚠️ **血盾由这一招自己挂**（用户 2026-10-14："血盾 是用那个主动技能
+         * 偷血 挂的"）—— 早先是打算让一个常驻被动在挨打时挂，那一步**没写完**，
+         * 所以"偷血 → 变壳 → 打穿还钱"整条链当时是**断的**。
+         *
+         * ⚠️ `custom` = **这次偷了多少**（与 `transfer` 读**同一个**表达式 ⇒
+         * 两个数一致）。破壳时按它还钱（`onBreak` 那条 `buffCustom` 表达式）。
+         */
+        {
+          kind: 'grantBuff',
+          target: { mode: 'self' },
+          buff: GLUTTONY_SHIELD,
+          custom: GRAB_HP_AMOUNT,
+        },
+      ],
     },
   ],
   targeting: { mode: 'primaryEnemy' },
@@ -324,7 +300,15 @@ export const GLUTTONY_BITE: SkillDef = {
   hits: [
     {
       at: logicMs(8),
-      effects: [{ kind: 'damage', damage: { base: S(14), canCrit: false, countsAsHit: true } }],
+      effects: [
+        { kind: 'damage', damage: { base: S(15), canCrit: false, countsAsHit: true } },
+        /**
+         * ⚠️ **偷炁并进这一招**（用户 2026-10-14："偷炁和偷缠的效果，直接
+         * 加到 噬咬 / 大嚼 上"）—— 所以「暴食」只有**三条**技能：
+         * 噬咬（伤害 + 偷炁）/ 大嚼（伤害 + 偷缠）/ 啃噬·血（偷血 + 血盾）。
+         */
+        { kind: 'transfer', transfer: { pool: 'energy', amount: grabRatio('energy') } },
+      ],
     },
   ],
   targeting: { mode: 'primaryEnemy' },
@@ -347,7 +331,11 @@ export const GLUTTONY_GORGE: SkillDef = {
   hits: [
     {
       at: logicMs(16),
-      effects: [{ kind: 'damage', damage: { base: S(26), canCrit: false, countsAsHit: true } }],
+      effects: [
+        { kind: 'damage', damage: { base: S(30), canCrit: false, countsAsHit: true } },
+        /** ⚠️ 偷缠并进这一招（同「噬咬」那条说明）。 */
+        { kind: 'transfer', transfer: { pool: 'douqi', amount: grabRatio('douqi') } },
+      ],
     },
   ],
   targeting: { mode: 'primaryEnemy' },
@@ -363,8 +351,6 @@ export const GLUTTONY_SKILLS: readonly SkillDef[] = [
   GLUTTONY_BITE,
   GLUTTONY_GORGE,
   GLUTTONY_GRAB_HP,
-  GLUTTONY_GRAB_ENERGY,
-  GLUTTONY_GRAB_DOUQI,
 ];
 
 export const GLUTTONY_BUFFS: readonly BuffDef[] = [
@@ -375,8 +361,6 @@ export const GLUTTONY_BUFFS: readonly BuffDef[] = [
   tel('gluttony-bite', logicMs(8)),
   tel('gluttony-gorge', logicMs(16)),
   tel('gluttony-grab-hp', logicMs(10)),
-  tel('gluttony-grab-energy', logicMs(6)),
-  tel('gluttony-grab-douqi', logicMs(6)),
 ];
 
 /** 行为：**攻速高** —— `gapMs` 比傲慢的 4000 短不少；三条啃噬优先。 */
@@ -386,8 +370,6 @@ export const GLUTTONY_BEHAVIORS: readonly Behavior[] = [
     kind: 'rotation',
     steps: [
       { skillId: 'gluttony-grab-hp' },
-      { skillId: 'gluttony-grab-energy' },
-      { skillId: 'gluttony-grab-douqi' },
       { skillId: 'gluttony-gorge' },
       { skillId: 'gluttony-bite' },
     ],

@@ -104,6 +104,15 @@ export interface Effect {
   readonly damage?: DamageSpec;
   /** grantBuff / removeBuff 用 */
   readonly buff?: BuffDef;
+  /**
+   * **`grantBuff` 时随这次授予写进实例的自定义数值**（`BuffInstance.custom`）。
+   *
+   * ⚠️ 与 `GrantAbility.custom`（能力侧）是**同一件事的两条路**：
+   * 能力侧服务于"触发器 / `onHpBelow` 产出的授予"，而这条服务于
+   * **命中里的效果**（「暴食」的「啃噬·血」：挂「血盾」时把"这次偷了多少"
+   * 带进去 —— 破壳时要按它还给玩家）。
+   */
+  readonly custom?: number | Expr;
   readonly buffId?: BuffId;
   /** resource 用 */
   readonly resource?: { readonly key: ResourceKey; readonly delta: number | Expr };

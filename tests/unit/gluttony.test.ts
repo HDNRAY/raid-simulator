@@ -185,3 +185,75 @@ describe('「饕餮」：**buff 层数就是计数器**（3 次成功 → 饱食
     expect(taken, '100 × 0.7 = 70').toBe(70);
   });
 });
+
+/* ================================================================== *
+ * 3. 端到端：**真的打一场**（壳是"啃噬·血"挂的，不是手工挂的）
+ * ================================================================== */
+
+describe('端到端：「啃噬·血」自己挂「血盾」（feat 之前漏掉的那一步）', () => {
+  /**
+   * ⚠️ 这一组是**补的**：先前那 6 条都是**手工把壳挂上**再验行为，所以
+   * "**壳到底有没有人挂**"这件事根本没被测到 —— 而当时它**确实没人挂**
+   * （定义了、注册了，但没有任何东西授予它），整条"偷血 → 变壳 → 打穿还钱"
+   * 是**断的**。这一组让 Boss **真的出手**。
+   */
+  function realFight(): Harness {
+    /** ⚠️ 带上 `test-hit`：它是玩家用来"打穿壳"的那一击。 */
+    const h = harness({ playerHp: 100, skills: [hitSkill(200)] });
+    /** 让 Boss 用**它自己的技能表**里的「啃噬·血」。 */
+    h.engine.tick(
+      [{ type: 'useSkill', skillId: 'gluttony-grab-hp', atTick: h.engine.snapshot.tick }],
+      'boss',
+    );
+    h.engine.drainEvents();
+    /** 走完那 1.0 秒读条。 */
+    for (let i = 0; i < 70; i += 1) h.engine.tick([]);
+    h.engine.drainEvents();
+    return h;
+  }
+
+  it('🎯 Boss 打完「啃噬·血」→ 它身上**真的出现**一层壳，且带着"偷了多少"', () => {
+    const h = realFight();
+    const shell = shellOf(h);
+    expect(shell, '壳该由那一招自己挂上（这是先前漏掉的那一步）').toBeDefined();
+    expect(shell?.custom, '壳上记着"这次偷了多少"').toBeGreaterThan(0);
+    expect(shell?.absorb, '壳的耐久 = 偷到的那个数').toBe(shell?.custom);
+  });
+
+  it('🎯 玩家掉血 = 壳上记的那个数（偷与被偷**同一个式子**）', () => {
+    const h = realFight();
+    const shell = shellOf(h);
+    expect(h.player()?.resources.hp).toBe(100 - (shell?.custom ?? 0));
+  });
+
+  it('🎯 打穿那层壳 → 偷走的血**回到玩家身上**', () => {
+    const h = realFight();
+    const stolen = shellOf(h)?.custom ?? 0;
+    expect(stolen, '先确认真的偷到了').toBeGreaterThan(0);
+    const afterSteal = h.player()?.resources.hp ?? 0;
+
+    /** 一发足够大的攻击把壳打穿（壳的耐久就是 `stolen`）。 */
+    h.engine.tick(
+      [{ type: 'useSkill', skillId: 'test-hit', atTick: h.engine.snapshot.tick }],
+      'player',
+    );
+    h.engine.drainEvents();
+
+    expect(shellOf(h), '壳该被打穿').toBeUndefined();
+    expect(h.player()?.resources.hp, '血回来了').toBe(afterSteal + stolen);
+  });
+
+  it('「噬咬」现在**同时**打伤害并偷炁（用户：偷炁并进噬咬）', () => {
+    const h = harness({ playerHp: 100 });
+    const bossHpBefore = h.boss()?.resources.hp ?? 0;
+    h.engine.tick([{ type: 'useSkill', skillId: 'gluttony-bite', atTick: h.engine.snapshot.tick }], 'boss');
+    /** ⚠️ 要等读完条：噬咬的前摇是 0.8 秒 = 48 个 tick。 */
+    for (let i = 0; i < 60; i += 1) h.engine.tick([]);
+    h.engine.drainEvents();
+
+    expect(h.player()?.resources.hp, '打出了伤害（15）').toBe(100 - 15);
+    expect(h.player()?.resources.energy, '炁也被偷了 30%').toBeLessThan(100);
+    expect(bossHpBefore, '它自己不掉血').toBe(h.boss()?.resources.hp);
+  });
+});
+
