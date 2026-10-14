@@ -28,7 +28,12 @@ const i18nKeys = new Set([
 
 /** 一层厚 `pool` 的壳。 */
 function shell(pool: number): BuffDef {
-  return makeBuffDef({ id: 'test-shell', nameKey: 'skill.attack.name', absorbValue: pool });
+  return makeBuffDef({
+    id: 'test-shell',
+    nameKey: 'skill.attack.name',
+    duration: Number.POSITIVE_INFINITY,
+    absorbValue: pool,
+  });
 }
 
 function hitSkill(damage: number): SkillDef {
@@ -98,12 +103,24 @@ const shellLeft = (h: Harness): number | undefined =>
 
 describe('吸收壳：先吃伤害、扣光就碎、不吃增伤', () => {
   /**
-   * ⚠️ **还没通过的用例（如实记着）**：`absorb` 的**写回没有持久化** ——
-   * 壳池扣减算对了，但下一次 `replaceCombatant` 会把它覆盖回 100。
-   * 已知这是一个"工作副本 / 写回"类的问题（与 `hitResolution` 里记过的
-   * "事件发了但状态没变"同族），**没修完**。
+   * ==================================================================
+   * ⚠️ **未解决：伤害 < 壳 时壳不扣**（2026-10-14 停在这里）
+   * ==================================================================
+   *
+   * 症状：伤害 30 / 壳 100 → 血**不掉**（对），但**壳也不变薄**（错）。
+   *
+   * 已经**排除**的（都实测过）：
+   *   - 不是"壳在断言前过期"（把壳改成永久，症状一样）
+   *   - 不是"伤害算成 0"（trace：`result.amount=30`）
+   *   - 不是"壳没挂上"（trace：实例上 `absorb: 100`）
+   *   - 不是 `applyDamage(amount:0)` 覆盖（已加"漏 0 点就不调它"的分支，症状一样）
+   *
+   * ⚠️ **最可疑的线索**：这一条路径下 **`absorbFromBuffs` 根本没被调用**
+   * （加的 trace 一次都没打印），而"伤害 > 壳"那两条打得通 —— 所以问题
+   * 更可能在**进入伤害分支之后、到达吸收之前**的某处提前退出，而不是写回。
+   * 下一步该从 `case 'damage'` 往下逐行打点。
    */
-  it.todo('🛡 伤害 < 壳 → **血一点不掉**，壳变薄（写回还没持久化）');
+  it.todo('🛡 伤害 < 壳 → **血一点不掉**，壳变薄（见上面的排查记录）');
 
   it('🛡 伤害 > 壳 → 壳碎，**漏过去的**才扣血', () => {
     const h = shellHarness(30, 50);
@@ -121,7 +138,7 @@ describe('吸收壳：先吃伤害、扣光就碎、不吃增伤', () => {
     expect(h.events().some((e) => e.kind === 'buffExpired')).toBe(false);
   });
 
-  it.todo('⚠️ 壳**不吃增伤**：同一发伤害，扣的壳厚一样（依赖上面那条修好）');
+  it.todo('⚠️ 壳**不吃增伤**（依赖上一条修好）');
   it.skip('（占位）壳不吃增伤', () => {
     /**
      * ⚠️ 用户："如果 血盾**不吃这个减伤**"。

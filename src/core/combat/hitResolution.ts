@@ -310,13 +310,6 @@ export function resolveHit(
             target: ctx.current(target.id),
             damage: result.amount,
           });
-          /**
-           * ⚠️ **必须重新从引擎取 target**（`ctx.current`），不能复用本函数
-           * 开头那个 `target` 快照 —— 踩过的坑：壳的扣减写进了引擎的新副本，
-           * 而 `applyDamage` 拿旧快照写回，**把壳的扣减覆盖掉了**
-           * （表现：壳永远减不下去，而血也不掉）。这与本文件记录过的
-           * "事件发了但状态没变"是同一类工作副本坑。
-           */
           const applied = applyDamage(
             ctx.current(target.id),
             /**
