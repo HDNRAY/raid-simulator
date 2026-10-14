@@ -4,10 +4,12 @@ import { BattleEngine } from '../../src/core/combat/battleState';
 import { createRegistry } from '../../src/core/content/registry';
 import { applyBuff } from '../../src/core/buffs';
 import { ALL_BUFFS, ALL_SKILLS } from '../../src/data/content';
-import { LAZY_BEHAVIORS, LAZY_IDLE, LAZY_IDLE_PASSIVE, LAZY_IDLE_SKILL, LAZY_RECENT_HIT, LAZY_SLEEP, LAZY_SLEEP_SKILL } from '../../src/data/lazyBoss';
+import { LAZY_BEHAVIORS, LAZY_BLUNT, LAZY_IDLE, LAZY_IDLE_PASSIVE, LAZY_IDLE_SKILL, LAZY_PRESSURE, LAZY_RECENT_HIT, LAZY_SLEEP, LAZY_SLEEP_SKILL } from '../../src/data/lazyBoss';
 import type { BuffDef, Combatant, SkillDef, StatKey } from '../../src/core/types';
 import { logicMs } from '../../src/core/loopConstants';
 import { makeCombatant, makeSkillDef } from './helpers';
+import { descParamsOf } from '../../src/app/descParams';
+import { descTemplateOf } from '../../src/app/keyRows';
 
 /**
  * **「懒惰」的机制** + 这一轮新加的 `Ability: 'removeBuff'`。
@@ -320,3 +322,49 @@ function playerSleeping(e: BattleEngine): boolean {
       ?.buffs.some((b) => b.defId === LAZY_SLEEP.id) ?? false
   );
 }
+
+/* ================================================================== *
+ * 4. 两招都按**已损失的血量百分比**加成（2026-10-14 用户改的口径）
+ * ================================================================== */
+
+describe('「钝击 / 重压」都吃"损失血量百分比"', () => {
+  const damageSpecs = (skill: { readonly hits: readonly { readonly effects: readonly unknown[] }[] }) =>
+    skill.hits
+      .flatMap((h) => h.effects)
+      .filter(
+        (e): e is { readonly kind: 'damage'; readonly damage: { readonly base: unknown } } =>
+          typeof e === 'object' && e !== null && (e as { kind?: string }).kind === 'damage',
+      );
+
+  it('🎯 **两招都有"按损失比"的加成段**（少了 50% 血 ⇒ 伤害 +50%）', () => {
+    /**
+     * 用户 2026-10-14："**2 个技能都吃损失血量，而且是吃百分比**，
+     * 比如少了 50% 血 伤害加成就是 50%"。
+     *
+     * 判据是**机制**（不是数值）：每招两段伤害 ——
+     *   ① 第一段是**数字** base（`{damage}` 模板参数要读它）
+     *   ② 第二段是**表达式** base（读"已损失血量百分比"）
+     * ⚠️ 数值调了照样绿；"第二段丢了 / 第一段变成表达式"才红。
+     */
+    for (const skill of [LAZY_BLUNT, LAZY_PRESSURE]) {
+      const specs = damageSpecs(skill);
+      expect(specs.length, `${skill.id} 应当有两段伤害`).toBe(2);
+      expect(typeof specs[0]?.damage.base, `${skill.id} 第一段必须是数字`).toBe('number');
+      expect(typeof specs[1]?.damage.base, `${skill.id} 第二段必须是表达式`).toBe('object');
+    }
+  });
+
+  it('⚠️ 详情里的 `{damage}` **仍然取得到**（第一段是数字的直接后果）', () => {
+    /**
+     * ⚠️ 这是个**静默坏**的坑：`descParams.firstDamageOf` 只认**数字**
+     * base。如果哪天有人把第一段也改成表达式，详情页就会把 `{damage}`
+     * **原样显示出来** —— 而单测不会红（除非有这一条）。
+     */
+    for (const skill of [LAZY_BLUNT, LAZY_PRESSURE]) {
+      const template = descTemplateOf(skill.descKey ?? '');
+      expect(template, `${skill.id} 没有文案模板`).toBeTruthy();
+      const params = descParamsOf(skill, template ?? '', 500);
+      expect(params?.damage, `${skill.id} 的 {damage} 取不到了`).toEqual(expect.any(Number));
+    }
+  });
+});

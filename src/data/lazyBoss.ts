@@ -233,6 +233,16 @@ export const LAZY_IDLE_PASSIVE: BuffDef = {
  * 3. 技能
  * ================================================================== */
 
+const HP_LOSS: Expr = { e: 'missingResourceRatio', who: 'self', resource: 'hp' };
+
+/**
+ * ⚠️ **两招共用的那个"损失比"**（0..1）：`missingResourceRatio` 就是
+ * "已损失的血量百分比"。用户 2026-10-14："**2 个技能都吃损失血量，
+ * 而且是吃百分比**，比如少了 50% 血 伤害加成就是 50%"。
+ *
+ * ⚠️ 它必须**声明在两招之前**：TS 的 `const` 有 TDZ，写在后面会让
+ * 第一招在模块求值时读到未初始化（这个坑今天已经踩过一次）。
+ */
 /** 「钝击」：普通小技能。 */
 export const LAZY_BLUNT: ActiveSkillDef = {
   id: 'lazy-blunt',
@@ -244,12 +254,31 @@ export const LAZY_BLUNT: ActiveSkillDef = {
     { kind: 'grant', on: 'castStart', target: { mode: 'self' }, buff: tel('lazy-blunt', logicMs(10)) },
   ],
   castTime: logicMs(10),
-  cooldown: logicMs(40),
+  /** ⚠️ 用户 2026-10-14："懒惰的 2 个技能 **略微减少 cd**"（4.0s → **3.5s**）。 */
+  cooldown: logicMs(35),
   cost: [],
   hits: [
     {
       at: logicMs(10),
-      effects: [{ kind: 'damage', damage: { base: S(18), canCrit: false, countsAsHit: true } }],
+      effects: [
+        /**
+         * ⚠️ **两段式**：第一段保持**数字** base（`{damage}` 模板参数照旧
+         * 取得到 —— `descParams.firstDamageOf` 只认数字），第二段是加成。
+         *
+         * 用户 2026-10-14："**2 个技能都吃损失血量，而且是吃百分比**，
+         * 比如少了 50% 血 伤害加成就是 50%"。⇒ 加成 = `base × 损失比`
+         * （`missingResourceRatio` 就是那个 0..1 的百分比）。
+         */
+        { kind: 'damage', damage: { base: S(18), canCrit: false, countsAsHit: true } },
+        {
+          kind: 'damage',
+          damage: {
+            base: { e: 'mul', of: [{ e: 'const', value: S(18) }, HP_LOSS] },
+            canCrit: false,
+            countsAsHit: true,
+          },
+        },
+      ],
     },
   ],
   targeting: { mode: 'primaryEnemy' },
@@ -278,7 +307,6 @@ export const LAZY_BLUNT: ActiveSkillDef = {
  * ⚠️ 系数用 `missingResourceRatio`（现成的 `Expr`）：它读的是**它自己**
  * 损失了多少比例，不依赖玩家的任何状态。
  */
-const HP_LOSS: Expr = { e: 'missingResourceRatio', who: 'self', resource: 'hp' };
 
 export const LAZY_PRESSURE: ActiveSkillDef = {
   id: 'lazy-pressure',
@@ -290,7 +318,8 @@ export const LAZY_PRESSURE: ActiveSkillDef = {
     { kind: 'grant', on: 'castStart', target: { mode: 'self' }, buff: tel('lazy-pressure', logicMs(16)) },
   ],
   castTime: logicMs(16),
-  cooldown: logicMs(80),
+  /** ⚠️ 用户 2026-10-14："**略微减少 cd**"（8.0s → **7.0s**）。 */
+  cooldown: logicMs(70),
   cost: [],
   hits: [
     {
@@ -298,25 +327,28 @@ export const LAZY_PRESSURE: ActiveSkillDef = {
       effects: [
         {
           kind: 'damage',
-          damage: {
-            base: S(24),
-            scaling: [{ stat: 'maxHp', ratio: 0 }],
-            canCrit: false,
-            countsAsHit: true,
-          },
+          damage: { base: S(24), canCrit: false, countsAsHit: true },
         },
         /**
-         * ⚠️ 上面那个 `scaling` 是**占位**（ratio 0）—— 真正的加成走这里：
-         * 一条**独立的**伤害效果，基础值由 `HP_LOSS × 40` 给。
+         * ⚠️ **加成段**（用户 2026-10-14 改的规则）：
+         * "**2 个技能都吃损失血量，而且是吃百分比**，比如少了 50% 血
+         * 伤害加成就是 50%"。
          *
-         * 为什么不写进同一个 `DamageSpec`：`DamageSpec.scaling` 是
-         * `stat × ratio` 的**线性**项，而这里要的是"读一个表达式"。
-         * 拆两段是**最窄**的写法（不动 `DamageSpec` 的形状）。
+         * ⇒ 加成 = `base × 损失比`，于是总伤害 = `base × (1 + 损失比)`
+         * （少了 50% 血 ⇒ 24 + 12 = **36**）。
+         *
+         * ⚠️ **旧的"×40 封顶"已删**：那是"按损失血量"的另一种口径
+         * （绝对加成、有上限），与新规则不是一回事。
+         *
+         * ⚠️ 为什么拆两段而不是写进同一个 `DamageSpec`：`DamageSpec.scaling`
+         * 是 `stat × ratio` 的**线性**项，而这里要的是"读一个表达式"；
+         * 拆两段是**最窄**的写法（不动 `DamageSpec` 的形状）。第一段保持
+         * 数字 base 也是有意的（见钝击那段的说明）。
          */
         {
           kind: 'damage',
           damage: {
-            base: { e: 'mul', of: [HP_LOSS, { e: 'const', value: 40 }] },
+            base: { e: 'mul', of: [{ e: 'const', value: S(24) }, HP_LOSS] },
             canCrit: false,
             countsAsHit: true,
           },
