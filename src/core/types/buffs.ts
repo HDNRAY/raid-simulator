@@ -296,6 +296,13 @@ export interface BuffDef {
    * 后者参与修正池聚合，前者是一个整体开关。
    */
   readonly damageMultBoost?: number;
+  /**
+   * **挂上时，这层壳有多厚**（写进 `BuffInstance.absorb`；缺省 = 不是壳）。
+   *
+   * ⚠️ 这里只声明**初始值**；运行期被消耗的是**实例上的** `absorb`
+   * （定义不可变，状态在实例上 —— 这是整套数据模型的分工）。
+   */
+  readonly absorbValue?: number;
   readonly triggers?: readonly TriggerDef[];
   readonly vfx?: BuffVfx;
   readonly dispellable?: boolean;
@@ -327,4 +334,33 @@ export interface BuffInstance {
   readonly triggerCooldowns: Record<string, number>;
   /** 剩余触发次数：triggerKey → 剩余 */
   readonly triggerCounts: Record<string, number>;
+  /**
+   * **吸收池**：这一层壳还能吃掉多少点伤害（「血盾」用）。
+   *
+   * ==================================================================
+   * 为什么是 buff 实例上的一个字段，而不是 `resources.shield`
+   * ==================================================================
+   *
+   * 用户原话："**其他的类似的 计数啥的 都在这么实现，包括 shield 不也是一个
+   * buff 吗**" —— 对。这套数据模型的既定做法就是"判定 / 计数**全落在 buff
+   * 上**，零新引擎机制"（`damageReduce` / `damageThreshold` / `invulnerable`
+   * / `ccImmune` 全是 `BuffFlags`）。护盾也照办：
+   *
+   *   - **池子**（每个实例自己的状态）→ 本字段
+   *   - **"池子空了"** → 引擎把那条 buff 摘掉（见 `hitResolution`），
+   *     而不是让内容去轮询"空了吗"
+   *
+   * ⚠️ 与 `damageThreshold` 的**区别**（两者都在挡伤害，别混淆）：
+   *
+   * | | `damageThreshold` | `absorb`（本字段） |
+   * |---|---|---|
+   * | 语义 | **每一击**减 N 点（打不"碎"） | **总共**能吸 N 点，扣光就"碎" |
+   * | 状态 | 无（读 flag 就行） | **有**（每次扣减、要写回） |
+   * | 用途 | 「卸」的平减 | **「血盾」的"5 秒内打破"** |
+   *
+   * ⚠️ 它**不吃增伤 / 减伤**：打破壳不该因为对方叠了 buff 而变难
+   * （用户："如果 血盾不吃这个减伤"）。所以扣减走的是**原始伤害**，
+   * 见 `hitResolution` 的 `absorb` 分支。
+   */
+  readonly absorb?: number;
 }

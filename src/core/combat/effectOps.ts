@@ -374,3 +374,78 @@ export function applyStunEffect(args: {
       }
   return;
 }
+
+/* ================================================================== *
+ * 5. 吸收壳（`BuffInstance.absorb`，「血盾」）
+ * ================================================================== */
+
+/**
+ * 把一次伤害**先扣在目标的吸收壳上**，返回"壳漏过去之后还剩多少伤害"。
+ *
+ * ==================================================================
+ * 为什么它是 buff 实例上的一个数（而不是 `resources.shield`）
+ * ==================================================================
+ *
+ * 用户原话："**其他的类似的 计数啥的 都在这么实现，包括 shield 不也是一个
+ * buff 吗**" —— 对。这套数据模型的既定做法是"判定 / 计数全落在 buff 上"。
+ * 所以壳的**池子**挂在实例上（`BuffInstance.absorb`），而**"壳空了"由引擎
+ * 摘掉那条 buff** —— 于是内容只要给那条 buff 挂一个 `onBuffExpired`
+ * 触发器，就能在"被打碎"那一刻做事（例如**把偷走的血还给玩家**）。
+ *
+ * ==================================================================
+ * ⚠️ 它**不吃增伤 / 减伤**
+ * ==================================================================
+ *
+ * 传进来的 `damage` 是**已经过防御减免、但还没过易伤**的那个数
+ * （调用方算好的）。壳按它**全额**扣 —— 用户："如果 血盾不吃这个减伤"
+ * （打破壳不该因为对方叠了 buff 而变难）。
+ *
+ * ⚠️ 多个壳时**按顺序扣**（先来的先挡）：一次伤害可能同时打穿好几层，
+ * 这在单 Boss 的内容里不会发生，但写清楚免得下一个人以为漏了。
+ */
+export function absorbFromBuffs(args: {
+  readonly ctx: EffectEvalContext;
+  readonly target: Combatant;
+  readonly damage: number;
+}): number {
+  const { ctx, target, damage } = args;
+  if (damage <= 0) return damage;
+
+  let left = damage;
+  const kept: Combatant['buffs'][number][] = [];
+  const broken: Combatant['buffs'][number][] = [];
+
+  for (const buff of target.buffs) {
+    const pool = buff.absorb;
+    if (pool === undefined || left <= 0) {
+      kept.push(buff);
+      continue;
+    }
+    const eaten = Math.min(pool, left);
+    left -= eaten;
+    const rest = pool - eaten;
+    /** 扣光 = **碎**：这一条不进 keep，于是它的过期触发器会响。 */
+    if (rest <= 0) broken.push(buff);
+    else kept.push({ ...buff, absorb: rest });
+  }
+
+  if (broken.length === 0 && kept.length === target.buffs.length) return left;
+
+  /**
+   * ⚠️ 写回时**从引擎取当前对象**（不是那个传进来的快照）：调用方可能
+   * 已经在本 tick 里改过它（例如先挂了 buff），拿旧快照写回会**覆盖掉**
+   * 那些改动 —— 与 `hitResolution` 里记过的"事件发了但状态没变"同一类。
+   */
+  ctx.replaceCombatant({ ...ctx.current(target.id), buffs: kept });
+  for (const buff of broken) {
+    (ctx.events as EventDef[]).push({
+      kind: 'buffExpired',
+      tick: ctx.state.tick,
+      targetId: target.id,
+      buffId: buff.defId,
+      stacks: 0,
+      sourceId: buff.sourceId,
+    });
+  }
+  return left;
+}

@@ -43,7 +43,13 @@ import { aggregateFlags, applyBuff } from '../buffs';
 import { runTriggers } from './triggers';
 import { absorbedByOf, withAbsorbedByBuffId } from './avoidedSource';
 import { casterGainsDouqiFromDamage } from './holds';
-import { actsOnVictim, applyStunEffect, applyThornReflect, transferResources } from './effectOps';
+import {
+  actsOnVictim,
+  absorbFromBuffs,
+  applyStunEffect,
+  applyThornReflect,
+  transferResources,
+} from './effectOps';
 import {
   applyDamage,
   applyHeal,
@@ -292,9 +298,35 @@ export function resolveHit(
            * 而挂在挨打者身上的（如「倒地」）会被 `avoided` 挡掉。
            */
           applyHitEffects(ctx, actor, target, effect, skill.id, avoided);
+          /**
+           * ⚠️ **先过吸收壳**（「血盾」）：壳按`result.amount`（已过防御减免、
+           * **未过易伤**）全额吃掉，漏过去的部分才成为真正的伤害。
+           * 壳被扣光时 `absorbFromBuffs` 会摘掉那条 buff 并补发 `buffExpired`
+           * —— 于是内容挂在那条 buff 上的 `onBuffExpired` 触发器（"把血还给
+           * 玩家"）会响。判据与理由见 `effectOps.ts` 的 `absorbFromBuffs`。
+           */
+          const leaked = absorbFromBuffs({
+            ctx,
+            target: ctx.current(target.id),
+            damage: result.amount,
+          });
+          /**
+           * ⚠️ **必须重新从引擎取 target**（`ctx.current`），不能复用本函数
+           * 开头那个 `target` 快照 —— 踩过的坑：壳的扣减写进了引擎的新副本，
+           * 而 `applyDamage` 拿旧快照写回，**把壳的扣减覆盖掉了**
+           * （表现：壳永远减不下去，而血也不掉）。这与本文件记录过的
+           * "事件发了但状态没变"是同一类工作副本坑。
+           */
           const applied = applyDamage(
             ctx.current(target.id),
-            result,
+            /**
+             * `absorbed` 记**壳吃掉的那部分**（供飘字 / 日志显示"被护盾挡了"）——
+             * 它原先恒为 0（`computeDamage` 里 `damageReduce` 那条从没算过它），
+             * 所以这里填上不会与任何既有语义冲突。
+             */
+            leaked === result.amount
+              ? result
+              : { ...result, amount: leaked, absorbed: result.amount - leaked },
             actor.id,
             skill.id,
             ctx.state.tick,
