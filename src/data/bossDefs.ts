@@ -34,6 +34,7 @@ import { PRIDE_BOSS } from './prideBoss';
 import { LUST_BOSS } from './lustBoss';
 import { JEALOUSY_BOSS } from './jealousyBoss';
 import { GREED_BOSS } from './greedBoss';
+import { LAZY_BOSS } from './lazyBoss';
 
 /**
  * 一个 Boss 的**全部内容**。
@@ -47,6 +48,15 @@ export interface BossDef {
   readonly id: string;
   /** 血量上限（展示刻度）。 */
   readonly hp: number;
+  /**
+   * **开局血量**（缺省 = 满血）。
+   *
+   * ⚠️ 存在的理由只有一个：「懒惰」要求"上限 500、但**开局只有 250**"
+   * —— 也就是它**一上来就是半血**（那正好喂饱它自己的"按损失血量加成"
+   * 那一条）。别拿它当"随机起始血量"用：它是**内容声明的一个数**，
+   * 不是运行期掷出来的。
+   */
+  readonly startHp?: number;
   readonly nameKey: LocaleKey;
   readonly skills: readonly SkillDef[];
   /**
@@ -61,7 +71,13 @@ export interface BossDef {
 }
 
 /** 有自己定义的 Boss。**开发中的不在里面**（见文件头）。 */
-export const BOSS_DEFS: readonly BossDef[] = [PRIDE_BOSS, LUST_BOSS, JEALOUSY_BOSS, GREED_BOSS];
+export const BOSS_DEFS: readonly BossDef[] = [
+  PRIDE_BOSS,
+  LUST_BOSS,
+  JEALOUSY_BOSS,
+  GREED_BOSS,
+  LAZY_BOSS,
+];
 
 const BY_ID = new Map(BOSS_DEFS.map((b) => [b.id, b]));
 
@@ -79,6 +95,17 @@ export function bossDefOf(id: string): BossDef | undefined {
  */
 export function bossHpFor(id: string): number {
   return BY_ID.get(id)?.hp ?? PRIDE_BOSS.hp;
+}
+
+/**
+ * 某个 Boss 的**开局血量**（缺省 = 它的上限）。
+ *
+ * ⚠️ 没有定义时按**上限**算（开发中的 Boss 借傲慢那条占位路）。
+ */
+export function bossStartHpFor(id: string): number {
+  const def = BY_ID.get(id);
+  if (def === undefined) return PRIDE_BOSS.hp;
+  return def.startHp ?? def.hp;
 }
 
 /** 需要落进内容注册表的全部 Boss 技能 / buff（三个 Boss 的合集）。 */

@@ -1,6 +1,6 @@
 /** Ability —— 唯一的原子单位（7 个变体）。 */
 
-import type { SkillId } from './ids';
+import type { BuffId, SkillId } from './ids';
 import type { ResourceKey, ResourcePoolRef } from './resources';
 import type { Expr, StatModifier } from './stats';
 import type { BuffDef } from './buffs';
@@ -81,6 +81,35 @@ export interface ResourceAbility {
 }
 
 /**
+ * **移除一个 buff**（按 `buffId`，不分实例）。
+ *
+ * ==================================================================
+ * 为什么需要它（而不是复用现有的 `deal` / `resource`）
+ * ==================================================================
+ *
+ * 触发器的执行器只认**它真的用得上**的那几类动作（`grant` / `resource` /
+ * `deal`）。而「懒惰」的「怠惰」要求"**挨一次打就把层数清零**" ——
+ * 那是"移除"语义，三者都表达不了：
+ *
+ *   - `grant` 只能加
+ *   - `resource` 只碰资源池
+ *   - `deal` 是伤害
+ *
+ * ⚠️ 写一个联合里没有的 kind 会被**静默忽略**（执行器的 `default: break`）
+ * —— 也就是"看起来生效、实际什么都不做"。所以这里**显式**加一个成员，
+ * 并在 `triggers.ts` / `runAi.ts` 两处执行器里实现它。
+ *
+ * ⚠️ **按 `buffId` 移除**（同 defId 的所有实例一起清）：这与
+ * `EffectKind: 'removeBuff'` 的语义一致（那条是"把一个 buff 摘掉"），
+ * 而且"清零"要的正是这个 —— 不是"减一层"。
+ */
+export interface RemoveBuffAbility {
+  readonly kind: 'removeBuff';
+  readonly target: TargetRule;
+  readonly buffId: BuffId;
+}
+
+/**
  * 从某个池子扣资源（使用次数、充能、法力都走它）。
  *
  * ⚠️ **未实现的设计**：没有任何消费者（三个能力执行点都不认它），
@@ -121,6 +150,7 @@ export type Ability =
   | DealAbility
   | GrantSkillAbility
   | ConsumeAbility
-  | ResourceAbility;
+  | ResourceAbility
+  | RemoveBuffAbility;
 
 export type AbilityKind = Ability['kind'];

@@ -35,8 +35,9 @@ import { LIN_WANFENG_HP } from './kits/linwanfeng';
 import { LUST_BEHAVIORS, LUST_PASSIVE } from './lustBoss';
 import { JEALOUSY_BEHAVIORS } from './jealousyBoss';
 import { GREED_BEHAVIORS } from './greedBoss';
+import { LAZY_BEHAVIORS } from './lazyBoss';
 import { PRIDE_BEHAVIORS } from './bossPride';
-import { bossHpFor } from './bossDefs';
+import { bossHpFor, bossStartHpFor } from './bossDefs';
 import { BOSS_ROSTER, PLAYER_ROSTER, findEntry } from './roster';
 
 /**
@@ -193,6 +194,7 @@ const BOSS_BEHAVIORS: ReadonlyMap<string, readonly Behavior[]> = new Map([
   ['lust', LUST_BEHAVIORS],
   ['envy', JEALOUSY_BEHAVIORS],
   ['greed', GREED_BEHAVIORS],
+  ['sloth', LAZY_BEHAVIORS],
 ]);
 
 export function behaviorsFor(id: string): readonly Behavior[] {
@@ -219,7 +221,8 @@ export function makeBoss(id: string, options?: { readonly noAi?: boolean }): Com
     nameKey: findEntry(BOSS_ROSTER, id)?.nameKey ?? 'boss.name',
     side: 'enemy',
     caps: { hp: bossHpFor(id), energy: 0, douqi: 0 },
-    resources: { hp: bossHpFor(id), energy: 0, douqi: 0 },
+    /** ⚠️ 起始血量可以与上限不同（「懒惰」= 上限 500 / 开局 250）。 */
+    resources: { hp: bossStartHpFor(id), energy: 0, douqi: 0 },
     counters: {},
     basePrimary: { strength: 400, agility: 200, intelligence: 300, spirit: 200 },
     cooldowns: {},

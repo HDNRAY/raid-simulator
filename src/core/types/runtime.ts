@@ -72,6 +72,27 @@ export interface Combatant {
   readonly activeHold?:
     | { readonly skillId: SkillId; readonly drainDebt?: number }
     | undefined;
+  /**
+   * **生命回复的小数欠账**（单位 = 1/1000 点，见 `combatantBirth.ts` 的
+   * `REGEN_DEBT_SCALE`）。
+   *
+   * ==================================================================
+   * 为什么需要它（「懒惰」的"每秒回 1 点"逼出来的）
+   * ==================================================================
+   *
+   * `hpRegen` 的口径是**每秒**，而回复按**逻辑步**结算 —— 所以
+   * "每秒 1 点" = 每步 `0.1` 点。而 `changeResource` 会
+   * `Math.round(before + delta)`：`0.1 → 0`，**一点都不回**。
+   *
+   * 引擎原先的应对是**在注释里规定**"内容里写 `hpRegen` 必须 ≥ 每秒 10"
+   * （那也太糙了：等于说"1 点/秒"这个需求表达不出来）。这里给它一个
+   * **小数额度累加器**，与「卸」的 `drainDebt` 同一条思路：
+   * 每步只把小数记进欠账，**攒够 1 个整点才真回 1 点**。
+   *
+   * ⚠️ **对既有内容零影响**：没有 `hpRegen` 的人，这个值恒为 0，
+   * 走的是与今天逐字相同的那条路（所以黄金重放不会动）。
+   */
+  readonly regenDebt?: number;
   readonly behaviors: readonly Behavior[];
   readonly alive: boolean;
 }

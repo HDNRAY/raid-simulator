@@ -64,7 +64,19 @@ export function expireBuffs(ctx: UpkeepContext): void {
 export function regenerateResources(ctx: UpkeepContext): void {
   for (const combatant of ctx.mutableAll()) {
     const result = regenerate(combatant, ctx.statsOf(combatant.id), ctx.tick);
-    if (result.events.length > 0) {
+    /**
+     * ⚠️ 判据是"**状态变了**"（对象引用变了），**不是**"有事件"。
+     *
+     * 踩过的坑（2026-10-14，「懒惰」的"每秒回 1 点"）：生命回复的小数
+     * **欠账**（`regenDebt`）在"还没攒够 1 个整点"时**一条事件都不产生**
+     * —— 于是原来那句 `if (result.events.length > 0)` 会把欠账**整个丢掉**，
+     * 表现为"`hpRegen` 写了但永远不回血"。
+     *
+     * `regenerate` 每次都会返回**新的对象**（即使只改了欠账），所以引用
+     * 比较正好是"这一步它动过没有"的判据；没动时（没有回复来源）
+     * `regenerate` 会原样返回入参，这里也就不会多写一次。
+     */
+    if (result.combatant !== combatant || result.events.length > 0) {
       ctx.replaceCombatant(result.combatant);
       ctx.events.push(...result.events);
     }

@@ -276,6 +276,17 @@ function runAbilities(
         break;
       }
 
+      /**
+       * 移除一个 buff（按 `defId`）—— 「懒惰」的「怠惰」用"挨打清零"。
+       * ⚠️ 它**不是** `EffectKind: 'removeBuff'`（那是命中的效果）；
+       * 这里是**能力**（触发器产出的动作），所以走 `ctx` 的落地入口。
+       */
+      case 'removeBuff': {
+        const who = whoOf(ctx, ownerId, ability.target, payload);
+        if (who !== undefined) ctx.removeBuffFromTrigger(ctx.current(who), ability.buffId);
+        break;
+      }
+
       case 'deal': {
         const who = whoOf(ctx, ownerId, ability.target, payload);
         if (who !== undefined) ctx.dealDamageFromTrigger(ownerId, who, ability.hit);

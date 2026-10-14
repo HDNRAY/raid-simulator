@@ -57,6 +57,15 @@ export function capOf(combatant: Combatant, key: keyof Combatant['resources']): 
   return Math.max(0, Math.floor(combatant.caps[key]));
 }
 
+/**
+ * `regenDebt`（生命回复的小数欠账）的刻度：**1/1000 点**。
+ *
+ * 与「卸」的 `DRAIN_SCALE` 同一条纪律：**必须走整数**，否则 10 次 0.1 的
+ * 浮点累加会得到 `0.999…`，差一个整点。值取 1000 是因为"每秒 1 点"
+ * 落到每步是 `0.1 = 100/1000`（整数），而更细的回复率也不会掉精度。
+ */
+export const REGEN_DEBT_SCALE = 1000;
+
 /** 把资源钳到 [0, cap]。**整数**。 */
 export function clampResources(combatant: Combatant): Combatant['resources'] {
   const out = { ...combatant.resources };
@@ -510,11 +519,26 @@ export function regenerate(
    * 用 `LOGIC_TICKS_PER_SECOND` 而不是字面量 `10` —— 否则"一步多长"
    * 就有了第二份真相（正是「卸」那次 10 倍偏差的同一类问题）。
    */
-  const hpPerLogicTick = (stats.hpRegen ?? 0) / LOGIC_TICKS_PER_SECOND;
-  if (hpPerLogicTick > 0) {
-    const result = changeResource(current, 'hp', Math.round(hpPerLogicTick), tick);
-    current = result.combatant;
-    events.push(...result.events);
+  const hpPerStep = (stats.hpRegen ?? 0) / LOGIC_TICKS_PER_SECOND;
+  if (hpPerStep > 0) {
+    /**
+     * ⚠️ **小数走欠账累加器**（原来的写法是 `Math.round(hpPerStep)`，
+     * 那会把"每秒 1 点"（= 每步 0.1）**舍成 0，一点都不回**）。
+     *
+     * 与「卸」的 `drainDebt` 同一条思路，而且同样用**整数**（1/1000 点）：
+     * 浮点累加 10 次 0.1 会得到 `0.9999999999999999`，差一个整点。
+     */
+    const gain =
+      ((current.regenDebt ?? 0) + Math.round(hpPerStep * REGEN_DEBT_SCALE)) / REGEN_DEBT_SCALE;
+    const whole = Math.floor(gain);
+    const next = { ...current, regenDebt: Math.round((gain - whole) * REGEN_DEBT_SCALE) };
+    if (whole > 0) {
+      const result = changeResource(next, 'hp', whole, tick);
+      current = result.combatant;
+      events.push(...result.events);
+    } else {
+      current = next;
+    }
   }
 
   return { combatant: current, events };

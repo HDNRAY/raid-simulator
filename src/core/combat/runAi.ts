@@ -140,6 +140,31 @@ export function runAbilities(
         continue;
       }
 
+      /**
+       * 移除一个 buff（按 `defId`）—— `onHpBelow.then` 里也能用。
+       * ⚠️ 与 `triggers.ts` 的同名分支是同一条语义（清零 / 摘掉），
+       * 两处都要实现：`runAi` 走的是"能力数组"，而触发器有自己的执行器。
+       */
+      if (ability.kind === 'removeBuff') {
+        const targetId = targetIdOf(ability.target.mode);
+        const target = ctx.current(targetId);
+        if (target.buffs.some((b) => b.defId === ability.buffId)) {
+          ctx.replaceCombatant({
+            ...target,
+            buffs: target.buffs.filter((b) => b.defId !== ability.buffId),
+          });
+          ctx.events.push({
+            kind: 'buffExpired',
+            tick: ctx.tick,
+            targetId,
+            buffId: ability.buffId,
+            stacks: 0,
+            sourceId: actorId,
+          });
+        }
+        continue;
+      }
+
       if (ability.kind === 'trigger') {
         // onHpBelow 里嵌 trigger 没有明确语义，直接执行它的 then
         for (const then of ability.trigger.then) runAbilities(ctx, actorId, [then]);

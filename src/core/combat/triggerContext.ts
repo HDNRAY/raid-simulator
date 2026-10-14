@@ -59,6 +59,7 @@ export type TriggerContext = Pick<
   | 'skillDef'
   | 'currentTick'
   | 'grantBuffFromTrigger'
+  | 'removeBuffFromTrigger'
   | 'changeResourceFromTrigger'
   | 'dealDamageFromTrigger'
 >;
@@ -81,6 +82,30 @@ export function triggerContextFor(host: TriggerHost, roll: () => number): Trigge
         buffId: def.id,
         stacks: applied.stacks,
         sourceId,
+      });
+    },
+
+    /**
+     * 移除一个 buff（按 `defId`，同 defId 的实例一起摘）。
+     *
+     * ⚠️ 与 `applyBuff` 的"复用实例"相反：这里**按 defId 过滤**，
+     * 所以 `independent` 叠层的多个实例也会一起清掉 —— 这正是
+     * "清零"要的语义（引擎里已有一处同源实现：`EffectKind: 'removeBuff'`）。
+     */
+    removeBuffFromTrigger: (target, buffId) => {
+      const current = host.current(target.id);
+      if (!current.buffs.some((b) => b.defId === buffId)) return;
+      host.replaceCombatant({
+        ...current,
+        buffs: current.buffs.filter((b) => b.defId !== buffId),
+      });
+      host.events.push({
+        kind: 'buffExpired',
+        tick: host.combat.currentTick(),
+        targetId: target.id,
+        buffId,
+        stacks: 0,
+        sourceId: target.id,
       });
     },
 

@@ -110,6 +110,8 @@ export interface HitResolutionContext {
   currentTick(): number;
   /** 按 id 挂一个 buff（复用 `applyBuff` 的语义）。 */
   grantBuffFromTrigger(target: Combatant, def: BuffDef, sourceId: string): void;
+  /** 按 `defId` 移除一个 buff（同 defId 的实例一起摘）。 */
+  removeBuffFromTrigger(target: Combatant, buffId: string): void;
   /** 一次性资源变动。 */
   changeResourceFromTrigger(target: Combatant, resource: string, delta: number): void;
   /**
