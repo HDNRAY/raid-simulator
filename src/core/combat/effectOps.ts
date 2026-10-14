@@ -433,8 +433,19 @@ export function absorbFromBuffs(args: {
 
   /**
    * ⚠️ 写回时**从引擎取当前对象**（不是那个传进来的快照）：调用方可能
-   * 已经在本 tick 里改过它（例如先挂了 buff），拿旧快照写回会**覆盖掉**
-   * 那些改动 —— 与 `hitResolution` 里记过的"事件发了但状态没变"同一类。
+   * 已经在本 tick 里改过它，拿旧快照写回会**覆盖掉**那些改动。
+   *
+   * ⚠️ **已知未解决（2026-10-14）**：伤害 < 壳 时**壳不扣**。
+   * 排查记录（都是实测，别重走）：
+   *   - `kept` 里是 `absorb: 70`（trace 确认），紧接着 `ctx.current(id)`
+   *     读回来是 `100` —— 同一个 work map、同一个 id
+   *   - 试过"就地改实例的 absorb"（`toMutable` 只深拷数组、实例是共享引用）
+   *     → **仍然不生效**
+   *   - "伤害 > 壳"那条（整条 buff 被摘掉）**正常** ⇒ 问题出在
+   *     "**替换 / 改写数组里的元素**"这条路上，不是写回本身
+   *   - 已排除：壳过期、伤害为 0、壳没挂上、`applyDamage(amount:0)` 覆盖
+   * 下一步建议：从 `castPipeline` 的 `resolveHit` 调用点往下，
+   * 查 **advanceCasts → resolveHits 之间有没有第二次写回** 把 work 覆盖掉。
    */
   ctx.replaceCombatant({ ...ctx.current(target.id), buffs: kept });
   for (const buff of broken) {
