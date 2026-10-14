@@ -225,7 +225,7 @@ export const LUST_HUM: SkillDef = {
   hits: [
     {
       at: logicMs(9),
-      effects: [{ kind: 'damage', damage: { base: S(12), canCrit: false, countsAsHit: true } }],
+      effects: [{ kind: 'damage', damage: { base: S(9), canCrit: false, countsAsHit: true } }],
     },
   ],
   targeting: { mode: 'primaryEnemy' },
@@ -247,7 +247,7 @@ export const LUST_ENTANGLE: SkillDef = {
   hits: [
     {
       at: logicMs(20),
-      effects: [{ kind: 'damage', damage: { base: S(30), canCrit: false, countsAsHit: true } }],
+      effects: [{ kind: 'damage', damage: { base: S(20), canCrit: false, countsAsHit: true } }],
     },
   ],
   targeting: { mode: 'primaryEnemy' },

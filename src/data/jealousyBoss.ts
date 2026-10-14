@@ -96,7 +96,7 @@ export const JEALOUSY_REND: SkillDef = {
   hits: [
     {
       at: logicMs(6),
-      effects: [{ kind: 'damage', damage: { base: S(35), canCrit: false, countsAsHit: true } }],
+      effects: [{ kind: 'damage', damage: { base: S(22), canCrit: false, countsAsHit: true } }],
     },
   ],
   targeting: { mode: 'primaryEnemy' },
@@ -121,7 +121,7 @@ export const JEALOUSY_REAP: SkillDef = {
     {
       at: logicMs(18),
       effects: [
-        { kind: 'damage', damage: { base: S(70), canCrit: false, countsAsHit: true } },
+        { kind: 'damage', damage: { base: S(46), canCrit: false, countsAsHit: true } },
         { kind: 'grantBuff', buff: JEALOUSY_MARK },
       ],
     },
