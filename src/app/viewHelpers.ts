@@ -159,6 +159,17 @@ const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
    * 显示名 —— 玩家看到的是同一个东西，所以复用同一个短标签。
    */
   'boss-heavy-armor': 'buffShort.bossArmor',
+  /**
+   * 「嫉妒」的「见红」（`JEALOUSY_MARK`）—— 它**会显示**（不是 hidden），
+   * 因为它挂在**玩家身上**、而且玩家必须知道"现在挨打更痛"。
+   * 短标签用自己的名字（`envy.mark.short`），不借用别人的。
+   */
+  'jealousy-mark': 'jealousy.mark.name',
+  /**
+   * 「色欲」的「缚」（`LUST_BIND_THORNS`）—— 引导期间挂在它自己身上，
+   * **不隐藏**（玩家看到它就知道"这两秒别碰"）。短标签用技能名。
+   */
+  'lust-bind-thorns': 'lust.bind.name',
   'combo-window': 'buffShort.comboWindow',
   knockdown: 'buffShort.knockdown',
   /** 色欲的眩晕与印记（不登记就会显示中性兜底「？」）。 */

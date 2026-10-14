@@ -30,9 +30,11 @@ import type {
 
   CastInstance,
   Combatant,
+  CombatantId,
   EventDef,
   DamageSpec,
   Effect,
+  Expr,
   HitDef,
   SkillDef,
   StatKey,
@@ -41,12 +43,14 @@ import { aggregateFlags, applyBuff } from '../buffs';
 import { runTriggers } from './triggers';
 import { absorbedByOf, withAbsorbedByBuffId } from './avoidedSource';
 import { casterGainsDouqiFromDamage } from './holds';
+import { actsOnVictim, applyStunEffect, applyThornReflect, transferResources } from './effectOps';
 import {
   applyDamage,
   applyHeal,
   changeResource,
   computeDamage,
   computeHeal,
+  evaluateCondition,
   flatBlocked,
 } from './index';
 import type { BattleState } from '../types';
@@ -63,6 +67,19 @@ export interface HitResolutionContext {
   statsOf(combatantId: string): Readonly<Record<StatKey, number>>;
   rollCrit(stats: Readonly<Record<StatKey, number>>, damage: DamageSpec): boolean;
   gainDouqiFromDamage(combatantId: string, damage: number, tick: number): void;
+  /**
+   * 求值一个 `Expr`：`who: 'self'/'caster'` 锚在 `actor`、`'target'` 锚在
+   * `target`。
+   *
+   * ⚠️ **锚点必须由调用方显式给出** —— 一次结算里可能同时要读两边
+   * （`transfer` 的搬运量就是"双方血量百分比之差"），谁是"另一方"
+   * 只有调用方知道。属性一律走**施法者**的修正树，与 `computeDamage`
+   * 读 `casterStats` 同一条口径。
+   */
+  evalExpr(
+    expr: Expr,
+    who: { readonly self: CombatantId; readonly target: CombatantId },
+  ): number;
   pushBuffApplied(targetId: string, buffId: string, stacks: number): void;
 
   /* ---- 触发器引擎需要的能力（见 `triggers.ts`） ---- */
@@ -334,42 +351,17 @@ export function resolveHit(
         skillId: skill.id,
       });
     }
-  }
 
-/**
- * 这个效果是不是**作用在挨打者身上**。
- *
- * ==================================================================
- * 为什么需要它（`avoided` 的判据）
- * ==================================================================
- *
- * 被闪掉 / 无敌的命中**没有碰到人**，所以"挨打者完全不受影响" ——
- * 但**施法者自己的东西照旧**（他确实放了这一招，代价与冷却已经付了）。
- *
- * 所以这条判据必须按**效果作用于谁**来分，不能按"是不是伤害"来分：
- *
- * | 效果 | 作用对象 | 被闪掉时 |
- * |---|---|---|
- * | `grantBuff` / `removeBuff` / `stun` / `interrupt` | 挨打者（默认） | **跳过** |
- * | 同上，但写了 `target: self` | 施法者 | 照常 |
- * | `resource` / `cooldown` | **永远是施法者** | 照常 |
- *
- * ⚠️ `resource` / `cooldown` 这两条**必须显式列出来** —— 它们没有
- * `target` 字段，如果落到"默认 = 挨打者"那一支就会被误跳过：
- * 于是"被打断"会不退冷却、"派生技消耗资源"会不生效，
- * 而且症状是**静默的数值不对**，极难查。
- */
-function actsOnVictim(effect: Effect): boolean {
-  switch (effect.kind) {
-    /** 施法者自己的资源收支（`applyHitEffects` 里读的就是 `actor`）。 */
-    case 'resource':
-    /** 施法者自己的冷却调整（「截」成功不退 CD 靠它）。 */
-    case 'cooldown':
-      return false;
-    default:
-      return effect.target?.mode !== 'self';
+    /**
+     * **荆棘反伤**：受击者身上带 `reflectFraction` 时，按比例把**实际受到
+     * 的伤害**反弹给攻击者。
+     *
+     * ⚠️ 它是**另一条独立的路**（不是上面那套触发器的替代）：荆棘每次
+     * 受伤都触发、不消耗、无内部 CD —— "这一段时间内你别碰我"。
+     * 完整理由在 `effectOps.ts` 的 `applyThornReflect`。
+     */
+    applyThornReflect({ ctx, attacker: actor, victim: target, taken, skillId: skill.id });
   }
-}
 
 /** 非伤害类效果（授予 buff / 改资源 / 打断）。 */
 export function applyHitEffects(
@@ -403,6 +395,20 @@ export function applyHitEffects(
      * 另一种面貌出现。所以判据要**整次命中判定一次**，不能靠效果顺序。
      */
     if (avoided && actsOnVictim(effect)) return;
+
+    /**
+     * **`effect.when`：整条效果的开关。**
+     *
+     * ⚠️ 这个字段**声明了很久但引擎从没求值过** —— 它一直是静默无效的：
+     * 内容写 `when` 不报错、效果照样结算。第一个真实消费者是「嫉妒」的
+     * 「夺息」（"你的炁高于 60% 才偷"），所以在这里接上。这类"看起来支持、
+     * 其实不生效"的字段是本仓库反复清的病（`interruptImmune` /
+     * `ccImmune` / `damageTakenMult` 都踩过）。
+     *
+     * 判据里的 `who` 与触发器同一套解析：这里的 `actor` 是"自己"，
+     * 所以 `who: 'target'` 落到挨打的那一方。
+     */
+    if (effect.when !== undefined && !evaluateCondition(actor, effect.when, ctx, target)) return;
 
     if (effect.kind === 'grantBuff' && effect.buff) {
       const who = effect.target?.mode === 'self' ? actor : target;
@@ -501,82 +507,15 @@ export function applyHitEffects(
 
     if (effect.kind === 'stun') {
       /**
-       * **眩晕** = 挂一个带 `actionLock` 的 buff（禁行动）+ 打扰断当前施法。
-       *
-       * ⚠️ 两件事**必须同时做**，所以合成一个 `kind` 而不是让内容写两行：
-       * 只挂 buff 不打打断 → "不能动但读条还在走"的半晕状态；
-       * 只打断不挂 buff → 打断完立刻又能出招。
-       *
-       * ⚠️ **打断不退冷却**（`casts` 直接移除即可，冷却本来就在施放时扣过）。
-       * 这是有意的：玩家在关键读条快完成时被晕，那个技能照样进 CD ——
-       * 退冷却会让眩晕变成"免费重置"，反而削弱这一击的分量。
+       * ⚠️ 实现搬到了 `effectOps.ts` 的 `applyStunEffect`
+       * （AGENTS.md §3："不走命中管线的特殊效果"归那一处）。
        */
-      const who = effect.target?.mode === 'self' ? actor : target;
-      const stunned = ctx.current(who.id);
-      const def = effect.buff;
+      applyStunEffect({ ctx, actor, target, effect });
+      return;
+    }
 
-      /**
-       * ⚠️ **`ccImmune`（免控）在这里生效。**
-       *
-       * 这个 flag 早就定义了、`aggregateFlags` 也一直在算它，但
-       * **没有任何地方读它** —— 又一个"看起来支持但实际不生效"的字段
-       * （`interruptImmune` 也踩过同一个坑）。眩晕是它唯一合理的消费者，
-       * 所以在这里接上，而不是新造一个 flag。
-       */
-      if (aggregateFlags(stunned).ccImmune) {
-        ctx.events.push({
-          kind: 'interruptImmune',
-          tick: ctx.state.tick,
-          targetId: stunned.id,
-          skillId: stunned.casts[0]?.skillId ?? '',
-        });
-        return;
-      }
-
-      if (def !== undefined) {
-        const applied = applyBuff(stunned, def, actor.id, ctx.state.tick);
-        ctx.replaceCombatant({ ...ctx.current(who.id), buffs: applied.buffs });
-        ctx.events.push({
-          kind: 'buffApplied',
-          tick: ctx.state.tick,
-          targetId: who.id,
-          buffId: def.id,
-          stacks: applied.stacks,
-          sourceId: actor.id,
-        });
-      }
-
-      /** 打断它当前**所有**读条（眩晕不看可打断性 —— 人都动不了了）。 */
-      const casting = ctx.current(who.id);
-      if (casting.casts.length > 0) {
-        ctx.replaceCombatant({ ...casting, casts: [] });
-        for (const cast of casting.casts) {
-          ctx.events.push({
-            kind: 'castInterrupted',
-            tick: ctx.state.tick,
-            sourceId: who.id,
-            skillId: cast.skillId,
-            reason: 'interrupted',
-          });
-          ctx.events.push({
-            kind: 'interruptSuccess',
-            tick: ctx.state.tick,
-            sourceId: actor.id,
-            targetId: who.id,
-            skillId: cast.skillId,
-            /**
-             * 打断者（`actor`）用的招式 = 本函数第 5 个参数 `skillId`
-             * （`applyHitEffects` 的"触发这个效果的技能"）。
-             *
-             * ⚠️ 只在**有值**时写这个键（条件展开），因为
-             * `ExactOptionalPropertyTypes` 下 `sourceSkillId: undefined`
-             * 与"没有这个键"是两件事，而"没有招式"才是真的语义。
-             * 触发器产出的眩晕没有 `skillId`，那时这个键就不该出现。
-             */
-            ...(skillId === undefined ? {} : { sourceSkillId: skillId }),
-          });
-        }
-      }
+    if (effect.kind === 'transfer' && effect.transfer) {
+      transferResources({ ctx, actor, target, transfer: effect.transfer });
       return;
     }
 

@@ -296,14 +296,102 @@ export const LUST_CHARM: SkillDef = {
   interruptible: true,
 };
 
+/**
+ * 「缚」的**荆棘**：引导期间，**每一次**受伤都按比例反弹。
+ *
+ * ==================================================================
+ * 与「欲望印记」那套反伤的区别（两条并存，不是替代）
+ * ==================================================================
+ *
+ * | | 「污堕印记」 | 「缚」（本 buff） |
+ * |---|---|---|
+ * | 触发 | 有印记时**再挨一下** | **每一次**受伤 |
+ * | 次数 | 触发即**消耗**印记 | **不消耗**，buff 在就一直在 |
+ * | 数值 | 固定 18 点 | **受到伤害的 50%** |
+ * | 防抖 | 有内部 CD（30 逻辑步） | 无 —— 约束是"窗只有 2.2 秒" |
+ *
+ * 所以印记表达的是"你打一下，我回你一下，然后你有 3 秒安全窗口"；
+ * 缚表达的是"**这两秒内你别碰我**"。两条一起存在时，色欲的**惩罚贪刀**
+ * 这条主题被加强了一档 —— 第一次标定时如果太狠，先调的是印记那 18，
+ * 不是这里（印记是常驻的，缚是 12 秒一次的窗口）。
+ *
+ * ⚠️ 时长 = 引导 2.0 秒 + 0.2 秒余量。**不能**只给 2.0 秒：这个 buff 在
+ * `castStart` 那一刻挂上，而读条本身要走 2.0 秒 —— 掐得太准会让最后
+ * 一两帧落在窗口外（表现是"明明还在引导，最后一下没反伤"）。
+ */
+export const LUST_BIND_THORNS: BuffDef = {
+  id: 'lust-bind-thorns',
+  nameKey: 'lust.bind.name',
+  icon: 'lust_stun',
+  /** 从**色欲自己**的角度看这是增益（它的窗口），所以极性是 buff。 */
+  polarity: 'buff',
+  color: 0xd060d0,
+  duration: logicMs(22),
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+  flags: { reflectFraction: 0.5 },
+};
+
+/**
+ * 「缚」：**引导 2 秒，期间任何伤害按 50% 反弹**。
+ *
+ * ==================================================================
+ * 为什么它一点伤害都没有
+ * ==================================================================
+ *
+ * 这一招的威胁**完全**来自荆棘：引导的 2 秒里，你可以继续打它（它不还手），
+ * 但每一击都会弹回来一半。所以它逼的决定是
+ * "**我这两秒忍不忍得住**" —— 与色欲的主题（惩罚贪刀）同源，
+ * 而手段与印记那套**不同**（那是"打一下停三秒"，这是"整段停手"）。
+ *
+ * ⚠️ **引导窗口就是读条窗口**：命中放在 `at: castTime`（2 秒），
+ * 所以那 2 秒里它不产出任何攻击 —— 引擎的"引导"不需要新机制。
+ *
+ * ⚠️ 荆棘挂在 `castStart`（读条一开始就生效），不是命中那一刻：
+ * 挂在命中就晚了整整 2 秒，"引导期间反伤"会变成"引导结束后反伤"。
+ */
+export const LUST_BIND: SkillDef = {
+  id: 'lust-bind',
+  kind: 'activeSkill',
+  nameKey: 'lust.bind.name',
+  descKey: 'lust.bind.desc',
+  icon: 'lust_stun',
+  abilities: [
+    {
+      kind: 'grant',
+      on: 'castStart',
+      target: { mode: 'self' },
+      buff: LUST_BIND_THORNS,
+    },
+  ],
+  castTime: logicMs(20),
+  cooldown: logicMs(120),
+  cost: [],
+  /**
+   * ⚠️ **空 hits 是有意的**：这一招只有荆棘，没有伤害。
+   * 引擎不需要"空命中"的特判 —— `hits: []` 就是"读完条什么都不结算"。
+   * ⚠️ 但**读条本身照走**（`castStarted` / 读条条 / 可打断），那正是
+   * 玩家看到的东西。
+   */
+  hits: [],
+  targeting: { mode: 'primaryEnemy' },
+  tags: ['spell'],
+  interruptible: true,
+};
+
 /** 「色欲」的全部技能。 */
-export const LUST_SKILLS: readonly SkillDef[] = [LUST_HUM, LUST_ENTANGLE, LUST_CHARM];
+export const LUST_SKILLS: readonly SkillDef[] = [LUST_HUM, LUST_ENTANGLE, LUST_CHARM, LUST_BIND];
 
 /**
  * `DUP_ID`。而且它本来也不该注册：`grant` 是**按对象内联** buff 的
  * （见 `GrantAbility.buff`），不走 id 查表。
  */
-export const LUST_BUFFS: readonly BuffDef[] = [LUST_MARK, LUST_STUN, LUST_PASSIVE];
+export const LUST_BUFFS: readonly BuffDef[] = [
+  LUST_MARK,
+  LUST_STUN,
+  LUST_PASSIVE,
+  LUST_BIND_THORNS,
+];
 
 /* ------------------------------------------------------------------ *
  * 行为（轮转）
@@ -349,10 +437,15 @@ export const LUST_BEHAVIORS: readonly Behavior[] = [
        *
        * ⚠️ `gapMs` **必须短于各自的冷却**，否则那一步永远不满足条件、
        * 轮转空转（记在 `PRIDE_BEHAVIORS` 的坑）：
+       *   缚   CD 12s → gap 10s
        *   魅惑 CD 6s → gap 5s
        *   缠绕 CD 9s → gap 8s
        *   轻吟 CD 2s → gap 1.5s
+       *
+       * ⚠️ 「缚」排**最前**：它 CD 最长（12s），而且辨识度来自"那两秒你
+       * 什么都打不得" —— 被填充技挤掉会让这个机制几乎看不见。
        */
+      { skillId: 'lust-bind', gapMs: 10_000 },
       { skillId: 'lust-charm', gapMs: 5_000 },
       { skillId: 'lust-entangle', gapMs: 8_000 },
       { skillId: 'lust-hum', gapMs: 1_500 },

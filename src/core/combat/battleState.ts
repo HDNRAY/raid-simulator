@@ -27,6 +27,8 @@
  */
 
 import { type CombatContext } from './index';
+import { evalExpr } from '../expr/eval';
+import { evalContextFor } from './effectOps';
 import { createAiState, type AiState } from '../ai';
 import type { StatBreakdown } from '../stats/pipeline';
 import type { CreateBattleOptions } from './battleOptions';
@@ -283,20 +285,26 @@ export class BattleEngine {
       replaceCombatant: (updated) => this.replaceCombatant(updated),
       opponentOf: (id) => opponentOf(this.state.combatants, id),
       statsOf: (id) => this.statsOf(id),
+      /** `transfer` 的搬运量 + `effect.when` 都靠它求值；构造在 `effectOps.ts`。
+       *  ⚠️ `buffDef`/`skillDef`/`currentTick` 由下面的 `triggerContextFor` 提供。 */
+      evalExpr: (expr, who) =>
+        evalExpr(
+          expr,
+          evalContextFor({
+            combatants: this.state.combatants,
+            statsOf: (id) => this.statsOf(id),
+            combatCtx: this.ctx,
+            who,
+          }),
+        ),
       rollCrit: (stats, damage) => this.rollCrit(stats, damage),
       /**
-       * 触发器需要的能力（解析定义 + 三类落地动作）。
-       *
-       * ⚠️ 实现抽到了 `triggerContext.ts` —— 那一块是**触发器专用**的，
-       * 与战斗状态机无关；留在这里会把这个文件顶过 700 行上限
-       * （AGENTS.md §3），而且每加一种能力都会再顶一次。
-       */
-      /**
-       * 触发器引擎的落地动作（反伤等）。
+       * 触发器引擎的落地动作（反伤等）—— 实现抽在 `triggerContext.ts`。
        *
        * ⚠️ 显式**转发**而不是把 `this` 传出去：`current` /
        * `replaceCombatant` 是 private，传 `this` 过不了类型（那会誘人写成
        * `as never` 绕过去，见 AGENTS.md §1）。
+       * ⚠️ 它同时提供 `buffDef` / `skillDef` / `currentTick`。
        */
       ...triggerContextFor(
         {

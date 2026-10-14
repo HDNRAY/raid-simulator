@@ -516,6 +516,15 @@ function behaviorSkillRefs(behavior: Behavior): readonly string[] {
      */
     case 'weightedRotation':
       return behavior.steps.map((s) => s.skillId);
+    /**
+     * ⚠️ **CD 驱动的技能同样要校验存在性**。
+     *
+     * 漏了它的症状与随机轮转那条注释里写的一模一样：id 写错时
+     * `decide` 里 `view.skillOf(...)` 查不到 → `continue` → 那条行为
+     * **一辈子不出手**，而表现只是"这个 Boss 好像少了一招"。
+     */
+    case 'onCooldown':
+      return [behavior.skillId];
     case 'onHpBelow':
       // `then` 现在是能力数组：grant 引用的 buff 需要校验存在性，
       // 所以这里只关心 skillId 引用（grantSkill）

@@ -262,8 +262,8 @@ describe('Boss 池 = **做完的**那些（设计稿 §2.3）', () => {
     }
   });
 
-  it('现在只有傲慢与色欲（未实现的 Boss 会陆续进来）', () => {
-    expect(BOSS_POOL.map((b) => b.id)).toEqual(['meiichiro', 'lust']);
+  it('现在有傲慢、色欲、嫉妒（未实现的 Boss 会陆续进来）', () => {
+    expect(BOSS_POOL.map((b) => b.id)).toEqual(['meiichiro', 'lust', 'envy']);
   });
 
   it('池子派生自 BOSS_ROSTER：id / nameKey 都在', () => {

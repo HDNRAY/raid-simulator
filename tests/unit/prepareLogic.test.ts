@@ -419,11 +419,13 @@ describe('能不能开战：开发中的单位灰掉且**不能开战**', () => 
 
   it('真实名单：开发中的仍然不能开战（2026-10-12 凯丽出师）', () => {
     const real = (id: string): boolean => isDeveloping(id);
-    /** 两个做完的人物、两个做完的 Boss —— 任意组合都能开战。 */
+    /** 两个做完的人物、三个做完的 Boss —— 任意组合都能开战。 */
     expect(canStartBattle(sel({ focus: 'start' }), real)).toBe(true);
     expect(canStartBattle(sel({ playerId: 'kaili', focus: 'start' }), real)).toBe(true);
     expect(canStartBattle(sel({ bossId: 'lust', focus: 'start' }), real)).toBe(true);
-    for (const bossId of ['envy', 'gluttony', 'wrath', 'sloth', 'greed']) {
+    /** ⚠️ 2026-10-14：「嫉妒」出师（四招 + 偷血/偷炁），所以它也能开战了。 */
+    expect(canStartBattle(sel({ bossId: 'envy', focus: 'start' }), real)).toBe(true);
+    for (const bossId of ['gluttony', 'wrath', 'sloth', 'greed']) {
       expect(canStartBattle(sel({ bossId, focus: 'start' }), real)).toBe(false);
     }
     /**

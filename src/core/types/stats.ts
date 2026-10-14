@@ -72,11 +72,38 @@ export type Who = 'self' | 'target' | 'caster' | 'source';
  */
 export type Expr =
   | { readonly e: 'const'; readonly value: number }
-  | { readonly e: 'stat'; readonly who: Who; readonly stat: StatKey }
+  | {
+      readonly e: 'stat';
+      readonly who: Who;
+      readonly stat: StatKey;
+      /**
+       * 把这个属性乘一个倍数。缺省 = 1（原有行为）。
+       *
+       * ⚠️ 它存在的理由只有一个：**把"比率"写成"百分点"**。
+       * `damageTakenMult` 这类属性是 **1 = 基准**（0.5 表示减半），
+       * 而内容作者读它时想的是"百分比"（+30% 要写 1.3）。
+       * 所以 `{ e:'stat', stat:'damageTakenMult', scale:100 }` 读出来
+       * 是 **130**，可以直接减 100 得到"高出的那 30 点"。
+       *
+       * 它**不是**给"顺手乘一下"用的 —— 那种事该写 `mul`。
+       */
+      readonly scale?: number;
+    }
   | { readonly e: 'resource'; readonly who: Who; readonly resource: ResourceKey }
   | { readonly e: 'maxResource'; readonly who: Who; readonly resource: ResourceKey }
   | { readonly e: 'resourceRatio'; readonly who: Who; readonly resource: ResourceKey }
   | { readonly e: 'missingResourceRatio'; readonly who: Who; readonly resource: ResourceKey }
+  /**
+   * **生命百分比**。
+   *
+   * ⚠️ 为什么不复用 `resourceRatio { resource: 'hp' }`：两者**能**算出同一个
+   * 数，但"血量百分比"是本仓库里出现频率最高的一种读法（差值 / 门槛 /
+   * 描述文案都在用），把它写成 `resourceRatio` 会让**每次读它的人都要
+   * 多看一眼"hp 是不是也是一个 resource"**。语义入口清晰比少一个联合成员
+   * 重要 —— 这与 `hpBelow` / `hpAbove` 单独存在（而不是塞进
+   * `resourceBelow`）是同一条惯例。
+   */
+  | { readonly e: 'hpRatio'; readonly who: Who }
   | { readonly e: 'buffStacks'; readonly who: Who; readonly buffId: BuffId }
   | { readonly e: 'hasBuff'; readonly who: Who; readonly buffId: BuffId }
   /**

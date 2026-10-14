@@ -173,6 +173,34 @@ export function decide(view: AiView, behaviors: readonly Behavior[], state: AiSt
   // ---- 4. rotation / weightedRotation ----
   if (!view.canAct) return { actions, nextState: next, events };
 
+  /**
+   * ---- 3.5 onCooldown：冷却好了就用（排在轮转**之前** = 招牌优先）----
+   *
+   * ⚠️ 位置很关键：它在 `canAct` 之后（不能行动时当然不出手），
+   * 在轮转之前（所以它一出手，这个 tick 的轮转就不出手了）。
+   *
+   * ⚠️ 不消费随机数 —— 固定种子下的轮转序列不会因为这条行为而漂。
+   */
+  for (const behavior of behaviors) {
+    if (behavior.kind !== 'onCooldown') continue;
+    if (!view.skillOf(behavior.skillId)) continue;
+    if (!view.isReady(behavior.skillId)) continue;
+    const last = next.lastUsedAt[behavior.skillId];
+    if (
+      behavior.minIntervalMs !== undefined &&
+      last !== undefined &&
+      (view.tick - last) * (1000 / 60) < behavior.minIntervalMs
+    ) {
+      continue;
+    }
+    actions.push({ type: 'useSkill', skillId: behavior.skillId, atTick: view.tick });
+    next = {
+      ...next,
+      lastUsedAt: { ...next.lastUsedAt, [behavior.skillId]: view.tick },
+    };
+    return { actions, nextState: next, events };
+  }
+
   for (const behavior of behaviors) {
     if (behavior.kind === 'rotation') {
       const step = pickStep(view, behavior.steps, next);

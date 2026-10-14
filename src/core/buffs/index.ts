@@ -313,6 +313,13 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
   let ccImmune = false;
   let interruptImmune = false;
   let actionLock = false;
+  /**
+   * 荆棘（`reflectFraction`）—— **多个来源取最大值**。
+   *
+   * ⚠️ 与 `damageReduce` / `damageThreshold` 同一条理由：相加会越过
+   * "完全反弹"，而且玩家无法预期（两层 50% 变成 100% 是没人能想到的）。
+   */
+  let reflectFraction = 0;
   const comboWindow: string[] = [];
   /**
    * 技能 tag 白名单 —— 多个来源取**并集**。
@@ -334,6 +341,9 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
     if (f.ccImmune) ccImmune = true;
     if (f.interruptImmune) interruptImmune = true;
     if (f.actionLock) actionLock = true;
+    if (f.reflectFraction !== undefined) {
+      reflectFraction = Math.max(reflectFraction, f.reflectFraction);
+    }
     if (f.comboWindow) comboWindow.push(...f.comboWindow);
     if (f.restrictToTags) restrictToTags.push(...f.restrictToTags);
   }
@@ -345,6 +355,7 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
     ...(ccImmune ? { ccImmune: true } : {}),
     ...(interruptImmune ? { interruptImmune: true } : {}),
     ...(actionLock ? { actionLock: true } : {}),
+    ...(reflectFraction > 0 ? { reflectFraction } : {}),
     ...(comboWindow.length > 0 ? { comboWindow } : {}),
     ...(restrictToTags.length > 0 ? { restrictToTags } : {}),
   };

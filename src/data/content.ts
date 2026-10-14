@@ -45,6 +45,7 @@
 
 import type { BuffDef, SkillDef } from '../core/types';
 import { LUST_BUFFS, LUST_SKILLS } from './lustBoss';
+import { JEALOUSY_BUFFS, JEALOUSY_SKILLS } from './jealousyBoss';
 import { COMBO_WINDOW, STRIKE } from './kits/combo';
 /**
  * ⚠️ 蓄势（「避实击虚」的 buff）来自它**自己的文件** —— 它是
@@ -157,6 +158,15 @@ export {
   PRIDE_BUFFS,
   PRIDE_SKILLS,
 } from './bossPride';
+export {
+  JEALOUSY_BUFFS,
+  JEALOUSY_FLAME,
+  JEALOUSY_MARK,
+  JEALOUSY_REAP,
+  JEALOUSY_REND,
+  JEALOUSY_SKILLS,
+  JEALOUSY_SNATCH,
+} from './jealousyBoss';
 
 /** 生命上限（展示值）。 */
 export const HP_MAX = 100;
@@ -282,7 +292,7 @@ export const PLAYER_SKILL_IDS: ReadonlySet<string> = new Set(
  * 一个不该存在的事实）。所以那一处改成读本集合。
  */
 export const BOSS_SKILL_IDS: ReadonlySet<string> = new Set(
-  [...PRIDE_SKILLS, ...LUST_SKILLS].map((s) => s.id),
+  [...PRIDE_SKILLS, ...LUST_SKILLS, ...JEALOUSY_SKILLS].map((s) => s.id),
 );
 
 /**
@@ -323,6 +333,7 @@ export const ALL_SKILLS: readonly SkillDef[] = [
   ...PENDING_SKILLS.map((p) => p.skill),
   ...PRIDE_SKILLS,
   ...LUST_SKILLS,
+  ...JEALOUSY_SKILLS,
 ];
 
 /** 玩家技能里"某个角色带哪一套"的**定义**（不含「击」那种派生技）。 */
@@ -374,6 +385,7 @@ export const ALL_BUFFS: readonly BuffDef[] = [
   BOSS_ENRAGE,
   ...PRIDE_BUFFS,
   ...LUST_BUFFS,
+  ...JEALOUSY_BUFFS,
   /**
    * 「倒地」（Boss 的「碾压」给玩家的）。
    *

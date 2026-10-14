@@ -69,6 +69,7 @@ function visitExpr(expr: Expr, acc: ExprRefsAccumulator): void {
     case 'maxResource':
     case 'resourceRatio':
     case 'missingResourceRatio':
+    case 'hpRatio':
     case 'counter':
       return;
     case 'add':

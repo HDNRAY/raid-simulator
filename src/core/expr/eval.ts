@@ -65,7 +65,7 @@ export function evalExpr(expr: Expr, ctx: EvalContext): number {
       return guard(expr.value);
 
     case 'stat':
-      return guard(ctx.getStat(expr.who, expr.stat));
+      return guard(ctx.getStat(expr.who, expr.stat) * (expr.scale ?? 1));
 
     case 'resource':
       return guard(ctx.getResource(expr.who, expr.resource));
@@ -81,6 +81,11 @@ export function evalExpr(expr: Expr, ctx: EvalContext): number {
     case 'missingResourceRatio': {
       const max = guard(ctx.getMaxResource(expr.who, expr.resource));
       return clamp(1 - safeDiv(guard(ctx.getResource(expr.who, expr.resource)), max), 0, 1);
+    }
+
+    case 'hpRatio': {
+      const max = guard(ctx.getMaxResource(expr.who, 'hp'));
+      return clamp(safeDiv(guard(ctx.getResource(expr.who, 'hp')), max), 0, 1);
     }
 
     case 'buffStacks':
