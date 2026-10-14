@@ -80,6 +80,8 @@ export function evalContextFor(args: {
     getMaxResource: (w, resource) => pick(w).caps[resource],
     getBuffStacks: (w, buffId) =>
       pick(w).buffs.filter((b) => b.defId === buffId).reduce((sum, b) => sum + b.stacks, 0),
+    getBuffCustom: (w, buffId) =>
+      pick(w).buffs.filter((b) => b.defId === buffId).reduce((sum, b) => sum + (b.custom ?? 0), 0),
     /**
      * ⚠️ 与 `stats.ts` 里那个桩**同一条纪律**：离散计数器还没接线，
      * 读出来恒 0。防线在**校验层** —— 内容里写 `Expr.counter` 会被
@@ -403,13 +405,27 @@ export function applyStunEffect(args: {
  * ⚠️ 多个壳时**按顺序扣**（先来的先挡）：一次伤害可能同时打穿好几层，
  * 这在单 Boss 的内容里不会发生，但写清楚免得下一个人以为漏了。
  */
+export interface AbsorbResult {
+  /** 壳漏过去的伤害（= 真正要打在血上的那个数）。 */
+  readonly leaked: number;
+  /**
+   * **被打穿的那几条壳**（`absorb` 扣光）。
+   *
+   * ⚠️ 把"谁碎了"交回给调用方，而不是在这里跑 `BuffDef.onBreak` ——
+   * 跑能力要用 `runAbilities`（在 `triggers.ts`），而本文件已经被它
+   * 依赖 ⇒ 在这里调用会造出**模块环**。调用方（`hitResolution`）本来
+   * 就在那一侧，跑起来没有环。
+   */
+  readonly broken: readonly Combatant['buffs'][number][];
+}
+
 export function absorbFromBuffs(args: {
   readonly ctx: EffectEvalContext;
   readonly target: Combatant;
   readonly damage: number;
-}): number {
+}): AbsorbResult {
   const { ctx, target, damage } = args;
-  if (damage <= 0) return damage;
+  if (damage <= 0) return { leaked: damage, broken: [] };
 
   let left = damage;
   /** 只要有一条壳被**扣过**（哪怕没碎）就算"改过" —— 见下面那条守卫的坑。 */
@@ -444,7 +460,7 @@ export function absorbFromBuffs(args: {
    *
    * 教训：**"数量没变"不等于"值没变"**。这种守卫要用**显式的改动标记**。
    */
-  if (!changed) return left;
+  if (!changed) return { leaked: left, broken: [] };
 
   ctx.replaceCombatant({ ...ctx.current(target.id), buffs: kept });
   for (const buff of broken) {
@@ -457,5 +473,53 @@ export function absorbFromBuffs(args: {
       sourceId: buff.sourceId,
     });
   }
-  return left;
+  return { leaked: left, broken };
+}
+
+/* ================================================================== *
+ * 6. 「吸收壳」的**一步到位**入口（吸收 + 打穿时跑 `onBreak`）
+ * ================================================================== */
+
+/**
+ * 一次伤害过壳的完整流程，返回**漏过去的伤害**。
+ *
+ * ==================================================================
+ * 为什么连 `onBreak` 一起放在这里
+ * ==================================================================
+ *
+ * "打穿壳"要做两件事，而它们必须**挨着**（中间插别的写回就会丢掉壳的扣减）：
+ *   1. 把伤害扣在壳上（`absorbFromBuffs`）
+ *   2. 哪条壳被打穿，就跑它的 `BuffDef.onBreak`
+ *
+ * ⚠️ 跑能力用的是 `runAbilities`，而它来自 `triggers.ts` —— 所以这一块
+ * **只能住在 `hitResolution` 那一侧**（本文件被 `triggers.ts` 依赖，
+ * 反向 import 会造模块环）。所以这里只收第 1 步 + 把"谁碎了"交回去，
+ * 第 2 步由调用方做。
+ *
+ * ⚠️ **壳不吃 `damageReduce`**（用户："血盾不吃这个减伤"）：所以传进来的
+ * `damage` 必须是**未打折**的那个数，`damageReduce` 留给"漏过去的部分"
+ * —— 两边都乘就等于**免了两次**。
+ */
+export function absorbShieldDamage(args: {
+  readonly ctx: EffectEvalContext;
+  readonly target: Combatant;
+  /** 这一击的伤害（**未过 `damageReduce`**，见上）。 */
+  readonly damage: number;
+  /** 目标侧的比例减伤（漏过去之后才乘）。 */
+  readonly damageReduce: number;
+}): {
+  readonly leaked: number;
+  readonly absorbedByShield: number;
+  /** 被打穿的那几条壳（调用方要跑它们的 `onBreak`，理由见上）。 */
+  readonly broken: AbsorbResult['broken'];
+} {
+  const { ctx, target, damage, damageReduce } = args;
+  const result = absorbFromBuffs({ ctx, target, damage });
+  /** 漏过去的先**过减伤**（壳那一步没打折）。 */
+  const afterReduce = Math.round(result.leaked * (1 - damageReduce));
+  return {
+    leaked: afterReduce,
+    absorbedByShield: Math.max(0, damage - afterReduce),
+    broken: result.broken,
+  };
 }

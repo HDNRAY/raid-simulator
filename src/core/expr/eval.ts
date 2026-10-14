@@ -30,6 +30,11 @@ export interface EvalContext {
   /** 读 buff 层数（不存在返回 0） */
   getBuffStacks(who: Who, buffId: string): number;
   /**
+   * 读某个 buff 实例上的**自定义数值**（`BuffInstance.custom`）。
+   * ⚠️ 没有那条 buff / 没带数时返回 0（调用方通常用 `fallback` 决定语义）。
+   */
+  getBuffCustom?(who: Who, buffId: string): number;
+  /**
    * 读内容实例的离散计数器。
    *
    * ⚠️ **引擎尚未实现**：战斗路径的实现是 `() => 0` 的桩（见
@@ -90,6 +95,11 @@ export function evalExpr(expr: Expr, ctx: EvalContext): number {
 
     case 'buffStacks':
       return guard(ctx.getBuffStacks(expr.who, expr.buffId));
+
+    case 'buffCustom': {
+      const value = ctx.getBuffCustom?.(expr.who, expr.buffId) ?? 0;
+      return guard(value === 0 ? (expr.fallback ?? 0) : value);
+    }
 
     case 'hasBuff':
       return ctx.getBuffStacks(expr.who, expr.buffId) > 0 ? 1 : 0;

@@ -134,6 +134,7 @@ export function applyBuff(
       triggerCooldowns: {},
       triggerCounts: {},
       ...(def.absorbValue === undefined ? {} : { absorb: def.absorbValue }),
+      ...(def.custom === undefined ? {} : { custom: def.custom }),
     };
     const existingIndependent = combatant.buffs.filter((b) => b.defId === def.id);
     if (existingIndependent.length >= max) {
@@ -164,6 +165,7 @@ export function applyBuff(
       triggerCooldowns: {},
       triggerCounts: {},
       ...(def.absorbValue === undefined ? {} : { absorb: def.absorbValue }),
+      ...(def.custom === undefined ? {} : { custom: def.custom }),
     };
     return { buffs: [...combatant.buffs, instance], change: 'applied', stacks: 1 };
   }
@@ -210,6 +212,7 @@ export function applyBuff(
         triggerCooldowns: {},
         triggerCounts: {},
         ...(def.absorbValue === undefined ? {} : { absorb: def.absorbValue }),
+      ...(def.custom === undefined ? {} : { custom: def.custom }),
       };
       return { buffs: [...cleared, instance], change: 'replaced', stacks: 1 };
     }

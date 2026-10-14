@@ -262,8 +262,15 @@ describe('Boss 池 = **做完的**那些（设计稿 §2.3）', () => {
     }
   });
 
-  it('现在有傲慢、色欲、嫉妒、贪婪、懒惰（未实现的会陆续进来）', () => {
-    expect(BOSS_POOL.map((b) => b.id)).toEqual(['meiichiro', 'lust', 'envy', 'sloth', 'greed']);
+  it('现在只剩暴怒没做（其余六个都能打）', () => {
+    expect(BOSS_POOL.map((b) => b.id)).toEqual([
+      'meiichiro',
+      'lust',
+      'envy',
+      'gluttony',
+      'sloth',
+      'greed',
+    ]);
   });
 
   it('池子派生自 BOSS_ROSTER：id / nameKey 都在', () => {

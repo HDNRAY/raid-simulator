@@ -1,6 +1,7 @@
 /** Buff / Debuff —— 与修正器同模型，`polarity` 只影响 UI 颜色。 */
 
 import type { BuffId, CombatantId, LocaleKey, SkillId } from './ids';
+import type { Ability } from './abilities';
 import type { StatModifier } from './stats';
 import type { SkillTag, TriggerDef } from './triggers';
 
@@ -303,6 +304,42 @@ export interface BuffDef {
    * （定义不可变，状态在实例上 —— 这是整套数据模型的分工）。
    */
   readonly absorbValue?: number;
+  /**
+   * **壳被打穿**（`absorb` 扣光 ⇒ 引擎把这条 buff 摘掉）时执行的能力。
+   *
+   * ==================================================================
+   * 为什么它与 `onExpire` 必须**分开**（「血盾」逼出来的）
+   * ==================================================================
+   *
+   * 一条带 `absorbValue` 的 buff 有**两条完全不同的结束路**：
+   *
+   * | 结束方式 | 该做什么（血盾） |
+   * |---|---|
+   * | **被打穿**（扣光） | **把偷走的血还给玩家** |
+   * | **5 秒到期** | 它拿走（**什么都不做**） |
+   *
+   * 而两条路在引擎里都表现为 `buffExpired` 事件 —— 内容**分不开**
+   * （条件里读不到 `absorb` 有没有剩）。所以引擎在**打穿**那条路上
+   * **额外**跑这一串能力（见 `effectOps.absorbFromBuffs`），
+   * 而 `onExpire` 走常规的 `onBuffExpired` 触发器。
+   */
+  readonly onBreak?: readonly Ability[];
+  /**
+   * **到期**（`duration` 到了）时执行的能力。与 `onBreak` 分开的理由见上。
+   *
+   * ⚠️ 它**不是** `onBuffExpired` 触发器的重复：那条是"这个 buff 消失"
+   * （碎或到期都会响），而这条**只在到期那条路上**跑。
+   */
+  readonly onExpire?: readonly Ability[];
+  /**
+   * **携带一个自定义数值**（缺省无），供"这一条 buff 上的某个数"用
+   * （「血盾」：**这次偷了多少**，破壳时按它还给玩家）。
+   *
+   * ⚠️ 为什么不是 `absorbValue` 本身：那是**壳的耐久**（会被打掉），
+   * 而这个是**当初偷走的量**（用来还钱）。两者在"一发打穿壳"时会不同
+   * （壳 30、被打 50 → 只能还 30，不能还 50）。
+   */
+  readonly custom?: number;
   readonly triggers?: readonly TriggerDef[];
   readonly vfx?: BuffVfx;
   readonly dispellable?: boolean;
@@ -363,4 +400,6 @@ export interface BuffInstance {
    * 见 `hitResolution` 的 `absorb` 分支。
    */
   readonly absorb?: number;
+  /** 这一条带的自定义数值（`BuffDef.custom` 的运行期副本）。 */
+  readonly custom?: number;
 }

@@ -72,8 +72,13 @@ export function triggerContextFor(host: TriggerHost, roll: () => number): Trigge
     skillDef: (id) => host.combat.skillDef(id),
     currentTick: () => host.combat.currentTick(),
 
-    grantBuffFromTrigger: (target, def, sourceId) => {
-      const applied = applyBuff(host.current(target.id), def, sourceId, host.combat.currentTick());
+    grantBuffFromTrigger: (target, def, sourceId, custom) => {
+      const applied = applyBuff(
+        host.current(target.id),
+        custom === undefined ? def : { ...def, custom },
+        sourceId,
+        host.combat.currentTick(),
+      );
       host.replaceCombatant({ ...host.current(target.id), buffs: applied.buffs });
       host.events.push({
         kind: 'buffApplied',

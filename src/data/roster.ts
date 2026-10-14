@@ -97,7 +97,6 @@ export const BOSS_ROSTER: readonly RosterEntry[] = [
  */
 const DEVELOPING: ReadonlySet<string> = new Set([
   'daixuan',
-  'gluttony',
   'wrath',
 ]);
 

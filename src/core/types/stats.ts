@@ -105,6 +105,21 @@ export type Expr =
    */
   | { readonly e: 'hpRatio'; readonly who: Who }
   | { readonly e: 'buffStacks'; readonly who: Who; readonly buffId: BuffId }
+  /**
+   * 读某个 buff 实例上的**自定义数值**（`BuffInstance.custom`，缺省 0）。
+   *
+   * ⚠️ 存在的理由只有一个（「暴食」的「血盾」）：**打穿壳时要把
+   * "当初偷走多少"还给玩家**，而那个数挂在**壳那条 buff 的实例上**
+   * （`grant.custom` 写进去的）。没有它，内容就只能把还的数额写死 ——
+   * 而"每次偷的量都不一样"。
+   */
+  | {
+      readonly e: 'buffCustom';
+      readonly who: Who;
+      readonly buffId: BuffId;
+      /** 找不到那条 buff 时给什么（缺省 0）。 */
+      readonly fallback?: number;
+    }
   | { readonly e: 'hasBuff'; readonly who: Who; readonly buffId: BuffId }
   /**
    * 读内容实例的离散计数器（使用次数 / 充能）。
@@ -150,6 +165,20 @@ export type Condition =
   | { readonly kind: 'always' }
   | { readonly kind: 'hasBuff'; readonly who?: Who; readonly buffId: BuffId; readonly minStacks?: number }
   | { readonly kind: 'notHasBuff'; readonly who?: Who; readonly buffId: BuffId }
+  /**
+   * **某个 buff 至少 `minStacks` 层**（缺省 1）。
+   *
+   * ⚠️ 与 `hasBuff` 的 `minStacks` **不是重复**：那条挂在**触发器**上
+   * （触发器自己的勾子），而这条是**通用条件** —— 于是它能用在
+   * "触发器里的 `when`" 与"内容里的其它条件位"。「暴食」的「饕餮」
+   * 靠它判"层数够 3 了没有"（用户："buff 累计 3 层自己触发别的"）。
+   */
+  | {
+      readonly kind: 'buffStacks';
+      readonly who?: Who;
+      readonly buffId: BuffId;
+      readonly minStacks: number;
+    }
   | { readonly kind: 'buffExpiring'; readonly who?: Who; readonly buffId: BuffId; readonly withinMs: number }
   | { readonly kind: 'hpBelow'; readonly who?: Who; readonly ratio: number }
   | { readonly kind: 'hpAbove'; readonly who?: Who; readonly ratio: number }

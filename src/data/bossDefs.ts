@@ -35,6 +35,7 @@ import { LUST_BOSS } from './lustBoss';
 import { JEALOUSY_BOSS } from './jealousyBoss';
 import { GREED_BOSS } from './greedBoss';
 import { LAZY_BOSS } from './lazyBoss';
+import { GLUTTONY_BOSS } from './gluttonyBoss';
 
 /**
  * 一个 Boss 的**全部内容**。
@@ -77,6 +78,7 @@ export const BOSS_DEFS: readonly BossDef[] = [
   JEALOUSY_BOSS,
   GREED_BOSS,
   LAZY_BOSS,
+  GLUTTONY_BOSS,
 ];
 
 const BY_ID = new Map(BOSS_DEFS.map((b) => [b.id, b]));

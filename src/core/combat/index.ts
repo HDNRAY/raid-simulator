@@ -344,6 +344,13 @@ export function evaluateCondition(
     case 'notHasBuff':
       return !pick(condition.who).buffs.some((b) => b.defId === condition.buffId);
 
+    case 'buffStacks': {
+      const stacks = pick(condition.who)
+        .buffs.filter((b) => b.defId === condition.buffId)
+        .reduce((sum, b) => sum + b.stacks, 0);
+      return stacks >= condition.minStacks;
+    }
+
     case 'buffExpiring': {
       const buff = pick(condition.who).buffs.find((b) => b.defId === condition.buffId);
       if (!buff || !Number.isFinite(buff.expiresAtTick)) return false;

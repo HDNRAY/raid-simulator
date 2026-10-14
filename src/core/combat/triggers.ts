@@ -78,6 +78,14 @@ export function isSupportedHook(hook: string): boolean {
 export interface TriggerPayload extends HitPayload {
   /** 递归深度（由派发方维护，调用者不要传）。 */
   readonly depth?: number;
+  /**
+   * **这一串能力要用的自定义数值**（缺省 0）。
+   *
+   * ⚠️ 用途只有一个（「暴食」的「血盾」）：壳被打穿时，"把当初偷走的血
+   * 还给玩家"那个数挂在**壳实例的 `custom`** 上，而壳此刻已经被摘掉 ——
+   * 所以引擎在跑 `onBreak` 时把那个数**随载荷带进来**。
+   */
+  readonly custom?: number;
 }
 
 /**
@@ -253,7 +261,7 @@ function rollRangeMs(
  * 落地动作全部**委托给 ctx**（由 `battleState` 提供，复用现成的
  * `applyBuff` / `changeResource` / 伤害结算），本文件不自己碰状态。
  */
-function runAbilities(
+export function runAbilities(
   ctx: HitResolutionContext,
   ownerId: string,
   abilities: readonly Ability[],
@@ -263,15 +271,27 @@ function runAbilities(
     switch (ability.kind) {
       case 'grant': {
         const who = whoOf(ctx, ownerId, ability.target, payload);
-        if (who !== undefined) ctx.grantBuffFromTrigger(ctx.current(who), ability.buff, ownerId);
+        if (who !== undefined) {
+          ctx.grantBuffFromTrigger(ctx.current(who), ability.buff, ownerId, ability.custom);
+        }
         break;
       }
 
       case 'resource': {
         const who = whoOf(ctx, ownerId, ability.target, payload);
         if (who !== undefined) {
-          const delta = typeof ability.delta === 'number' ? ability.delta : 0;
-          ctx.changeResourceFromTrigger(ctx.current(who), ability.resource, delta);
+          /**
+           * ⚠️ 数值可以是 `Expr` —— 而表达式求值需要 `EvalContext`
+           * （本执行器没有）。所以这里只认**数字**，外加一条
+           * **`custom` 占位**：内容写 `delta: { e:'buffCustom' … }` 时，
+           * 引擎用载荷里的 `custom` 顶替（「血盾」还钱用它 —— 那个数来自
+           * **刚刚被打穿的那条壳**，此刻已经不在身上，表达式读不到了）。
+           */
+          const delta =
+            typeof ability.delta === 'number'
+              ? ability.delta
+              : (payload.custom ?? 0);
+          if (delta !== 0) ctx.changeResourceFromTrigger(ctx.current(who), ability.resource, delta);
         }
         break;
       }

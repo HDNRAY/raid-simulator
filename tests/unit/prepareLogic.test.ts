@@ -419,7 +419,7 @@ describe('能不能开战：开发中的单位灰掉且**不能开战**', () => 
 
   it('真实名单：开发中的仍然不能开战（2026-10-12 凯丽出师）', () => {
     const real = (id: string): boolean => isDeveloping(id);
-    /** 两个做完的人物、五个做完的 Boss —— 任意组合都能开战。 */
+    /** 两个做完的人物、六个做完的 Boss —— 任意组合都能开战。 */
     expect(canStartBattle(sel({ focus: 'start' }), real)).toBe(true);
     expect(canStartBattle(sel({ playerId: 'kaili', focus: 'start' }), real)).toBe(true);
     expect(canStartBattle(sel({ bossId: 'lust', focus: 'start' }), real)).toBe(true);
@@ -429,7 +429,9 @@ describe('能不能开战：开发中的单位灰掉且**不能开战**', () => 
     expect(canStartBattle(sel({ bossId: 'greed', focus: 'start' }), real)).toBe(true);
     /** ⚠️ 同一天：「懒惰」出师（睡眠 + 怠惰回血 + 两招伤害）。 */
     expect(canStartBattle(sel({ bossId: 'sloth', focus: 'start' }), real)).toBe(true);
-    for (const bossId of ['gluttony', 'wrath']) {
+    /** ⚠️ 同一天：「暴食」出师（三条啃噬 + 血盾 + 饕餮计数）。 */
+    expect(canStartBattle(sel({ bossId: 'gluttony', focus: 'start' }), real)).toBe(true);
+    for (const bossId of ['wrath']) {
       expect(canStartBattle(sel({ bossId, focus: 'start' }), real)).toBe(false);
     }
     /**

@@ -60,6 +60,7 @@ function visitExpr(expr: Expr, acc: ExprRefsAccumulator): void {
       return;
     case 'buffStacks':
     case 'hasBuff':
+    case 'buffCustom':
       acc.buffIds.push(expr.buffId);
       return;
     case 'contrib':

@@ -413,6 +413,16 @@ function evalAiCondition(condition: import('../types').Condition, view: AiView):
     case 'targetCount':
     case 'lastHitWasCrit':
       return false;
+    /**
+     * ⚠️ `buffStacks` 在 AI 侧**能判**（读 `who()` 的 buff 层数）——
+     * 所以不放进上面那组"保守 false"。
+     */
+    case 'buffStacks': {
+      const stacks = who()
+        .buffs.filter((b) => b.defId === condition.buffId)
+        .reduce((sum, b) => sum + b.stacks, 0);
+      return stacks >= condition.minStacks;
+    }
   }
 }
 

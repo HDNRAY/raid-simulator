@@ -106,6 +106,8 @@ export interface ComputeStatsOptions {
     getResource(who: Who, resource: ResourceKey): number;
     getMaxResource(who: Who, resource: ResourceKey): number;
     getBuffStacks(who: Who, buffId: string): number;
+  /** 读某个 buff 实例的 `custom`（「血盾」还钱要用；缺省 0）。 */
+  getBuffCustom?(who: Who, buffId: string): number;
     /**
      * 读离散计数器。
      *
@@ -318,6 +320,7 @@ export function computeStats(options: ComputeStatsOptions): StatsResult {
     getResource: (who, resource) => resourceAccess?.getResource(who, resource) ?? 0,
     getMaxResource: (who, resource) => resourceAccess?.getMaxResource(who, resource) ?? 0,
     getBuffStacks: (who, buffId) => resourceAccess?.getBuffStacks(who, buffId) ?? 0,
+    getBuffCustom: (who, buffId) => resourceAccess?.getBuffCustom?.(who, buffId) ?? 0,
     getCounter: (pool, counter) => resourceAccess?.getCounter(pool, counter) ?? 0,
     getContribution: (namespace) => namespaceValue(namespace),
     evaluateCondition: (condition) => evaluateCondition?.(condition) ?? condition.kind === 'always',

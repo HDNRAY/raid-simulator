@@ -38,6 +38,14 @@ export interface GrantAbility {
    * （霸体、施法光环）。详见 `AbilityTiming` 的说明。
    */
   readonly on?: AbilityTiming;
+  /**
+   * **随这次授予写进实例的自定义数值**（缺省 = 用 `buff.custom`）。
+   *
+   * 用途：「血盾」每次偷的量不一样，而"破壳时还多少"要**按当初偷的算** ——
+   * 所以得让**授予者**把那个数带进来（`grantBuffFromTrigger` 已经收它，
+   * 见 `triggers.ts` 的调用点）。
+   */
+  readonly custom?: number;
 }
 
 export interface DealAbility {

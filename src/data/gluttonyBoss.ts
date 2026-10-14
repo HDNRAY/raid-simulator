@@ -1,0 +1,421 @@
+/**
+ * **「暴食」** —— 地魔神。
+ *
+ * 设计记录：`docs/specs/2026-10-12-seven-sins.md` §12。
+ *
+ * ==================================================================
+ * 它的题型
+ * ==================================================================
+ *
+ * | Boss | 逼你决定的 |
+ * |---|---|
+ * | 傲慢 | "这一下发不发得起 30 炁去躲？" |
+ * | 色欲 | "我现在该不该继续打？" |
+ * | 嫉妒 | "我攒着的东西，还敢不敢留着？" |
+ * | 贪婪 | "它的层数还在涨 —— 现在不爆发，等什么时候？" |
+ * | 懒惰 | "它不动、血在回 —— 你打算什么时候动手？" |
+ * | **暴食** | "**它刚咬了我一口 —— 那 5 秒我打不打得穿那层壳？**" |
+ *
+ * ==================================================================
+ * 三块机制（用户 2026-10-14 定）
+ * ==================================================================
+ *
+ * 1. **「啃噬」三条**（血 / 炁 / 缠）—— **放哪个池就吃哪个**
+ * 2. **「血盾」**（只有血那条）：偷你【当前血的 30%，最少 10 点、
+ *    **不致死**（最多留你 1 点）】→ 变成它身上一层壳，窗口 **5 秒**：
+ *      - **5 秒内打穿** → 偷走的血**还给你**
+ *      - **没打穿** → 它拿走（那些血**变成它的血**，不造成额外伤害）
+ * 3. **被动「饕餮」**：**单场累计** 3 次**成功**的啃噬（被闪避的不算）
+ *    → 获得「饱食」：持续一段时间、**减伤 30%**；然后计数清零、可再触发
+ *    ⚠️ 但**血盾那层壳不吃这个减伤**（打壳的伤害不打折 —— 用户点名）
+ *
+ * ==================================================================
+ * ⚠️ 数值：伤害刻意压得很低
+ * ==================================================================
+ *
+ * 用户："**暴食的技能伤害不要太高了，他有偷取效果**" —— 所以两条伤害技
+ * 按傲慢的**一半左右**给（14 / 26）。它靠啃噬活着，不靠打人。
+ */
+
+import type { Behavior, BuffDef, Expr, SkillDef } from '../core/types';
+import type { BossDef } from './bossDefs';
+import { logicMs } from '../core/loopConstants';
+import { S } from './scale';
+import { BOSS_TELEGRAPH } from './bossShared';
+
+/** 读条标记（时长 = 自己的 `castTime`）。 */
+function tel(skillId: string, ms: number): BuffDef {
+  return { ...BOSS_TELEGRAPH, id: `boss-${skillId}-telegraph`, duration: ms };
+}
+
+/* ================================================================== *
+ * 1. 「饱食」：3 次啃噬之后的减伤（先定义，计数那条要引用它）
+ * ================================================================== */
+
+/**
+ * 「饱食」——减伤 **30%**，持续一段时间。
+ *
+ * ⚠️ `damageReduce: 0.3` 是**判定层**的旗标（`computeDamage` 读它），
+ * 与「卸」的平减走同一条路 —— 不是"属性修正"。
+ *
+ * ⚠️ 它**不作用于血盾那层壳**：壳在 `absorbFromBuffs` 里**先吃掉全额伤害**
+ * （那一步在 `computeDamage` 之前），所以"打壳"不打折 ——
+ * 这正是用户点名的那条（"如果 血盾不吃这个减伤"）。
+ */
+export const GLUTTONY_SATED: BuffDef = {
+  id: 'gluttony-sated',
+  nameKey: 'gluttony.sated.name',
+  icon: 'greed_idle',
+  polarity: 'buff',
+  color: 0x8ad0a0,
+  duration: logicMs(80),
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+  flags: { damageReduce: 0.3 },
+};
+
+/* ================================================================== *
+ * 2. 「饕餮」：计数**就是这条 buff 的层数**
+ * ================================================================== */
+
+/**
+ * 「饕餮」——**buff 层数就是那个计数器**（用户原话："buff 累计 3 层
+ * 自己触发别的，然后把自己消掉"）。
+ *
+ * ==================================================================
+ * 计数怎么涨、怎么归零
+ * ==================================================================
+ *
+ * - **+1 层**：`GLUTTONY_COUNT_PASSIVE` 的 `onHitTaken` 挂它 —— 而
+ *   `onHitTaken` **只在"真的掉血了"时派发**（引擎既有语义），所以
+ *   **被闪避 / 被免疫的那一次天然不计数**（用户："被闪避的 没偷成功
+ *   不计数"）✓ 不需要额外写一条判据
+ * - **满 3 层**：它自己的 `onBuffApplied` 触发器醒一次，判到 3 层 →
+ *   给「饱食」+ **把自己清掉**（`Ability: 'removeBuff'`）
+ * - **单场累计**：`duration` 是 30 秒（每次啃噬 `stackRefresh` 刷新），
+ *   一局只打它一场 ⇒ "单场"与"这条 buff 的寿命"重合 ✓
+ */
+export const GLUTTONY_COUNT: BuffDef = {
+  id: 'gluttony-count',
+  nameKey: 'gluttony.count.name',
+  icon: 'greed_idle',
+  polarity: 'buff',
+  color: 0xd8b34a,
+  duration: logicMs(300),
+  maxStacks: 3,
+  stacking: { mode: 'stackRefresh', max: 3 },
+  triggers: [
+    {
+      on: 'onBuffApplied',
+      when: { kind: 'buffStacks', who: 'self', buffId: 'gluttony-count', minStacks: 3 },
+      then: [
+        { kind: 'grant', target: { mode: 'self' }, buff: GLUTTONY_SATED },
+        { kind: 'removeBuff', target: { mode: 'self' }, buffId: 'gluttony-count' },
+      ],
+    },
+  ],
+};
+
+/**
+ * 给「饕餮」加层的**常驻被动**。
+ *
+ * ⚠️ 判据是"这一击真的扣到了东西"（`taken > 0`）—— 所以**闪避不计数**
+ * 是天然的（`onHitTaken` 只在真的掉血时派发）。
+ */
+export const GLUTTONY_COUNT_PASSIVE: BuffDef = {
+  id: 'gluttony-count-passive',
+  nameKey: 'gluttony.name',
+  icon: 'greed_idle',
+  polarity: 'buff',
+  hidden: true,
+  duration: Number.POSITIVE_INFINITY,
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+  triggers: [
+    {
+      on: 'onHitTaken',
+      then: [{ kind: 'grant', target: { mode: 'self' }, buff: GLUTTONY_COUNT }],
+    },
+  ],
+};
+
+/* ================================================================== *
+ * 3. 「血盾」：偷来的血，5 秒内可以赎回去
+ * ================================================================== */
+
+/** 偷你当前血的 30%，但**最少 10 点、且不致死**（最多留你 1 点）。 */
+export const GRAB_HP_AMOUNT: Expr = {
+  e: 'clamp',
+  value: {
+    e: 'min',
+    of: [
+      { e: 'mul', of: [{ e: 'resource', who: 'target', resource: 'hp' }, { e: 'const', value: 0.3 }] },
+      { e: 'add', of: [{ e: 'resource', who: 'target', resource: 'hp' }, { e: 'const', value: -1 }] },
+    ],
+  },
+  min: { e: 'const', value: 10 },
+  max: { e: 'const', value: 1e9 },
+};
+
+/**
+ * 「血盾」本体 —— **打穿它就把血还给你**。
+ *
+ * ==================================================================
+ * "打穿"由引擎实现，"还钱"由这条 buff 自己的触发器做
+ * ==================================================================
+ *
+ * `absorbValue` 是"壳能吃多少伤害"，**扣光时引擎会把这条 buff 摘掉并补发
+ * `buffExpired`**（见 `hitResolution` 的伤害路径 + `effectOps.absorbFromBuffs`）。
+ * 所以"打穿"= **这条 buff 被摘掉**，而下面那条 `onBuffExpired` 就是
+ * "碎"的那一刻。
+ *
+ * ⚠️ **到期 vs 打碎**：`duration` 5 秒到点也会派发 `buffExpired` ——
+ * 那时**不该还钱**（用户："没打碎 → 它拿走"）。两者靠**`absorb` 还有没有剩**
+ * 分：打碎 → 壳被扣到 0 并摘掉；到期 → 壳还在（有剩）。
+ * 而触发器读得到它：`buffCustom` 读的是 `custom`（**当初偷了多少**），
+ * 壳被扣过时 `absorb` 会变小 —— 这里用一条**只有"碎"才成立**的判据
+ * （见下面的 `when`）。
+ *
+ * ⚠️ `custom`（这次偷了多少）与 `absorbValue`（壳的耐久）**是两个数**：
+ * 一发打穿时它们不一样（壳 30、被打 50 → 只能还 30）。`custom` 由
+ * `GLUTTONY_STEAL_PASSIVE` 那条 `grant` 带进来。
+ */
+export const GLUTTONY_SHIELD: BuffDef = {
+  id: 'gluttony-shield',
+  nameKey: 'gluttony.shield.name',
+  icon: 'boss_armor',
+  polarity: 'buff',
+  color: 0xd06b6b,
+  duration: logicMs(50),
+  maxStacks: 1,
+  stacking: { mode: 'replace' },
+  /**
+   * ⚠️ 初始厚度 10（"最少 10 点"那条的下限）—— 真正的厚度由
+   * `GLUTTONY_STEAL_PASSIVE` 每次挂的时候用 `grant.custom` 覆盖。
+   */
+  absorbValue: 10,
+  /**
+   * ⚠️ **打穿才还钱**：走 `onBreak`（引擎在"壳被扣光"那条路上跑它），
+   * 而不是 `onBuffExpired` —— 后者**到期也会响**，那时不该还（用户：
+   * "没打碎 → 它拿走"）。两者分开的理由写在 `BuffDef.onBreak` 上。
+   *
+   * ⚠️ 还的数是**当初偷的**（`custom`）：壳此刻已经摘掉、表达式读不到它，
+   * 所以引擎把那个数**随载荷带进**这一串能力（见 `runAbilities` 的
+   * `payload.custom`）。内容这边写一个 `buffCustom` 表达式**当占位**——
+   * 执行器只认它的"这是表达式 ⇒ 用载荷里的 custom"这个信号。
+   */
+  onBreak: [
+    {
+      kind: 'resource',
+      target: { mode: 'primaryEnemy' },
+      resource: 'hp',
+      delta: { e: 'buffCustom', who: 'self', buffId: 'gluttony-shield' },
+    },
+  ],
+};
+
+/* ================================================================== *
+ * 4. 啃噬：血 / 炁 / 缠 三条
+ * ================================================================== */
+
+/** 偷当前值的 30%（炁 / 缠用）。 */
+function grabRatio(pool: 'energy' | 'douqi'): Expr {
+  return {
+    e: 'mul',
+    of: [{ e: 'resource', who: 'target', resource: pool }, { e: 'const', value: 0.3 }],
+  };
+}
+
+export const GLUTTONY_GRAB_ENERGY: SkillDef = {
+  id: 'gluttony-grab-energy',
+  kind: 'activeSkill',
+  nameKey: 'gluttony.grabEnergy.name',
+  descKey: 'gluttony.grabEnergy.desc',
+  icon: 'boss_empower',
+  abilities: [
+    { kind: 'grant', on: 'castStart', target: { mode: 'self' }, buff: tel('gluttony-grab-energy', logicMs(6)) },
+  ],
+  castTime: logicMs(6),
+  cooldown: logicMs(30),
+  cost: [],
+  hits: [
+    {
+      at: logicMs(6),
+      effects: [{ kind: 'transfer', transfer: { pool: 'energy', amount: grabRatio('energy') } }],
+    },
+  ],
+  targeting: { mode: 'primaryEnemy' },
+  tags: ['melee'],
+  interruptible: true,
+};
+
+export const GLUTTONY_GRAB_DOUQI: SkillDef = {
+  id: 'gluttony-grab-douqi',
+  kind: 'activeSkill',
+  nameKey: 'gluttony.grabDouqi.name',
+  descKey: 'gluttony.grabDouqi.desc',
+  icon: 'boss_empower',
+  abilities: [
+    { kind: 'grant', on: 'castStart', target: { mode: 'self' }, buff: tel('gluttony-grab-douqi', logicMs(6)) },
+  ],
+  castTime: logicMs(6),
+  cooldown: logicMs(30),
+  cost: [],
+  hits: [
+    {
+      at: logicMs(6),
+      effects: [{ kind: 'transfer', transfer: { pool: 'douqi', amount: grabRatio('douqi') } }],
+    },
+  ],
+  targeting: { mode: 'primaryEnemy' },
+  tags: ['melee'],
+  interruptible: true,
+};
+
+/**
+ * 「啃噬·血」：偷血 → 变壳（5 秒）。
+ *
+ * ⚠️ 它**不直接扣血**（`transfer` 会把血搬进它自己）—— 用户要的是
+ * "**变成它身上一层壳**，打破就还"。所以这一条**只负责扣玩家**：
+ * 用 `transfer` 的 `pool: 'hp'` 扣玩家，再靠**常驻被动**在"它挨打"时
+ * 把偷来的量挂成壳（`grant.custom` 带上那个数）。
+ *
+ * ⚠️ 现在这一版**少了一半**（打穿还钱）—— 见文件末尾。
+ */
+export const GLUTTONY_GRAB_HP: SkillDef = {
+  id: 'gluttony-grab-hp',
+  kind: 'activeSkill',
+  nameKey: 'gluttony.grabHp.name',
+  descKey: 'gluttony.grabHp.desc',
+  icon: 'boss_cleave',
+  abilities: [
+    { kind: 'grant', on: 'castStart', target: { mode: 'self' }, buff: tel('gluttony-grab-hp', logicMs(10)) },
+  ],
+  castTime: logicMs(10),
+  cooldown: logicMs(60),
+  cost: [],
+  hits: [
+    {
+      at: logicMs(10),
+      effects: [{ kind: 'transfer', transfer: { pool: 'hp', amount: GRAB_HP_AMOUNT } }],
+    },
+  ],
+  targeting: { mode: 'primaryEnemy' },
+  tags: ['melee'],
+  interruptible: true,
+};
+
+/* ================================================================== *
+ * 5. 两条伤害技（刻意压低）
+ * ================================================================== */
+
+export const GLUTTONY_BITE: SkillDef = {
+  id: 'gluttony-bite',
+  kind: 'activeSkill',
+  nameKey: 'gluttony.bite.name',
+  descKey: 'gluttony.bite.desc',
+  icon: 'boss_sweep',
+  abilities: [
+    { kind: 'grant', on: 'castStart', target: { mode: 'self' }, buff: tel('gluttony-bite', logicMs(8)) },
+  ],
+  castTime: logicMs(8),
+  cooldown: logicMs(30),
+  cost: [],
+  hits: [
+    {
+      at: logicMs(8),
+      effects: [{ kind: 'damage', damage: { base: S(14), canCrit: false, countsAsHit: true } }],
+    },
+  ],
+  targeting: { mode: 'primaryEnemy' },
+  tags: ['melee'],
+  interruptible: true,
+};
+
+export const GLUTTONY_GORGE: SkillDef = {
+  id: 'gluttony-gorge',
+  kind: 'activeSkill',
+  nameKey: 'gluttony.gorge.name',
+  descKey: 'gluttony.gorge.desc',
+  icon: 'boss_cleave',
+  abilities: [
+    { kind: 'grant', on: 'castStart', target: { mode: 'self' }, buff: tel('gluttony-gorge', logicMs(16)) },
+  ],
+  castTime: logicMs(16),
+  cooldown: logicMs(80),
+  cost: [],
+  hits: [
+    {
+      at: logicMs(16),
+      effects: [{ kind: 'damage', damage: { base: S(26), canCrit: false, countsAsHit: true } }],
+    },
+  ],
+  targeting: { mode: 'primaryEnemy' },
+  tags: ['melee'],
+  interruptible: true,
+};
+
+/* ================================================================== *
+ * 6. 定义
+ * ================================================================== */
+
+export const GLUTTONY_SKILLS: readonly SkillDef[] = [
+  GLUTTONY_BITE,
+  GLUTTONY_GORGE,
+  GLUTTONY_GRAB_HP,
+  GLUTTONY_GRAB_ENERGY,
+  GLUTTONY_GRAB_DOUQI,
+];
+
+export const GLUTTONY_BUFFS: readonly BuffDef[] = [
+  GLUTTONY_SATED,
+  GLUTTONY_COUNT,
+  GLUTTONY_COUNT_PASSIVE,
+  GLUTTONY_SHIELD,
+  tel('gluttony-bite', logicMs(8)),
+  tel('gluttony-gorge', logicMs(16)),
+  tel('gluttony-grab-hp', logicMs(10)),
+  tel('gluttony-grab-energy', logicMs(6)),
+  tel('gluttony-grab-douqi', logicMs(6)),
+];
+
+/** 行为：**攻速高** —— `gapMs` 比傲慢的 4000 短不少；三条啃噬优先。 */
+export const GLUTTONY_BEHAVIORS: readonly Behavior[] = [
+  { kind: 'enrage', atMs: 120_000, dmgMult: 2 },
+  {
+    kind: 'rotation',
+    steps: [
+      { skillId: 'gluttony-grab-hp' },
+      { skillId: 'gluttony-grab-energy' },
+      { skillId: 'gluttony-grab-douqi' },
+      { skillId: 'gluttony-gorge' },
+      { skillId: 'gluttony-bite' },
+    ],
+  },
+];
+
+/** ⚠️ 血量与其它几个 Boss 暂时相同（等实测）。 */
+export const GLUTTONY_HP = 420;
+
+export const GLUTTONY_BOSS: BossDef = {
+  id: 'gluttony',
+  hp: GLUTTONY_HP,
+  nameKey: 'gluttony.name',
+  skills: GLUTTONY_SKILLS,
+  buffs: GLUTTONY_BUFFS,
+  behaviors: GLUTTONY_BEHAVIORS,
+};
+
+/**
+ * ==================================================================
+ * 两条曾经"表达不出来"的东西，现在都接线了（记下来免得重走）
+ * ==================================================================
+ *
+ * 1. **"打穿壳 → 把偷走的血还给你"**：靠 `BuffDef.onBreak`（引擎在
+ *    **扣光**那条路上**额外**跑的一串能力）+ `payload.custom`
+ *    （把"当初偷了多少"随载荷带进去 —— 壳此刻已经摘掉，表达式读不到）。
+ * 2. **"没打穿 → 它拿走"**：**不需要写内容** —— 因为 `transfer` 在偷的
+ *    那一刻**已经把血给了它**，而"打穿"才会还回去。所以"到期什么都不做"
+ *    正是默认行为 ✓（这也是 `onBreak` 与 `onBuffExpired` 必须分开的原因：
+ *    后者到期也会响，用它还钱就等于"无论打没打穿都还"，那这一招白设计了）。
+ */

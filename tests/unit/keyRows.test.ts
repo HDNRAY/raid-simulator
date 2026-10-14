@@ -37,6 +37,7 @@ import { PRIDE_SKILLS } from '../../src/data/bossPride';
 import { JEALOUSY_SKILLS } from '../../src/data/jealousyBoss';
 import { GREED_SKILLS } from '../../src/data/greedBoss';
 import { LAZY_SKILLS } from '../../src/data/lazyBoss';
+import { GLUTTONY_SKILLS } from '../../src/data/gluttonyBoss';
 import { buildKeyRows, isBindablePlayerSkill, messageKeysMatching } from '../../src/app/keyRows';
 import { createRegistry } from '../../src/core/content/registry';
 import { translator } from '../../src/i18n/translator';
@@ -83,13 +84,14 @@ function focusPercentOf(): number {
 }
 
 describe('按键设置只列玩家技能', () => {
-  it('五个 Boss 的技能都不该可绑键', () => {
+  it('六个 Boss 的技能都不该可绑键', () => {
     const bosses = [
       ...LUST_SKILLS.map((s) => ({ who: '色欲', skill: s })),
       ...PRIDE_SKILLS.map((s) => ({ who: '傲慢', skill: s })),
       ...JEALOUSY_SKILLS.map((s) => ({ who: '嫉妒', skill: s })),
       ...GREED_SKILLS.map((s) => ({ who: '贪婪', skill: s })),
       ...LAZY_SKILLS.map((s) => ({ who: '懒惰', skill: s })),
+      ...GLUTTONY_SKILLS.map((s) => ({ who: '暴食', skill: s })),
     ];
 
     const leaked = bosses
@@ -144,7 +146,7 @@ describe('按键设置只列玩家技能', () => {
    * 之后多出第三个桶（`PENDING_SKILLS`：「破」，黛玄的、还没接线）。
    * 所以期望值显式列出它，而不是把它当成"多出来的那个"忽略掉。
    */
-  it('ALL_SKILLS 减去玩家技能 = 五个 Boss 的技能 + 待接线技能', () => {
+  it('ALL_SKILLS 减去玩家技能 = 六个 Boss 的技能 + 待接线技能', () => {
     const nonPlayer = ALL_SKILLS.filter((s) => !PLAYER_SKILL_IDS.has(s.id)).map((s) => s.id);
     const expected = [
       ...LUST_SKILLS,
@@ -152,6 +154,7 @@ describe('按键设置只列玩家技能', () => {
       ...JEALOUSY_SKILLS,
       ...GREED_SKILLS,
       ...LAZY_SKILLS,
+      ...GLUTTONY_SKILLS,
       ...PENDING_SKILLS.map((p) => p.skill),
     ].map((s) => s.id);
 

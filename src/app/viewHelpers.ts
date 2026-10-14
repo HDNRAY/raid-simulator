@@ -177,6 +177,10 @@ const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
   /** 「懒惰」的「睡眠」与「怠惰」—— 两个都会显示（玩家要看到自己在睡 / 它回得快）。 */
   'lazy-sleep': 'lazy.sleep.name',
   'lazy-idle': 'lazy.idle.name',
+  /** 「暴食」的三个会显示的 buff：血盾 / 饕餮 / 饱食。 */
+  'gluttony-shield': 'gluttony.shield.name',
+  'gluttony-count': 'gluttony.count.name',
+  'gluttony-sated': 'gluttony.sated.name',
   'combo-window': 'buffShort.comboWindow',
   knockdown: 'buffShort.knockdown',
   /** 色欲的眩晕与印记（不登记就会显示中性兜底「？」）。 */

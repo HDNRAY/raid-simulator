@@ -40,12 +40,12 @@ import type {
   StatKey,
 } from '../types';
 import { aggregateFlags, applyBuff } from '../buffs';
-import { runTriggers } from './triggers';
+import { runAbilities, runTriggers } from './triggers';
 import { absorbedByOf, withAbsorbedByBuffId } from './avoidedSource';
 import { casterGainsDouqiFromDamage } from './holds';
 import {
   actsOnVictim,
-  absorbFromBuffs,
+  absorbShieldDamage,
   applyStunEffect,
   applyThornReflect,
   transferResources,
@@ -115,7 +115,13 @@ export interface HitResolutionContext {
   skillDef(skillId: string): SkillDef | undefined;
   currentTick(): number;
   /** 按 id 挂一个 buff（复用 `applyBuff` 的语义）。 */
-  grantBuffFromTrigger(target: Combatant, def: BuffDef, sourceId: string): void;
+  grantBuffFromTrigger(
+    target: Combatant,
+    def: BuffDef,
+    sourceId: string,
+    /** ⚠️ 只在"这次授予带一个数"时给（「血盾」：这次偷了多少）。 */
+    custom?: number,
+  ): void;
   /** 按 `defId` 移除一个 buff（同 defId 的实例一起摘）。 */
   removeBuffFromTrigger(target: Combatant, buffId: string): void;
   /** 一次性资源变动。 */
@@ -299,21 +305,24 @@ export function resolveHit(
            */
           applyHitEffects(ctx, actor, target, effect, skill.id, avoided);
           /**
-           * ⚠️ **先过吸收壳**（「血盾」）：壳按`result.amount`（已过防御减免、
-           * **未过易伤**）全额吃掉，漏过去的部分才成为真正的伤害。
-           * 壳被扣光时 `absorbFromBuffs` 会摘掉那条 buff 并补发 `buffExpired`
-           * —— 于是内容挂在那条 buff 上的 `onBuffExpired` 触发器（"把血还给
-           * 玩家"）会响。判据与理由见 `effectOps.ts` 的 `absorbFromBuffs`。
+           * ⚠️ **先过吸收壳**（「血盾」），⚠️ 按**未过 `damageReduce`** 的伤害
+           * 吃（用户："血盾不吃这个减伤"）。"打穿壳要跑它自己的 `onBreak`"
+           * （把偷走的血还给玩家）—— 实现与理由收在 `effectOps.absorbShieldDamage`。
            */
-          // eslint-disable-next-line no-console
-          console.log('[TRACE] before-absorb base=', typeof effect.damage.base === 'number' ? effect.damage.base : 'x', 'amount=', result.amount, 'shell=', ctx.current(target.id).buffs.map((b) => `${b.defId}=${b.absorb}`).join(','));
-          const leaked = absorbFromBuffs({
+          const reduce = victimFlags.damageReduce ?? 0;
+          const preReduce = reduce > 0 ? result.amount / (1 - reduce) : result.amount;
+          const shield = absorbShieldDamage({
             ctx,
             target: ctx.current(target.id),
-            damage: result.amount,
+            damage: preReduce,
+            damageReduce: reduce,
           });
-          // eslint-disable-next-line no-console
-          console.log('[TRACE] after-absorb leaked=', leaked, 'shell=', ctx.current(target.id).buffs.map((b) => `${b.defId}=${b.absorb}`).join(','));
+          for (const brokenBuff of shield.broken) {
+            for (const ability of brokenBuff.def?.onBreak ?? []) {
+              runAbilities(ctx, target.id, [ability], { custom: brokenBuff.custom ?? 0 });
+            }
+          }
+          const leaked = shield.leaked;
           const applied = applyDamage(
             ctx.current(target.id),
             /**
@@ -321,9 +330,9 @@ export function resolveHit(
              * 它原先恒为 0（`computeDamage` 里 `damageReduce` 那条从没算过它），
              * 所以这里填上不会与任何既有语义冲突。
              */
-            leaked === result.amount
+            shield.absorbedByShield <= 0
               ? result
-              : { ...result, amount: leaked, absorbed: result.amount - leaked },
+              : { ...result, amount: leaked, absorbed: shield.absorbedByShield },
             actor.id,
             skill.id,
             ctx.state.tick,

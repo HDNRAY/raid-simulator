@@ -171,6 +171,10 @@ export function computeStatsFor(
           ctx.resolveCombatantFor(combatantId, who).buffs
             .filter((b: BuffInstance) => b.defId === buffId)
             .reduce((sum: number, b: BuffInstance) => sum + b.stacks, 0),
+        getBuffCustom: (who: Who, buffId: string) =>
+          ctx.resolveCombatantFor(combatantId, who).buffs
+            .filter((b: BuffInstance) => b.defId === buffId)
+            .reduce((sum: number, b: BuffInstance) => sum + (b.custom ?? 0), 0),
         /**
          * ⚠️ **未实现的桩**：离散计数器还没有接线，所以这里恒返回 0。
          *
