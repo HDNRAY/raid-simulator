@@ -5,6 +5,7 @@ import {
   type DetailContext,
   type DetailModel,
 } from '../../src/ui/prepareDetail';
+import { prepareDetailContext } from '../../src/app/prepareDetailContext';
 
 /**
  * ==================================================================
@@ -96,11 +97,10 @@ describe('内容按类切换，且只取真数据', () => {
     /** 生命上限是**真的**（不是编的）。 */
     expect(m?.subtitle?.params).toEqual({ hp: 420 });
     /**
-     * ⚠️ 第一行是分节标题「招式」（`dim`），后面才是招式本身 ——
-     * 模型里没有"称号 / 简介"那种字段（仓库里根本没有这份数据）。
+     * ⚠️ **2026-10-14：不再有分节标题行**（用户："不用分 招式和被动，
+     * 直接写每个能力就好"）⇒ 第一行**直接就是**一条能力。
      */
-    expect(m?.rows[0]).toEqual({ kind: 'text', key: 'roster.ui.detail.skills', dim: true });
-    const skill = m?.rows[1];
+    const skill = m?.rows[0];
     expect(skill?.kind).toBe('skill');
     if (skill?.kind === 'skill') {
       expect(skill.nameKey).toBe('boss.cleave.name');
@@ -109,6 +109,36 @@ describe('内容按类切换，且只取真数据', () => {
     }
     /** ⚠️ Boss **没有**配对的对话头像（需求只给了 3 个角色）。 */
     expect(m?.portraitId).toBeUndefined();
+  });
+
+  it('⚠️ 招式与被动**合成一列**，而且被动**也有说明**（用户报"被动都没有说明"）', () => {
+    /**
+     * 两件事一起钉：
+     *   1. **不再分节** ⇒ 模型里**没有** `roster.ui.detail.skills` /
+     *      `.passives` 那种小节标题行
+     *   2. 被动行**带 `descKey`** —— `BossDef.passives` 是 `PassiveSkillDef[]`，
+     *      它**有** `descKey`（五条被动的文案都在 i18n 里）。原先
+     *      `bossPassives` 手写成 `{ nameKey, descParams: {} }` 把它丢了
+     */
+    /**
+     * ⚠️ 这条要用**真的** `DetailContext`（本文件顶部那个 `ctx` 是手搭的夹具，
+     * 它的 `bossPassives` 恒返回 `[]`）—— 因为要验的正是"真数据里被动有没有
+     * 说明"。
+     */
+    const real = prepareDetailContext({ on: () => false });
+    const m = detailModelOf({ kind: 'boss', id: 'sloth' }, real);
+    const rows = m?.rows ?? [];
+    const textKeys = rows.filter((r) => r.kind === 'text').map((r) => r.key);
+    expect(textKeys, '不该再有「招式 / 被动」小节标题').toEqual([]);
+
+    const skills = real.bossSkills('sloth');
+    const passives = real.bossPassives('sloth');
+    expect(passives.length, '懒惰有一条被动（怠惰）').toBeGreaterThan(0);
+    expect(rows.length, '招式 + 被动 = 一列').toBe(skills.length + passives.length);
+    /** ⚠️ 每一条**被动**都要有说明（这就是用户报的那件事）。 */
+    for (const passive of passives) {
+      expect(passive.descKey, `被动 ${passive.nameKey} 缺 descKey`).toBeTruthy();
+    }
   });
 
   it('炁机：开关态 + 说明（说明是内容里的 `descKey`）', () => {

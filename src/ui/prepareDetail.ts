@@ -291,22 +291,21 @@ function bossDetail(id: string, ctx: DetailContext): DetailModel | undefined {
       params: { hp: ctx.bossHp(id) },
     },
     /** ⚠️ 不设 `portraitId`：Boss 没有配对的对话头像（见文件头）。 */
+    /**
+     * ⚠️ **不再分「招式」「被动」两节**（用户 2026-10-14："**不用分 招式和被动，
+     * 直接写每个能力就好**"）。
+     *
+     * 顺序：**招式在前、被动在后**（用户选的）——
+     * 招式 = `BossDef.skills`（它怎么打你），被动 = `BossDef.passives`
+     * （它天生就会什么）。两节的**小节标题行也一并删掉**：既然不分区，
+     * 那两行就是纯粹的噪声。
+     *
+     * ⚠️ 被动行同样走 `skillRow()` ⇒ **有名字也有说明**（见
+     * `app/prepareDetailContext.ts` 的 `bossPassives`）。
+     */
     rows: soon
       ? [{ kind: 'text', key: 'roster.ui.developing', dim: true }]
-      : [
-          { kind: 'text', key: 'roster.ui.detail.skills', dim: true },
-          ...ctx.bossSkills(id),
-          /**
-           * ⚠️ **被动单独一节**（用户 2026-10-14 要求）。它就是
-           * `BossDef.passives` —— 那几条**开战前就挂着**的。
-           */
-          ...(ctx.bossPassives(id).length === 0
-            ? []
-            : [
-                { kind: 'text' as const, key: 'roster.ui.detail.passives', dim: true },
-                ...ctx.bossPassives(id),
-              ]),
-        ],
+      : [...ctx.bossSkills(id), ...ctx.bossPassives(id)],
   };
 }
 

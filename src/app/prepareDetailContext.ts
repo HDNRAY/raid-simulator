@@ -191,15 +191,19 @@ export function prepareDetailContext(free: {
      */
     bossPassives: (id) =>
       /**
-       * ⚠️ `BuffDef` **没有** `descKey`（只有 `nameKey`）—— 被动那几行的
-       * 说明暂时留空。要写"这条被动干什么"得给 `BuffDef` 加一个
-       * `descKey`（那是另一件事：全仓 buff 的文案都还没走这条路）。
+       * ⚠️ **2026-10-14 修**：这里原先手写一行 `{ nameKey, descParams: {} }`，
+       * 注释还写着"`BuffDef` 没有 `descKey`（只有 `nameKey`），被动那几行的
+       * 说明暂时留空" —— **那句话已经过时了**：
+       *
+       *   - `BossDef.passives` 现在是 **`PassiveSkillDef[]`**（2026-10-14 的
+       *     判别联合重构），而 `PassiveSkillDef` **有 `descKey`**
+       *   - 五条被动的文案（印记 / 弱点 / 饕餮 / 怠惰 / 怒火）**都在 i18n 里**
+       *
+       * 所以玩家看到的"被动**没有任何说明**"（用户报的）纯粹是**没去取**。
+       * ⇒ 直接复用 `skillRow()`：它对被动技能本来就有一条正确的分支
+       * （`kind !== 'activeSkill'` ⇒ 参数取空对象，但**名字与说明照给**）。
        */
-      bossDefById(id).passives.map((buff) => ({
-        kind: 'skill' as const,
-        nameKey: buff.nameKey ?? buff.id,
-        descParams: {},
-      })),
+      bossDefById(id).passives.map((passive) => skillRow(passive, bossHpFor(id))),
     developing: isDeveloping,
     qijiOn: (id) => free.on(id),
   };
