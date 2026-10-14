@@ -71,6 +71,15 @@ export interface CastBarOptions {
 /** 彩虹描边的分段数（见 `drawRainbowBorder`）。 */
 const SEGMENTS = 48;
 
+/**
+ * 彩虹分段色 —— **模块级只算一次**。
+ *
+ * ⚠️ 它只跟 `SEGMENTS` 有关，是**常量**。原先它在 `drawRainbowBorder()`
+ * 里现算（每帧 48 次 HSL→RGB + 一个新数组）—— 那是 2026-10-14 那次
+ * "**进度条卡顿**"的一半原因（另一半见 `update()` 里的说明）。
+ */
+const RAINBOW = rainbowColors(SEGMENTS);
+
 const RADIUS = 2;
 
 /**
@@ -220,6 +229,11 @@ export class CastBar {
     if (this.armored === on) return;
     this.armored = on;
     this.dirty = true;
+    /**
+     * ⚠️ 描边**不跟 `update()` 走了**（那里每帧调一次的代价见 `update()`）⇒
+     * 状态真的翻转时，这里必须自己画一次。
+     */
+    this.drawBorder(this.options.line);
   }
 
   /**
@@ -271,7 +285,7 @@ export class CastBar {
       Math.max(0, bottom - top - 2 * RADIUS) * 2;
     const arcs = 2 * Math.PI * RADIUS;
     const total = Math.max(1, straight + arcs);
-    const colors = rainbowColors(SEGMENTS);
+    const colors = RAINBOW;
     const pointAt = (t: number): readonly [number, number] => {
       /** 按周长把 `t`(0..1) 映射到轮廓上的一点。走四个边 + 四个圆角。 */
       const arcLen = (Math.PI / 2) * RADIUS;
@@ -345,13 +359,20 @@ export class CastBar {
         .fill({ color: this.channel ? (this.options.channelFill ?? this.options.fill) : this.options.fill, alpha: 1 });
     }
     /**
-     * 每次改完填充**重画一遍描边**。
+     * ⚠️ **这里不再重画描边**（2026-10-14 改）。
      *
-     * 让 `INSET` 应该是够的，但"上下两条边被盖"这个问题反复出现，
-     * 所以再加一道保险：无论填充怎么变，描边永远是最后画上去的
-     * （`this.border` 也在 `addChild` 顺序里排在填充之后）。
+     * 原先每次 `update()`（= 每帧，读条期间）都调一遍 `drawBorder()`，
+     * 本意是"无论填充怎么变，描边都最后画上去"。但那是**用错工具解决
+     * 顺序问题**：`this.border` 在 `addChild` 里**本来就排在填充之后**
+     * （见构造处），而填充四周各让了 `INSET`(2)px ⇒ 它压不到描边。
+     *
+     * 代价有多大：霸体读条时 `drawBorder` 会走彩虹分支 ——
+     * **每帧 48 次 `stroke` + 48 次色相换算**，两条读条就是每帧 96 次
+     * 描边调用。用户直接报的就是这个："**还是有点卡··啊 进度条卡顿**"。
+     *
+     * ⇒ 现在描边只在**它真的变了**的时候画：构造、`setRect`（缩放 /
+     * 换分辨率）、`setArmored`（霸体开关）。进度变化只重画填充。
      */
-    this.drawBorder(this.options.line);
   }
 
   /**
