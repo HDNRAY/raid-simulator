@@ -43,7 +43,7 @@
  * 而且"读条缩到 39%"已经足够危险。
  */
 
-import type { ActiveSkillDef, Behavior, BuffDef, SkillDef } from '../core/types';
+import type { ActiveSkillDef, Behavior, BuffDef, PassiveSkillDef, SkillDef } from '../core/types';
 import type { BossDef } from './bossDefs';
 import { logicMs } from '../core/loopConstants';
 import { S } from './scale';
@@ -239,6 +239,7 @@ export const GREED_SKILLS: readonly SkillDef[] = [GREED_HOARD_SKILL, GREED_PLUND
 
 export const GREED_BUFFS: readonly BuffDef[] = [
   GREED_HOARD,
+  GREED_WEAK_POINT_PASSIVE,
   GREED_WEAK_POINT,
   tel('greed-hoard', logicMs(20)),
   tel('greed-plunder', logicMs(8)),
@@ -274,6 +275,22 @@ export const GREED_BEHAVIORS: readonly Behavior[] = [
  */
 export const GREED_HP = 420;
 
+/**
+ * **「弱点」被动**（`PassiveSkillDef`）—— 随机 3~5 秒给双方各挂一层易伤。
+ *
+ * ⚠️ 它以前只是个 `BuffDef`，而引擎**从不挂 `BossDef.buffs`** ⇒ 这条被动
+ * 一直是**死的**（一整场都不出现）。换成被动技能之后 `makeBoss` 会挂它。
+ */
+export const GREED_WEAK_POINT_SKILL: PassiveSkillDef = {
+  id: 'greed-weak-point',
+  kind: 'passive',
+  nameKey: 'greed.weakPoint.name',
+  descKey: 'greed.weakPoint.desc',
+  icon: 'greed_idle',
+  abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: GREED_WEAK_POINT_PASSIVE }],
+  tags: [],
+};
+
 export const GREED_BOSS: BossDef = {
   id: 'greed',
   hp: GREED_HP,
@@ -284,6 +301,6 @@ export const GREED_BOSS: BossDef = {
    * ⚠️ **整场都在的被动**（开战前就挂上）。与 `buffs` 分开的理由见
    * `BossDef.passives` —— 这里的每一条都是**引擎真的会挂**的。
    */
-  passives: [GREED_WEAK_POINT_PASSIVE],
+  passives: [GREED_WEAK_POINT_SKILL],
   behaviors: GREED_BEHAVIORS,
 };

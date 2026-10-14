@@ -207,10 +207,22 @@ describe('⚠️ 契约：`BossDef.passives` 真的会挂在它身上', () => {
    * （`withBuff({}, [LAZY_IDLE_PASSIVE])`）—— 于是"到底有没有人挂它"
    * 从来不在判据里。与「暴食的血盾」是同一个形状。
    */
-  it('每个 Boss 开战时身上都有它声明的每一条被动', () => {
+  /**
+   * ⚠️ 被动现在是**被动技能**（`PassiveSkillDef`）—— 它自己不是 buff，
+   * 而是**通过 `abilities` 里的 `grant` 把 buff 挂上去**。所以判据是
+   * "**它授予的那条 buff 在不在身上**"，不是"技能 id 在不在身上"。
+   */
+  const grantedByPassives = (def: (typeof BOSS_DEFS)[number]): readonly string[] =>
+    def.passives.flatMap((passive) =>
+      passive.abilities.flatMap((ability) =>
+        ability.kind === 'grant' ? [ability.buff.id] : [],
+      ),
+    );
+
+  it('每个 Boss 开战时身上都有它声明的每一条被动**授予的 buff**', () => {
     for (const def of BOSS_DEFS) {
       const onBody = new Set(makeBoss(def.id).buffs.map((b) => b.defId));
-      const missing = def.passives.map((p) => p.id).filter((id) => !onBody.has(id));
+      const missing = grantedByPassives(def).filter((id) => !onBody.has(id));
       expect(missing, `${def.id} 的被动没被挂上`).toEqual([]);
     }
   });
@@ -221,7 +233,7 @@ describe('⚠️ 契约：`BossDef.passives` 真的会挂在它身上', () => {
      * 看到前摇标记 / 一次性印记。这条会把那种"顺手多挂"挡回去。
      */
     for (const def of BOSS_DEFS) {
-      const declaredPassive = new Set(def.passives.map((p) => p.id));
+      const declaredPassive = new Set(grantedByPassives(def));
       const onBody = makeBoss(def.id).buffs.map((b) => b.defId);
       const extra = onBody.filter((id) => !declaredPassive.has(id));
       expect(extra, `${def.id} 开场多挂了不该挂的`).toEqual([]);

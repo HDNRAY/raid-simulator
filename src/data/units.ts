@@ -271,10 +271,31 @@ export function makeBoss(id: string, options?: { readonly noAi?: boolean }): Com
  * 从 0 起算。永久 buff 不看这个值，但要保持一致（否则重放会有细微差异）。
  */
 function innateBuffsFor(id: string): Combatant['buffs'] {
-  return bossDefById(id).passives.reduce<Combatant['buffs']>(
-    (acc, def) => applyBuff({ ...EMPTY_FOR_INNATE, id, side: 'enemy', buffs: acc }, def, id, 0).buffs,
-    [],
-  );
+  /**
+   * ⚠️ **被动技能 → "开战就挂着的那几条 buff"**（2026-10-14 改）。
+   *
+   * 走的是被动技能的 `abilities`（`grant` = 挂 buff），而不是"把 `passives`
+   * 当成 buff 直接用" —— 那是这次换类型的目的：被动技能是一等公民
+   * （`PassiveSkillDef`），它**授予什么**写在 `abilities` 里。
+   *
+   * ⚠️ **只认 `grant`**：别的 kind（`modifier` / `deal` / `consume` …）在
+   * 这条路上**没有执行点**，写了必须**立刻崩**，不许静默无效
+   * （AGENTS.md §2 的判据："用了不报错、结果什么也没发生"是最坏的一类）。
+   * `modifier`（"被动改属性"）将来要在 `battleSetup` 的 `passiveModifiers`
+   * 那条路上接 —— 那时**两条路都要按 kind 分派**，见本函数末尾的说明。
+   */
+  let acc: Combatant['buffs'] = [];
+  for (const passive of bossDefById(id).passives) {
+    for (const ability of passive.abilities) {
+      if (ability.kind !== 'grant') {
+        throw new Error(
+          `boss passive ${passive.id}: only 'grant' is supported here (got '${ability.kind}')`,
+        );
+      }
+      acc = applyBuff({ ...EMPTY_FOR_INNATE, id, side: 'enemy', buffs: acc }, ability.buff, id, 0).buffs;
+    }
+  }
+  return acc;
 }
 
 /**

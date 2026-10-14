@@ -29,7 +29,7 @@
  * "借傲慢的轮转"那条占位路（见 `data/units.ts` 的 `behaviorsFor`）。
  */
 
-import type { Behavior, BuffDef, LocaleKey, SkillDef } from '../core/types';
+import type { Behavior, BuffDef, LocaleKey, PassiveSkillDef, SkillDef } from '../core/types';
 import { PRIDE_BOSS } from './prideBoss';
 import { LUST_BOSS } from './lustBoss';
 import { JEALOUSY_BOSS } from './jealousyBoss';
@@ -85,7 +85,7 @@ export interface BossDef {
    * ⇒ 现在：**被动有它自己的字段**，"整场都在"这件事不再靠猜
    * （判据是"它有没有被技能授予"，猜不得）。
    */
-  readonly passives: readonly BuffDef[];
+  readonly passives: readonly PassiveSkillDef[];
   /**
    * 这个 Boss **自己**的 buff。
    *
@@ -146,7 +146,9 @@ export function bossStartHpFor(id: string): number {
 /** 需要落进内容注册表的全部 Boss 技能 / buff（三个 Boss 的合集）。 */
 export const BOSS_SKILLS: readonly SkillDef[] = BOSS_DEFS.flatMap((b) => [...b.skills]);
 
-export const BOSS_BUFFS: readonly BuffDef[] = BOSS_DEFS.flatMap((b) => [
-  ...b.buffs,
-  ...b.passives,
-]);
+/**
+ * ⚠️ **只收 `buffs`**：`passives` 是**被动技能**（`PassiveSkillDef`），
+ * 它们**不进 buff 表** —— 它们**授予**的那些 buff 各自写在 `buffs` 里
+ * （`grant` 的 `buff` 引用和 `buffs` 里那份是同一个对象）。
+ */
+export const BOSS_BUFFS: readonly BuffDef[] = BOSS_DEFS.flatMap((b) => [...b.buffs]);

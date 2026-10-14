@@ -37,7 +37,7 @@
  * 按傲慢的**一半左右**给（14 / 26）。它靠啃噬活着，不靠打人。
  */
 
-import type { ActiveSkillDef, Behavior, BuffDef, Expr, SkillDef } from '../core/types';
+import type { ActiveSkillDef, Behavior, BuffDef, Expr, PassiveSkillDef, SkillDef } from '../core/types';
 import type { BossDef } from './bossDefs';
 import { logicMs } from '../core/loopConstants';
 import { S } from './scale';
@@ -355,6 +355,7 @@ export const GLUTTONY_SKILLS: readonly SkillDef[] = [
 
 export const GLUTTONY_BUFFS: readonly BuffDef[] = [
   GLUTTONY_SATED,
+  GLUTTONY_COUNT_PASSIVE,
   GLUTTONY_COUNT,
   GLUTTONY_SHIELD,
   tel('gluttony-bite', logicMs(8)),
@@ -378,6 +379,21 @@ export const GLUTTONY_BEHAVIORS: readonly Behavior[] = [
 /** ⚠️ 血量与其它几个 Boss 暂时相同（等实测）。 */
 export const GLUTTONY_HP = 420;
 
+/**
+ * **「饕餮」被动**（`PassiveSkillDef`）—— 成功啃噬 3 次 → 「饱食」减伤 30%。
+ *
+ * ⚠️ 与贪婪那条同病：以前只是个 `BuffDef`，引擎不挂 ⇒ **计数从不累加**。
+ */
+export const GLUTTONY_APPETITE_SKILL: PassiveSkillDef = {
+  id: 'gluttony-appetite',
+  kind: 'passive',
+  nameKey: 'gluttony.count.name',
+  descKey: 'gluttony.count.desc',
+  icon: 'greed_idle',
+  abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: GLUTTONY_COUNT_PASSIVE }],
+  tags: [],
+};
+
 export const GLUTTONY_BOSS: BossDef = {
   id: 'gluttony',
   hp: GLUTTONY_HP,
@@ -388,7 +404,7 @@ export const GLUTTONY_BOSS: BossDef = {
    * ⚠️ **整场都在的被动**（开战前就挂上）。与 `buffs` 分开的理由见
    * `BossDef.passives` —— 这里的每一条都是**引擎真的会挂**的。
    */
-  passives: [GLUTTONY_COUNT_PASSIVE],
+  passives: [GLUTTONY_APPETITE_SKILL],
   behaviors: GLUTTONY_BEHAVIORS,
 };
 

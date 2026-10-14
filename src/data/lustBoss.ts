@@ -19,7 +19,7 @@
  * ⚠️ 本作**不分伤害类型**（用户决定），所以技能表里只有伤害数值。
  */
 
-import type { ActiveSkillDef, Behavior, BuffDef, SkillDef } from '../core/types';
+import type { ActiveSkillDef, Behavior, BuffDef, PassiveSkillDef, SkillDef } from '../core/types';
 import type { BossDef } from './bossDefs';
 import { logicMs } from '../core/loopConstants';
 import { S } from './scale';
@@ -389,6 +389,7 @@ export const LUST_SKILLS: readonly SkillDef[] = [LUST_HUM, LUST_ENTANGLE, LUST_C
  */
 export const LUST_BUFFS: readonly BuffDef[] = [
   LUST_MARK,
+  LUST_PASSIVE,
   LUST_STUN,
   LUST_BIND_THORNS,
 ];
@@ -466,6 +467,23 @@ export const LUST_BEHAVIORS: readonly Behavior[] = [
  */
 export const LUST_HP = 420;
 
+/**
+ * **「印记」被动**（`PassiveSkillDef`）—— 色欲的**反伤**（用户："印记那个是被动"）。
+ *
+ * ⚠️ 与「缚」区分开：**缚是引导型技能**（那一条不在这里）。
+ * ⚠️ 它以前只是个 `BuffDef`，靠 `innateBuffsFor` 里"只给色欲开的后门"挂上 ——
+ * 现在被动技能是一等公民，那条后门已删。
+ */
+export const LUST_THORNS_SKILL: PassiveSkillDef = {
+  id: 'lust-thorns',
+  kind: 'passive',
+  nameKey: 'lust.thorns.name',
+  descKey: 'lust.thorns.desc',
+  icon: 'lust_mark',
+  abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: LUST_PASSIVE }],
+  tags: [],
+};
+
 export const LUST_BOSS: BossDef = {
   id: 'lust',
   hp: LUST_HP,
@@ -476,7 +494,7 @@ export const LUST_BOSS: BossDef = {
    * ⚠️ **整场都在的被动**（开战前就挂上）。与 `buffs` 分开的理由见
    * `BossDef.passives` —— 这里的每一条都是**引擎真的会挂**的。
    */
-  passives: [LUST_PASSIVE],
+  passives: [LUST_THORNS_SKILL],
   behaviors: LUST_BEHAVIORS,
 };
 

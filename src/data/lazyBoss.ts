@@ -39,7 +39,7 @@
  * **实测定。**
  */
 
-import type { ActiveSkillDef, Behavior, BuffDef, Expr, SkillDef } from '../core/types';
+import type { ActiveSkillDef, Behavior, BuffDef, Expr, PassiveSkillDef, SkillDef } from '../core/types';
 import type { BossDef } from './bossDefs';
 import { logicMs } from '../core/loopConstants';
 import { S } from './scale';
@@ -337,6 +337,9 @@ export const LAZY_SKILLS: readonly SkillDef[] = [LAZY_BLUNT, LAZY_PRESSURE];
 
 export const LAZY_BUFFS: readonly BuffDef[] = [
   LAZY_SLEEP,
+  LAZY_BASE_REGEN,
+  LAZY_IDLE_PASSIVE,
+  LAZY_SLEEP_PASSIVE,
   LAZY_IDLE,
   tel('lazy-blunt', logicMs(10)),
   tel('lazy-pressure', logicMs(16)),
@@ -375,6 +378,42 @@ export const LAZY_BEHAVIORS: readonly Behavior[] = [
 export const LAZY_HP = 500;
 export const LAZY_START_HP = 250;
 
+/**
+ * ⚠️ **懒惰这三条被动是本轮"机械转换"的产物**（为了满足 `BossDef.passives`
+ * 换成的 `PassiveSkillDef[]`），**下一条改动就会重做它们**：
+ *   - 「睡眠」要变成**一条真正的技能**（进轮转、带前摇）—— 用户："睡眠技"
+ *   - 「基础回血」要**并进「怠惰」**（用户："基础回血不是单独的被动，就是怠惰本身"）
+ *   - 「怠惰」要改成 **2^层数**（现在还是"每层 +1"）
+ *
+ * 所以这里的名字/结构是**临时的**，别照它写文档。
+ */
+export const LAZY_SLEEP_CYCLE_SKILL: PassiveSkillDef = {
+  id: 'lazy-sleep-cycle',
+  kind: 'passive',
+  nameKey: 'lazy.sleep.name',
+  icon: 'lazy_sleep',
+  abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: LAZY_SLEEP_PASSIVE }],
+  tags: [],
+};
+
+export const LAZY_IDLE_TICKS_SKILL: PassiveSkillDef = {
+  id: 'lazy-idle-ticks',
+  kind: 'passive',
+  nameKey: 'lazy.idle.name',
+  icon: 'lazy_idle',
+  abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: LAZY_IDLE_PASSIVE }],
+  tags: [],
+};
+
+export const LAZY_BASE_REGEN_SKILL: PassiveSkillDef = {
+  id: 'lazy-base-regen-passive',
+  kind: 'passive',
+  nameKey: 'lazy.baseRegen.name',
+  icon: 'lazy_idle',
+  abilities: [{ kind: 'grant', target: { mode: 'self' }, buff: LAZY_BASE_REGEN }],
+  tags: [],
+};
+
 export const LAZY_BOSS: BossDef = {
   id: 'sloth',
   hp: LAZY_HP,
@@ -386,6 +425,6 @@ export const LAZY_BOSS: BossDef = {
    * ⚠️ **整场都在的被动**（开战前就挂上）。与 `buffs` 分开的理由见
    * `BossDef.passives` —— 这里的每一条都是**引擎真的会挂**的。
    */
-  passives: [LAZY_BASE_REGEN, LAZY_IDLE_PASSIVE, LAZY_SLEEP_PASSIVE],
+  passives: [LAZY_SLEEP_CYCLE_SKILL, LAZY_IDLE_TICKS_SKILL, LAZY_BASE_REGEN_SKILL],
   behaviors: LAZY_BEHAVIORS,
 };
