@@ -305,11 +305,15 @@ export function resolveHit(
            * —— 于是内容挂在那条 buff 上的 `onBuffExpired` 触发器（"把血还给
            * 玩家"）会响。判据与理由见 `effectOps.ts` 的 `absorbFromBuffs`。
            */
+          // eslint-disable-next-line no-console
+          console.log('[TRACE] before-absorb base=', typeof effect.damage.base === 'number' ? effect.damage.base : 'x', 'amount=', result.amount, 'shell=', ctx.current(target.id).buffs.map((b) => `${b.defId}=${b.absorb}`).join(','));
           const leaked = absorbFromBuffs({
             ctx,
             target: ctx.current(target.id),
             damage: result.amount,
           });
+          // eslint-disable-next-line no-console
+          console.log('[TRACE] after-absorb leaked=', leaked, 'shell=', ctx.current(target.id).buffs.map((b) => `${b.defId}=${b.absorb}`).join(','));
           const applied = applyDamage(
             ctx.current(target.id),
             /**

@@ -412,6 +412,8 @@ export function absorbFromBuffs(args: {
   if (damage <= 0) return damage;
 
   let left = damage;
+  /** 只要有一条壳被**扣过**（哪怕没碎）就算"改过" —— 见下面那条守卫的坑。 */
+  let changed = false;
   const kept: Combatant['buffs'][number][] = [];
   const broken: Combatant['buffs'][number][] = [];
 
@@ -424,29 +426,26 @@ export function absorbFromBuffs(args: {
     const eaten = Math.min(pool, left);
     left -= eaten;
     const rest = pool - eaten;
+    changed = true;
     /** 扣光 = **碎**：这一条不进 keep，于是它的过期触发器会响。 */
     if (rest <= 0) broken.push(buff);
     else kept.push({ ...buff, absorb: rest });
   }
 
-  if (broken.length === 0 && kept.length === target.buffs.length) return left;
-
   /**
-   * ⚠️ 写回时**从引擎取当前对象**（不是那个传进来的快照）：调用方可能
-   * 已经在本 tick 里改过它，拿旧快照写回会**覆盖掉**那些改动。
+   * ⚠️ **判据是 `changed`，不是"数量有没有变"** —— 这里踩过一个坑（2026-10-14）：
    *
-   * ⚠️ **已知未解决（2026-10-14）**：伤害 < 壳 时**壳不扣**。
-   * 排查记录（都是实测，别重走）：
-   *   - `kept` 里是 `absorb: 70`（trace 确认），紧接着 `ctx.current(id)`
-   *     读回来是 `100` —— 同一个 work map、同一个 id
-   *   - 试过"就地改实例的 absorb"（`toMutable` 只深拷数组、实例是共享引用）
-   *     → **仍然不生效**
-   *   - "伤害 > 壳"那条（整条 buff 被摘掉）**正常** ⇒ 问题出在
-   *     "**替换 / 改写数组里的元素**"这条路上，不是写回本身
-   *   - 已排除：壳过期、伤害为 0、壳没挂上、`applyDamage(amount:0)` 覆盖
-   * 下一步建议：从 `castPipeline` 的 `resolveHit` 调用点往下，
-   * 查 **advanceCasts → resolveHits 之间有没有第二次写回** 把 work 覆盖掉。
+   * 原先写的是 `if (broken.length === 0 && kept.length === target.buffs.length) return left;`
+   * —— 意思是"没碎、也没删掉东西 ⇒ 什么都没发生"。但**"壳变薄"恰恰是
+   * 数量不变的那种改动**：壳 100 吃了 30 之后还是**一条** buff（只是
+   * `absorb` 从 100 变成 70），于是那句守卫把它当成"没事发生"**直接
+   * 返回** —— 症状是"伤害 < 壳 时壳永远不扣"（血也不掉，因为伤害确实被
+   * 算成吸收了），排查了很久，因为两条路各自看起来都对。
+   *
+   * 教训：**"数量没变"不等于"值没变"**。这种守卫要用**显式的改动标记**。
    */
+  if (!changed) return left;
+
   ctx.replaceCombatant({ ...ctx.current(target.id), buffs: kept });
   for (const buff of broken) {
     (ctx.events as EventDef[]).push({

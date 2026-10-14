@@ -102,8 +102,11 @@ const shellLeft = (h: Harness): number | undefined =>
   h.target()?.buffs.find((b) => b.defId === 'test-shell')?.absorb;
 
 describe('吸收壳：先吃伤害、扣光就碎、不吃增伤', () => {
-  /** ⚠️ 未解决：见 `effectOps.absorbFromBuffs` 顶部的排查记录。 */
-  it.todo('🛡 伤害 < 壳 → **血一点不掉**，壳变薄');
+  it('🛡 伤害 < 壳 → **血一点不掉**，壳变薄', () => {
+    const h = shellHarness(100, 30);
+    expect(h.target()?.resources.hp, '壳还没破，血不该掉').toBe(500);
+    expect(shellLeft(h), '壳少了 30').toBe(70);
+  });
 
   it('🛡 伤害 > 壳 → 壳碎，**漏过去的**才扣血', () => {
     const h = shellHarness(30, 50);
@@ -121,8 +124,7 @@ describe('吸收壳：先吃伤害、扣光就碎、不吃增伤', () => {
     expect(h.events().some((e) => e.kind === 'buffExpired')).toBe(false);
   });
 
-  it.todo('⚠️ 壳**不吃增伤**（依赖上一条）');
-  it.skip('（占位）壳不吃增伤', () => {
+  it('⚠️ 壳**不吃增伤**：同一发伤害，扣的壳厚一样（对方叠易伤也没用）', () => {
     /**
      * ⚠️ 用户："如果 血盾**不吃这个减伤**"。
      * 判据放在**壳这一侧**：收到 30 点伤害就掉 30 点壳 —— 与攻击方
