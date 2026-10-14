@@ -38,11 +38,11 @@
  * 返回空数组。判据在 `ui/prepareDetail.ts` 里也会再挡一层（两边都不越界）。
  */
 
-import { ALL_SKILLS, BOSS_SKILL_IDS, PENDING_SKILLS } from '../data/content';
+import { ALL_SKILLS } from '../data/content';
 import { bossDefById } from '../data/bossDefs';
 import { BOSS_ROSTER, PLAYER_ROSTER, findEntry, isDeveloping } from '../data/roster';
 import { bossHpFor } from '../data/bossDefs';
-import { behaviorsFor, playerHpFor, playerSkillsFor } from '../data/units';
+import { playerHpFor, playerSkillsFor } from '../data/units';
 import { qijiById } from '../data/qiji';
 import { descParamsOf } from './descParams';
 import { descTemplateOf } from './keyRows';
@@ -108,18 +108,29 @@ function skillById(id: string): SkillDef | undefined {
  * 技能（内容错误），详情区不该把它当成 Boss 的招式显示出来。
  */
 function bossSkillIds(id: string): readonly string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const behavior of behaviorsFor(id)) {
-    if (behavior.kind !== 'rotation' && behavior.kind !== 'weightedRotation') continue;
-    for (const step of behavior.steps) {
-      if (seen.has(step.skillId)) continue;
-      seen.add(step.skillId);
-      out.push(step.skillId);
-    }
-  }
-  const pending = new Set(PENDING_SKILLS.map((entry) => entry.skill.id));
-  return out.filter((sid) => BOSS_SKILL_IDS.has(sid) || pending.has(sid));
+  /**
+   * ⚠️ **2026-10-14 改**：从"**从行为数组里推**"改成"**直接用
+   * `BossDef.skills`**"。
+   *
+   * ==================================================================
+   * 为什么改（这条改动的起因是一个**真的漏**）
+   * ==================================================================
+   *
+   * 旧实现只读 `rotation` / `weightedRotation` 的步骤 —— 于是**凡是不在
+   * 轮转里的招式，详情面板上就根本不会列出来**，而玩家会以为"它只有这几招"。
+   * 实测漏掉的是「嫉妒」的「**妒火**」：它由 `{ kind: 'onCooldown' }`
+   * 驱动（"冷却一好就放"），从来不在 `rotation` 的步骤里 ✗
+   *
+   * 这种漏**不会让任何东西报错** —— 只有人去看面板才发现。
+   * 现在有 `test/unit/bossDetailCoverage.test.ts` 钉住"一条都不能漏"。
+   *
+   * ⚠️ 顺序用 `BossDef.skills` 的**声明顺序**（内容作者排的，比"行为出现顺序"
+   * 稳定：轮转里同一招可能出现多次、也可能换个顺序）。
+   * ⚠️ 不再需要 `BOSS_SKILL_IDS` / `PENDING_SKILLS` 那层过滤：这两个东西
+   * 都是为了"从并集里挑出这个 Boss 的"而存在的，而 `BossDef.skills`
+   * **本来就是每个 Boss 自己那一份**。
+   */
+  return bossDefById(id).skills.map((skill) => skill.id);
 }
 
 function playerUnit(id: string): DetailUnit | undefined {
