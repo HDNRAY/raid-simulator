@@ -86,7 +86,15 @@ export interface HitResolutionContext {
    */
   evalExpr(
     expr: Expr,
-    who: { readonly self: CombatantId; readonly target: CombatantId },
+    who: {
+      readonly self: CombatantId;
+      readonly target: CombatantId;
+      /**
+       * **触发器载荷里的数**（缺省 0）。
+       * ⚠️ 只有触发器执行器会传它（`Expr: 'payloadCustom'` 唯一的来源）。
+       */
+      readonly payloadCustom?: number;
+    },
   ): number;
   pushBuffApplied(targetId: string, buffId: string, stacks: number): void;
 

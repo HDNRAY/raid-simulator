@@ -300,16 +300,25 @@ export function runAbilities(
         const who = whoOf(ctx, ownerId, ability.target, payload);
         if (who !== undefined) {
           /**
-           * ⚠️ 数值可以是 `Expr` —— 而表达式求值需要 `EvalContext`
-           * （本执行器没有）。所以这里只认**数字**，外加一条
-           * **`custom` 占位**：内容写 `delta: { e:'buffCustom' … }` 时，
-           * 引擎用载荷里的 `custom` 顶替（「血盾」还钱用它 —— 那个数来自
-           * **刚刚被打穿的那条壳**，此刻已经不在身上，表达式读不到了）。
+           * ⚠️ 数值是 `Expr` 时**真的求值**（`ctx.evalExpr`）。
+           *
+           * 载荷里的那个数（`payload.custom`）以 `payloadCustom` 的形式
+           * **并进这次求值** —— 于是内容可以写
+           * `{ e:'mul', of:[{e:'payloadCustom'},{e:'const',value:-1}] }`
+           * 这样**带符号**的算式（「血盾」打穿时要**反向搬运**：它 −N、你 +N）。
+           *
+           * ⚠️ 上一版这里是"表达式只当占位、一律取正数 `payload.custom`" ——
+           * 那表达不了"我扣 N"，于是"打穿还钱"只做了玩家 +N 那一半，
+           * 而它偷走的那 +N 没被撤销 ⇒ **凭空多出 N 点血**（已修）。
            */
           const delta =
             typeof ability.delta === 'number'
               ? ability.delta
-              : (payload.custom ?? 0);
+              : ctx.evalExpr(ability.delta, {
+                  self: who,
+                  target: who,
+                  ...(payload.custom === undefined ? {} : { payloadCustom: payload.custom }),
+                });
           if (delta !== 0) ctx.changeResourceFromTrigger(ctx.current(who), ability.resource, delta);
         }
         break;

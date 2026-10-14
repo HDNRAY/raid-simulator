@@ -65,7 +65,13 @@ function harness(args: {
     id: 'boss',
     side: 'enemy',
     caps: { hp: 420, energy: 100, douqi: 100 },
-    resources: { hp: 420, energy: 0, douqi: 0 },
+    /**
+     * ⚠️ **开局 300/420（不是满血）**：`transfer` 到上限就加不进去了 ——
+     * 满血时"它 +N"那一步会静默变成 +0，而打穿时的"撤销 −N"照扣，
+     * 于是守恒断言看起来是坏的（那其实是**另一个**边界，不是这条 bug）。
+     * 留 120 的余量，偷 30 就落得下。
+     */
+    resources: { hp: 300, energy: 0, douqi: 0 },
   });
   const boss: Combatant = {
     ...bossBare,
@@ -197,9 +203,13 @@ describe('端到端：「啃噬·血」自己挂「血盾」（feat 之前漏掉
    * （定义了、注册了，但没有任何东西授予它），整条"偷血 → 变壳 → 打穿还钱"
    * 是**断的**。这一组让 Boss **真的出手**。
    */
-  function realFight(): Harness {
-    /** ⚠️ 带上 `test-hit`：它是玩家用来"打穿壳"的那一击。 */
-    const h = harness({ playerHp: 100, skills: [hitSkill(200)] });
+  function realFight(args: { readonly hit?: number } = {}): Harness {
+    /**
+     * ⚠️ 带上 `test-hit`：它是玩家用来"打穿壳"的那一击。
+     * ⚠️ **伤害可指定**：验"守恒"时要用**正好等于壳厚**的那一发（零泄漏），
+     * 否则壳体吸不完的部分会漏到它血上，把守恒断言搞成一道算术题。
+     */
+    const h = harness({ playerHp: 100, skills: [hitSkill(args.hit ?? 200)] });
     /** 让 Boss 用**它自己的技能表**里的「啃噬·血」。 */
     h.engine.tick(
       [{ type: 'useSkill', skillId: 'gluttony-grab-hp', atTick: h.engine.snapshot.tick }],
@@ -241,6 +251,54 @@ describe('端到端：「啃噬·血」自己挂「血盾」（feat 之前漏掉
 
     expect(shellOf(h), '壳该被打穿').toBeUndefined();
     expect(h.player()?.resources.hp, '血回来了').toBe(afterSteal + stolen);
+  });
+
+  /**
+   * ⚠️ **这一条是 2026-10-14 修的那个"凭空造血"bug 的回归保护。**
+   *
+   * `啃噬·血` 用 `transfer`（**双向**：玩家 −N **且它 +N**），而早期版本的
+   * `onBreak` **只做了"玩家 +N"那一半** ⇒ 它那 +N 没被撤销 ⇒
+   * **每打穿一次，全场总血量多出 N 点**（打穿反而让它更肥）。
+   *
+   * 判据：打穿之后**两边的血量都要回到"偷之前"的状态**（守恒）。
+   */
+  it('⚠️ 打穿 → 它**也不许留着**那些血（撤销那次偷取，两边都要回原样）', () => {
+    /**
+     * ⚠️ 玩家开局 100 血 ⇒ 偷的是 30%（= 30），所以用**正好 30 伤害**那一发：
+     * 壳体把它全吃掉、**一滴都不漏到它血上** ⇒ 两边的变化必须**恰好相反**。
+     */
+    const h = realFight({ hit: 30 });
+    const stolen = shellOf(h)?.custom ?? 0;
+    expect(stolen, '玩家 100 血的 30%').toBe(30);
+    expect(stolen, '先确认真的偷到了').toBeGreaterThan(0);
+    const playerAfterSteal = h.player()?.resources.hp ?? 0;
+    const bossAfterSteal = h.boss()?.resources.hp ?? 0;
+
+    h.engine.tick(
+      [{ type: 'useSkill', skillId: 'test-hit', atTick: h.engine.snapshot.tick }],
+      'player',
+    );
+    h.engine.drainEvents();
+
+    expect(shellOf(h), '壳该被打穿').toBeUndefined();
+    /** 玩家：拿回 N。 */
+    expect(h.player()?.resources.hp, '玩家的血回来了').toBe(playerAfterSteal + stolen);
+    /** ⚠️ Boss：**扣掉**那 N —— 它当初偷到的那一份要撤销。 */
+    expect(h.boss()?.resources.hp, '它那 +N 也被撤销').toBe(bossAfterSteal - stolen);
+  });
+
+  it('🎯 **没打穿**（壳自己到期）→ 玩家拿不回，它留着那笔血', () => {
+    const h = realFight();
+    const playerAfterSteal = h.player()?.resources.hp ?? 0;
+    const bossAfterSteal = h.boss()?.resources.hp ?? 0;
+
+    /** 什么都不做，等壳自然到期（5 秒 = 300 tick，给足余量）。 */
+    for (let i = 0; i < 320; i += 1) h.engine.tick([]);
+    h.engine.drainEvents();
+
+    expect(shellOf(h), '壳该已经到期').toBeUndefined();
+    expect(h.player()?.resources.hp, '没打穿就还不了').toBe(playerAfterSteal);
+    expect(h.boss()?.resources.hp, '它留着那笔血').toBe(bossAfterSteal);
   });
 
   it('「噬咬」现在**同时**打伤害并偷炁（用户：偷炁并进噬咬）', () => {

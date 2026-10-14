@@ -70,6 +70,11 @@ export function evalContextFor(args: {
   readonly statsOf: (id: CombatantId) => Readonly<Record<StatKey, number>>;
   readonly combatCtx: CombatContext;
   readonly who: { readonly self: CombatantId; readonly target: CombatantId };
+  /**
+   * **触发器载荷里的数**（缺省 0）—— 只有"正在跑触发器"的调用方会传。
+   * 见 `Expr` 的 `payloadCustom` 与 `BuffDef.onBreak`。
+   */
+  readonly payloadCustom?: number;
 }): EvalContext {
   const { combatants, statsOf, combatCtx, who } = args;
   const pick = (w: Who): Combatant => resolveCombatantIn(combatants, who.self, w);
@@ -82,6 +87,7 @@ export function evalContextFor(args: {
       pick(w).buffs.filter((b) => b.defId === buffId).reduce((sum, b) => sum + b.stacks, 0),
     getBuffCustom: (w, buffId) =>
       pick(w).buffs.filter((b) => b.defId === buffId).reduce((sum, b) => sum + (b.custom ?? 0), 0),
+    getPayloadCustom: () => args.payloadCustom ?? 0,
     /**
      * ⚠️ 与 `stats.ts` 里那个桩**同一条纪律**：离散计数器还没接线，
      * 读出来恒 0。防线在**校验层** —— 内容里写 `Expr.counter` 会被

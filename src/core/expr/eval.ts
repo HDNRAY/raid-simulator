@@ -35,6 +35,11 @@ export interface EvalContext {
    */
   getBuffCustom?(who: Who, buffId: string): number;
   /**
+   * **触发器载荷里带的那个数**（见 `Expr` 的 `payloadCustom`）。
+   * ⚠️ 只有"正在跑某条触发器"的那个上下文才知道它 —— 别处缺省 0。
+   */
+  getPayloadCustom?(): number;
+  /**
    * 读内容实例的离散计数器。
    *
    * ⚠️ **引擎尚未实现**：战斗路径的实现是 `() => 0` 的桩（见
@@ -95,6 +100,9 @@ export function evalExpr(expr: Expr, ctx: EvalContext): number {
 
     case 'buffStacks':
       return guard(ctx.getBuffStacks(expr.who, expr.buffId));
+
+    case 'payloadCustom':
+      return guard(ctx.getPayloadCustom?.() ?? 0);
 
     case 'buffCustom': {
       const value = ctx.getBuffCustom?.(expr.who, expr.buffId) ?? 0;

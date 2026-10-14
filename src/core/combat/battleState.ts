@@ -295,6 +295,7 @@ export class BattleEngine {
             statsOf: (id) => this.statsOf(id),
             combatCtx: this.ctx,
             who,
+            ...(who.payloadCustom === undefined ? {} : { payloadCustom: who.payloadCustom }),
           }),
         ),
       rollCrit: (stats, damage) => this.rollCrit(stats, damage),

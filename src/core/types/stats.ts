@@ -113,6 +113,18 @@ export type Expr =
    * （`grant.custom` 写进去的）。没有它，内容就只能把还的数额写死 ——
    * 而"每次偷的量都不一样"。
    */
+  /**
+   * **触发器载荷里带的那个数**（`TriggerPayload.custom`）。
+   *
+   * ⚠️ 存在的理由只有一个（「血盾」）：打穿壳时要**撤销那次偷取** ——
+   * 而"当初偷了多少"挂在**刚刚被摘掉**的那条壳上，此刻**任何 buff 查询
+   * 都读不到它**（`buffCustom` 也一样）。所以引擎把它**随载荷**带进
+   * `onBreak` 那一串能力，这个节点就是"读它"。
+   *
+   * ⚠️ **它只该出现在触发器的能力里**（`BuffDef.onBreak` / `trigger.then`）。
+   * 别的地方没有载荷 ⇒ 恒 0（内容里写错位置不会崩，但也不会有数）。
+   */
+  | { readonly e: 'payloadCustom' }
   | {
       readonly e: 'buffCustom';
       readonly who: Who;
