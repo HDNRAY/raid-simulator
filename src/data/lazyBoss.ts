@@ -39,7 +39,7 @@
  * **实测定。**
  */
 
-import type { Behavior, BuffDef, Expr, SkillDef } from '../core/types';
+import type { ActiveSkillDef, Behavior, BuffDef, Expr, SkillDef } from '../core/types';
 import type { BossDef } from './bossDefs';
 import { logicMs } from '../core/loopConstants';
 import { S } from './scale';
@@ -234,7 +234,7 @@ export const LAZY_IDLE_PASSIVE: BuffDef = {
  * ================================================================== */
 
 /** 「钝击」：普通小技能。 */
-export const LAZY_BLUNT: SkillDef = {
+export const LAZY_BLUNT: ActiveSkillDef = {
   id: 'lazy-blunt',
   kind: 'activeSkill',
   nameKey: 'lazy.blunt.name',
@@ -280,7 +280,7 @@ export const LAZY_BLUNT: SkillDef = {
  */
 const HP_LOSS: Expr = { e: 'missingResourceRatio', who: 'self', resource: 'hp' };
 
-export const LAZY_PRESSURE: SkillDef = {
+export const LAZY_PRESSURE: ActiveSkillDef = {
   id: 'lazy-pressure',
   kind: 'activeSkill',
   nameKey: 'lazy.pressure.name',

@@ -215,7 +215,14 @@ export class BattleLoop {
     this.input = createKeyboardInput(window, {
       bindings: this.bindings,
       currentTick: () => this.engine.snapshot.tick,
-      isHoldSkill: (skillId) => this.engine.skillOf(skillId)?.holdDrain !== undefined,
+      /**
+       * ⚠️ `holdDrain` 是主动技能专属 —— 按 `kind` 收窄（`?.` 之后
+       * `skill?.kind === 'activeSkill'` 已经把 `skill` 收窄成 `ActiveSkillDef`）。
+       */
+      isHoldSkill: (skillId) => {
+        const skill = this.engine.skillOf(skillId);
+        return skill?.kind === 'activeSkill' && skill.holdDrain !== undefined;
+      },
       /**
        * **派生技**：`Ctrl/Cmd + 源技能键` → 放派生技。
        *
@@ -396,7 +403,10 @@ export class BattleLoop {
             this.bindings,
             state.tick,
             usableNow,
-            (skillId) => this.engine.skillOf(skillId)?.holdDrain !== undefined,
+            (skillId) => {
+              const skill = this.engine.skillOf(skillId);
+              return skill?.kind === 'activeSkill' && skill.holdDrain !== undefined;
+            },
           )
         : []),
       ...(this.touchInput
@@ -405,7 +415,10 @@ export class BattleLoop {
             this.touchInput.bindings(),
             state.tick,
             usableNow,
-            (skillId) => this.engine.skillOf(skillId)?.holdDrain !== undefined,
+            (skillId) => {
+              const skill = this.engine.skillOf(skillId);
+              return skill?.kind === 'activeSkill' && skill.holdDrain !== undefined;
+            },
           )
         : []),
     ];
@@ -484,7 +497,11 @@ export class BattleLoop {
    */
   private isUsable(skillId: string): boolean {
     const skill = this.engine.skillOf(skillId);
-    if (!skill) return false;
+    /**
+     * ⚠️ **只有主动技能"可用"** —— 代价 / 冷却 / 读条是主动技能专属，
+     * 被动技能不会被"使用"。顺手把 `kind` 判在这里，下面就不必再判。
+     */
+    if (!skill || skill.kind !== 'activeSkill') return false;
     const state = this.engine.snapshot;
     const actor = state.combatants.find((c) => c.side === 'ally');
     if (!actor || !actor.alive) return false;

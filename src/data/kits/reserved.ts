@@ -58,11 +58,11 @@
  */
 
 import { logicMs } from '../../core/loopConstants';
-import type { SkillDef } from '../../core/types';
+import type { ActiveSkillDef, SkillDef } from '../../core/types';
 import { S } from '../scale';
 
 /** 破：打断任何技能。固定 5 秒 CD，不占公共冷却。 */
-export const BREAK: SkillDef = {
+export const BREAK: ActiveSkillDef = {
   id: 'break',
   kind: 'activeSkill',
   nameKey: 'skill.break.name',

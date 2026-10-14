@@ -9,8 +9,8 @@ import { PUNCH_SKILL_ID } from '../../src/data/kits/heishan';
 import { makePlayer } from '../../src/data/units';
 import { createRegistry } from '../../src/core/content/registry';
 import { BattleEngine } from '../../src/core/combat/battleState';
-import type { Combatant, SkillDef, StatKey } from '../../src/core/types';
-import { makeCombatant } from './helpers';
+import type { ActiveSkillDef, Combatant, StatKey } from '../../src/core/types';
+import { activeSkillOf, makeCombatant } from './helpers';
 
 /**
  * **两条新炁机：黑闪 / 斩法**（用户 2026-10-14 点名）。
@@ -36,14 +36,12 @@ const registry = createRegistry(
  * ================================================================== */
 
 describe('「斩法」：斩 30 次解锁 → 读条减半 + 伤害 +30%', () => {
-  const tweaked = (): SkillDef => {
+  const tweaked = (): ActiveSkillDef => {
     const out = applySkillTweaks(
       { skills: new Map([[ATTACK.id, ATTACK]]), buffs: new Map() },
       [QIJI_ZHAN.skillTweak!],
     );
-    const skill = out.skills.get(ATTACK.id);
-    if (skill === undefined) throw new Error('斩不见了');
-    return skill;
+    return activeSkillOf(out.skills.get(ATTACK.id), ATTACK.id);
   };
 
   it('🎯 伤害 ×1.3（从技能里取原值，不写死数字）', () => {
@@ -160,7 +158,7 @@ describe('「黑闪」：拳命中后 1.2 秒再命中 → 伤害翻倍', () => 
   it('📊 **实测**翻倍窗口：命中间隔落在 [72, 78) tick（= 1.2 ~ 1.3 秒）', () => {
     /** 命中间隔 = `gap + 18`（两个 18-tick 的读条）⇒ gap ∈ [54, 60)。 */
     const gaps = scanDoublingGaps(40, 75);
-    // eslint-disable-next-line no-console
+     
     console.log('DBG 黑闪翻倍窗口（gap → 命中间隔 tick）:', gaps.map((g) => `${g}→${g + 18}`).join(' '));
     expect(gaps.length, '窗口不该是空的').toBeGreaterThan(0);
     /** ⚠️ 边界实测：下界 = 1.2 秒（gap 54），上界 < 1.3 秒（gap 60）。 */

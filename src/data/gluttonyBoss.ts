@@ -37,7 +37,7 @@
  * 按傲慢的**一半左右**给（14 / 26）。它靠啃噬活着，不靠打人。
  */
 
-import type { Behavior, BuffDef, Expr, SkillDef } from '../core/types';
+import type { ActiveSkillDef, Behavior, BuffDef, Expr, SkillDef } from '../core/types';
 import type { BossDef } from './bossDefs';
 import { logicMs } from '../core/loopConstants';
 import { S } from './scale';
@@ -241,7 +241,7 @@ function grabRatio(pool: 'energy' | 'douqi'): Expr {
  *
  * ⚠️ 现在这一版**少了一半**（打穿还钱）—— 见文件末尾。
  */
-export const GLUTTONY_GRAB_HP: SkillDef = {
+export const GLUTTONY_GRAB_HP: ActiveSkillDef = {
   id: 'gluttony-grab-hp',
   kind: 'activeSkill',
   nameKey: 'gluttony.grabHp.name',
@@ -285,7 +285,7 @@ export const GLUTTONY_GRAB_HP: SkillDef = {
  * 5. 两条伤害技（刻意压低）
  * ================================================================== */
 
-export const GLUTTONY_BITE: SkillDef = {
+export const GLUTTONY_BITE: ActiveSkillDef = {
   id: 'gluttony-bite',
   kind: 'activeSkill',
   nameKey: 'gluttony.bite.name',
@@ -316,7 +316,7 @@ export const GLUTTONY_BITE: SkillDef = {
   interruptible: true,
 };
 
-export const GLUTTONY_GORGE: SkillDef = {
+export const GLUTTONY_GORGE: ActiveSkillDef = {
   id: 'gluttony-gorge',
   kind: 'activeSkill',
   nameKey: 'gluttony.gorge.name',

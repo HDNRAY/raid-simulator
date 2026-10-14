@@ -37,7 +37,7 @@
  */
 
 import { logicMs } from '../../core/loopConstants';
-import type { BuffDef, SkillDef } from '../../core/types';
+import type { ActiveSkillDef, BuffDef } from '../../core/types';
 import type { SkillId } from '../../core/types/ids';
 import { C, S } from '../scale';
 
@@ -165,7 +165,7 @@ export function comboWindowFor(sourceSkillId: SkillId): BuffDef {
  * ⚠️ 默认**不绑键**（需求："不绑"）—— 玩家要在设置里自己绑。
  * 所以它默认不出现在技能栏与触屏按钮上，但**不是不能绑**。
  */
-export const JIE: SkillDef = {
+export const JIE: ActiveSkillDef = {
   id: 'jie',
   kind: 'activeSkill',
   nameKey: 'skill.jie.name',
@@ -243,7 +243,7 @@ export const JIE: SkillDef = {
  *   - 触屏：画在原按钮上的角标环
  * 平时它**不可用**（`requires` 不满足），所以不占技能栏。
  */
-export const STRIKE: SkillDef = {
+export const STRIKE: ActiveSkillDef = {
   id: 'strike',
   kind: 'activeSkill',
   nameKey: 'skill.strike.name',

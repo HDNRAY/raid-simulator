@@ -20,7 +20,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { SkillDef } from '../../src/core/types';
+import type { ActiveSkillDef } from '../../src/core/types';
 import { descParamsOf, placeholdersOf } from '../../src/app/descParams';
 import { displaySeconds } from '../../src/app/displayTime';
 import { buildKeyRows } from '../../src/app/keyRows';
@@ -32,18 +32,19 @@ import { createRegistry } from '../../src/core/content/registry';
 import { DEFAULT_BINDINGS } from '../../src/input/keyboard';
 import { FLASH } from '../../src/data/kits/kaili';
 import { KNOCKDOWN } from '../../src/data/bossShared';
+import { activeSkillOf } from './helpers';
 
 const TEMPLATES = flattenCatalog(zhCN);
 
 /** 技能表里按 id 找（`ALL_SKILLS` 是玩家 + 两个 Boss 的全集）。 */
-function skillOf(id: string): SkillDef {
-  const skill = ALL_SKILLS.find((s) => s.id === id);
+function skillOf(id: string): ActiveSkillDef {
+  const skill = activeSkillOf(ALL_SKILLS.find((s) => s.id === id), id);
   expect(skill, `技能表里没有 ${id}`).toBeDefined();
-  return skill as SkillDef;
+  return activeSkillOf(skill, id);
 }
 
 /** 那句说明的 i18n 模板。 */
-function templateOf(skill: SkillDef): string {
+function templateOf(skill: ActiveSkillDef): string {
   const key = skill.descKey;
   expect(key, `${skill.id} 没有 descKey`).toBeDefined();
   const template = TEMPLATES.get(key as string);
@@ -52,13 +53,13 @@ function templateOf(skill: SkillDef): string {
 }
 
 /** 渲染一句说明：模板来自 i18n，参数来自内容定义。 */
-function render(skill: SkillDef, maxHp?: number): string {
+function render(skill: ActiveSkillDef, maxHp?: number): string {
   const template = templateOf(skill);
   return translator.t(skill.descKey as never, descParamsOf(skill, template, maxHp) as never);
 }
 
 /** 推出来的参数（断言"参数表里有什么"用）。 */
-function paramsOf(skill: SkillDef, maxHp?: number) {
+function paramsOf(skill: ActiveSkillDef, maxHp?: number) {
   return descParamsOf(skill, templateOf(skill), maxHp);
 }
 
@@ -72,7 +73,7 @@ function paramsOf(skill: SkillDef, maxHp?: number) {
  * ------------------------------------------------------------------ */
 
 /** 技能第一段伤害的基础值（`hits[].effects[].damage.base`）。 */
-function damageOf(skill: SkillDef): number {
+function damageOf(skill: ActiveSkillDef): number {
   for (const hit of skill.hits) {
     for (const effect of hit.effects) {
       const base = effect.damage?.base;
@@ -85,7 +86,7 @@ function damageOf(skill: SkillDef): number {
 }
 
 /** 技能给**自己**回血的绝对值（`resource: hp` 且 `delta > 0`）。 */
-function selfHealOf(skill: SkillDef): number {
+function selfHealOf(skill: ActiveSkillDef): number {
   for (const ability of skill.abilities) {
     if (ability.kind !== 'resource') continue;
     if (ability.target.mode !== 'self') continue;
@@ -98,7 +99,7 @@ function selfHealOf(skill: SkillDef): number {
 }
 
 /** 让目标动不了的时长（秒）—— `actionLock` 或 `restrictToTags` 都算。 */
-function stunSecondsOf(skill: SkillDef): number {
+function stunSecondsOf(skill: ActiveSkillDef): number {
   for (const hit of skill.hits) {
     for (const effect of hit.effects) {
       if (effect.kind !== 'stun' && effect.kind !== 'grantBuff') continue;
@@ -125,7 +126,7 @@ function stunSecondsOf(skill: SkillDef): number {
  * ------------------------------------------------------------------ */
 
 /** 把第一段命中的第一个 `damage` 效果的基础伤害改成 `damage`。 */
-function withDamage(skill: SkillDef, damage: number): SkillDef {
+function withDamage(skill: ActiveSkillDef, damage: number): ActiveSkillDef {
   const hit = skill.hits[0];
   if (hit === undefined) throw new Error(`${skill.id} 没有 hits[0]`);
   let replaced = false;
@@ -139,7 +140,7 @@ function withDamage(skill: SkillDef, damage: number): SkillDef {
 }
 
 /** 改掉技能**自我授予**的第一个 buff 的时长。 */
-function withSelfBuffDuration(skill: SkillDef, duration: number): SkillDef {
+function withSelfBuffDuration(skill: ActiveSkillDef, duration: number): ActiveSkillDef {
   const index = skill.abilities.findIndex(
     (a) => a.kind === 'grant' && a.target.mode === 'self',
   );
@@ -154,7 +155,7 @@ function withSelfBuffDuration(skill: SkillDef, duration: number): SkillDef {
 }
 
 /** 改掉技能**自我授予**的第一个 buff 的第一条修正的值。 */
-function withSelfBuffModifierValue(skill: SkillDef, value: number): SkillDef {
+function withSelfBuffModifierValue(skill: ActiveSkillDef, value: number): ActiveSkillDef {
   const index = skill.abilities.findIndex(
     (a) => a.kind === 'grant' && a.target.mode === 'self',
   );
@@ -179,7 +180,7 @@ function withSelfBuffModifierValue(skill: SkillDef, value: number): SkillDef {
 }
 
 /** 改掉技能的第一条 `resource` 能力的 `delta`（回血那类）。 */
-function withResourceDelta(skill: SkillDef, delta: number): SkillDef {
+function withResourceDelta(skill: ActiveSkillDef, delta: number): ActiveSkillDef {
   const has = skill.abilities.some((a) => a.kind === 'resource');
   if (!has) throw new Error(`${skill.id} 没有 resource 能力`);
   return {
@@ -191,7 +192,7 @@ function withResourceDelta(skill: SkillDef, delta: number): SkillDef {
 }
 
 /** 把技能命中里某个 buff 的时长改掉（按 buff id 找）。 */
-function withGrantedBuffDuration(skill: SkillDef, buffId: string, duration: number): SkillDef {
+function withGrantedBuffDuration(skill: ActiveSkillDef, buffId: string, duration: number): ActiveSkillDef {
   const hit = skill.hits[0];
   if (hit === undefined) throw new Error(`${skill.id} 没有 hits[0]`);
   let replaced = false;
@@ -249,7 +250,7 @@ describe('伤害数字：从技能自己的命中推', () => {
  * 但"推导坏了"这件事**看不出来**。从 buff 反推则保证：内容改了、文案
  * 必须跟着改；而"反推本身有没有坏"由下一条变异断言钉住。
  */
-function selfBuffNumbers(focus: SkillDef): { readonly percent: number; readonly seconds: number } {
+function selfBuffNumbers(focus: ActiveSkillDef): { readonly percent: number; readonly seconds: number } {
   const grant = focus.abilities.find((a) => a.kind === 'grant' && a.target.mode === 'self');
   if (grant === undefined || grant.kind !== 'grant') throw new Error('focus 没有自我 grant');
   const percent = (grant.buff.modifiers ?? []).find((m) => m.op === 'addPercent')?.value;
@@ -258,7 +259,7 @@ function selfBuffNumbers(focus: SkillDef): { readonly percent: number; readonly 
 }
 
 /** 技能授予**自己**的第一个 buff 的时长（秒）—— 「闪」「避」这类只有时长。 */
-function selfGrantedSecondsOf(skill: SkillDef): number {
+function selfGrantedSecondsOf(skill: ActiveSkillDef): number {
   const grant = skill.abilities.find((a) => a.kind === 'grant' && a.target.mode === 'self');
   if (grant === undefined || grant.kind !== 'grant') throw new Error(`${skill.id} 没有自我 grant`);
   return displaySeconds(grant.buff.duration);
@@ -410,7 +411,7 @@ describe('色欲的招式说明：数值写的是数据里的值', () => {
 
   it('⚠️ 变异：轻吟冷却与伤害改了 → 文案跟着变', () => {
     const base = withDamage(skillOf('lust-hum'), 55);
-    const mutated: SkillDef = { ...base, cooldown: 12_000 };
+    const mutated: ActiveSkillDef = { ...base, cooldown: 12_000 };
     const text = render(mutated);
     expect(text, '冷却要跟随被改过的值').toContain('12');
     expect(text, '伤害要跟随被改过的值').toContain('55');

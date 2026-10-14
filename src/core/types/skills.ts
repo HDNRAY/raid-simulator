@@ -132,15 +132,39 @@ export interface PassiveEntity extends GameEntity {
 }
 
 /**
- * 主动 / 被动技能定义。
+ * 主动 / 被动技能**共用的基类**。
  *
- * **被动技能是一等公民**：就是 `kind: 'passive'` 的实体，
- * 效果写在继承来的 `abilities` 里，不需要额外字段。
- * （旧项目的 `Talent` 是个 `costs: any, effects: any` 的空壳，
- * 所以"被动技能"从来无法表达。）
+ * ==================================================================
+ * 为什么这里要判别联合，而不是原来那一个 `SkillDef`
+ * ==================================================================
+ *
+ * 原先 `SkillDef` 同时服务主动与被动，于是**被动技能被迫填一堆假值**：
+ * `castTime: 0` / `hits: []` / `targeting` … —— 它们"看起来能用，
+ * 其实是假值"，而类型系统对此一言不发。
+ *
+ * 所以按判别字段 `kind` 拆成两个接口（`ActiveSkillDef` /
+ * `PassiveSkillDef`），只有**两者都真的会用到的字段**留在这里。
+ *
+ * ⚠️ 判据是**真实读者**，不是"感觉":某个字段只要被动路径也读，就留在
+ * 本基类（例如 `tags` 被门禁 / 触发器读，与技能是主动还是被动无关）；
+ * 只有主动施法路径才读的（`cost` / `hits` / `targeting` …）全部下移到
+ * `ActiveSkillDef`。
  */
-export interface SkillDef extends GameEntity {
+export interface SkillDefBase extends GameEntity {
   readonly kind: 'activeSkill' | 'passive';
+  /**
+   * 技能标签（`SkillTag`）。
+   *
+   * ⚠️ 出现在基类是因为它**不是主动技能专属**：门禁的
+   * `restrictToTags`（倒地只能按某类技能）与触发器按 tag 过滤，
+   * 都只关心"这个技能是什么类"，与它有没有读条 / 命中段无关。
+   */
+  readonly tags: readonly SkillTag[];
+}
+
+/** 主动技能：会被"施放"，因此有读条 / 冷却 / 代价 / 命中段。 */
+export interface ActiveSkillDef extends SkillDefBase {
+  readonly kind: 'activeSkill';
   /** 0 = 瞬发 */
   readonly castTime: number;
   readonly channel?: ChannelDef;
@@ -170,6 +194,27 @@ export interface SkillDef extends GameEntity {
   };
   readonly targeting: TargetRule;
   readonly hits: readonly HitDef[];
-  readonly tags: readonly SkillTag[];
   readonly interruptible: boolean;
 }
+
+/**
+ * 被动技能：**不会**被"施放"，所以没有读条 / 冷却 / 代价 / 命中段 ——
+ * 效果写在继承来的 `abilities` 里（`grant` / `trigger` / `modifier`…）。
+ *
+ * **被动技能是一等公民**：就是 `kind: 'passive'` 的实体，
+ * 不需要额外字段。
+ * （旧项目的 `Talent` 是个 `costs: any, effects: any` 的空壳，
+ * 所以"被动技能"从来无法表达。）
+ */
+export interface PassiveSkillDef extends SkillDefBase {
+  readonly kind: 'passive';
+}
+
+/**
+ * 主动 / 被动技能的**判别联合**。
+ *
+ * 需要"两种都要处理"的地方用 `switch (skill.kind)` 穷尽分支（TS 会查漏）；
+ * 只处理主动的**优先把参数类型收窄成 `ActiveSkillDef`**，不要在每个
+ * 调用点加 `if`。
+ */
+export type SkillDef = ActiveSkillDef | PassiveSkillDef;

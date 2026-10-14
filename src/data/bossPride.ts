@@ -53,7 +53,7 @@
  * 定义处，不要只看这一行。
  */
 
-import type { Behavior, BuffDef, SkillDef } from '../core/types';
+import type { ActiveSkillDef, Behavior, BuffDef, SkillDef } from '../core/types';
 import { logicMs } from '../core/loopConstants';
 import { C, S } from './scale';
 import { KNOCKDOWN } from './bossShared';
@@ -155,7 +155,7 @@ export const BOSS_HEAVY_ARMOR: BuffDef = {
  * 它的设计重量全在"快"上：读条最短，所以玩家的正确应对是**硬吃**
  * （20 血 vs 30 炁，两笔都是可预算的代价，取决于兜里还有多少炁）。
  */
-export const BOSS_SCORN: SkillDef = {
+export const BOSS_SCORN: ActiveSkillDef = {
   id: 'boss-scorn',
   kind: 'activeSkill',
   nameKey: 'boss.cleave.name',
@@ -205,7 +205,7 @@ export const BOSS_SCORN: SkillDef = {
  * ⚠️ 它是**法术**（`spell`）而不是近战 —— 与快刀/慢刀的物理近战区分开，
  * 这是沿用旧「横扫」的分类。
  */
-export const BOSS_REBUKE: SkillDef = {
+export const BOSS_REBUKE: ActiveSkillDef = {
   id: 'boss-rebuke',
   kind: 'activeSkill',
   nameKey: 'boss.sweep.name',
@@ -251,7 +251,7 @@ export const BOSS_REBUKE: SkillDef = {
  * 一旦玩家炁见底就是死局（与 `lust-boss.md` §0.2 的"不要有死局"冲突）。
  * "不划算"已经足够把玩家推向闪避，不需要做成"不可能"。
  */
-export const BOSS_HEAVY: SkillDef = {
+export const BOSS_HEAVY: ActiveSkillDef = {
   id: 'boss-heavy',
   kind: 'activeSkill',
   nameKey: 'boss.empower.name',
@@ -338,7 +338,7 @@ export const BOSS_HEAVY: SkillDef = {
  * 免费拿到，而"整场一次"由 `cooldown`（30 秒 > 一场时长）保证，
  * 血量门槛由轮转步的 `when` 保证。
  */
-export const BOSS_MEND: SkillDef = {
+export const BOSS_MEND: ActiveSkillDef = {
   id: 'boss-mend',
   kind: 'activeSkill',
   nameKey: 'boss.mend.name',

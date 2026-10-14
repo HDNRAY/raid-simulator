@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { BattleEngine } from '../../src/core/combat/battleState';
-import { makeCombatant } from './helpers';
+import { activeSkillOf, makeCombatant } from './helpers';
 import { applyBuff } from '../../src/core/buffs';
 import { ALL_BUFFS, ALL_SKILLS } from '../../src/data/content';
 import { LUST_MARK, LUST_PASSIVE, LUST_STUN, LUST_BEHAVIORS } from '../../src/data/lustBoss';
-import type { BuffDef, SkillDef } from '../../src/core/types';
+import type { ActiveSkillDef, BuffDef } from '../../src/core/types';
 
 /**
  * 「色欲」的两个辨识机制：**反伤印记**与**眩晕**。
@@ -17,10 +17,10 @@ import type { BuffDef, SkillDef } from '../../src/core/types';
  */
 
 const buffs = new Map<string, BuffDef>(ALL_BUFFS.map((b) => [b.id, b]));
-const skills = new Map<string, SkillDef>(ALL_SKILLS.map((s) => [s.id, s]));
+const skills = new Map<string, ActiveSkillDef>(ALL_SKILLS.map((s) => [s.id, activeSkillOf(s, s.id)]));
 
 /** 玩家打海草 / Boss 打玩家的技能（测试用，固定伤害便于断言）。 */
-function strike(id: string, damage: number): SkillDef {
+function strike(id: string, damage: number): ActiveSkillDef {
   return {
     id,
     kind: 'activeSkill',
@@ -40,9 +40,9 @@ function strike(id: string, damage: number): SkillDef {
   };
 }
 
-function makeEngine(extra: readonly SkillDef[] = []) {
+function makeEngine(extra: readonly ActiveSkillDef[] = []) {
   /** 额外的技能注册进**技能表**（buff 表用真实的 `ALL_BUFFS`）。 */
-  const all = new Map<string, SkillDef>(skills);
+  const all = new Map<string, ActiveSkillDef>(skills);
   for (const s of extra) all.set(s.id, s);
 
   const player = makeCombatant({ id: 'player', side: 'ally' });
@@ -254,7 +254,7 @@ describe('眩晕：锁死行动 + 打断施法', () => {
     /** 直接用「魅惑」的内容定义去打（它带 `kind: 'stun'`）。 */
     const charm = skills.get('lust-charm');
     expect(charm, '「魅惑」必须已注册进 ALL_SKILLS').toBeDefined();
-    const engine2 = makeEngine([charm as SkillDef, strike('p-hit', 10)]);
+    const engine2 = makeEngine([activeSkillOf(charm, 'lust-charm'), strike('p-hit', 10)]);
     grant(engine2, 'player', immune);
     engine2.applyActions([{ type: 'useSkill', skillId: 'lust-charm', atTick: 0 }], 'lust');
     /**

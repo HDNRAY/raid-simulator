@@ -9,6 +9,7 @@ import {
 import { roughlyUsable } from '../../src/core/run';
 import { registry } from './fixtures';
 import { FOCUS_BUFF } from '../../src/data/kits/shared';
+import { activeSkillOf } from '../unit/helpers';
 
 /**
  * 真实内容的集成测试。
@@ -439,7 +440,7 @@ describe('公共冷却不应产生误报（用户报过的 bug）', () => {
   it('预测门禁与引擎判据一致：按住「斩」不会产生被拒', () => {
     const options = makeGoldenEngineOptions();
     const engine = new BattleEngine(options);
-    const attack = options.skills.get('attack')!;
+    const attack = activeSkillOf(options.skills.get('attack'), 'attack');
     let attacks = 0;
     let rejects = 0;
 
@@ -576,7 +577,7 @@ describe('读条与打断（公共冷却已删除，节奏改由读条表达）'
   });
 
   it('「闪」有 1 秒冷却（保留取舍，但不让连按浪费炁）', () => {
-    const dodge = registry.skills.get('dodge')!;
+    const dodge = activeSkillOf(registry.skills.get('dodge'), 'dodge');
     expect(dodge.cooldown).toBe(1000);
   });
 
@@ -627,8 +628,8 @@ describe('读条与打断（公共冷却已删除，节奏改由读条表达）'
   });
 
   it('「轰」比「斩」读条更久（高伤害的代价是更容易被打断）', () => {
-    const a = registry.skills.get('attack')!;
-    const b = registry.skills.get('blast')!;
+    const a = activeSkillOf(registry.skills.get('attack'), 'attack');
+    const b = activeSkillOf(registry.skills.get('blast'), 'blast');
     expect(b.castTime).toBeGreaterThan(a.castTime);
     expect(a.castTime).toBeGreaterThan(0);
   });
@@ -636,7 +637,7 @@ describe('读条与打断（公共冷却已删除，节奏改由读条表达）'
   it('「闪」「破」是瞬发 —— 它们必须能随时按出来', () => {
     // 闪避的意义就是"看到前摇随时能按"；破要能打断 Boss 的读条。
     // 如果它们也读条，这两个核心玩法就废了。
-    expect(registry.skills.get('dodge')!.castTime).toBe(0);
-    expect(registry.skills.get('break')!.castTime).toBe(0);
+    expect(activeSkillOf(registry.skills.get('dodge'), 'dodge').castTime).toBe(0);
+    expect(activeSkillOf(registry.skills.get('break'), 'break').castTime).toBe(0);
   });
 });

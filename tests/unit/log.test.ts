@@ -20,6 +20,7 @@ import { LOG_PANEL_METRICS } from '../../src/ui/LogPanel';
 import { translator } from '../../src/i18n/translator';
 import type { EventDef } from '../../src/core/types';
 import { ALL_BUFFS, ALL_SKILLS } from '../../src/data/content';
+import { activeSkillOf } from './helpers';
 
 /**
  * 战斗日志的**格式化层**。
@@ -305,7 +306,7 @@ describe('能力结算时刻：castStart 与 castFinish', () => {
   });
 
   it('霸体时长 == 慢刀前摇（读条走完就消失，不会溢出到下一招）', () => {
-    const heavy = ALL_SKILLS.find((s) => s.id === 'boss-heavy')!;
+    const heavy = activeSkillOf(ALL_SKILLS.find((s) => s.id === 'boss-heavy'), 'boss-heavy');
     const armor = ALL_BUFFS.find((b) => b.id === 'boss-heavy-armor');
     expect(armor).toBeDefined();
     expect(armor!.flags?.interruptImmune).toBe(true);

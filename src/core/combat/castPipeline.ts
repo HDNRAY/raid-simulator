@@ -30,6 +30,7 @@
  */
 
 import type {
+  ActiveSkillDef,
   BuffDef,
   CastInstance,
   Combatant,
@@ -89,9 +90,15 @@ export function advanceCasts(
 
       // 同样遍历副本：循环体里 resolveHit 会改状态
       for (const cast of [...actor.casts]) {
-        // 来源消失（技能被移除）→ 立即中断。见 i18n/数据模型规范 §7.2 规则 4
+        /**
+         * 来源消失（技能被移除）→ 立即中断。见 i18n/数据模型规范 §7.2 规则 4
+         *
+         * ⚠️ `kind !== 'activeSkill'` 走**同一条**：只有主动技能会读条
+         * （`tryUseSkill` 按 `kind` 收窄过），所以被动技能出现在这里只可能
+         * 是内容坏了 —— 与其读 `hits` 时拿到假值静默通过，不如一起中断。
+         */
         const skill = ctx.skills.get(cast.skillId);
-        if (!skill) {
+        if (!skill || skill.kind !== 'activeSkill') {
           ctx.events.push({
             kind: 'castInterrupted',
             tick: ctx.tick,
@@ -198,7 +205,7 @@ export function advanceCasts(
    */
 export function applyCastStartAbilities(
   ctx: CastPipelineContext,
-  skill: SkillDef,
+  skill: ActiveSkillDef,
   actorId: string,
 ): void {
     for (const ability of skill.abilities) {
@@ -222,7 +229,7 @@ export function applyCastStartAbilities(
 export function resolveSkillHits(
   ctx: CastPipelineContext,
   actor: Combatant,
-  skill: SkillDef,
+  skill: ActiveSkillDef,
 ): void {
     for (const hit of skill.hits) {
       resolveHit(ctx.hit(), actor, skill, hit);
@@ -255,7 +262,7 @@ export function resolveSkillHits(
 export function fireCastFinishTriggers(
   ctx: CastPipelineContext,
   actor: Combatant,
-  skill: SkillDef,
+  skill: ActiveSkillDef,
 ): void {
     /**
      * 本次结算的**唯一工作副本**。
@@ -457,7 +464,12 @@ export function tryUseSkill(
     let actor = ctx.current(actorId);
 
     const skill = ctx.skills.get(skillId);
-    if (!skill) return;
+    /**
+     * ⚠️ **只有主动技能能被施放** —— 被动技能的效果写在 `abilities` 里，
+     * 由引擎在挂载 / 触发时结算，从不走这条路。在这里收窄一次，下面就不必
+     * 在每个字段（`cost` / `castTime` / `hits`…）处再判 `kind`。
+     */
+    if (!skill || skill.kind !== 'activeSkill') return;
 
     const stats = ctx.statsOf(actor.id);
     const opponent = ctx.opponentOf(actor.id);

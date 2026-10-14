@@ -31,7 +31,7 @@ import {
   PLAYER_SKILL_IDS,
   PLAYER_SKILLS,
 } from '../../src/data/content';
-import type { SkillDef } from '../../src/core/types';
+import type { ActiveSkillDef } from '../../src/core/types';
 import { LUST_SKILLS } from '../../src/data/lustBoss';
 import { PRIDE_SKILLS } from '../../src/data/bossPride';
 import { JEALOUSY_SKILLS } from '../../src/data/jealousyBoss';
@@ -46,6 +46,7 @@ import { GUARD_HOLD_DRAIN_PER_SECOND } from '../../src/data/balance';
 import { FLASH, FLASH_IFRAME } from '../../src/data/kits/kaili';
 import { DODGE_IFRAME } from '../../src/data/kits/linwanfeng';
 import { displaySeconds } from '../../src/app/displayTime';
+import { activeSkillOf } from './helpers';
 
 /**
  * ==================================================================
@@ -64,7 +65,7 @@ import { displaySeconds } from '../../src/app/displayTime';
  */
 
 /** 技能第一条代价的**显示值**（独立读 `SkillDef`，不经过行构造）。 */
-function costValueOf(skill: SkillDef): number {
+function costValueOf(skill: ActiveSkillDef): number {
   const cost = skill.cost[0];
   if (cost === undefined || typeof cost.value !== 'number') {
     throw new Error(`${skill.id} 没有可显示的静态代价`);
@@ -280,7 +281,7 @@ describe('行的内容：没有战斗快照时也要有结构化信息', () => {
     expect(rows.some((r) => r.skillId === 'break'), '「破」不该出现在设置页').toBe(false);
     /** 但它**还在定义里**（注册表能解析）—— 删除会丢设计，见 reserved.ts。 */
     expect(ALL_SKILLS.some((s) => s.id === 'break')).toBe(true);
-    expect(isBindablePlayerSkill(ALL_SKILLS.find((s) => s.id === 'break')!)).toBe(false);
+    expect(isBindablePlayerSkill(activeSkillOf(ALL_SKILLS.find((s) => s.id === 'break'), 'break'))).toBe(false);
     /** 也不在默认键位表里 —— 否则 `bindingsForPlayer` 之外还会漏出它。 */
     expect(DEFAULT_BINDINGS.some((b) => b.skillId === 'break')).toBe(false);
   });

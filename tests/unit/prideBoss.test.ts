@@ -11,9 +11,9 @@ import {
   PRIDE_BUFFS,
   PRIDE_SKILLS,
 } from '../../src/data/bossPride';
-import { makeCombatant } from './helpers';
+import { activeSkillOf, makeCombatant } from './helpers';
 import { OUTPUT_PRIORITY, PLAYER_CAPS, makeGoldenEngineOptions, planPriority } from '../golden/fixtures';
-import type { Action, BattleState, Behavior, BuffDef, SkillDef } from '../../src/core/types';
+import type { Action, ActiveSkillDef, BattleState, Behavior, BuffDef } from '../../src/core/types';
 import { PRIDE_HP } from '../../src/data/prideBoss';
 
 /**
@@ -35,7 +35,7 @@ import { PRIDE_HP } from '../../src/data/prideBoss';
  */
 
 const buffs = new Map<string, BuffDef>(ALL_BUFFS.map((b) => [b.id, b]));
-const skills = new Map<string, SkillDef>(ALL_SKILLS.map((s) => [s.id, s]));
+const skills = new Map<string, ActiveSkillDef>(ALL_SKILLS.map((s) => [s.id, activeSkillOf(s, s.id)]));
 
 /** 一个不还手的 Boss：血厚到打不死，只用给定的行为数组。 */
 function makeRotationEngine(options: {
@@ -216,7 +216,7 @@ describe('「傲慢」的三把刀：内容数值就是设计表', () => {
     expect(BOSS_SCORN.hits[0]!.at).toBe(1_000);
     expect(BOSS_REBUKE.hits[0]!.at).toBe(1_500);
     expect(BOSS_HEAVY.hits[0]!.at).toBe(2_000);
-    const damageOf = (s: SkillDef): unknown => {
+    const damageOf = (s: ActiveSkillDef): unknown => {
       const effect = s.hits[0]!.effects.find((e) => e.kind === 'damage');
       return effect?.kind === 'damage' ? effect.damage?.base : undefined;
     };
@@ -234,7 +234,7 @@ describe('「傲慢」的三把刀：内容数值就是设计表', () => {
   });
 
   it('「倒地」只来自慢刀', () => {
-    const grantsKnockdown = (s: SkillDef): boolean =>
+    const grantsKnockdown = (s: ActiveSkillDef): boolean =>
       s.hits.some((h) =>
         h.effects.some((e) => e.kind === 'grantBuff' && e.buff?.id === 'knockdown'),
       );
@@ -244,7 +244,7 @@ describe('「傲慢」的三把刀：内容数值就是设计表', () => {
   });
 
   it('霸体只在慢刀上，且不带任何"卸力无效"的新 flag（设计 §5.2 明确不封卸力）', () => {
-    const grantsArmor = (s: SkillDef): boolean =>
+    const grantsArmor = (s: ActiveSkillDef): boolean =>
       s.abilities.some((a) => a.kind === 'grant' && a.buff.id === 'boss-heavy-armor');
     expect(grantsArmor(BOSS_HEAVY)).toBe(true);
     expect(grantsArmor(BOSS_REBUKE)).toBe(false);

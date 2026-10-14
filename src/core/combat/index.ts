@@ -25,6 +25,7 @@
 
 import { kahanSum, roundStat, safeDiv } from '../numeric';
 import type {
+  ActiveSkillDef,
   BuffDef,
   BuffInstance,
   Combatant,
@@ -213,9 +214,13 @@ export function syncResourceGateBuff(
   };
 }
 
+/**
+ * ⚠️ 参数收窄成 `ActiveSkillDef`：门禁判的是"**能不能放这一招**" ——
+ * 读条 / 冷却 / 代价 / 目标全是主动技能才有的概念，被动技能不会被施放。
+ */
 export function checkGate(
   combatant: Combatant,
-  skill: SkillDef,
+  skill: ActiveSkillDef,
   ctx: CombatContext,
   options: {
     readonly hasTarget: boolean;
@@ -448,7 +453,7 @@ export function hastedCastTime(castTimeMs: number, stats: Readonly<Record<StatKe
 /** 资源消耗（返回新的 combatant；不足时由 gate 拦住，这里只扣）。 */
 export function payCosts(
   combatant: Combatant,
-  skill: SkillDef,
+  skill: ActiveSkillDef,
   tick: number,
 ): { readonly combatant: Combatant; readonly events: readonly EventDef[] } {
   let current = combatant;

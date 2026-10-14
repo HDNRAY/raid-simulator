@@ -26,7 +26,7 @@
  */
 
 import { logicMs } from '../../core/loopConstants';
-import type { BuffDef, SkillDef } from '../../core/types';
+import type { ActiveSkillDef, BuffDef, SkillDef } from '../../core/types';
 import { C, S } from '../scale';
 import { FOCUS } from './shared';
 import { COMBO_WINDOW, JIE } from './combo';
@@ -124,7 +124,7 @@ export const SUNDER_DEBUFF: BuffDef = {
  * 引擎是原值，中间任何一次改动都会让它们分叉而没人看得出来。改成
  * `logicMs(3)` 之后**值 == 显示**，不再有"吸上去"这一层。
  */
-export const PUNCH: SkillDef = {
+export const PUNCH: ActiveSkillDef = {
   id: 'punch',
   kind: 'activeSkill',
   nameKey: 'skill.punch.name',
@@ -159,7 +159,7 @@ export const PUNCH: SkillDef = {
  *
  * ⚠️ 数值与机制**一个字都没动**（定稿："轰 不动"）。
  */
-export const BLAST: SkillDef = {
+export const BLAST: ActiveSkillDef = {
   id: 'blast',
   kind: 'activeSkill',
   nameKey: 'skill.blast.name',
@@ -204,7 +204,7 @@ export const BLAST: SkillDef = {
  * ⚠️ **初始不绑定任何按键**（需求）。它仍出现在设置里可被绑定；
  * 而战斗画面右下角**只显示已绑定按键的技能**。
  */
-export const FLASH: SkillDef = {
+export const FLASH: ActiveSkillDef = {
   id: 'flash',
   kind: 'activeSkill',
   nameKey: 'skill.flash.name',

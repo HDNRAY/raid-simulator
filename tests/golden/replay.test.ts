@@ -18,6 +18,7 @@ import {
   planPriority,
 } from './fixtures';
 import { LIN_WANFENG_HP, LIN_WANFENG_SKILLS } from '../../src/data/kits/linwanfeng';
+import { activeSkillOf } from '../unit/helpers';
 
 /**
  * 黄金重放（架构规范 §7.5）。
@@ -331,8 +332,7 @@ describe('随机源：新内容不含暴击，所以不消耗随机数', () => {
   it('给一个可暴击的技能就会消耗随机数（机制是好的）', () => {
     const options = makeGoldenEngineOptions();
     const skills = new Map(options.skills);
-    const attack = skills.get('attack');
-    if (!attack) throw new Error('missing attack skill');
+    const attack = activeSkillOf(skills.get('attack'), 'attack');
     skills.set('attack', {
       ...attack,
       hits: attack.hits.map((h) => ({

@@ -25,7 +25,7 @@
  */
 
 import { LOGIC_TICKS_PER_SECOND, logicMs } from '../../core/loopConstants';
-import type { BuffDef, SkillDef } from '../../core/types';
+import type { ActiveSkillDef, BuffDef, SkillDef } from '../../core/types';
 import { GUARD_HOLD_DRAIN_PER_SECOND, GUARD_THRESHOLD } from '../balance';
 import { C, S } from '../scale';
 import { FOCUS } from './shared';
@@ -94,7 +94,7 @@ export const GUARD_THRESHOLD_BUFF: BuffDef = {
  * ⚠️ 数值与机制**一个字都没动**（定稿："斩 不动"）—— 从
  * `data/content.ts` 原样搬过来，只换了文件位置。
  */
-export const ATTACK: SkillDef = {
+export const ATTACK: ActiveSkillDef = {
   id: 'attack',
   kind: 'activeSkill',
   nameKey: 'skill.attack.name',
@@ -166,7 +166,7 @@ export const ATTACK: SkillDef = {
  * 收益，代价是 1.2 秒——本作最长的读条，所以它几乎只能在 Boss 刚出完招
  * 的空档里放。没有这个读条，它就是"更强的轰"（而且不带易伤反而更差）。
  */
-export const PI: SkillDef = {
+export const PI: ActiveSkillDef = {
   id: 'pi',
   kind: 'activeSkill',
   nameKey: 'skill.pi.name',
@@ -239,7 +239,7 @@ export const PI: SkillDef = {
  * 而杠杆是"每秒"。`15 炁/秒` ⇒ `perLogicTick: 1.5`；写成 `15` 就是 150 炁/秒。
  * 显示侧由 `core/combat/holds.ts` 的 `holdDrainPerSecond()` 乘回来。
  */
-export const GUARD: SkillDef = {
+export const GUARD: ActiveSkillDef = {
   id: 'guard',
   kind: 'activeSkill',
   nameKey: 'skill.guard.name',
@@ -276,7 +276,7 @@ export const GUARD: SkillDef = {
 };
 
 /** 避：0.5 秒完全无敌。代价是 15 炁。 */
-export const DODGE: SkillDef = {
+export const DODGE: ActiveSkillDef = {
   id: 'dodge',
   kind: 'activeSkill',
   nameKey: 'skill.dodge.name',

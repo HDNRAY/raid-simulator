@@ -6,18 +6,14 @@ import {
   type ContentBundle,
 } from '../../src/core/content/validate';
 import { LOGIC_TICK_MS } from '../../src/core/loopConstants';
-import type {
-  BuffDef,
-  EncounterDef,
-  GameEntity,
-  SkillDef,
-} from '../../src/core/types';
+import type { ActiveSkillDef, BuffDef, EncounterDef, GameEntity } from '../../src/core/types';
 import { PRIDE_BEHAVIORS } from '../../src/data/bossPride';
 import { ALL_BUFFS, ALL_SKILLS } from '../../src/data/content';
 import { ENTROPY_CLOCK } from '../../src/data/entities/entropyClock';
 import { LUST_BEHAVIORS } from '../../src/data/lustBoss';
 import { flattenCatalog } from '../../src/i18n/translator';
 import { zhCN } from '../../src/i18n/locales/zh-CN';
+import { activeSkillOf } from './helpers';
 
 /**
  * **`OFF_GRID_TIME`：内容里的时间值必须落在 0.1 秒刻度上。**
@@ -53,10 +49,16 @@ const EMPTY_LOADOUT = {
  * 之所以只需要 `as SkillDef`（而不是 `as unknown as`）：本检查只读
  * 时间字段，`Partial` 与目标类型在结构上是兼容的。
  */
-function asSkill(value: Partial<SkillDef>): SkillDef {
+function asSkill(value: Partial<ActiveSkillDef>): ActiveSkillDef {
   // 给上"本检查会遍历的集合"的空值，免得 fixture 漏字段导致 TypeError
   // 而不是一条断言失败。
-  return { abilities: [], hits: [], ...value } as SkillDef;
+  /**
+   * ⚠️ **`kind` 必须显式写出来**：校验器按 `kind === 'activeSkill'` 收窄
+   * （见 `content/timeGrid.ts`），而这里是 `as` 强迫类型 —— 运行期漏了
+   * `kind` 的话类型检查不会响，但**校验器会整条跳过这个技能**，
+   * 表现成"改坏了值也不报错"（本次确实红过）。
+   */
+  return { abilities: [], hits: [], ...value, kind: 'activeSkill' } as ActiveSkillDef;
 }
 
 /** 同上，buffs 版。 */
@@ -111,7 +113,7 @@ describe('OFF_GRID_TIME：现有内容全过（规则成立 + 内容干净）', 
 
 describe('OFF_GRID_TIME：反向验证（真的会红）', () => {
   it('「拳」的 castTime 写回 250（= logicMs(2.5)）会报错，并指出字段', () => {
-    const punch = ALL_SKILLS.find((s) => s.id === 'punch');
+    const punch = activeSkillOf(ALL_SKILLS.find((s) => s.id === 'punch'), 'punch');
     expect(punch).toBeDefined();
 
     const issues = validateContent({
@@ -133,7 +135,9 @@ describe('OFF_GRID_TIME：反向验证（真的会红）', () => {
 
     const tampered: ContentBundle = {
       ...bundle,
-      skills: bundle.skills.map((s) => (s.id === 'punch' ? asSkill({ ...s, castTime: 250 }) : s)),
+      skills: bundle.skills.map((s) =>
+        s.id === 'punch' && s.kind === 'activeSkill' ? asSkill({ ...s, castTime: 250 }) : s,
+      ),
     };
 
     expect(validateContent(tampered).map((i) => i.code)).toEqual(['OFF_GRID_TIME']);
@@ -222,14 +226,14 @@ describe('OFF_GRID_TIME：反向验证（真的会红）', () => {
   });
 
   it('「截」的 `cooldownMs: -logicMs(100)`（负数 = 退还）照旧通过 —— 刻度看绝对值', () => {
-    const jie = ALL_SKILLS.find((s) => s.id === 'jie');
+    const jie = activeSkillOf(ALL_SKILLS.find((s) => s.id === 'jie'), 'jie');
     expect(jie).toBeDefined();
 
     expect(offGridTimeIssues(gridInput({ skills: jie === undefined ? [] : [jie] }))).toEqual([]);
   });
 
   it('`holdDrain.perLogicTick`（速率，不是时长）**不**被拦 —— 别误伤', () => {
-    const guard = ALL_SKILLS.find((s) => s.id === 'guard');
+    const guard = activeSkillOf(ALL_SKILLS.find((s) => s.id === 'guard'), 'guard');
     expect(guard?.holdDrain?.perLogicTick).toBe(1.5);
 
     const issues = offGridTimeIssues(gridInput({ skills: guard === undefined ? [] : [guard] }));

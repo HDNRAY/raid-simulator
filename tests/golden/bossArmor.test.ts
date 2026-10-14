@@ -3,6 +3,7 @@ import { BattleEngine } from '../../src/core/combat/battleState';
 import { PRIDE_BEHAVIORS } from '../../src/data/bossPride';
 import { registry } from './fixtures';
 import { makeGoldenEngineOptions } from './fixtures';
+import { activeSkillOf } from '../unit/helpers';
 
 /**
  * 「傲慢」的**霸体**机制：唯一挡得住打断的东西。
@@ -131,6 +132,6 @@ describe('Boss 霸体：唯一挡得住打断的东西', () => {
     const armor = makeGoldenEngineOptions().buffs.get('boss-heavy-armor')!;
     expect(armor.flags?.interruptImmune).toBe(true);
     expect(Number.isFinite(armor.duration)).toBe(true);
-    expect(armor.duration).toBe(registry.skills.get('boss-heavy')!.castTime);
+    expect(armor.duration).toBe(activeSkillOf(registry.skills.get('boss-heavy'), 'boss-heavy').castTime);
   });
 });

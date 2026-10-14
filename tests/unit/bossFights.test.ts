@@ -92,7 +92,7 @@ describe('六个 Boss 各跑一整场（整场级回归）', () => {
   const results = BOSSES.map((id) => fight(id));
 
   it('📊 打印整场摘要（人看的，不是断言）', () => {
-    // eslint-disable-next-line no-console
+     
     console.table(
       results.map((r) => ({
         Boss: r.id,
@@ -179,7 +179,7 @@ describe('多 seed 复核（排除"只是这个种子不好"）', () => {
         });
       }
     }
-    // eslint-disable-next-line no-console
+     
     console.table(rows);
     expect(rows).toHaveLength(BOSSES.length * 3);
   });

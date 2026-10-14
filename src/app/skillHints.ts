@@ -105,6 +105,14 @@ export function derivedHintKeys(skill: SkillDef | undefined): readonly string[] 
   if (skill === undefined) return [];
 
   /**
+   * ⚠️ **`hits` 只有主动技能有**（被动技能没有命中段，它的效果写在
+   * `abilities` 里 —— 下面那条路径对两种技能都成立）。按 `kind` 收窄，
+   * 而不是"假定有 `hits`、没有就当空数组"：后者正是被动技能被迫填假值的
+   * 那个毛病。
+   */
+  const hits = skill.kind === 'activeSkill' ? skill.hits : [];
+
+  /**
    * ⚠️ **两条路径都要扫**：`hits[].effects`（命中时发生的事）与
    * `abilities`（施法时发生的事，如 `castStart` 给自己挂霸体）。
    *
@@ -115,7 +123,7 @@ export function derivedHintKeys(skill: SkillDef | undefined): readonly string[] 
   const buffEffects: readonly (
     | { readonly kind: string; readonly buff?: BuffDef; readonly target?: TargetRule }
   )[] = [
-    ...(skill.hits ?? []).flatMap((hit) => [...(hit.effects ?? [])]),
+    ...hits.flatMap((hit) => [...(hit.effects ?? [])]),
     ...(skill.abilities ?? []).filter((a) => a.kind === 'grant'),
   ];
 
@@ -126,7 +134,7 @@ export function derivedHintKeys(skill: SkillDef | undefined): readonly string[] 
    * 而这条提示说的是"**这一下**值不值得用闪避全额免掉"。
    */
   const threshold = HP_MAX * HIGH_DAMAGE_RATIO;
-  const biggestHit = (skill.hits ?? [])
+  const biggestHit = hits
     .flatMap((hit) => [...(hit.effects ?? [])])
     .reduce((max, e) => {
       if (e.kind !== 'damage') return max;

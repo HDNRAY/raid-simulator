@@ -29,7 +29,7 @@
 
 import { LOGIC_TICK_MS } from '../core/loopConstants';
 import type { QijiSkillTweak } from '../core/types/qiji';
-import type { Effect, SkillDef, BuffDef } from '../core/types';
+import type { Effect, ActiveSkillDef, SkillDef, BuffDef } from '../core/types';
 
 /* ================================================================== *
  * 把内容层的改动落到技能定义上（`skillTweaks` 的**唯一**解释点）
@@ -153,6 +153,14 @@ export function applySkillTweaks(
 
   const skills = new Map<string, SkillDef>();
   for (const [skillId, skill] of tables.skills) {
+    /**
+     * ⚠️ 炁机的技能改动只碰**主动技能**（代价 / 读条 / 命中段都在它身上）；
+     * 被动技能没有这些东西，原样保留同一个引用。
+     */
+    if (skill.kind !== 'activeSkill') {
+      skills.set(skillId, skill);
+      continue;
+    }
     const deltas = costDeltas.get(skillId);
     const effect = onUse.get(skillId);
     skills.set(skillId, applyToSkill(skill, deltas, effect, buffs, scales.get(skillId)));
@@ -200,13 +208,14 @@ function overrideBuffModifiers(
  * 实测增伤仍是 60）。
  */
 function applyToSkill(
-  skill: SkillDef,
+  /** ⚠️ 只有主动技能有代价 / 读条 / 命中段可改。 */
+  skill: ActiveSkillDef,
   deltas: ReadonlyMap<string, number> | undefined,
   effect: QijiSkillTweak['onUse'],
   buffs: ReadonlyMap<string, BuffDef>,
   /** 「砍」那两个倍率（缺省 = 不动）。 */
   scale: { castTimeScale?: number; damageScale?: number } | undefined,
-): SkillDef {
+): ActiveSkillDef {
   /** 这条技能里哪些 grant 的 buff 被覆盖过（按 id 找新对象）。 */
   const abilities = skill.abilities.map((ability) => {
     if (ability.kind !== 'grant') return ability;

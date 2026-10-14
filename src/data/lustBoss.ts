@@ -19,7 +19,7 @@
  * ⚠️ 本作**不分伤害类型**（用户决定），所以技能表里只有伤害数值。
  */
 
-import type { Behavior, BuffDef, SkillDef } from '../core/types';
+import type { ActiveSkillDef, Behavior, BuffDef, SkillDef } from '../core/types';
 import type { BossDef } from './bossDefs';
 import { logicMs } from '../core/loopConstants';
 import { S } from './scale';
@@ -206,7 +206,7 @@ export const LUST_STUN: BuffDef = {
  * ------------------------------------------------------------------ */
 
 /** 「轻吟」：快招，短前摇、低伤、频繁。 */
-export const LUST_HUM: SkillDef = {
+export const LUST_HUM: ActiveSkillDef = {
   id: 'lust-hum',
   kind: 'activeSkill',
   nameKey: 'lust.hum.name',
@@ -234,7 +234,7 @@ export const LUST_HUM: SkillDef = {
 };
 
 /** 「缠绕」：慢招，长前摇、中伤。 */
-export const LUST_ENTANGLE: SkillDef = {
+export const LUST_ENTANGLE: ActiveSkillDef = {
   id: 'lust-entangle',
   kind: 'activeSkill',
   nameKey: 'lust.entangle.name',
@@ -264,7 +264,7 @@ export const LUST_ENTANGLE: SkillDef = {
  * 没有那一次比较，所以它天然卸不掉。这条必须在**技能描述**里写明
  * （见 i18n），否则玩家会以为「卸」坏了。
  */
-export const LUST_CHARM: SkillDef = {
+export const LUST_CHARM: ActiveSkillDef = {
   id: 'lust-charm',
   kind: 'activeSkill',
   nameKey: 'lust.charm.name',
@@ -351,7 +351,7 @@ export const LUST_BIND_THORNS: BuffDef = {
  * ⚠️ 荆棘挂在 `castStart`（读条一开始就生效），不是命中那一刻：
  * 挂在命中就晚了整整 2 秒，"引导期间反伤"会变成"引导结束后反伤"。
  */
-export const LUST_BIND: SkillDef = {
+export const LUST_BIND: ActiveSkillDef = {
   id: 'lust-bind',
   kind: 'activeSkill',
   nameKey: 'lust.bind.name',

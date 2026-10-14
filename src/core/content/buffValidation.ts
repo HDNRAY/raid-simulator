@@ -73,6 +73,8 @@ export function collectAllBuffDefs(sources: BuffSources): readonly BuffDef[] {
   const out: BuffDef[] = [...sources.buffs];
   for (const skill of sources.skills) {
     for (const ability of skill.abilities) collectInlineBuffs(ability, out);
+    // ⚠️ 命中段里的内联 buff 只有主动技能有（被动技能没有 `hits`）。
+    if (skill.kind !== 'activeSkill') continue;
     for (const hit of skill.hits) {
       for (const effect of hit.effects) if (effect.buff) out.push(effect.buff);
     }

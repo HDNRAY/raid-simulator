@@ -371,6 +371,12 @@ export const GUARD_SKILL_ID = 'guard';
 /** 一个技能"打在身上最重的那一击"的伤害（展示刻度；不是伤害技能返回 0）。 */
 function incomingDamage(skill: SkillDef | undefined): number {
   if (skill === undefined) return 0;
+  /**
+   * ⚠️ **被动技能没有命中段**（`hits` 只在 `ActiveSkillDef` 上）——
+   * 它不会被"施放"，也就打不出伤害。这里返回 0（"没有威胁"）而不是
+   * 硬转成主动技能：判 `kind` 才能把"它不可能是伤害招式"这件事说清楚。
+   */
+  if (skill.kind !== 'activeSkill') return 0;
   let worst = 0;
   for (const hit of skill.hits) {
     for (const effect of hit.effects) {
@@ -509,10 +515,18 @@ export function planPriority(
         if (threat > dodgeAbove) {
           const alreadyImmune = (player?.buffs ?? []).some((b) => b.defId === 'dodge-iframe');
           const dodger = options.dodgeSkillId;
+          const dodgeSkill = registry.skills.get(dodger);
           const canDodge =
             remainingMs <= leadMs &&
             !alreadyImmune &&
-            roughlyUsable(dodger, state, registry.skills.get(dodger));
+            /**
+             * ⚠️ 「避」按 id 查出来的是 `SkillDef | undefined`（联合类型）：
+             * 查不到 → 不能闪；查到但是被动（不会被"施放"）→ 也不能闪。
+             * 所以这里判 `kind`，而不是把它硬转成主动技能。
+             */
+            dodgeSkill !== undefined &&
+            dodgeSkill.kind === 'activeSkill' &&
+            roughlyUsable(dodger, state, dodgeSkill);
           if (canDodge) {
             const dodge: Action = { type: 'useSkill', skillId: dodger, atTick: tick };
             /** 先松开「卸」再闪（同一个 tick 里两个动作）—— 否则格的 buff 会留着。 */
@@ -540,6 +554,12 @@ export function planPriority(
 
     for (const skillId of priority) {
       const skill = registry.skills.get(skillId);
+      /**
+       * ⚠️ 只有主动技能能被"施放"：查不到 → 跳过；查到但是被动
+       * （没有 `cooldown` / `cost`）→ 也跳过。判 `kind` 而不是硬转成
+       * 主动技能，否则"优先级表里混进被动技能"这件事会被静默掩盖。
+       */
+      if (skill !== undefined && skill.kind !== 'activeSkill') continue;
       if (onlyRefreshesActiveBuff(skill, player)) continue;
       if (roughlyUsable(skillId, state, skill)) {
         return [{ type: 'useSkill', skillId, atTick: tick }];

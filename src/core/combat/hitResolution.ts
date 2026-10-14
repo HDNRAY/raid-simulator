@@ -36,6 +36,7 @@ import type {
   Effect,
   Expr,
   HitDef,
+  ActiveSkillDef,
   SkillDef,
   StatKey,
 } from '../types';
@@ -146,7 +147,8 @@ export interface HitResolutionContext {
 export function resolveHit(
   ctx: HitResolutionContext,
   actor: Combatant,
-  skill: SkillDef,
+  /** ⚠️ 只有主动技能有 `hits`（被动技能没有命中段）。 */
+  skill: ActiveSkillDef,
   hit: HitDef,
 ): void {
     const target = ctx.opponentOf(actor.id);

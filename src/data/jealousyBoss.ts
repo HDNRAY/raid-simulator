@@ -37,7 +37,7 @@
  * 条件，实际间隔变成一个说不清的数。
  */
 
-import type { Behavior, BuffDef, Expr, SkillDef } from '../core/types';
+import type { ActiveSkillDef, Behavior, BuffDef, Expr, SkillDef } from '../core/types';
 import type { BossDef } from './bossDefs';
 import { logicMs } from '../core/loopConstants';
 import { S } from './scale';
@@ -81,7 +81,7 @@ function tel(skillId: string, ms: number): BuffDef {
 }
 
 /** 「剜」：快、轻、填节奏 —— 它存在的意义是"占住你的手"，不占你的打断。 */
-export const JEALOUSY_REND: SkillDef = {
+export const JEALOUSY_REND: ActiveSkillDef = {
   id: 'jealousy-rend',
   kind: 'activeSkill',
   nameKey: 'jealousy.rend.name',
@@ -105,7 +105,7 @@ export const JEALOUSY_REND: SkillDef = {
 };
 
 /** 「殁」：大回环。伤害最高、**可打断**，并给玩家挂「见红」。 */
-export const JEALOUSY_REAP: SkillDef = {
+export const JEALOUSY_REAP: ActiveSkillDef = {
   id: 'jealousy-reap',
   kind: 'activeSkill',
   nameKey: 'jealousy.reap.name',
@@ -147,7 +147,7 @@ export const JEALOUSY_REAP: SkillDef = {
  * ⚠️ `when` 里的 `who: 'target'` 指**被打的那一方**（玩家）。
  * 这里的 60 是**内部刻度**（`DISPLAY_SCALE = 1`，所以与展示值相同）。
  */
-export const JEALOUSY_SNATCH: SkillDef = {
+export const JEALOUSY_SNATCH: ActiveSkillDef = {
   id: 'jealousy-snatch',
   kind: 'activeSkill',
   nameKey: 'jealousy.snatch.name',
@@ -242,7 +242,7 @@ const FLAME_AMOUNT: Expr = {
  */
 export const JEALOUSY_FLAME_AMOUNT: Expr = FLAME_AMOUNT;
 
-export const JEALOUSY_FLAME: SkillDef = {
+export const JEALOUSY_FLAME: ActiveSkillDef = {
   id: 'jealousy-flame',
   kind: 'activeSkill',
   nameKey: 'jealousy.flame.name',

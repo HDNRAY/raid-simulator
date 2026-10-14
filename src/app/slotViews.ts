@@ -88,6 +88,11 @@ export function buildSlotView(
 ): SkillSlotView | undefined {
   const skill = skills.get(slot.skillId);
   if (!skill) return undefined;
+  /**
+   * ⚠️ 槽位只造**主动技能**：代价 / 冷却 / 按住消耗都是主动技能专属 ——
+   * 被动技能没有"施放"这回事，不该占一个格子。
+   */
+  if (skill.kind !== 'activeSkill') return undefined;
   const state = engine.snapshot.combatants.find((c) => c.side === 'ally');
   if (!state) return undefined;
 

@@ -4,6 +4,7 @@ import { douqiFromDamage } from '../../src/core/combat/holds';
 import { DOUQI_PER_DAMAGE, DOUQI_PER_INTERNAL_DAMAGE } from '../../src/data/balance';
 import { ALL_SKILLS } from '../../src/data/content';
 import { makeGoldenEngineOptions } from '../golden/fixtures';
+import { activeSkillOf } from './helpers';
 
 /**
  * "伤害 → 缠"的**系数 / 取整 / 谁能拿到**。
@@ -137,7 +138,7 @@ describe('伤害 → 缠：系数与取整', () => {
 describe('规则 (C)：用缠的技能不给**施放者**回缠', () => {
   /** 那个技能付的缠（从内容定义推 —— 「凝」2026-10-13 从 50 改成 40）。 */
   function douqiCostOf(skillId: string): number {
-    const skill = ALL_SKILLS.find((s) => s.id === skillId);
+    const skill = activeSkillOf(ALL_SKILLS.find((s) => s.id === skillId), skillId);
     const cost = skill?.cost.find((c) => c.resource === 'douqi');
     if (cost === undefined || typeof cost.value !== 'number') {
       throw new Error(`${skillId} 没有数字型缠代价`);

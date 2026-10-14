@@ -11,9 +11,10 @@ import { STRIKE } from '../../src/data/kits/combo';
 import { FOCUS_BUFF } from '../../src/data/kits/shared';
 import { createRunSession } from '../../src/app/runSession';
 import { makeGoldenEngineOptions } from '../golden/fixtures';
-import type { Action, SkillDef } from '../../src/core/types';
+import type { Action, ActiveSkillDef } from '../../src/core/types';
 import type { EventDef } from '../../src/core/events';
 import type { CreateBattleOptions } from '../../src/core/combat/battleOptions';
+import { activeSkillOf } from './helpers';
 
 /**
  * ==================================================================
@@ -353,7 +354,7 @@ describe('「避实击虚」：避 → 蓄势 → **下一次攻击伤害翻倍*
      * 旧效果（回缠）曾经拿这条当"读法的证据"。现在效果换了，**读法变了
      * 但事实没变** —— 留着它，免得有人以为那条炁机现在改代价。
      */
-    const dodge = makeGoldenEngineOptions().skills.get('dodge') as SkillDef;
+    const dodge = activeSkillOf(makeGoldenEngineOptions().skills.get('dodge'), 'dodge');
     expect(dodge.cost.map((c) => c.resource)).toEqual(['energy']);
     expect(KIT_DODGE.skillTweaks[0]?.costDeltas).toBeUndefined();
   });
@@ -382,8 +383,10 @@ describe('⚠️ 蓄势的**消费契约**：已迁移到引擎级的 `consume`�
    *      从**技能表推导**，新增攻击技能**自动**被覆盖（它天然会消费）
    */
   const usableByLin = [...LIN_WANFENG_SKILLS, STRIKE];
-  const damaging = usableByLin.filter((skill) =>
-    skill.hits.some((hit) => hit.effects.some((e) => e.kind === 'damage')),
+  const damaging = usableByLin.filter(
+    (skill) =>
+      skill.kind === 'activeSkill' &&
+      skill.hits.some((hit) => hit.effects.some((e) => e.kind === 'damage')),
   );
 
   it('① 蓄势声明了 `consume.on = [onAttack]`，且**只有**这一条', () => {
@@ -394,6 +397,7 @@ describe('⚠️ 蓄势的**消费契约**：已迁移到引擎级的 `consume`�
 
   it('② 数据层没有任何手写的 `removeBuff`（假的第二份真相已删干净）', () => {
     for (const skill of usableByLin) {
+      if (skill.kind !== 'activeSkill') continue;
       const removes = skill.hits
         .flatMap((hit) => hit.effects)
         .filter((e) => e.kind === 'removeBuff');
@@ -518,15 +522,15 @@ describe('⚠️ `skillTweak` 作用在**副本**上（不污染注册表 / 下�
   it('应用之后，传进去的那张技能表一个字没变', () => {
     const base = makeGoldenEngineOptions();
     const focus = base.skills.get('focus');
-    expect(costOf(focus)).toBe(40);
+    expect(costOf(activeSkillOf(focus, 'focus'))).toBe(40);
 
     const tweaked = applySkillTweaks({ skills: base.skills, buffs: base.buffs }, KIT_FOCUS_COST.skillTweaks);
     /** 新表里的那份改了… */
-    expect(costOf(tweaked.skills.get('focus'))).toBe(20);
+    expect(costOf(activeSkillOf(tweaked.skills.get('focus'), 'focus'))).toBe(20);
     /** …旧表（= 注册表）那份**没变**。 */
-    expect(costOf(base.skills.get('focus'))).toBe(40);
+    expect(costOf(activeSkillOf(base.skills.get('focus'), 'focus'))).toBe(40);
 
-    function costOf(skill: SkillDef | undefined): number | undefined {
+    function costOf(skill: ActiveSkillDef | undefined): number | undefined {
       const cost = skill?.cost.find((c) => c.resource === 'douqi');
       return typeof cost?.value === 'number' ? cost.value : undefined;
     }

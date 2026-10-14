@@ -34,7 +34,7 @@
  * 判据与文案分界见 `AGENTS.md` §2 与 `src/i18n/locales/zh-CN.ts` 各条注释。
  */
 
-import type { BuffDef, SkillDef } from '../core/types';
+import type { ActiveSkillDef, BuffDef, SkillDef } from '../core/types';
 import { displaySeconds } from './displayTime';
 
 /**
@@ -62,7 +62,8 @@ export function placeholdersOf(template: string): readonly string[] {
  *   宁可让测试抓到"模板要 `{percent}` 而参数里没有"，也不要猜一个 420。
  */
 export function descParamsOf(
-  skill: SkillDef,
+  /** ⚠️ 只有主动技能有前摇 / 冷却 / 命中段 —— 说明文案的数值全从它们来。 */
+  skill: ActiveSkillDef,
   template: string,
   maxHp?: number,
 ): Readonly<Record<string, number>> | undefined {
@@ -127,7 +128,7 @@ function selfGrantedDurationSeconds(skill: SkillDef): number | undefined {
  * （多段的话该写哪一段由内容设计决定，不该由这里默默挑一个）。写成
  * 契约（`undefined`）而不是猜，是为了让它**在测试里现形**。
  */
-function firstDamageOf(skill: SkillDef): number | undefined {
+function firstDamageOf(skill: ActiveSkillDef): number | undefined {
   for (const hit of skill.hits) {
     for (const effect of hit.effects) {
       const base = effect.damage?.base;
@@ -159,7 +160,7 @@ function firstDamageOf(skill: SkillDef): number | undefined {
  * 反过来，**不带限制的 buff 不算**（例如「碾压」的霸体是挂在 Boss 自己
  * 身上的，与"你动不了多久"无关）。
  */
-function stunSecondsOf(skill: SkillDef): number | undefined {
+function stunSecondsOf(skill: ActiveSkillDef): number | undefined {
   for (const hit of skill.hits) {
     for (const effect of hit.effects) {
       if (effect.kind !== 'stun' && effect.kind !== 'grantBuff') continue;

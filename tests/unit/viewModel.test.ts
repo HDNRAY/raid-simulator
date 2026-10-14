@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { ActiveSkillDef } from '../../src/core/types';
 import { translator } from '../../src/i18n/translator';
 import { ALL_SKILLS, PLAYER_SKILL_IDS } from '../../src/data/content';
 import { FONT, LAYOUT } from '../../src/ui/layout';
@@ -226,7 +227,8 @@ describe('数据一致性：命中时刻必须等于读条时长', () => {
      * （和"Boss 技能漏进按键设置"是同一个根因）。
      */
     const bossSkills = ALL_SKILLS.filter(
-      (s) => !PLAYER_SKILL_IDS.has(s.id) && s.castTime > 0,
+      (s): s is ActiveSkillDef =>
+        s.kind === 'activeSkill' && !PLAYER_SKILL_IDS.has(s.id) && s.castTime > 0,
     );
     expect(bossSkills.length).toBeGreaterThan(0);
     const offenders: string[] = [];

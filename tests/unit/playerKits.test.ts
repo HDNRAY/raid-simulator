@@ -20,8 +20,8 @@ import { KAILI_HP } from '../../src/data/kits/kaili';
 import { LIN_WANFENG_HP } from '../../src/data/kits/linwanfeng';
 import { PLAYER_ROSTER, isDeveloping } from '../../src/data/roster';
 import { makePlayer, playerHpFor } from '../../src/data/units';
-import type { BuffDef, SkillDef, StatKey } from '../../src/core/types';
-import { makeBuffDef, makeCombatant, makeSkillDef } from './helpers';
+import type { ActiveSkillDef, BuffDef, StatKey } from '../../src/core/types';
+import { activeSkillOf, makeBuffDef, makeCombatant, makeSkillDef } from './helpers';
 
 /**
  * **两套角色技能**（`docs/specs/2026-10-12-player-kits.md`）的回归保护。
@@ -50,7 +50,7 @@ const i18nKeys = new Set(
     .concat(ALL_BUFFS.map((b) => b.nameKey)),
 );
 
-function engineWith(extraSkills: readonly SkillDef[] = [], playerBuffs: readonly BuffDef[] = []) {
+function engineWith(extraSkills: readonly ActiveSkillDef[] = [], playerBuffs: readonly BuffDef[] = []) {
   const registry = createRegistry(
     { entities: [], skills: [...ALL_SKILLS, ...extraSkills], buffs: [...ALL_BUFFS] },
     { localeKeys: i18nKeys },
@@ -98,7 +98,7 @@ function engineWith(extraSkills: readonly SkillDef[] = [], playerBuffs: readonly
 }
 
 /** 一个只会"打一下"的 Boss 技能（伤害可调）。 */
-function strikeSkill(damage: number, extras: SkillDef['hits'][number]['effects'] = []): SkillDef {
+function strikeSkill(damage: number, extras: ActiveSkillDef['hits'][number]['effects'] = []): ActiveSkillDef {
   return makeSkillDef({
     id: 'test-hit',
     nameKey: 'skill.attack.name',
@@ -124,7 +124,7 @@ function strikeSkill(damage: number, extras: SkillDef['hits'][number]['effects']
 function bossHits(
   playerBuffs: readonly BuffDef[],
   damage: number,
-  extras?: SkillDef['hits'][number]['effects'],
+  extras?: ActiveSkillDef['hits'][number]['effects'],
 ) {
   const skill = strikeSkill(damage, extras);
   const { engine, attackerId } = engineWith([skill], playerBuffs);
@@ -188,14 +188,14 @@ describe('两套角色技能：按角色装配（定稿见 docs/specs/2026-10-12
   });
 
   it('「斩」与「拳」同耗炁、读条与伤害按定稿分叉', () => {
-    const attack = skillsForPlayer('player').find((s) => s.id === 'attack');
-    const punch = skillsForPlayer('kaili').find((s) => s.id === 'punch');
+    const attack = activeSkillOf(skillsForPlayer('player').find((s) => s.id === 'attack'), 'attack');
+    const punch = activeSkillOf(skillsForPlayer('kaili').find((s) => s.id === 'punch'), 'punch');
     expect(attack?.cost[0]?.value).toBe(punch?.cost[0]?.value);
     expect(punch?.castTime).toBeLessThan(attack?.castTime ?? 0);
   });
 
   it('「拳」不消耗炁以外的资源（它是快节奏的填充，不是缠的出口）', () => {
-    const punch = skillsForPlayer('kaili').find((s) => s.id === 'punch');
+    const punch = activeSkillOf(skillsForPlayer('kaili').find((s) => s.id === 'punch'), 'punch');
     expect(punch?.cost.map((c) => c.resource)).toEqual(['energy']);
   });
 
@@ -340,7 +340,7 @@ describe('「卸」：阈值抵消（≤N 整击作废 / >N 平减 N）', () => 
 
 describe('「击」（派生技）：产出者是**炁机**（P3 已接回）', () => {
   it('「截」成功后**不再**开派生窗口 —— 用户要求把派生的那一段去掉', () => {
-    const jie = ALL_SKILLS.find((s) => s.id === 'jie');
+    const jie = activeSkillOf(ALL_SKILLS.find((s) => s.id === 'jie'), 'jie');
     const interrupt = jie?.hits[0]?.effects.find((e) => e.kind === 'interrupt');
     expect(interrupt).toBeDefined();
     const kinds = (interrupt?.onSuccess ?? []).map((e) => e.kind);
@@ -382,6 +382,7 @@ describe('「击」（派生技）：产出者是**炁机**（P3 已接回）', 
      * 这正是上面那条"截的 `onSuccess` 只有 `cooldown`"在钉的事。
      */
     for (const skill of ALL_SKILLS) {
+      if (skill.kind !== 'activeSkill') continue;
       for (const hit of skill.hits) {
         for (const effect of hit.effects) {
           expect(

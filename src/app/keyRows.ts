@@ -30,6 +30,7 @@ import { hintKeysOf } from './skillHints';
 import type { TranslateFn } from '../i18n/translator';
 import { flattenCatalog } from '../i18n/translator';
 import { zhCN } from '../i18n/locales/zh-CN';
+import type { ActiveSkillDef } from '../core/types';
 
 /**
  * ==================================================================
@@ -185,19 +186,26 @@ export function buildKeyRows(options: BuildKeyRowsOptions): readonly KeyRow[] {
    * **不要退回按 id 前缀过滤**，那对「色欲」是失效的。
    */
   const all = [...registry.skills.values()].filter(isBindablePlayerSkill);
+  /**
+   * ⚠️ **可选池里的技能必然是主动技能**：被动技能没有键可绑，也没有代价 /
+   * 冷却 / 读条可显示。按 `kind` 收窄在这里做一次，下面就不必在每个字段
+   * （`cost` / `cooldown` / `castTime`…）处再判一遍。
+   */
   const ordered = all
-    .map((sk) => sk.id)
+    .filter((sk): sk is ActiveSkillDef => sk.kind === 'activeSkill')
     .sort((a, b) => {
-      const ai = boundOrder.get(a);
-      const bi = boundOrder.get(b);
+      const ai = boundOrder.get(a.id);
+      const bi = boundOrder.get(b.id);
       if (ai !== undefined && bi !== undefined) return ai - bi;
       if (ai !== undefined) return -1;
       if (bi !== undefined) return 1;
-      return a.localeCompare(b);
+      return a.id.localeCompare(b.id);
     });
-  return ordered.map((skillId) => {
-    const b = { skillId, key: options.bindings.find((x) => x.skillId === skillId)?.key ?? '' };
-    const skill = registry.skill(b.skillId);
+  return ordered.map((skill) => {
+    const b = {
+      skillId: skill.id,
+      key: options.bindings.find((x) => x.skillId === skill.id)?.key ?? '',
+    };
     const slot = options.snapshotOf().skills.find((x) => x.skillId === b.skillId);
     /**
      * ================================================================

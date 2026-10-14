@@ -43,7 +43,7 @@
  * 而且"读条缩到 39%"已经足够危险。
  */
 
-import type { Behavior, BuffDef, SkillDef } from '../core/types';
+import type { ActiveSkillDef, Behavior, BuffDef, SkillDef } from '../core/types';
 import type { BossDef } from './bossDefs';
 import { logicMs } from '../core/loopConstants';
 import { S } from './scale';
@@ -164,7 +164,7 @@ export const GREED_WEAK_POINT_PASSIVE: BuffDef = {
  * 读条 2.0 秒（层数高了会被 `haste` 缩短到 1.22 秒 —— 所以"越晚越难断"
  * 是**同一个机制的自然结果**，不需要另写一条规则）。
  */
-export const GREED_HOARD_SKILL: SkillDef = {
+export const GREED_HOARD_SKILL: ActiveSkillDef = {
   id: 'greed-hoard',
   kind: 'activeSkill',
   nameKey: 'greed.hoard.name',
@@ -184,7 +184,7 @@ export const GREED_HOARD_SKILL: SkillDef = {
 };
 
 /** 「掠夺」：快、轻（填充）。 */
-export const GREED_PLUNDER: SkillDef = {
+export const GREED_PLUNDER: ActiveSkillDef = {
   id: 'greed-plunder',
   kind: 'activeSkill',
   nameKey: 'greed.plunder.name',
@@ -208,7 +208,7 @@ export const GREED_PLUNDER: SkillDef = {
 };
 
 /** 「重利」：慢、重（可打断）。 */
-export const GREED_USURY: SkillDef = {
+export const GREED_USURY: ActiveSkillDef = {
   id: 'greed-usury',
   kind: 'activeSkill',
   nameKey: 'greed.usury.name',

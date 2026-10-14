@@ -5,7 +5,7 @@
  * Combatant / BuffDef"这件事只有一种写法 —— 类型变化时只改一处。
  */
 
-import type { BuffDef, Combatant, SkillDef } from '../../src/core/types';
+import type { ActiveSkillDef, BuffDef, Combatant, SkillDef } from '../../src/core/types';
 
 /** 一个 tick 的毫秒数（测试里频繁用来算 tick 边界）。 */
 export const MS_PER_TICK = 1000 / 60;
@@ -48,10 +48,17 @@ export function makeBuffDef(
   };
 }
 
-/** 构造一个最小可用的技能定义。 */
+/**
+ * 构造一个最小可用的技能定义。
+ *
+ * ⚠️ 这里造的**必然都是主动技能**（下面写死了 `kind: 'activeSkill'`），
+ * 所以返回类型就是 `ActiveSkillDef` —— 调用方读 `castTime` / `hits` /
+ * `cost` 时不必再判 `kind`。被动技能没有对应的构造器：它的效果直接写在
+ * `abilities` 里，测试要造就手写一个 `PassiveSkillDef`。
+ */
 export function makeSkillDef(
-  overrides: Partial<SkillDef> & Pick<SkillDef, 'id'>,
-): SkillDef {
+  overrides: Partial<ActiveSkillDef> & Pick<ActiveSkillDef, 'id'>,
+): ActiveSkillDef {
   return {
     kind: 'activeSkill',
     nameKey: 'stat.strength',
@@ -66,4 +73,17 @@ export function makeSkillDef(
     interruptible: false,
     ...overrides,
   };
+}
+
+/**
+ * 把 `SkillDef` 收窄成主动技能（测试里读 `hits` / `castTime` / `cost` 用它）。
+ *
+ * ⚠️ 这是**类型守卫**，不是逃生舱 —— AGENTS.md §1 明确允许"收窄联合类型"。
+ * 测试里大部分技能查表都是主动技能，但类型上是联合，所以要么判 `kind`、
+ * 要么用它。**运行期真的检查**（不是 `as`），传错会立刻抛。
+ */
+export function activeSkillOf(skill: SkillDef | undefined, what = 'skill'): ActiveSkillDef {
+  if (skill === undefined) throw new Error(`skill not found: ${what}`);
+  if (skill.kind !== 'activeSkill') throw new Error(`not an active skill: ${skill.id}`);
+  return skill;
 }

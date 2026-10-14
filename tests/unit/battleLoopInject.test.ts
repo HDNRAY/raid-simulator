@@ -78,7 +78,10 @@ describe('BattleLoop.injectActions（act 的合法注入点）', () => {
     const loop = makeLoop();
     const boss = loop.engineState.snapshot.combatants.find((c) => c.side === 'enemy');
     const skillId = [...loop.engineState.skillIds].find(
-      (id) => loop.engineState.skillOf(id)?.castTime === 0,
+      (id) => {
+        const s = loop.engineState.skillOf(id);
+        return s !== undefined && s.kind === 'activeSkill' && s.castTime === 0;
+      },
     );
     expect(boss).toBeDefined();
     expect(skillId).toBeDefined();

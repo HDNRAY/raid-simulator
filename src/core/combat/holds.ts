@@ -19,7 +19,7 @@
  * 依赖用 `HoldsContext` 写清楚（见 `hitResolution.ts` 的同名说明）。
  */
 
-import type { BuffDef, Combatant, EventDef, SkillDef } from '../types';
+import type { ActiveSkillDef, BuffDef, Combatant, EventDef, SkillDef } from '../types';
 import { DOUQI_PER_INTERNAL_DAMAGE } from '../../data/balance';
 import { LOGIC_TICKS_PER_SECOND, TICKS_PER_LOGIC_TICK } from '../loopConstants';
 import { changeResource } from './index';
@@ -78,8 +78,12 @@ export function startHold(
     const actor = ctx.current(actorId);
     if (!actor) return;
     const skill = ctx.skills.get(skillId);
-    if (!skill?.holdDrain) {
-      // 不是按住型技能 → 退化成普通施放，这样输入层不必区分两种技能
+    /**
+     * ⚠️ `holdDrain` 是主动技能专属（被动技能没有按住消耗）—— 按 `kind`
+     * 收窄；`skill` 不存在 / 不是主动技能都退化成普通施放，这样输入层
+     * 不必区分两种技能。
+     */
+    if (skill?.kind !== 'activeSkill' || skill.holdDrain === undefined) {
       ctx.tryUseSkill(skillId, actorId);
       return;
     }
@@ -132,11 +136,15 @@ export function tickHolds(ctx: HoldsContext): void {
       if (!actor || !hold) continue;
 
       const skill = ctx.skills.get(hold.skillId);
-      const drain = skill?.holdDrain;
-      if (!drain) {
+      /**
+       * ⚠️ 只有主动技能会进 `activeHold`（`startHold` 按 `kind` 收窄过），
+       * 所以这里同时判 `kind` —— 被动技能 / 技能没了都按"松开"处理。
+       */
+      if (skill?.kind !== 'activeSkill' || skill.holdDrain === undefined) {
         endHold(ctx, hold.skillId, id);
         continue;
       }
+      const drain = skill.holdDrain;
 
       const have = (actor.resources as Record<string, number>)[drain.resource] ?? 0;
       /**
@@ -231,7 +239,7 @@ export function douqiFromDamage(damage: number): number {
  * - ⚠️ **纯函数**：只看静态内容（`skill.cost`），不读时间/随机，
  *   也不会改变 rng 的消耗顺序 —— 确定性语义不变。
  */
-export function casterGainsDouqiFromDamage(skill: SkillDef): boolean {
+export function casterGainsDouqiFromDamage(skill: ActiveSkillDef): boolean {
   return !skill.cost.some((cost) => cost.resource === 'douqi');
 }
 

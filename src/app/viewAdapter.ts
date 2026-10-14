@@ -526,8 +526,12 @@ function toCombatantView(
     const skill = engine.skillOf(cast.skillId);
     const elapsedMs = (tick - cast.startedAtTick) * (1000 / 60);
     const progress = cast.castTimeMs > 0 ? Math.min(1, elapsedMs / cast.castTimeMs) : 0;
-    const nextHit =
-      skill?.hits.find((h: { at: number }) => h.at > elapsedMs)?.at ?? cast.castTimeMs;
+    /**
+     * ⚠️ 只有主动技能有 `hits`（被动技能没有命中段）—— 而读条本来就只属于
+     * 主动技能，所以按 `kind` 收窄；不是主动技能就没有"下一段"可预告。
+     */
+    const hits = skill?.kind === 'activeSkill' ? skill.hits : [];
+    const nextHit = hits.find((h) => h.at > elapsedMs)?.at ?? cast.castTimeMs;
     /**
      * `interruptible` 在这里被**重新解释**为"现在能不能被打断"。
      *

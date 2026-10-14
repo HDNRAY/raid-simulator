@@ -166,18 +166,27 @@ function collectTimeFields(input: TimeGridInput): readonly Field[] {
 
   for (const skill of input.skills) {
     const base = `skill:${skill.id}`;
-    field(out, skill.castTime, `${base}.castTime`, 'castTime');
-    field(out, skill.cooldown, `${base}.cooldown`, 'cooldown');
-    if (skill.channel) {
-      field(out, skill.channel.durationMs, `${base}.channel.durationMs`, 'durationMs');
-      field(out, skill.channel.tickIntervalMs, `${base}.channel.tickIntervalMs`, 'tickIntervalMs');
-    }
-    if (skill.charges) {
-      field(out, skill.charges.rechargeMs, `${base}.charges.rechargeMs`, 'rechargeMs');
-    }
-    for (const [index, hit] of skill.hits.entries()) {
-      field(out, hit.at, `${base}.hits[${index}].at`, 'at');
-      collectEffectFields(hit.effects, `${base}.hits[${index}].effects`, out);
+    /**
+     * ⚠️ **时间字段只有主动技能有**（读条 / 冷却 / 引导 / 充能 / hit frame）——
+     * 被动技能的效果写在 `abilities` 里，所以那一层两种技能共用。
+     *
+     * 顺序与原样一致：主动字段先收集，`abilities` 在后（报错顺序是测试
+     * 与日志读到的顺序，不因为这次收窄而变）。
+     */
+    if (skill.kind === 'activeSkill') {
+      field(out, skill.castTime, `${base}.castTime`, 'castTime');
+      field(out, skill.cooldown, `${base}.cooldown`, 'cooldown');
+      if (skill.channel) {
+        field(out, skill.channel.durationMs, `${base}.channel.durationMs`, 'durationMs');
+        field(out, skill.channel.tickIntervalMs, `${base}.channel.tickIntervalMs`, 'tickIntervalMs');
+      }
+      if (skill.charges) {
+        field(out, skill.charges.rechargeMs, `${base}.charges.rechargeMs`, 'rechargeMs');
+      }
+      for (const [index, hit] of skill.hits.entries()) {
+        field(out, hit.at, `${base}.hits[${index}].at`, 'at');
+        collectEffectFields(hit.effects, `${base}.hits[${index}].effects`, out);
+      }
     }
     collectAbilityFields(skill.abilities, `${base}.abilities`, out);
   }

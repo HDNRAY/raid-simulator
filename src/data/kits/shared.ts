@@ -18,7 +18,7 @@
  */
 
 import { logicMs } from '../../core/loopConstants';
-import type { BuffDef, SkillDef } from '../../core/types';
+import type { ActiveSkillDef, BuffDef } from '../../core/types';
 import { C, S } from '../scale';
 
 /** 凝：增伤 60%，持续 10 秒。 */
@@ -63,7 +63,7 @@ export const FOCUS_BUFF: BuffDef = {
  * 同代价、同读条、同效果。分成两份会立刻漂（改了一个忘了另一个），
  * 而"两个技能 id 也叫 focus"会在注册表里直接 `DUP_ID` 报错。
  */
-export const FOCUS: SkillDef = {
+export const FOCUS: ActiveSkillDef = {
   id: 'focus',
   kind: 'activeSkill',
   nameKey: 'skill.focus.name',

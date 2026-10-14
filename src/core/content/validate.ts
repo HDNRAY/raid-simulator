@@ -285,32 +285,42 @@ function validateSkill(
 
   validateLocaleKey(skill.nameKey, at('nameKey'), localeKeys, push);
 
-  // hit 时间必须升序
-  for (let i = 1; i < skill.hits.length; i += 1) {
-    const prev = skill.hits[i - 1];
-    const curr = skill.hits[i];
-    if (prev && curr && curr.at < prev.at) {
-      push({
-        severity: 'error',
-        code: 'HIT_ORDER',
-        path: at(`hits[${i}].at`),
-        message: `hit times must be ascending: ${prev.at} then ${curr.at}`,
-      });
+  /**
+   * ⚠️ **只有主动技能有 `hits` / `cooldown`** —— 被动技能的效果写在
+   * `abilities` 里（下面那几段是两种技能共用的）。
+   *
+   * 判据在 `kind` 上，而不是"`hits` 是不是空数组"：空 `hits` 的主动技能
+   * 也要照常校验（那是合法的瞬发纯 buff 技），而被动技能**根本不该有**
+   * 命中段这个概念。
+   */
+  if (skill.kind === 'activeSkill') {
+    // hit 时间必须升序
+    for (let i = 1; i < skill.hits.length; i += 1) {
+      const prev = skill.hits[i - 1];
+      const curr = skill.hits[i];
+      if (prev && curr && curr.at < prev.at) {
+        push({
+          severity: 'error',
+          code: 'HIT_ORDER',
+          path: at(`hits[${i}].at`),
+          message: `hit times must be ascending: ${prev.at} then ${curr.at}`,
+        });
+      }
     }
-  }
 
-  // 读条技能必须有 hit 落在读条结束前或恰好结束时
-  for (const [index, hit] of skill.hits.entries()) {
-    for (const effect of hit.effects) {
-      if (effect.kind === 'grantBuff' || effect.kind === 'removeBuff') {
-        const id = effect.buff?.id ?? effect.buffId;
-        if (id && !buffIds.has(id)) {
-          push({
-            severity: 'error',
-            code: 'MISSING_BUFF',
-            path: at(`hits[${index}].effects`),
-            message: `unknown buff "${id}"`,
-          });
+    // 读条技能必须有 hit 落在读条结束前或恰好结束时
+    for (const [index, hit] of skill.hits.entries()) {
+      for (const effect of hit.effects) {
+        if (effect.kind === 'grantBuff' || effect.kind === 'removeBuff') {
+          const id = effect.buff?.id ?? effect.buffId;
+          if (id && !buffIds.has(id)) {
+            push({
+              severity: 'error',
+              code: 'MISSING_BUFF',
+              path: at(`hits[${index}].effects`),
+              message: `unknown buff "${id}"`,
+            });
+          }
         }
       }
     }
@@ -342,24 +352,28 @@ function validateSkill(
    *
    * 这条断言就是防那两种。踩过的坑：这种"两个数字必须相等"的约定
    * 只写在注释里，改一个忘一个就静默坏掉 —— 所以让它可执行。
+   *
+   * ⚠️ 只有主动技能有 `hits` / `cooldown`（见上面那段同源说明）。
    */
-  for (const [hitIndex, hit] of skill.hits.entries()) {
-    for (const [effectIndex, effect] of hit.effects.entries()) {
-      for (const nested of effect.onSuccess ?? []) {
-        if (nested.kind !== 'cooldown') continue;
-        // 只校验"退自己"的情况（`skillId` 填了别人的属于另一回事）
-        const which = nested.skillId ?? skill.id;
-        if (which !== skill.id) continue;
-        const refund = -(nested.cooldownMs ?? 0);
-        if (refund > 0 && refund !== skill.cooldown) {
-          push({
-            severity: 'error',
-            code: 'COOLDOWN_REFUND_MISMATCH',
-            path: at(`hits[${hitIndex}].effects[${effectIndex}].onSuccess`),
-            message:
-              `refunds ${refund}ms but skill cooldown is ${skill.cooldown}ms — ` +
-              `"no cooldown on success" requires them to be equal`,
-          });
+  if (skill.kind === 'activeSkill') {
+    for (const [hitIndex, hit] of skill.hits.entries()) {
+      for (const [effectIndex, effect] of hit.effects.entries()) {
+        for (const nested of effect.onSuccess ?? []) {
+          if (nested.kind !== 'cooldown') continue;
+          // 只校验"退自己"的情况（`skillId` 填了别人的属于另一回事）
+          const which = nested.skillId ?? skill.id;
+          if (which !== skill.id) continue;
+          const refund = -(nested.cooldownMs ?? 0);
+          if (refund > 0 && refund !== skill.cooldown) {
+            push({
+              severity: 'error',
+              code: 'COOLDOWN_REFUND_MISMATCH',
+              path: at(`hits[${hitIndex}].effects[${effectIndex}].onSuccess`),
+              message:
+                `refunds ${refund}ms but skill cooldown is ${skill.cooldown}ms — ` +
+                `"no cooldown on success" requires them to be equal`,
+            });
+          }
         }
       }
     }

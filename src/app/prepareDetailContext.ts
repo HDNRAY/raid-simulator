@@ -68,7 +68,14 @@ function skillRow(skill: SkillDef, /** 那个技能**属于谁**的血上限（`
    * 所以这个值对它们无副作用。
    */
   const params =
-    template === undefined ? {} : (descParamsOf(skill, template, maxHp) ?? {});
+    /**
+     * ⚠️ `descParamsOf` 只收主动技能（前摇 / 冷却 / 命中段是它取数的来源）——
+     * 所以这里按 `kind` 收窄。被动技能仍然给出名字与说明，只是没有数值参数
+     * （它的效果写在 `abilities` 里，没有"前摇 / 伤害"可推）。
+     */
+    template === undefined || skill.kind !== 'activeSkill'
+      ? {}
+      : (descParamsOf(skill, template, maxHp) ?? {});
   return {
     kind: 'skill',
     /**

@@ -32,6 +32,7 @@ import { describe, expect, it } from 'vitest';
 import { ALL_BUFFS, ALL_SKILLS } from '../../src/data/content';
 import { translator } from '../../src/i18n/translator';
 import { hintKeysOf } from '../../src/app/skillHints';
+import { activeSkillOf } from './helpers';
 
 describe('招式提示：全部从效果推导', () => {
   /**
@@ -50,7 +51,7 @@ describe('招式提示：全部从效果推导', () => {
    * （见 `app/skillHints.ts`）。下面用**真实的傲慢 / 色欲内容**钉住它。
    */
   it('【推导】傲慢「碾压」：高伤 / 霸体 / 倒地**全部**推出来', () => {
-    const heavy = ALL_SKILLS.find((s) => s.id === 'boss-heavy')!;
+    const heavy = activeSkillOf(ALL_SKILLS.find((s) => s.id === 'boss-heavy'), 'boss-heavy');
     /**
      * ⚠️ `SkillDef` 上**已经没有** `hintTags` 字段了 —— 三个提示全部推导：
      *   - 高伤 ← 单次伤害 60 ≥ 血上限的 30%
@@ -92,7 +93,7 @@ describe('招式提示：全部从效果推导', () => {
   });
 
   it('【推导】色欲「魅惑」：显示「眩晕」，而且**不再**错标「高伤」', () => {
-    const charm = ALL_SKILLS.find((s) => s.id === 'lust-charm')!;
+    const charm = activeSkillOf(ALL_SKILLS.find((s) => s.id === 'lust-charm'), 'lust-charm');
     const keys = hintKeysOf(charm);
     /** 眩晕取的是那个 debuff 自己的名字（「眩晕」）。 */
     expect(keys).toContain('lust.stun.name');
@@ -112,7 +113,7 @@ describe('招式提示：全部从效果推导', () => {
 
   it('【推导】「截」「破」的「打断」来自 `interrupt` 效果，不靠手写', () => {
     for (const id of ['jie', 'break']) {
-      const skill = ALL_SKILLS.find((s) => s.id === id);
+      const skill = activeSkillOf(ALL_SKILLS.find((s) => s.id === id), id);
       if (skill === undefined) continue;
       expect(hintKeysOf(skill), `${id} 应当推出「打断」`).toContain(
         'settings.hintTags.interrupt',
@@ -146,6 +147,7 @@ describe('招式提示：全部从效果推导', () => {
       if (!controllerBuffIds.has(buff.id)) continue;
       /** 只有当它真的被某个技能的**挨打者向**效果挂上时，才要求显示。 */
       const grantedToVictim = ALL_SKILLS.some((s) =>
+        s.kind === 'activeSkill' &&
         s.hits.some((h) =>
           h.effects.some(
             (e) =>

@@ -1,19 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type {
-  Ability,
-  BattleState,
-  BuffDef,
-  Condition,
-  EncounterDef,
-  EquipmentEntity,
-  Expr,
-  GameEntityInstance,
-  HitDef,
-  Loadout,
-  SkillDef,
-  StatKey,
-  StatModifier,
-} from '../../src/core/types';
+import type { Ability, ActiveSkillDef, BattleState, BuffDef, Condition, EncounterDef, EquipmentEntity, Expr, GameEntityInstance, HitDef, Loadout, PassiveSkillDef, StatKey, StatModifier } from '../../src/core/types';
 
 /**
  * M1-1 的**真正验收**。
@@ -189,7 +175,7 @@ const heavyHits: readonly HitDef[] = [
   { at: 1500, effects: [{ kind: 'damage', damage: { base: 400, canCrit: true, countsAsHit: true } }] },
 ];
 
-const slash: SkillDef = {
+const slash: ActiveSkillDef = {
   id: 'slash',
   kind: 'activeSkill',
   nameKey: 'resource.energy',
@@ -206,7 +192,7 @@ const slash: SkillDef = {
   interruptible: false,
 };
 
-const dodge: SkillDef = {
+const dodge: ActiveSkillDef = {
   id: 'dodge',
   kind: 'activeSkill',
   nameKey: 'hud.dodged',
@@ -221,7 +207,7 @@ const dodge: SkillDef = {
   interruptible: false,
 };
 
-const guard: SkillDef = {
+const guard: ActiveSkillDef = {
   id: 'guard',
   kind: 'activeSkill',
   nameKey: 'hud.immune',
@@ -237,7 +223,7 @@ const guard: SkillDef = {
 };
 
 /** 派生技能：只有 combo 窗口内可用 */
-const arc: SkillDef = {
+const arc: ActiveSkillDef = {
   id: 'arc',
   kind: 'activeSkill',
   nameKey: 'stat.damageBoost',
@@ -262,7 +248,7 @@ const arc: SkillDef = {
 };
 
 /** 重击：可被打断的读条技能 */
-export const heavySkill: SkillDef = {
+export const heavySkill: ActiveSkillDef = {
   id: 'heavy',
   kind: 'activeSkill',
   nameKey: 'stat.strength',
@@ -278,7 +264,7 @@ export const heavySkill: SkillDef = {
 };
 
 /** 被动天赋：同一 schema，只是 kind 是 passive */
-const passiveTalent: SkillDef = {
+const passiveTalent: PassiveSkillDef = {
   id: 'talent-resonance',
   kind: 'passive',
   nameKey: 'stat.haste',
@@ -294,13 +280,7 @@ const passiveTalent: SkillDef = {
       },
     },
   ],
-  castTime: 0,
-  cooldown: 0,
-  cost: [],
-  targeting: { mode: 'self' },
-  hits: [],
   tags: [],
-  interruptible: false,
 };
 
 /* ------------------------------------------------------------------ *
@@ -317,7 +297,7 @@ const bossCastBuff: BuffDef = {
   stacking: { mode: 'refresh' },
 };
 
-export const crimsonArcSkill: SkillDef = {
+export const crimsonArcSkill: ActiveSkillDef = {
   id: 'crimson-arc',
   kind: 'activeSkill',
   nameKey: 'event.enrage',
@@ -491,7 +471,13 @@ describe('类型层能表达规范承诺的内容', () => {
 
   it('被动技能与主动技能同一 schema', () => {
     expect(passiveTalent.kind).toBe('passive');
-    expect(passiveTalent.hits).toHaveLength(0);
+    /**
+     * ⚠️ **被动没有 `hits` 这个字段**（不是"空数组"）—— 这正是"主动与被动
+     * 各自有一个类型"的意义：被动不再被迫填一堆没意义的主动字段。
+     * 所以断言是"**这个键根本不存在**"，而不是"它是空数组"。
+     */
+    expect('hits' in passiveTalent).toBe(false);
+    expect('castTime' in passiveTalent).toBe(false);
     expect(passiveTalent.abilities[0]?.kind).toBe('derived');
   });
 
