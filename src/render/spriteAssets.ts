@@ -194,8 +194,18 @@ export const SPRITES: readonly CharacterSprite[] = [
   },
 ];
 
-/** 素材根目录（相对 `public/`）。 */
-export const FD2_RGBA_DIR = 'fd2/rgba';
+/**
+ * **帧素材的根目录**（相对 `public/`）。
+ *
+ * ⚠️ 2026-10-14 从 `fd2/rgba` 搬到这里：`public/fd2/` 是**未裁剪的原始素材堆**
+ * （56MB / 8681 个文件，`.gitignore` 里），而**运行时只会读到其中 176 个文件**
+ * —— 那些已经被拷进 `public/game-art/`（**被 git 跟踪**）。
+ *
+ * 为什么非搬不可：线上是 CI 全新检出 → `pnpm run build` → 推 `dist/`。
+ * 只要素材在 ignore 里，**制品里就没有素材** ⇒ 线上退回程序化绘制
+ * （2026-10-14 实际发生过）。
+ */
+export const SPRITE_FRAME_DIR = 'game-art/frames';
 
 /** 按单位 id 取素材；没有则 `undefined`（调用方回退到程序化绘制）。 */
 export function spriteFor(id: string): CharacterSprite | undefined {
@@ -215,7 +225,7 @@ export function spriteFor(id: string): CharacterSprite | undefined {
  */
 export function frameUrl(slot: string, anim: 'idle' | 'attack', index: number): string {
   const n = String(index).padStart(2, '0');
-  return assetUrl(`${FD2_RGBA_DIR}/${slot}/${anim}/f${n}.png`);
+  return assetUrl(`${SPRITE_FRAME_DIR}/${slot}/${anim}/f${n}.png`);
 }
 
 /**

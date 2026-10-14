@@ -126,7 +126,7 @@ export function portraitFor(id: string): PortraitAsset | undefined {
   return PORTRAITS.find((p) => p.id === id);
 }
 
-/** 一张对话头像的 URL（`public/fd2/portraits/DATO_000_m0.png`）。 */
+/** 一张对话头像的 URL（`public/game-art/portraits/DATO_000_m0.png`）。 */
 export function portraitUrl(asset: PortraitAsset): string {
-  return assetUrl(`fd2/portraits/DATO_${asset.number}_m0.png`);
+  return assetUrl(`game-art/portraits/DATO_${asset.number}_m0.png`);
 }

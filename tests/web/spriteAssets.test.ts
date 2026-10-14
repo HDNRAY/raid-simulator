@@ -8,7 +8,10 @@ import { BOSS_ROSTER, PLAYER_ROSTER, isDeveloping } from '../../src/data/roster'
  * **素材表（`spriteAssets.ts`）的自证**。
  *
  * ==================================================================
- * ⚠️⚠️ 这一组**不读 `public/fd2/` 的素材**（用户 2026-10-13 拍板）
+ * ⚠️⚠️ 这一组**不读磁盘上的素材**（用户 2026-10-13 拍板）——
+ * 它只验 URL 的**形状**。⚠️ 2026-10-14 起运行时会读的素材被拷进了
+ * `public/game-art/`（**跟踪**，见那里的 README），但这一组的判据不变：
+ * 仍然只验形状，不去"判断素材"。
  * ==================================================================
  *
  * 原先这里有一组"素材表 ↔ 权威清单（`public/fd2/rgba/manifest.json`）"
@@ -42,11 +45,11 @@ function stripBase(url: string): string {
 }
 
 describe('帧 URL 的形状（仓库内自证，不读素材）', () => {
-  it('⚠️ 路径相对 `public/`（开头是 fd2/，没有二次前缀）', () => {
+  it('⚠️ 路径相对 `public/`（开头是 `game-art/`，没有二次前缀）', () => {
     for (const sprite of SPRITES) {
       for (const url of animUrls(sprite).idle) {
-        expect(stripBase(url).startsWith('fd2/rgba/')).toBe(true);
-        expect(stripBase(url)).not.toContain('fd2/fd2');
+        expect(stripBase(url).startsWith('game-art/frames/')).toBe(true);
+        expect(stripBase(url)).not.toContain('game-art/game-art');
       }
     }
   });
@@ -92,7 +95,7 @@ describe('每个出战单位都配到了素材与背景', () => {
     }
   });
 
-  it('背景路径也带 base 前缀、且指向 fd2/images 下的文件', () => {
+  it('背景路径也带 base 前缀、且指向 `game-art/backdrops` 下的文件', () => {
     const url = bossBackdropUrl('meiichiro');
     expect(url).toBeDefined();
     expect(url?.startsWith(assetUrl(''))).toBe(true);
@@ -104,7 +107,7 @@ describe('每个出战单位都配到了素材与背景', () => {
      * 原因是**火魔神精灵与火焰地板同色系，糊在背景里**。所以改动时
      * 这行会失败，提醒改的人"你动了玩家批准过的配对"。这是有意的。
      */
-    expect(url === undefined ? '' : stripBase(url)).toBe('fd2/images/BG_BG_024.png');
+    expect(url === undefined ? '' : stripBase(url)).toBe('game-art/backdrops/BG_BG_024.png');
   });
 
   it('不认识的 Boss id 返回 undefined（回退程序化夜空，不瞎挑一张）', () => {

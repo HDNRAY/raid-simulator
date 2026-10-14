@@ -42,13 +42,13 @@ import { assetUrl } from './assetUrl';
  * 不存在的 URL（不崩、只是 404）。`Map` 没有这个问题。
  */
 const BOSS_BG = new Map<string, string>([
-  ['meiichiro', 'fd2/images/BG_BG_024.png'],
-  ['lust', 'fd2/images/BG_BG_018.png'],
-  ['envy', 'fd2/images/BG_BG_035.png'],
-  ['gluttony', 'fd2/images/BG_BG_014.png'],
-  ['wrath', 'fd2/images/BG_BG_048.png'],
-  ['sloth', 'fd2/images/BG_BG_047.png'],
-  ['greed', 'fd2/images/BG_BG_010.png'],
+  ['meiichiro', 'game-art/backdrops/BG_BG_024.png'],
+  ['lust', 'game-art/backdrops/BG_BG_018.png'],
+  ['envy', 'game-art/backdrops/BG_BG_035.png'],
+  ['gluttony', 'game-art/backdrops/BG_BG_014.png'],
+  ['wrath', 'game-art/backdrops/BG_BG_048.png'],
+  ['sloth', 'game-art/backdrops/BG_BG_047.png'],
+  ['greed', 'game-art/backdrops/BG_BG_010.png'],
 ]);
 
 /**
@@ -63,7 +63,7 @@ export function bossBackdropUrl(bossId: string): string | undefined {
   const path = BOSS_BG.get(bossId);
   /**
    * ⚠️ 必须走 `assetUrl()`：线上部署在 `/raid/` 子路径下，
-   * 硬编码 `/fd2/...` 会解析到域名根而 404（本地 dev 是 `/`，看不出来）。
+   * 硬编码 `/game-art/...` 会解析到域名根而 404（本地 dev 是 `/`，看不出来）。
    */
   return path === undefined ? undefined : assetUrl(path);
 }
