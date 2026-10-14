@@ -320,6 +320,9 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
    * "完全反弹"，而且玩家无法预期（两层 50% 变成 100% 是没人能想到的）。
    */
   let reflectFraction = 0;
+  /** 「睡眠」的两个出路旗标（取**任意一个来源**即可，不做叠加）。 */
+  let movesWhileLocked = false;
+  let sleepReduceMs = 0;
   const comboWindow: string[] = [];
   /**
    * 技能 tag 白名单 —— 多个来源取**并集**。
@@ -341,6 +344,8 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
     if (f.ccImmune) ccImmune = true;
     if (f.interruptImmune) interruptImmune = true;
     if (f.actionLock) actionLock = true;
+    if (f.movesWhileLocked === true) movesWhileLocked = true;
+    if (f.sleepReduceMs !== undefined) sleepReduceMs = Math.max(sleepReduceMs, f.sleepReduceMs);
     if (f.reflectFraction !== undefined) {
       reflectFraction = Math.max(reflectFraction, f.reflectFraction);
     }
@@ -355,6 +360,8 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
     ...(ccImmune ? { ccImmune: true } : {}),
     ...(interruptImmune ? { interruptImmune: true } : {}),
     ...(actionLock ? { actionLock: true } : {}),
+    ...(movesWhileLocked ? { movesWhileLocked: true } : {}),
+    ...(sleepReduceMs > 0 ? { sleepReduceMs } : {}),
     ...(reflectFraction > 0 ? { reflectFraction } : {}),
     ...(comboWindow.length > 0 ? { comboWindow } : {}),
     ...(restrictToTags.length > 0 ? { restrictToTags } : {}),

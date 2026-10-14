@@ -242,8 +242,18 @@ export function checkGate(
 ): GateResult {
   const flags = aggregateFlags(combatant);
 
-  // 1. 动作锁
-  if (flags.actionLock) return { ok: false, reason: 'locked' };
+  /**
+   * 1. 动作锁。
+   *
+   * ⚠️ **`movesWhileLocked` 是"锁住但还能按键"的出路**（「睡眠」用）：
+   * 锁本身还在（技能照常受限），但**允许施放技能** —— 因为"按技能"
+   * 在那个设计里就是**挣扎**（每次减 3 秒睡眠）。
+   * 附加旗标在**同一个 buff 上**（`LAZY_SLEEP` 同时带 `actionLock` 与
+   * 它），所以不需要第二个 buff 去"抵消"第一个。
+   */
+  if (flags.actionLock && flags.movesWhileLocked !== true) {
+    return { ok: false, reason: 'locked' };
+  }
 
   /**
    * 1b. **技能 tag 白名单**（倒地时只能用「闪避」类）。

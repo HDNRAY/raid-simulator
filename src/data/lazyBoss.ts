@@ -83,7 +83,20 @@ export const LAZY_SLEEP: BuffDef = {
   duration: logicMs(100),
   maxStacks: 1,
   stacking: { mode: 'refresh' },
-  flags: { actionLock: true },
+  /**
+   * `actionLock` = 不能行动；**另两个旗标是"出路"**：
+   *   - `movesWhileLocked`：**仍然可以按技能**（任意技能，不挑 tag）
+   *   - `sleepReduceMs`：每按一次，这个 buff 的剩余时长 **−3 秒**
+   *
+   * ⚠️ 合起来就是用户定的那条："按技能 = 挣扎：**扣资源** + **睡眠减 3 秒**，
+   * 但技能本身**不生效**（无伤害 / 无 buff / 不进 CD）" —— 所以按 4 次就醒
+   * （10 秒 / 3 秒），而每次都要**付那个技能的代价**（拿资源换时间）。
+   */
+  flags: {
+    actionLock: true,
+    movesWhileLocked: true,
+    sleepReduceMs: 3000,
+  },
 };
 
 /**

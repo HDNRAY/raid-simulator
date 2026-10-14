@@ -38,7 +38,7 @@ import type {
   SkillDef,
   StatKey,
 } from '../types';
-import { applyBuff } from '../buffs';
+import { aggregateFlags, applyBuff } from '../buffs';
 import type { MutableCombatant } from './battleStateTypes';
 import { resolveHit } from './hitResolution';
 import {
@@ -404,6 +404,42 @@ export function pushBuffApplied(
     });
   }
 
+/**
+ * **「按技能挣扎」**：把身上带 `sleepReduceMs` 的 buff 各减那么多时长。
+ *
+ * @returns 改过就返回新的 combatant（调用方据此**跳过这一招的全部结算**）；
+ *          没改返回 `undefined`（正常技能照常往下走）。
+ *
+ * ⚠️ 减到 **≤ 1 个 tick** 时**直接摘掉**：留一个"还剩 0.1 秒"的状态会让
+ * 玩家看到进度条归零却仍然动不了（那种"就差一点"是最难受的）。
+ *
+ * ⚠️ 它**不扣资源** —— 代价在调用方（`payCosts`）已经付过了。
+ * 这条与「卸」的按住消耗是同一条分工："扣钱"与"做事"分开写。
+ */
+function strugglesOutOfSleep(
+  ctx: CastPipelineContext,
+  actor: Combatant,
+): Combatant | undefined {
+  const flags = aggregateFlags(actor);
+  const reduceMs = flags.sleepReduceMs ?? 0;
+  if (reduceMs <= 0) return undefined;
+
+  const reduceTicks = Math.round(reduceMs / (1000 / 60));
+  let changed = false;
+  const buffs = actor.buffs.flatMap((buff) => {
+    const amount = buff.def?.flags?.sleepReduceMs;
+    if (amount === undefined || amount <= 0) return [buff];
+    changed = true;
+    const left = buff.expiresAtTick - ctx.tick - reduceTicks;
+    if (!Number.isFinite(buff.expiresAtTick)) return [buff];
+    /** 见上：减到 ≤1 tick 就摘掉，不留"永远差一点"。 */
+    if (left <= 1) return [];
+    return [{ ...buff, expiresAtTick: buff.expiresAtTick - reduceTicks }];
+  });
+
+  return changed ? { ...actor, buffs } : undefined;
+}
+
 export function tryUseSkill(
   ctx: CastPipelineContext,
   skillId: string,
@@ -511,6 +547,28 @@ export function tryUseSkill(
     const paid = payCosts(actor, skill, ctx.tick);
     ctx.events.push(...paid.events);
     let next = paid.combatant;
+
+    /**
+     * ================================================================
+     * 「睡眠」：**按技能 = 挣扎**（用户 2026-10-14 定死的那条）
+     * ================================================================
+     *
+     * > 按技能 = 挣扎：**扣资源** + **睡眠减 3 秒**，但技能本身
+     * > **不生效**（无伤害 / 无 buff / 不进 CD）
+     *
+     * 所以它在"扣代价"之后、其它一切之前**提前返回**：
+     *   - ✅ 代价已经付了（`payCosts` 在上面）
+     *   - ✅ 睡眠按 `sleepReduceMs` 缩短
+     *   - ❌ 不进冷却、不计使用次数、不结算读条 / 能力 / 命中
+     *
+     * 恢复条件（`movesWhileLocked`）由动作锁那道门禁放行，见 `checkGate`。
+     */
+    const slept = strugglesOutOfSleep(ctx, next);
+    if (slept !== undefined) {
+      ctx.replaceCombatant(slept);
+      return;
+    }
+
 
     // 技能冷却（受急速影响）
     if (skill.cooldown > 0) {
