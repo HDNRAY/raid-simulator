@@ -124,7 +124,7 @@ describe('开发中名单与现实一致', () => {
     expect(BOSS_ROSTER.some((e) => !isDeveloping(e.id))).toBe(true);
   });
 
-  it('还没做完的 4 个 Boss + 黛玄在名单里（灰掉 + 标开发中）', () => {
+  it('还没做完的 3 个 Boss + 黛玄在名单里（灰掉 + 标开发中）', () => {
     /**
      * ⚠️ 2026-10-12：**凯丽从这里删掉了** —— 她有了自己的 5 招
      * （拳 / 轰 / 凝 / 截 / 闪）与 120 血上限，可以开战
@@ -132,16 +132,19 @@ describe('开发中名单与现实一致', () => {
      *
      * ⚠️ 2026-10-14：**嫉妒也删掉了** —— 它有四招（剜 / 殁 / 夺息 / 妒火）
      * 与自己的行为表，可以进肉鸽的 Boss 池（同上）。
+     *
+     * ⚠️ 同一天：**贪婪也删掉了** —— 敛财（9 层）+「弱点」被动 + 两招伤害。
      */
-    for (const id of ['daixuan', 'gluttony', 'wrath', 'sloth', 'greed']) {
+    for (const id of ['daixuan', 'gluttony', 'wrath', 'sloth']) {
       expect(isDeveloping(id), `${id} 应当是开发中`).toBe(true);
     }
     expect(isDeveloping('kaili'), '凯丽已经做完了，不该还标开发中').toBe(false);
   });
 
-  it('已完成的三个 Boss 不在名单里（需求：替换掉程序化绘制，可以打）', () => {
+  it('已完成的四个 Boss 不在名单里（需求：替换掉程序化绘制，可以打）', () => {
     expect(isDeveloping('meiichiro')).toBe(false);
     expect(isDeveloping('lust')).toBe(false);
     expect(isDeveloping('envy')).toBe(false);
+    expect(isDeveloping('greed')).toBe(false);
   });
 });

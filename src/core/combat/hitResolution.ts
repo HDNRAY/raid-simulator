@@ -92,6 +92,13 @@ export interface HitResolutionContext {
    */
   rollChance(): number;
   /**
+   * 掷一个 `[0, maxExclusive)` 的整数（种子化 RNG）。
+   *
+   * 用途：触发器的 `cooldownRangeMs`（"每次现掷一个 3–5 秒的间隔"）。
+   * ⚠️ 与 `rollChance` 一样，**调用即消耗**随机数 —— 只在真的要掷时调。
+   */
+  rollInt(maxExclusive: number): number;
+  /**
    * 解析 buff / 技能定义，以及当前 tick。
    *
    * ⚠️ 这三项是 `CombatContext` 要求的形状（`evaluateCondition` 要它）。
@@ -137,7 +144,18 @@ export function resolveHit(
     if (!target) return;
 
     const casterStats = ctx.statsOf(actor.id);
-    const victimFlags = aggregateFlags(target);
+    /**
+     * ⚠️ 判定旗标（buff 带来的）+ **目标自己的 `damageTakenMult`**
+     * （属性管道里的"易伤 / 弱点"）。
+     *
+     * 分开取是因为它们是两套东西：旗标是 `BuffFlags`（`invulnerable` /
+     * `damageThreshold` 那种"整击作废"的判定），而 `damageTakenMult` 是
+     * **属性**（`statsOf` 算出来的乘子）。`computeDamage` 只认后者做乘法。
+     */
+    const victimFlags = {
+      ...aggregateFlags(target),
+      damageTakenMult: ctx.statsOf(target.id).damageTakenMult,
+    };
 
     /**
      * 这一击里的全部伤害效果 —— 「卸」的阈值判定需要**看完整一击**。

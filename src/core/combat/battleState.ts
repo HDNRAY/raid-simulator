@@ -298,13 +298,16 @@ export class BattleEngine {
           }),
         ),
       rollCrit: (stats, damage) => this.rollCrit(stats, damage),
+      /** 掷 `[0, max)` 的整数 —— 与 `roll()` 同一条种子流，重放逐位相同。 */
+      rollInt: (maxExclusive) => {
+        if (!(maxExclusive > 0)) return 0;
+        const r = this.roll();
+        return Math.min(maxExclusive - 1, Math.floor(r * maxExclusive));
+      },
       /**
-       * 触发器引擎的落地动作（反伤等）—— 实现抽在 `triggerContext.ts`。
-       *
-       * ⚠️ 显式**转发**而不是把 `this` 传出去：`current` /
-       * `replaceCombatant` 是 private，传 `this` 过不了类型（那会誘人写成
-       * `as never` 绕过去，见 AGENTS.md §1）。
-       * ⚠️ 它同时提供 `buffDef` / `skillDef` / `currentTick`。
+       * 触发器引擎的落地动作（反伤等）—— 实现在 `triggerContext.ts`；
+       * 显式**转发**而不是传 `this`（private 字段过不了类型，见 AGENTS.md §1）。
+       * 它同时提供 `buffDef` / `skillDef` / `currentTick`。
        */
       ...triggerContextFor(
         {
@@ -471,24 +474,13 @@ export class BattleEngine {
   /**
    * 推进一个 tick。这是**唯一的**状态推进入口。
    *
-   * @param actions 本 tick 要应用的玩家 / AI 动作
-   * @param aiActions AI 产出的动作（M4 会填充；现在可以为空）
-   */
-  /**
-   * 推进一个 tick。
-   *
-   * @param actions 玩家本 tick 的动作
+   * @param actions 本 tick 要应用的动作
+   * @param actorId 动作的施放者。不传时按"单人一侧"推断 ——
+   *   调试入口需要能给 Boss 也发动作（例如手动触发霸体招式来看表现）。
    *
    * AI 的动作由引擎内部产出（见 `runAi`）—— 它和玩家动作走**同一条**
    * `applyActions` 路径，只是 actor 不同。这样"Boss 与玩家共用引擎"
    * 才是真的，而不是两套代码碰巧产生相似结果。
-   */
-  /**
-   * 推进一 tick。
-   *
-   * @param actions 本 tick 要应用的动作
-   * @param actorId 动作的施放者。不传时按"单人一侧"推断 ——
-   *   调试入口需要能给 Boss 也发动作（例如手动触发霸体招式来看表现）。
    */
   tick(actions: readonly Action[] = [], actorId?: string): void {
     if (this.state.status !== 'running') return;
@@ -599,6 +591,10 @@ export class BattleEngine {
        */
       onBuffHook: (ownerId, hook, payload) => {
         runTriggers(this.hitContext(), ownerId, hook, payload);
+      },
+      /** ⚠️ 载荷为空：`onTick` 不带"谁打了我"这类信息（它没有那次命中）。 */
+      onTick: (ownerId) => {
+        runTriggers(this.hitContext(), ownerId, 'onTick', {});
       },
     };
   }

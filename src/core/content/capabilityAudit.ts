@@ -132,6 +132,7 @@ function collectNestedAbilities(
  */
 export const SUPPORTED_HOOKS: readonly Hook[] = [
   'onCastFinish',
+  'onTick',
   'onHitTaken',
   'onCritDealt',
   'onBuffApplied',

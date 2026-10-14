@@ -170,6 +170,10 @@ const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
    * **不隐藏**（玩家看到它就知道"这两秒别碰"）。短标签用技能名。
    */
   'lust-bind-thorns': 'lust.bind.name',
+  /** 「贪婪」的「弱点」—— 双方各挂一层，**会显示**（玩家要看那 2 秒的窗口）。 */
+  'greed-weak-point': 'greed.weakPoint.name',
+  /** 「贪婪」的「敛财」—— 层数会显示在图标上（玩家要看着它涨）。 */
+  'greed-hoard': 'greed.hoard.name',
   'combo-window': 'buffShort.comboWindow',
   knockdown: 'buffShort.knockdown',
   /** 色欲的眩晕与印记（不登记就会显示中性兜底「？」）。 */

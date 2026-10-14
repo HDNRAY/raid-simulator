@@ -67,6 +67,18 @@ export interface DefenseFlags {
   readonly invulnerable?: boolean;
   readonly damageReduce?: number;
   readonly damageThreshold?: number;
+  /**
+   * **受到的伤害倍率**（`damageTakenMult`，基准 1）。
+   *
+   * ⚠️ 这个属性**声明了很久但没有任何引擎分支读它**（与 `ccImmune` /
+   * `interruptImmune` 同一类病）。第一次真实消费者是「贪婪」的「弱点」
+   * （"双方各挂一层，2 秒内受到的伤害翻倍"）与「嫉妒」的「见红」
+   * （"受到的伤害 +30%"）—— 所以在 `computeDamage` 里接上。
+   *
+   * ⚠️ 它是**乘子**（`STAT_RULES` 里 `kind: 'multiplier'`，基准 1）：
+   * `add 1` ⇒ ×2（翻倍）、`add 0.3` ⇒ ×1.3。
+   */
+  readonly damageTakenMult?: number;
 }
 
 /** 暴击判定结果。 */
@@ -205,6 +217,9 @@ export function computeDamage(
 
   if (!spec.ignoreModifiers) {
     if (targetFlags.damageReduce) value *= 1 - targetFlags.damageReduce;
+    /** 易伤 / 弱点（基准 1；`damageTakenMult` 是乘子型）。 */
+    const taken = targetFlags.damageTakenMult ?? 1;
+    if (taken !== 1) value *= taken;
   }
 
   const flatReduce = targetFlags.damageThreshold ?? 0;

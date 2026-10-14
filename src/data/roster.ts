@@ -100,7 +100,6 @@ const DEVELOPING: ReadonlySet<string> = new Set([
   'gluttony',
   'wrath',
   'sloth',
-  'greed',
 ]);
 
 /** 这个出战单位是不是还在开发中（备战界面据此灰掉 + 禁止开战）。 */

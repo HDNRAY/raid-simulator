@@ -47,6 +47,17 @@ export interface RunUpkeepContext extends UpkeepContext {
    * 事件数组钉在一个长期引用上）。
    */
   onBuffHook(ownerId: string, hook: BuffHookName, payload: HitPayload): void;
+  /**
+   * 把一次 `onTick` 钩子交给触发器引擎（每个**活着**的战斗者一次）。
+   *
+   * ⚠️ 为什么需要它：「贪婪」的「弱点」被动是**按时间**来的
+   * （"随机 3–5 秒一次"），而不是"挨打时"。没有这个钩子就只能挂在
+   * `onHitTaken` 上 —— 那会让节拍取决于玩家打得多快，而不是时钟。
+   *
+   * ⚠️ 触发器的间隔由它自己的 `cooldownMs` / `cooldownRangeMs` 管，
+   * 所以这里**每逻辑步**都调是安全的（没到点的那一步什么都不做）。
+   */
+  onTick(ownerId: string): void;
 }
 
 /**
@@ -77,4 +88,19 @@ export function runUpkeep(ctx: RunUpkeepContext, events: readonly EventDef[]): v
   ctx.buffHooks.drain(events, (ownerId, hook, payload) => {
     ctx.onBuffHook(ownerId, hook, payload);
   });
+
+  /**
+   * 第 5 步：`onTick`（按时间来的触发器）。
+   *
+   * ⚠️ 顺序放在 buff 钩子**之后**：先让"这个 buff 过期了 / 挂上了"派发完，
+   * 再问"有谁按时间要出手"。反过来会让同一 tick 里刚过期的触发器和
+   * tick 钩子抢同一份状态。
+   *
+   * ⚠️ 只遍历**活着**的人：死亡之后还触发会产出"死人打我"的事件
+   * （`alive` 是引擎裁决战斗结束的判据，不该被绕过）。
+   */
+  for (const combatant of ctx.combatants) {
+    if (!combatant.alive) continue;
+    ctx.onTick(combatant.id);
+  }
 }

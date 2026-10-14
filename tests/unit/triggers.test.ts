@@ -213,13 +213,15 @@ describe('哪些 hook 真的会被派发', () => {
       'onBuffExpired',
       'onCritDealt',
       'onHitTaken',
+      /** ⚠️ 2026-10-14：「贪婪」的「弱点」开始用"按时间"的钩子。 */
+      'onTick',
     ]);
     expect(isSupportedHook('onHitTaken')).toBe(true);
     expect(isSupportedHook('onCritDealt')).toBe(true);
     expect(isSupportedHook('onBuffApplied')).toBe(true);
     expect(isSupportedHook('onBuffExpired')).toBe(true);
+    expect(isSupportedHook('onTick')).toBe(true);
     expect(isSupportedHook('onKill')).toBe(false);
-    expect(isSupportedHook('onTick')).toBe(false);
     expect(isSupportedHook('onPhaseChange')).toBe(false);
   });
 });

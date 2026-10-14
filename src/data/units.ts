@@ -34,6 +34,7 @@ import { KAILI_HP } from './kits/kaili';
 import { LIN_WANFENG_HP } from './kits/linwanfeng';
 import { LUST_BEHAVIORS, LUST_PASSIVE } from './lustBoss';
 import { JEALOUSY_BEHAVIORS } from './jealousyBoss';
+import { GREED_BEHAVIORS } from './greedBoss';
 import { PRIDE_BEHAVIORS } from './bossPride';
 import { bossHpFor } from './bossDefs';
 import { BOSS_ROSTER, PLAYER_ROSTER, findEntry } from './roster';
@@ -191,6 +192,7 @@ export function playerSkillsFor(id: string): readonly SkillDef[] {
 const BOSS_BEHAVIORS: ReadonlyMap<string, readonly Behavior[]> = new Map([
   ['lust', LUST_BEHAVIORS],
   ['envy', JEALOUSY_BEHAVIORS],
+  ['greed', GREED_BEHAVIORS],
 ]);
 
 export function behaviorsFor(id: string): readonly Behavior[] {

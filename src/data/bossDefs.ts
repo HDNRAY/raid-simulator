@@ -33,6 +33,7 @@ import type { Behavior, BuffDef, LocaleKey, SkillDef } from '../core/types';
 import { PRIDE_BOSS } from './prideBoss';
 import { LUST_BOSS } from './lustBoss';
 import { JEALOUSY_BOSS } from './jealousyBoss';
+import { GREED_BOSS } from './greedBoss';
 
 /**
  * 一个 Boss 的**全部内容**。
@@ -60,7 +61,7 @@ export interface BossDef {
 }
 
 /** 有自己定义的 Boss。**开发中的不在里面**（见文件头）。 */
-export const BOSS_DEFS: readonly BossDef[] = [PRIDE_BOSS, LUST_BOSS, JEALOUSY_BOSS];
+export const BOSS_DEFS: readonly BossDef[] = [PRIDE_BOSS, LUST_BOSS, JEALOUSY_BOSS, GREED_BOSS];
 
 const BY_ID = new Map(BOSS_DEFS.map((b) => [b.id, b]));
 

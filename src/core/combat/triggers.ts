@@ -43,7 +43,7 @@ const DEPTH_LIMIT = 4;
 /**
  * 本引擎**实际会派发**的 hook（走进 `runTriggers` 的那些）。
  *
- * ⚠️ 只有这 4 个。其余 hook（`onCritTaken` / `onAvoided` / `onKill` …）
+ * ⚠️ 只有这 5 个。其余 hook（`onCritTaken` / `onAvoided` / `onKill` …）
  * 类型还在、内容也能写，但引擎**不认** —— 它们会静默无效。
  *
  * ⚠️ 注意 `onCastFinish` **不在**这张表里，但它**是活的**：
@@ -55,6 +55,14 @@ const DEPTH_LIMIT = 4;
  * 两张表的关系由 `tests/unit/content.test.ts` 断言（单向：本表 ⊆ 那张表）。
  */
 export const SUPPORTED_HOOKS: readonly string[] = [
+  /**
+   * ⚠️ 2026-10-14 新增（「贪婪」的「弱点」是第一个消费者）。
+   *
+   * 它由 `upkeep.runUpkeep` 对**每个活着的战斗者**每逻辑步派发一次，
+   * 而"多久真的一次"由触发器自己的 `cooldownMs` / `cooldownRangeMs`
+   * 管 —— 所以"按时间、随机间隔"这两件事都不用引擎再懂一遍。
+   */
+  'onTick',
   'onHitTaken',
   'onCritDealt',
   'onBuffApplied',
@@ -138,7 +146,19 @@ export function runTriggers(
        * 记 CD 与次数**必须在执行前**：执行本身会改 buff 列表（可能把
        * 印记消耗掉），之后再找这条记录就找不到了。
        */
-      if (trigger.cooldownMs !== undefined && trigger.cooldownMs > 0) {
+      /**
+       * 记 CD：固定值（`cooldownMs`）或**现掷一个区间内的值**
+       * （`cooldownRangeMs`，「贪婪」的「弱点」用后者）。
+       *
+       * ⚠️ 掷点走 `ctx.rollInt`（种子化），所以重放仍然逐位可复现；
+       * 而它**只在真的触发时**才掷（不是每 tick 掷），随机数消耗的顺序
+       * 仍由内容决定。
+       */
+      const cdMs =
+        trigger.cooldownRangeMs !== undefined
+          ? rollRangeMs(ctx, trigger.cooldownRangeMs)
+          : trigger.cooldownMs;
+      if (cdMs !== undefined && cdMs > 0) {
         ctx.replaceCombatant(
           withTriggerState(ctx, ownerId, (b) =>
             b.instanceId === buff.instanceId
@@ -146,7 +166,7 @@ export function runTriggers(
                   ...b,
                   triggerCooldowns: {
                     ...b.triggerCooldowns,
-                    [key]: tick + Math.round((trigger.cooldownMs ?? 0) / (1000 / 60)),
+                    [key]: tick + Math.round(cdMs / (1000 / 60)),
                   },
                 }
               : b,
@@ -201,6 +221,22 @@ function withTriggerState(
 /** 概率判定（走种子化 RNG）。 */
 function roll(ctx: HitResolutionContext): number {
   return ctx.rollChance();
+}
+
+/**
+ * 从一个 `[min, max]` 区间里现掷一个毫秒值（含两端）。
+ *
+ * ⚠️ `min > max` 时交换（内容写反了不该崩，也不该得到一个越界值）；
+ * 两者相等 ⇒ 退化成固定值。
+ */
+function rollRangeMs(
+  ctx: HitResolutionContext,
+  range: readonly [number, number],
+): number {
+  const lo = Math.min(range[0], range[1]);
+  const hi = Math.max(range[0], range[1]);
+  if (hi <= lo) return lo;
+  return lo + ctx.rollInt(hi - lo + 1);
 }
 
 /* ------------------------------------------------------------------ *

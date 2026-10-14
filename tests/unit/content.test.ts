@@ -276,18 +276,22 @@ describe('校验器能抓到各类内容错误', () => {
   it('UNSUPPORTED_HOOK：挂了引擎不会处理的 hook 会被报出来', () => {
     /**
      * `Hook` 是一整张声明表，而引擎**只处理** `SUPPORTED_HOOKS` 里那几个。
-     * 剩下的（`onTick` / `onKill` / 现在还没接线的 `onPhaseChange` …）写进内容是
+     * 剩下的（`onKill` / 还没接线的 `onPhaseChange` …）写进内容是
      * **静默无效**的：类型对、以前也过校验，但战斗中永远不触发。
      *
-     * 这条就是"不实测的规则等于没写"的实测：造一个 `onTick` 触发器，
+     * 这条就是"不实测的规则等于没写"的实测：造一个引擎不处理的触发器，
      * 证明校验器真的会说话。
+     *
+     * ⚠️ 2026-10-14：这里原先用的是 `onTick` —— 而「贪婪」的「弱点」开始
+     * 真的用它之后，它进了 `SUPPORTED_HOOKS`。所以换成 `onKill`
+     * （仍然没有派发点），否则这条测试会因为"这个 hook 现在支持了"而红。
      */
     const bundle: ContentBundle = {
       ...baseBundle(),
       buffs: [
         makeBuffDef({
           id: 'ticking',
-          triggers: [{ on: 'onTick', then: [] }],
+          triggers: [{ on: 'onKill', then: [] }],
         }),
       ],
     };
@@ -296,7 +300,7 @@ describe('校验器能抓到各类内容错误', () => {
     const issues = validateContent(bundle, { strict: false });
     const reported = issues.find((i) => i.code === 'UNSUPPORTED_HOOK');
     expect(reported).toBeDefined();
-    expect(reported?.message).toContain('onTick');
+    expect(reported?.message).toContain('onKill');
     // 打的是可读路径，内容作者能直接定位
     expect(reported?.path).toContain('ticking');
   });
@@ -392,7 +396,7 @@ describe('校验器能抓到各类内容错误', () => {
      */
     const bundle: ContentBundle = {
       ...baseBundle(),
-      buffs: [makeBuffDef({ id: 'ticking', triggers: [{ on: 'onTick', then: [] }] })],
+      buffs: [makeBuffDef({ id: 'ticking', triggers: [{ on: 'onKill', then: [] }] })],
     };
     const strictIssues = validateContent(bundle);
     expect(

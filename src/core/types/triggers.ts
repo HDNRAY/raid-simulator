@@ -108,6 +108,17 @@ export interface TriggerDef {
   readonly when?: Condition;
   /** 内置 CD（ms），防抖 */
   readonly cooldownMs?: number;
+  /**
+   * **随机内置 CD**（ms，`[min, max]`）—— 每次触发之后**现掷**一个间隔。
+   *
+   * 用途：「贪婪」的「弱点」被动是"**随机频率** 3–5 秒来一次"，而不是
+   * 固定节拍。写 `cooldownMs` 只能给固定值，写在这里才有随机。
+   *
+   * ⚠️ 掷点走**种子化 RNG**（与 `chance` 同一条流），所以固定种子下的
+   * 重放仍然逐位可复现 —— 不消耗 `Math.random`。
+   * ⚠️ 与 `cooldownMs` **二选一**（都写时本字段优先）。
+   */
+  readonly cooldownRangeMs?: readonly [number, number];
   /** 触发概率，走种子化 RNG */
   readonly chance?: number;
   readonly maxTriggersPerTick?: number;
