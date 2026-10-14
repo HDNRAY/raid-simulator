@@ -431,7 +431,7 @@ describe('能不能开战：开发中的单位灰掉且**不能开战**', () => 
     expect(canStartBattle(sel({ bossId: 'sloth', focus: 'start' }), real)).toBe(true);
     /** ⚠️ 同一天：「暴食」出师（三条啃噬 + 血盾 + 饕餮计数）。 */
     expect(canStartBattle(sel({ bossId: 'gluttony', focus: 'start' }), real)).toBe(true);
-    for (const bossId of ['wrath']) {
+    for (const bossId of []) {
       expect(canStartBattle(sel({ bossId, focus: 'start' }), real)).toBe(false);
     }
     /**

@@ -37,6 +37,7 @@ import { JEALOUSY_BEHAVIORS } from './jealousyBoss';
 import { GREED_BEHAVIORS } from './greedBoss';
 import { LAZY_BEHAVIORS } from './lazyBoss';
 import { GLUTTONY_BEHAVIORS } from './gluttonyBoss';
+import { WRATH_BEHAVIORS } from './wrathBoss';
 import { PRIDE_BEHAVIORS } from './bossPride';
 import { bossDefById, bossHpFor, bossStartHpFor } from './bossDefs';
 import { BOSS_ROSTER, PLAYER_ROSTER, findEntry } from './roster';
@@ -218,6 +219,7 @@ const BOSS_BEHAVIORS: ReadonlyMap<string, readonly Behavior[]> = new Map([
   ['greed', GREED_BEHAVIORS],
   ['sloth', LAZY_BEHAVIORS],
   ['gluttony', GLUTTONY_BEHAVIORS],
+  ['wrath', WRATH_BEHAVIORS],
 ]);
 
 export function behaviorsFor(id: string): readonly Behavior[] {

@@ -331,7 +331,9 @@ export function runAbilities(
        */
       case 'removeBuff': {
         const who = whoOf(ctx, ownerId, ability.target, payload);
-        if (who !== undefined) ctx.removeBuffFromTrigger(ctx.current(who), ability.buffId);
+        if (who !== undefined) {
+          ctx.removeBuffFromTrigger(ctx.current(who), ability.buffId, ability.stacks);
+        }
         break;
       }
 

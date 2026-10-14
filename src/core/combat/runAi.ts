@@ -21,6 +21,7 @@ import type { Ability, Combatant, EventDef, SkillDef } from '../types';
 import { decide, type AiState, type AiView } from '../ai';
 import { changeResource } from './index';
 import { applyBuff } from '../buffs';
+import { reduceBuffStacks } from './triggerContext';
 
 /** AI 决策需要的引擎能力。 */
 export interface AiContext {
@@ -149,18 +150,19 @@ export function runAbilities(
         const targetId = targetIdOf(ability.target.mode);
         const target = ctx.current(targetId);
         if (target.buffs.some((b) => b.defId === ability.buffId)) {
-          ctx.replaceCombatant({
-            ...target,
-            buffs: target.buffs.filter((b) => b.defId !== ability.buffId),
-          });
-          ctx.events.push({
-            kind: 'buffExpired',
-            tick: ctx.tick,
-            targetId,
-            buffId: ability.buffId,
-            stacks: 0,
-            sourceId: actorId,
-          });
+          /** ⚠️ 与 `triggerContext` 共用同一个纯函数（同一份算法只许有一份）。 */
+          const { buffs, expired } = reduceBuffStacks(target.buffs, ability.buffId, ability.stacks);
+          ctx.replaceCombatant({ ...target, buffs });
+          for (const id of expired) {
+            ctx.events.push({
+              kind: 'buffExpired',
+              tick: ctx.tick,
+              targetId,
+              buffId: id,
+              stacks: 0,
+              sourceId: actorId,
+            });
+          }
         }
         continue;
       }

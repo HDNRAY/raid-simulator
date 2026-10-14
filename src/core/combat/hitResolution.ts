@@ -133,7 +133,8 @@ export interface HitResolutionContext {
     custom?: number,
   ): void;
   /** 按 `defId` 移除一个 buff（同 defId 的实例一起摘）。 */
-  removeBuffFromTrigger(target: Combatant, buffId: string): void;
+  /** 移除某个 buff：`stacks` 给了只减那么多层（见 `RemoveBuffAbility`），不给 = 整条摘掉。 */
+  removeBuffFromTrigger(target: Combatant, buffId: string, stacks?: number): void;
   /** 一次性资源变动。 */
   changeResourceFromTrigger(target: Combatant, resource: string, delta: number): void;
   /**

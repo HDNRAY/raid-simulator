@@ -97,7 +97,6 @@ export const BOSS_ROSTER: readonly RosterEntry[] = [
  */
 const DEVELOPING: ReadonlySet<string> = new Set([
   'daixuan',
-  'wrath',
 ]);
 
 /** 这个出战单位是不是还在开发中（备战界面据此灰掉 + 禁止开战）。 */

@@ -86,7 +86,7 @@ function fight(bossId: string, seed = 20261014): FightResult {
 }
 
 /** 今天做的四个 + 早先的两个，全跑一遍并把结果打出来（调平衡时看它）。 */
-const BOSSES = ['meiichiro', 'lust', 'envy', 'greed', 'sloth', 'gluttony'] as const;
+const BOSSES = ['meiichiro', 'lust', 'envy', 'greed', 'sloth', 'gluttony', 'wrath'] as const;
 
 describe('六个 Boss 各跑一整场（整场级回归）', () => {
   const results = BOSSES.map((id) => fight(id));

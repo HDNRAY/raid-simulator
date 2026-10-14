@@ -183,6 +183,9 @@ const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
   'gluttony-sated': 'gluttony.sated.name',
   /** 「黑闪」的窗口（那条 0.1 秒的翻倍）。节拍是隐藏的，不用登记。 */
   'heishan-window': 'buff.heishanWindow.name',
+  /** 「暴怒」的两条可见 buff：怒火（层数）与暴怒形态。 */
+  'wrath-rage': 'wrath.rage.name',
+  'wrath-fury': 'wrath.fury.name',
   'combo-window': 'buffShort.comboWindow',
   knockdown: 'buffShort.knockdown',
   /** 色欲的眩晕与印记（不登记就会显示中性兜底「？」）。 */

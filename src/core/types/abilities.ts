@@ -115,6 +115,14 @@ export interface RemoveBuffAbility {
   readonly kind: 'removeBuff';
   readonly target: TargetRule;
   readonly buffId: BuffId;
+  /**
+   * **只减多少层**（缺省 = 整条摘掉）。
+   *
+   * ⚠️ 用户要的"**计数用 buff 层数**"这条路，光能加不够 —— 还得能**减 1**：
+   * 「暴怒」的怒火是"每 2 秒不挨打 **−1 层**"（不是清零）。
+   * 层数减到 0 的实例会被摘掉（并补 `buffExpired`，与整条摘掉同一条路）。
+   */
+  readonly stacks?: number;
 }
 
 /**

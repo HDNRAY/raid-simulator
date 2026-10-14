@@ -23,6 +23,42 @@ import type { BuffDef, Combatant, EventDef, SkillDef } from '../types';
 import { aggregateFlags, applyBuff } from '../buffs';
 import { applyDamage, changeResource, computeDamage } from './index';
 import type { HitPayload } from '../types/triggers';
+
+/**
+ * **按层削减某条 buff**（`RemoveBuffAbility.stacks` 用）—— 两个执行点共用。
+ *
+ * @param stacks 要减多少层；缺省 = **整条摘掉**（所有实例一起）
+ * @returns 新的 buffs 数组 + 被**完全摘掉**的那些 `defId`（供补 `buffExpired`）
+ *
+ * ⚠️ 抽成纯函数而不是在两个执行点各写一遍：AGENTS.md §2 的"同一份算法
+ * 只许有一个实现" —— 两份"都正确"的实现**也会漂**。
+ */
+export function reduceBuffStacks(
+  buffs: Combatant['buffs'],
+  buffId: string,
+  stacks?: number,
+): { readonly buffs: Combatant['buffs']; readonly expired: readonly string[] } {
+  if (stacks === undefined) {
+    const had = buffs.some((b) => b.defId === buffId);
+    return { buffs: buffs.filter((b) => b.defId !== buffId), expired: had ? [buffId] : [] };
+  }
+  let left = Math.max(0, stacks);
+  const expired: string[] = [];
+  const out: Combatant['buffs'][number][] = [];
+  for (const buff of buffs) {
+    if (buff.defId !== buffId || left <= 0) {
+      out.push(buff);
+      continue;
+    }
+    const take = Math.min(buff.stacks, left);
+    left -= take;
+    const rest = buff.stacks - take;
+    if (rest <= 0) expired.push(buffId);
+    else out.push({ ...buff, stacks: rest });
+  }
+  return { buffs: out, expired };
+}
+
 import type { HitResolutionContext } from './hitResolution';
 
 /**
@@ -98,21 +134,25 @@ export function triggerContextFor(host: TriggerHost, roll: () => number): Trigge
      * 所以 `independent` 叠层的多个实例也会一起清掉 —— 这正是
      * "清零"要的语义（引擎里已有一处同源实现：`EffectKind: 'removeBuff'`）。
      */
-    removeBuffFromTrigger: (target, buffId) => {
+    removeBuffFromTrigger: (target, buffId, stacks) => {
       const current = host.current(target.id);
       if (!current.buffs.some((b) => b.defId === buffId)) return;
-      host.replaceCombatant({
-        ...current,
-        buffs: current.buffs.filter((b) => b.defId !== buffId),
-      });
-      host.events.push({
-        kind: 'buffExpired',
-        tick: host.combat.currentTick(),
-        targetId: target.id,
-        buffId,
-        stacks: 0,
-        sourceId: target.id,
-      });
+      /**
+       * ⚠️ `stacks` 给了就**只减那么多层**（减到 0 的实例摘掉）——
+       * 那是「暴怒」的"每 2 秒 −1 层"要的语义；不给就整条摘掉（原样）。
+       */
+      const { buffs, expired } = reduceBuffStacks(current.buffs, buffId, stacks);
+      host.replaceCombatant({ ...current, buffs });
+      for (const id of expired) {
+        host.events.push({
+          kind: 'buffExpired',
+          tick: host.combat.currentTick(),
+          targetId: target.id,
+          buffId: id,
+          stacks: 0,
+          sourceId: target.id,
+        });
+      }
     },
 
     changeResourceFromTrigger: (target, resource, delta) => {

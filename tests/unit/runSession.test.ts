@@ -262,12 +262,13 @@ describe('Boss 池 = **做完的**那些（设计稿 §2.3）', () => {
     }
   });
 
-  it('现在只剩暴怒没做（其余六个都能打）', () => {
+  it('七个 Boss 全部能打（2026-10-14 暴怒出师，七宗罪齐了）', () => {
     expect(BOSS_POOL.map((b) => b.id)).toEqual([
       'meiichiro',
       'lust',
       'envy',
       'gluttony',
+      'wrath',
       'sloth',
       'greed',
     ]);
