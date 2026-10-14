@@ -548,6 +548,13 @@ export function tryUseSkill(
     ctx.events.push(...paid.events);
     let next = paid.combatant;
 
+    // 技能冷却（受急速影响）
+    if (skill.cooldown > 0) {
+      const cooldownMs = hastedCooldown(skill.cooldown, stats);
+      const readyAt = ctx.tick + Math.round(cooldownMs / (1000 / 60));
+      next = { ...next, cooldowns: { ...next.cooldowns, [skillId]: readyAt } };
+    }
+
     /**
      * ================================================================
      * 「睡眠」：**按技能 = 挣扎**（用户 2026-10-14 定死的那条）
@@ -558,8 +565,13 @@ export function tryUseSkill(
      *
      * 所以它在"扣代价"之后、其它一切之前**提前返回**：
      *   - ✅ 代价已经付了（`payCosts` 在上面）
+     *   - ✅ **冷却照进**（用户 2026-10-14："睡眠时按技能要进 cd"）
      *   - ✅ 睡眠按 `sleepReduceMs` 缩短
-     *   - ❌ 不进冷却、不计使用次数、不结算读条 / 能力 / 命中
+     *   - ❌ 不计使用次数、不结算读条 / 能力 / 命中（"不造成伤害和别的效果"）
+     *
+     * ⚠️ 位置就是判据：它在**冷却之后**（所以 CD 会写进去），在
+     * **使用次数 / 读条 / 命中之前**（所以那些都不会发生）。我第一版
+     * 写在了冷却**之前**，于是"睡着按技能不进 CD"—— 与用户的口径相反。
      *
      * 恢复条件（`movesWhileLocked`）由动作锁那道门禁放行，见 `checkGate`。
      */
@@ -569,13 +581,6 @@ export function tryUseSkill(
       return;
     }
 
-
-    // 技能冷却（受急速影响）
-    if (skill.cooldown > 0) {
-      const cooldownMs = hastedCooldown(skill.cooldown, stats);
-      const readyAt = ctx.tick + Math.round(cooldownMs / (1000 / 60));
-      next = { ...next, cooldowns: { ...next.cooldowns, [skillId]: readyAt } };
-    }
 
     // 记使用次数
     next = { ...next, uses: { ...next.uses, [skillId]: (next.uses[skillId] ?? 0) + 1 } };

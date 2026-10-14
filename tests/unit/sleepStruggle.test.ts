@@ -135,7 +135,7 @@ describe('「睡眠」：按技能 = 挣扎（扣资源 + 减 3 秒，技能本�
     expect(after, '但不是"按一下立刻醒"').toBeGreaterThan(0);
   });
 
-  it('⚠️ **按技能不造成任何效果**：没有伤害、没有 CD、没有使用次数', () => {
+  it('⚠️ **按技能不造成效果**：没有伤害、没有使用次数，但**进 CD**', () => {
     const h = sleepingHarness(10);
     const bossHpBefore = h.boss()?.resources.hp ?? -1;
     const cdBefore = h.player()?.cooldowns['test-heavy'];
@@ -144,18 +144,43 @@ describe('「睡眠」：按技能 = 挣扎（扣资源 + 减 3 秒，技能本�
     h.press();
 
     expect(h.boss()?.resources.hp, '睡着还能打伤害是最坏的一条').toBe(bossHpBefore);
-    expect(h.player()?.cooldowns['test-heavy'], '不进 CD').toBe(cdBefore);
     expect(h.player()?.uses['test-heavy'] ?? 0, '不计使用次数').toBe(usesBefore);
+    /**
+     * ⚠️ **CD 要进**（用户 2026-10-14："睡眠时按技能要进 cd"）。
+     * 它同时是"不能靠狂按无限挣扎"的那条约束：你只能按**已经就绪**的技能。
+     */
+    expect(
+      h.player()?.cooldowns['test-heavy'],
+      '睡着了也要进 CD',
+    ).not.toBe(cdBefore);
   });
 
-  it('按 4 次（10 秒 / 3 秒）就醒 —— 醒着时技能**照常全额生效**', () => {
+  it('一直按（按 CD 的节奏）→ 会醒；醒着时技能**照常全额生效**', () => {
+    /**
+     * ⚠️ **"按几次"取决于那个技能自己的 CD** —— 睡眠期间你只能按
+     * **已经就绪**的技能，所以"最快多久醒"= 拿就绪的技能狂按。
+     *
+     * ⚠️ 而且**睡眠自己每秒也在走**（`expiresAtTick` 是绝对 tick），
+     * 所以"10 秒 ÷ 3 秒 = 4 次"只在"瞬间按完 4 次"时成立。这里让引擎
+     * 真的走时间（每 tick 都试一次按键），验的是"**会醒**"，不是某个次数。
+     */
     const h = sleepingHarness(10);
-    for (let i = 0; i < 4; i += 1) h.press();
-    expect(h.player()?.buffs.some((b) => b.defId === LAZY_SLEEP.id), '4 次之后应该醒了').toBe(
+    for (let i = 0; i < 10 * 60; i += 1) {
+      h.press();
+      if (!h.player()?.buffs.some((b) => b.defId === LAZY_SLEEP.id)) break;
+    }
+    expect(h.player()?.buffs.some((b) => b.defId === LAZY_SLEEP.id), '一直按应该会醒').toBe(
       false,
     );
 
-    /** 醒了之后这一招必须"正常"：有伤害、有 CD。 */
+    /**
+     * ⚠️ 醒了之后这一招必须"正常"：有伤害、有 CD。
+     * 但要先**等它自己那 0.6 秒 CD 走完** —— 睡着时按的那几下同样进了 CD
+     * （那正是用户要的），所以刚醒时它是冷却中的。
+     */
+    while ((h.player()?.cooldowns['test-heavy'] ?? 0) > h.engine.snapshot.tick) h.engine.tick([]);
+    h.engine.drainEvents();
+
     const bossHpBefore = h.boss()?.resources.hp ?? -1;
     h.press();
     expect(h.boss()?.resources.hp, '醒了就该打出伤害').toBeLessThan(bossHpBefore);
