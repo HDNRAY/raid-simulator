@@ -366,7 +366,7 @@ export const LUST_BIND: SkillDef = {
     },
   ],
   castTime: logicMs(20),
-  cooldown: logicMs(120),
+  cooldown: logicMs(90),
   cost: [],
   /**
    * ⚠️ **空 hits 是有意的**：这一招只有荆棘，没有伤害。
@@ -440,15 +440,15 @@ export const LUST_BEHAVIORS: readonly Behavior[] = [
        *
        * ⚠️ `gapMs` **必须短于各自的冷却**，否则那一步永远不满足条件、
        * 轮转空转（记在 `PRIDE_BEHAVIORS` 的坑）：
-       *   缚   CD 12s → gap 10s
+       *   缚   CD 9s  → gap 7s
        *   魅惑 CD 6s → gap 5s
        *   缠绕 CD 9s → gap 8s
        *   轻吟 CD 2s → gap 1.5s
        *
-       * ⚠️ 「缚」排**最前**：它 CD 最长（12s），而且辨识度来自"那两秒你
+       * ⚠️ 「缚」排**最前**：它 CD 最长（9s），而且辨识度来自"那两秒你
        * 什么都打不得" —— 被填充技挤掉会让这个机制几乎看不见。
        */
-      { skillId: 'lust-bind', gapMs: 10_000 },
+      { skillId: 'lust-bind', gapMs: 7_000 },
       { skillId: 'lust-charm', gapMs: 5_000 },
       { skillId: 'lust-entangle', gapMs: 8_000 },
       { skillId: 'lust-hum', gapMs: 1_500 },
