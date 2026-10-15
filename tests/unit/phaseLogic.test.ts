@@ -21,8 +21,44 @@ import {
  * "两个界面同时可见" / "看得见、点不动"。抽成纯函数之后可以在 node 里钉住。
  */
 
-/** 全部相位，**逐条列出来**（加值时会漏在这里，正是漏改的报警器）。 */
-const ALL: readonly Phase[] = ['home', 'characterSelect', 'prepare', 'battle'];
+/**
+ * 全部相位，**逐条列出来**（加值时会漏在这里，正是漏改的报警器）。
+ *
+ * ⚠️ 2026-10-15 补齐：原先只列了四个（`qijiSelect` / `runOver` 加进来时
+ * **没有**补进这张表），于是"加相位要在这里加一个"这条纪律实际上已经失效
+ * —— 而它的作用正是"漏了会红"。现在七个都在，并补上 `runConfirm`
+ * （肉鸽每场战斗之前的确认屏）。
+ */
+const ALL: readonly Phase[] = [
+  'home',
+  'characterSelect',
+  'prepare',
+  'battle',
+  'runConfirm',
+  'qijiSelect',
+  'runOver',
+];
+
+/**
+ * 「返回 / 返回箭头」那张表**逐相位**的期望值（唯一一处手写的对照面）。
+ *
+ * | 相位 | `Esc` | 为什么 |
+ * |---|---|---|
+ * | `home` | 无 | 首页就是目标本身 |
+ * | `characterSelect` / `prepare` | `home` | 回首页 |
+ * | `battle` | 无 | 战斗中没有暂停 / 菜单（见 `phaseFromEscape`） |
+ * | `runConfirm` | **无** | 确认屏没有"回上一屏"（紧接在开局 / 选炁机之后） |
+ * | `qijiSelect` / `runOver` | `characterSelect` | 放弃 / 再来一局 |
+ */
+const ESCAPE_TARGET: Readonly<Record<Phase, string | undefined>> = {
+  home: undefined,
+  characterSelect: 'home',
+  prepare: 'home',
+  battle: undefined,
+  runConfirm: undefined,
+  qijiSelect: 'characterSelect',
+  runOver: 'characterSelect',
+};
 
 describe('返回：哪些相位能回首页', () => {
   it('自由模式与选角色屏 → 首页', () => {
@@ -43,11 +79,18 @@ describe('返回：哪些相位能回首页', () => {
     expect(phaseFromEscape('battle')).toBeUndefined();
   });
 
-  it('遍历全部相位：把上面的三条一次性钉死', () => {
+  it('⚠️ 确认屏的 Esc 也**什么都不做**（它没有"回上一屏"）', () => {
+    /**
+     * 确认屏紧接在"开局 / 选完炁机"之后：此时没有可回的那一屏（回选炁机屏
+     * 等于把刚做的决策重做一遍）。要离开这一局，从**选炁机屏 / 一局结束屏**
+     * 按返回 —— 那两处的箭头还在。
+     */
+    expect(phaseFromEscape('runConfirm')).toBeUndefined();
+  });
+
+  it('遍历全部相位：把上面那几条一次性钉死', () => {
     for (const phase of ALL) {
-      const target = phaseFromEscape(phase);
-      const expected = phase === 'characterSelect' || phase === 'prepare' ? 'home' : undefined;
-      expect(target, `phase=${phase}`).toBe(expected);
+      expect(phaseFromEscape(phase), `phase=${phase}`).toBe(ESCAPE_TARGET[phase]);
     }
   });
 });
@@ -65,8 +108,13 @@ describe('返回箭头的可见相位', () => {
     }
   });
 
-  it('只有自由模式 / 选角色屏显示箭头', () => {
-    expect(ALL.filter(backVisibleIn)).toEqual(['characterSelect', 'prepare']);
+  it('只有选角色 / 自由模式 / 选炁机 / 一局结束显示箭头', () => {
+    expect(ALL.filter(backVisibleIn)).toEqual([
+      'characterSelect',
+      'prepare',
+      'qijiSelect',
+      'runOver',
+    ]);
   });
 });
 

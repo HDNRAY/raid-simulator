@@ -31,6 +31,7 @@ import {
   homeDebugApi,
   prepareDebugApi,
   qijiDebugApi,
+  runConfirmDebugApi,
   settingsDebugApi,
 } from './debugApi';
 import { clampUiScale } from '../render/scaling';
@@ -43,6 +44,7 @@ import type { HomeScreen } from '../ui/HomeScreen';
 import type { CharacterSelectScreen } from '../ui/CharacterSelectScreen';
 import type { PrepareScreen } from '../ui/PrepareScreen';
 import type { QijiSelectScreen } from '../ui/QijiSelectScreen';
+import type { RunConfirmScreen } from '../ui/RunConfirmScreen';
 import type { RunOverScreen } from '../ui/RunOverScreen';
 import type { ScreenChrome } from '../ui/ScreenChrome';
 import type { TouchControls } from './touchControls';
@@ -117,6 +119,14 @@ export interface DebugApiDeps {
    */
   readonly qijiSelect: QijiSelectScreen;
   readonly runOver: RunOverScreen;
+  /**
+   * **确认屏**（肉鸽；2026-10-15）。
+   *
+   * ⚠️ 进调试入口的理由：`?runlen=2` 的验收要回答"**每场之前**都到了确认屏
+   * 吗"，而"到了"这件事在相位序列里只有一条字符串 —— 它显示的是哪一场、
+   * 右栏是不是刚选的炁机，只有这一屏自己的读数能证明。
+   */
+  readonly runConfirm: RunConfirmScreen;
   /**
    * **一局肉鸽的账本 + 相位序列**（`?runlen=N` 的验收探针）。
    *
@@ -233,6 +243,7 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
     ...characterSelectDebugApi(d.select),
     ...prepareDebugApi(d.prepare),
     ...qijiDebugApi(d.qijiSelect, d.runOver),
+    ...runConfirmDebugApi(d.runConfirm),
     /**
      * **一局肉鸽的账本**（只读观测）。
      *

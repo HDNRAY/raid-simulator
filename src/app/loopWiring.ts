@@ -74,6 +74,19 @@ export interface CanvasHost {
     moveFocus(delta: number, wrap?: boolean): void;
     confirm(): void;
   };
+  /**
+   * **确认屏**（肉鸽每场战斗之前，2026-10-15）。
+   *
+   * ⚠️ 它只有一个动作（开始这一场），所以契约只有 `frame` + `confirm`
+   * —— 与一局结束屏同一个形状（`Enter` / `Space` 都走 `confirm`）。
+   * 另外它**能滚**（`Shift+↑↓` 只滚左栏，见屏幕自己的 `scrollDetail`）。
+   */
+  readonly runConfirm: {
+    frame(): void;
+    confirm(): void;
+    /** **Shift + ↑ ↓**：滚左栏正文（不切焦点、不动光标 —— 这一屏没有光标）。 */
+    scrollDetail(dir: 'up' | 'down'): void;
+  };
   /** 一局结束屏（P3；Enter / 点屏幕 = 回选角色）。 */
   readonly runOver: {
     frame(): void;
@@ -148,6 +161,14 @@ export interface WireOptions {
     /** 把这次按键交给复盘（`true` = 消费了）。 */
     handleKey(key: string): boolean;
   };
+  /**
+   * **FPS 层**（`?fps=1` 才存在；`app/fpsOverlay.createFpsOverlay` 的产物）。
+   *
+   * ⚠️ 它由**这里**喂帧（`state.frameCount += 1` 那一刻），而不是自己挂一个
+   * `requestAnimationFrame` —— 帧的唯一真相就是那个 ticker，两份必然漂
+   * （设计稿 §1/§6）。所以这一层只暴露一个 `frame(now)`。
+   */
+  readonly fps?: { frame(nowMs: number): void } | undefined;
 }
 
 /**
@@ -182,6 +203,13 @@ export function wireLoop(o: WireOptions): void {
      * 读同一个值，复制一份就会出现"探针里的帧数永远不动"。
      */
     state.frameCount += 1;
+    /**
+     * ⚠️ **FPS 采样紧贴帧计数**（就在这一行下面）：那个计数器是"帧"的
+     * 唯一真相，采样必须与它同源 —— 排在相位分支**之前**，所以菜单 / 战斗
+     * 都算（FPS 是**应用**的帧率，不是"战斗的帧率"）。`?fps=1` 之外它是
+     * `undefined`，这一行就是一次可选的调用，没有任何别的影响。
+     */
+    o.fps?.frame(performance.now());
     if (state.phase !== 'battle') {
       /**
        * **非战斗阶段**：**不碰战斗**（`loop` 已经 dispose）。三个整屏界面
@@ -194,6 +222,7 @@ export function wireLoop(o: WireOptions): void {
       if (state.phase === 'home') host.home.frame();
       else if (state.phase === 'characterSelect') host.select.frame();
       else if (state.phase === 'prepare') host.prepare.frame();
+      else if (state.phase === 'runConfirm') host.runConfirm.frame();
       else if (state.phase === 'qijiSelect') host.qijiSelect.frame();
       else host.runOver.frame();
       /**
@@ -306,6 +335,8 @@ export function wireLoop(o: WireOptions): void {
      * | 自由模式 | Shift + ↑ ↓ | **滚详情区正文**（不切焦点、不动光标；见下） |
      * | 自由模式 | Tab / Shift+Tab | 同上但**环绕**（Tab 的通用语义） |
      * | 自由模式 | Enter | **确定**光标处的那一项；在「开始战斗」上时开战 |
+     * | 确认屏 | Enter / Space | 开始这一场（肉鸽；整屏只有这一个动作） |
+     * | 确认屏 | Shift + ↑ ↓ | 滚左栏正文（那一条比一屏长） |
      * | 自由模式 / 选角色 | `Esc` | **返回首页**（战斗中无反应，见上） |
      *
      * ⚠️ **移动光标 ≠ 确定选择**（需求原话："用 enter 来确定选择，
@@ -389,6 +420,29 @@ export function wireLoop(o: WireOptions): void {
        */
       if (layer === 'runOver') {
         if (event.key === 'Enter') host.runOver.confirm();
+        return;
+      }
+      /**
+       * **确认屏（肉鸽；2026-10-15）**：整屏也只有一个动作（开始这一场）。
+       *
+       * ⚠️ `Enter` 与 `Space` **都**认：`Space` 是"确认"的通用键（触屏
+       * 对等不受影响 —— 触屏走点「开始战斗」那一条），而这一屏是"确认 /
+       * 继续"语义，正是空格的传统含义。一局结束屏只认 `Enter`（那里没有
+       * 需要防的歧义），两者不同**是有意的**。
+       *
+       * ⚠️ `Shift+↑↓` 滚左栏（本次出战）：那一条比一屏长（1 行标题 + 5 条
+       * 技能），与备战屏**同一个键位习惯**（裸 ↑↓ 在这一屏没有别的意思
+       * —— 没有光标可移）。
+       */
+      if (layer === 'runConfirm') {
+        if (event.key === 'Enter' || event.key === ' ') {
+          host.runConfirm.confirm();
+          return;
+        }
+        if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && event.shiftKey) {
+          host.runConfirm.scrollDetail(event.key === 'ArrowUp' ? 'up' : 'down');
+          return;
+        }
         return;
       }
       if (layer === 'characterSelect') {

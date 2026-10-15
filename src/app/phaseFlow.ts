@@ -38,7 +38,8 @@ import { runLengthOf } from '../core/run/index';
 import { createRunSession } from './runSession';
 import type { QijiCandidateView, QijiView } from '../ui/qijiSelectLogic';
 import { switchPlayerProfile } from './playerKeys';
-import { phaseFromEscape, screenVisibilityOf, type Phase } from './phaseLogic';
+import { phaseFromEscape, phaseAfterAdvance, RUN_BATTLE_ENTRY, RUN_BATTLE_ENTRY_AFTER_QIJI, screenVisibilityOf } from './phaseLogic';
+import type { Phase, ShiftTarget } from './phaseLogic';
 import type { BattleLoop } from './battleLoop';
 import type { GameState } from './flow';
 import type { ContentRegistry } from '../core/content/registry';
@@ -117,7 +118,7 @@ export interface PhaseFlowDeps {
 export function createPhaseFlow(d: PhaseFlowDeps): {
   applyPhase(phase: Phase): void;
   enterBattle(playerId: string, bossId: string): void;
-  switchTo(target: 'home' | 'characterSelect' | 'prepare' | 'qijiSelect' | 'runOver'): void;
+  switchTo(target: ShiftTarget): void;
   backFromBattle(): void;
   backToHome(): void;
   /**
@@ -150,6 +151,24 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
   phaseHistory(): readonly string[];
   /** 当前一局的 `RunState`（没有时 `undefined`）。⚠️ 只读引用，别改它。 */
   runState(): RunState | undefined;
+  /**
+   * **确认屏要显示的内容**（2026-10-15）：第几场 / 共几场 / 出战角色 /
+   * 本局最近选的那条炁机。
+   *
+   * ⚠️ 渲染层不认识 `RunState`，所以摊平在这一层做（与 `runSummary` 同一条
+   * 纪律：接口形状由消费者声明）。
+   */
+  runConfirmInfo(): {
+    readonly position: number;
+    readonly length: number;
+    readonly playerId: string;
+    readonly qijiId?: string | undefined;
+  };
+  /**
+   * **确认屏的「开始战斗」**：真的开这一场（`enterBattle` 的唯一肉鸽入口
+   * 之一 —— 另外两条是开局与"选完炁机"，它们都先切到确认屏）。
+   */
+  confirmRunBattle(): void;
   /** 一局结束屏要显示的内容（位置 / 长度 / 这一局带了哪些炁机）。 */
   runSummary(): {
     readonly victory: boolean;
@@ -286,6 +305,7 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
     state.home?.setVisible(show.home);
     state.select?.setVisible(show.characterSelect);
     state.prepare?.setVisible(show.prepare);
+    state.runConfirm?.setVisible(show.runConfirm);
     state.qijiSelect?.setVisible(show.qijiSelect);
     state.runOver?.setVisible(show.runOver);
     d.scene.root.visible = show.battle;
@@ -358,7 +378,7 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
    * 每帧被主循环驱动，留着不放会继续跑一场已经看不到的战斗
    * （而且下一局 `enterBattle` 还会再建一个 —— 两个循环同时推进）。
    */
-  const switchTo = (target: 'home' | 'characterSelect' | 'prepare' | 'qijiSelect' | 'runOver'): void => {
+  const switchTo = (target: ShiftTarget): void => {
     state.loop?.dispose();
     state.loop = undefined;
     applyPhase(target);
@@ -374,7 +394,8 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
    *   1. 把**这一场的事件流 + 胜负 + 满血**喂给 `runSession.advance`
    *      （统计**不在这里算** —— 那是 `core/run/stats.ts` 的归约，
    *      由 `advanceRun` 调用；本文件一个加法都不写）
-   *   2. 按它给的**去向**走：进选择屏 / 直接下一场 / 一局结束
+   *   2. 按它给的**去向**走（`phaseLogic.phaseAfterAdvance`）：选炁机屏 /
+   *      **确认屏**（下一场先确认，2026-10-15）/ 一局结束屏
    *   3. 自由模式（`runSession.active === false`）照旧回备战界面
    *
    * ⚠️ **必须在 `switchTo` 之前读 loop**：`switchTo` 会 `dispose` 掉它
@@ -400,20 +421,22 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
     const flawless = outcome === 'victory' && player !== undefined && player.resources.hp >= player.caps.hp;
 
     const next = runSession.advance(outcome, loop?.battleEvents ?? [], flawless);
-    if (next.kind === 'selectQiji') {
-      switchTo('qijiSelect');
-      return;
-    }
-    if (next.kind === 'runOver') {
+    /**
+     * ⚠️ **`'battle'` 也要先过确认屏**（2026-10-15）：下一场开打之前给玩家
+     * 一屏只读的"派谁 / 带哪条炁机"。判据收在 `phaseAfterAdvance`
+     * （纯函数，有单测），所以这里不再自己写 `next.kind === 'battle'` 的
+     * 字面目标 —— 那正是"三条路里漏改一条"的形状。
+     */
+    if (next.kind !== 'battle') {
       /**
-       * ⚠️ 这里**不 `clear()`**：一局结束屏要显示"打到第几场 / 带了哪些炁机"
-       * （`runSummary` 读的就是这一局）。丢掉它的时机是**离开这一屏**时
-       * （`backToHome` / 一局结束屏的确认），不是进来的时候。
+       * ⚠️ `runOver` 这一支**不 `clear()`**：一局结束屏要显示"打到第几场 /
+       * 带了哪些炁机"（`runSummary` 读的就是这一局）。丢掉它的时机是
+       * **离开这一屏**时（`backToHome` / 一局结束屏的确认），不是进来的时候。
        */
-      switchTo('runOver');
+      switchTo(phaseAfterAdvance(next));
       return;
     }
-    enterBattle(runSession.state()?.playerId ?? d.selection.playerId, next.bossId);
+    switchTo(RUN_BATTLE_ENTRY);
   };
 
   /**
@@ -475,7 +498,11 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
       applyPhase('characterSelect');
       return;
     }
-    enterBattle(playerId, bossId);
+    /**
+     * ⚠️ **不直接进战斗**：先到**确认屏**（用户 2026-10-15："每场战斗开始前
+     * 加一个确认界面"）。`RUN_BATTLE_ENTRY` 是那三条路共用的**唯一**目标值。
+     */
+    switchTo(RUN_BATTLE_ENTRY);
   };
 
   /**
@@ -498,8 +525,9 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
   /**
    * **选一个炁机生效**（用户规则：选了才本局生效）。
    *
-   * ⚠️ 选完**直接进下一场**（§5.3 的节拍：每场战斗 → 一个决策 → 下一场）。
-   * 没有"确定 / 取消"两步 —— 那会多一个与"选了不能换"打架的中间态。
+   * ⚠️ 选完**先去确认屏**（2026-10-15），再由玩家按「开始战斗」进下一场：
+   * 节拍是"每场战斗 → 一个决策 → **确认** → 下一场"。没有"确定 / 取消"
+   * 两步 —— 那会多一个与"选了不能换"打架的中间态。
    */
   const chooseQiji = (qijiId: string): void => {
     if (!runSession.chooseQiji(qijiId)) {
@@ -516,7 +544,71 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
       switchTo('runOver');
       return;
     }
-    enterBattle(runSession.state()?.playerId ?? d.selection.playerId, bossId);
+    /**
+     * ⚠️ **选完也要先确认**（与开局那条同一条规则）：这一条路的目标由
+     * `RUN_BATTLE_ENTRY_AFTER_QIJI` 给（见那里的说明：它与"开局"分开命名）。
+     */
+    switchTo(RUN_BATTLE_ENTRY_AFTER_QIJI);
+  };
+
+  /**
+   * **确认屏要显示的内容**（2026-10-15）—— 纯读取，不改任何状态。
+   *
+   * ⚠️ `position` / `length` 与 `runSummary` 同一条口径（夹回 `1..length`）：
+   * `RunState.position` 在"通关"那一刻是 `len + 1`（见 `core/run/lifecycle.ts`），
+   * 虽然确认屏只在**一局还没结束时**出现，但这一层不该指望"调用点保证它
+   * 没结束" —— 夹一次的成本是零，而漏一次会显示"第 3 / 2 场"。
+   */
+  const runConfirmInfo = (): {
+    readonly position: number;
+    readonly length: number;
+    readonly playerId: string;
+    readonly qijiId?: string | undefined;
+  } => {
+    const run = runSession.state();
+    if (run === undefined) {
+      /**
+       * 没有进行中的一局（理论上到不了这一屏 —— 肉鸽那三条路都会先
+       * `begin`）。给一份能读的零值，而不是崩。
+       */
+      return { position: 0, length: 0, playerId: d.selection.playerId };
+    }
+    const length = runLengthOf(run);
+    const position = Math.min(Math.max(run.position, 1), Math.max(length, 1));
+    /**
+     * ⚠️ 右栏画的是**最近选的那一条**（`chosen` 的最后一条）：一局每场之后
+     * 可以选一条，而"这一场之前刚选了什么"正是玩家要确认的东西。
+     * 第一场之前 `chosen` 是空的 → `undefined`（由界面画占位那一句）。
+     */
+    const last = run.chosen[run.chosen.length - 1];
+    return {
+      position,
+      length,
+      playerId: run.playerId,
+      qijiId: last?.qijiId,
+    };
+  };
+
+  /**
+   * **确认屏的「开始战斗」**：真的开这一场。
+   *
+   * ⚠️ 它是肉鸽进战斗的**唯一**门口（另外两条路 —— 开局 / 选完炁机 ——
+   * 都只切到确认屏）：所以"跳过确认"这件事在结构上不存在，而不是靠
+   * 三条路各自记得不跳过。
+   *
+   * ⚠️ 没有进行中的一局时**什么也不做**（这一屏只可能在局里；静默开一场
+   * "自由模式的战斗"会让相位与账本对不上）。
+   */
+  const confirmRunBattle = (): void => {
+    const run = runSession.state();
+    if (run === undefined) return;
+    const bossId = runSession.bossId();
+    if (bossId === undefined) {
+      /** 越界（顺序算错）：回一局结束屏，而不是打一个不存在的 Boss。 */
+      switchTo('runOver');
+      return;
+    }
+    enterBattle(run.playerId, bossId);
   };
 
   /** 一局结束屏要显示的内容（纯读取，不改任何状态）。 */
@@ -569,6 +661,8 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
     playerKit,
     phaseHistory: () => phaseHistory,
     runState: () => runSession.state(),
+    runConfirmInfo,
+    confirmRunBattle,
     qijiCandidates,
     chooseQiji,
     runSummary,

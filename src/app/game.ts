@@ -75,6 +75,8 @@ import { wireLoop } from './loopWiring';
 import { wireCanvasPointer } from './canvasInput';
 import { wireSettingsKeys } from './settingsKeys';
 import { buildScreens } from './screenSetup';
+import { createScreenAccess } from './screenAccess';
+import { createFpsOverlay } from './fpsOverlay';
 import { readUrlParams } from './urlParams';
 import { switchOperationMode } from './operationMode';
 import { translateSafe } from './translate';
@@ -204,6 +206,26 @@ export function createGame(o: CreateGameDeps): GameHandle {
   const url = readUrlParams(globalThis.location.search);
 
   /**
+   * **FPS 层**（`?fps=1` 才有；2026-10-15）—— dev 工具，故意用 HTML
+   * （AGENTS.md §2 的**有意例外**，三条理由写在 `./fpsOverlay` 文件头）。
+   *
+   * ⚠️ 不带参数时 `createFpsOverlay` 直接返回 `undefined`（**一行 DOM
+   * 都不建**），而它的 `frame()` 由主循环喂（见 `wireLoop` 的 `fps` 选项）
+   * —— 这一层**不许**自己挂 `requestAnimationFrame`（帧的唯一真相是
+   * `loopWiring` 的 ticker，设计稿 §1/§6）。
+   *
+   * ⚠️ 挂 `stage`（= `#stage`）而不是 `document.body`：它要贴在画布底边
+   * 之上（用户说的"底部白边"那条带）。
+   */
+  const fpsOverlay = createFpsOverlay({
+    enabled: url.fps,
+    host: stage,
+    canvas: app.canvas,
+    /** ⚠️ 与各屏同一个取词入口（缺 key 回退到 key 本身）。 */
+    translate: translateSafe,
+  });
+
+  /**
    * **当前选中的出战单位**（备战界面的选择，进战斗时读到）。
    *
    * ⚠️ 它是**可变的**（`enterBattle` 会改它），而且 `startBattle` 每次开局
@@ -277,34 +299,6 @@ export function createGame(o: CreateGameDeps): GameHandle {
    * ⚠️ `selection` 由**这里**造（初值来自 `deps`）、交给它改：进战斗时
    * 选中的出战单位是**共享可变状态**，而"谁改它"只有 `enterBattle` 一处。
    */
-  /**
-   * **UI 缩放的唯一落实点**：场景 + **四个界面各自的边角控件**。
-   *
-   * ==================================================================
-   * 为什么单提一个函数（实测踩到的一条）
-   * ==================================================================
-   *
-   * 用户 2026-10-12："**UI 缩放要带上**"—— 齿轮从"一个挂 stage 上的共享
-   * 组件"变成**每屏一个**之后，它们不会自己跟着任何东西走，必须逐个转发。
-   *
-   * ⚠️ 原先**两条**路径各推各的：设置滑块推场景、调试入口
-   * （`__raidBattle.setUiScale`）也推场景。齿轮加进来之后只补了滑块那条，
-   * 于是"探针里选角色 / 自由模式的 `chromeScale` 停在 1"—— / 而**战斗那一屏
-   * 看起来完全正常**（它的齿轮挂在场景里，`BattleScene.setUiScale` 顺手
-   * 带上了），这种"三屏坏一屏好"最难归因。所以两个入口都收口到**这里**。
-   *
-   * ⚠️ 触屏层与设置面板**不在这里**：面板按 `uiScale` 重排是它自己的事，
-   * 触屏层的几何另有一套（见各自的文件）。
-   */
-  const applyUiScale = (scale: number): void => {
-    scene.setUiScale(scale);
-    screens.home.setUiScale(scale);
-    screens.select.setUiScale(scale);
-    screens.prepare.setUiScale(scale);
-    screens.qijiSelect.setUiScale(scale);
-    screens.runOver.setUiScale(scale);
-  };
-
   const flow = createPhaseFlow({
     state,
     store: d.settingsStore,
@@ -347,6 +341,8 @@ export function createGame(o: CreateGameDeps): GameHandle {
     chooseQiji,
     runSummary,
     runState,
+    runConfirmInfo,
+    confirmRunBattle,
     phaseHistory,
   } = flow;
 
@@ -377,6 +373,9 @@ export function createGame(o: CreateGameDeps): GameHandle {
     chooseQiji,
     runSummary,
     continueRun,
+    /** 确认屏（2026-10-15）：内容与「开始战斗」都由 `phaseFlow` 提供。 */
+    runConfirmInfo,
+    confirmRunBattle,
     initial: { playerId: selection.playerId, bossId: selection.bossId },
     /**
      * **自由模式的炁机**（2026-10-13）：池子从内容表读，激活状态由
@@ -394,25 +393,19 @@ export function createGame(o: CreateGameDeps): GameHandle {
   state.home = screens.home;
   state.select = screens.select;
   state.prepare = screens.prepare;
+  state.runConfirm = screens.runConfirm;
   state.qijiSelect = screens.qijiSelect;
   state.runOver = screens.runOver;
 
   /**
-   * **当前这一屏的边角控件**（齿轮 / 返回箭头）—— 键盘焦点与调试入口
-   * 都问它，而不是各自记着"设置按钮"那**一个**对象。
+   * **"当前这一屏是谁"的两个查询**（UI 缩放落到谁身上 / 齿轮问谁）——
+   * 整块在 `./screenAccess`（`game.ts` 是装配流水账，而"哪一屏在台上"
+   * 是另一块会随界面数量增长的知识：加一屏要在那里点两次名）。
    *
-   * ⚠️ 这正是这一轮的核心：齿轮从"一个挂 stage 上的共享组件"变成
-   * **四个界面各自的**（用户："多个页面的齿轮，应该分别定义"）。所以
-   * 需要"当前是谁"时只能**按相位查**，不能再指着一个全局引用。
+   * ⚠️ 它必须在 `screens` **之后**造（点名册要有名可点），而使用者
+   * （`settingsSetup` / `wireLoop` / 调试入口）都在更后面 —— 顺序即正确性。
    */
-  const getChrome = (): ScreenChrome | undefined => {
-    if (state.phase === 'home') return screens.home.chrome;
-    if (state.phase === 'characterSelect') return screens.select.chrome;
-    if (state.phase === 'prepare') return screens.prepare.chrome;
-    if (state.phase === 'qijiSelect') return screens.qijiSelect.chrome;
-    if (state.phase === 'runOver') return screens.runOver.chrome;
-    return scene.chrome;
-  };
+  const { applyUiScale, getChrome } = createScreenAccess({ state, screens, scene });
 
   /**
    * ⚠️ 开局默认在**首页**：一次性把三个界面与战斗场景的显隐摆好
@@ -546,6 +539,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
     home: screens.home,
     select: screens.select,
     prepare: screens.prepare,
+    runConfirm: screens.runConfirm,
     qijiSelect: screens.qijiSelect,
     runOver: screens.runOver,
     scene,
@@ -621,11 +615,12 @@ export function createGame(o: CreateGameDeps): GameHandle {
           home: screens.home,
           select: screens.select,
           prepare: screens.prepare,
+          runConfirm: screens.runConfirm,
           qijiSelect: screens.qijiSelect,
           runOver: screens.runOver,
           /**
            * ⚠️ **边角控件按相位取**（`getChrome()`）：每帧只更新**当前这一屏**
-           * 的齿轮 / 返回箭头（键位提示跟着唯一 flag 走）。四屏各自的
+           * 的齿轮 / 返回箭头（键位提示跟着唯一 flag 走）。各屏各自的
            * `chrome.update()` 都在这里一次算清，不需要"切换方式时通知所有
            * 界面的所有齿轮"那张订阅表。
            */
@@ -643,6 +638,8 @@ export function createGame(o: CreateGameDeps): GameHandle {
         observer,
         /** 复盘那一层：键盘归属要问它（见 `WireOptions.review`）。 */
         review: scene.logReview,
+        /** FPS 层（`?fps=1` 才存在）：喂帧的唯一入口（见 `WireOptions.fps`）。 */
+        fps: fpsOverlay,
       });
 
       installDebugApi({
@@ -662,6 +659,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
         home: screens.home,
         select: screens.select,
         prepare: screens.prepare,
+        runConfirm: screens.runConfirm,
         qijiSelect: screens.qijiSelect,
         runOver: screens.runOver,
         /**

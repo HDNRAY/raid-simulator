@@ -38,6 +38,15 @@ export interface UrlParams {
   /** `?noai=1` —— 对手不行动（用来拍"我先手"那类画面）。 */
   readonly noAi: boolean;
   /**
+   * **`?fps=1` —— 显示 HTML 的 FPS 层**（录制 / 导出日志；2026-10-15）。
+   *
+   * ⚠️ **只有显式带这个参数才创建**那一层 DOM（线上默认不挂调试条）。
+   * "不带参数时一行 DOM 都不建"这条性质由 `app/fpsOverlay` 的工厂自己保证
+   * 并被单测钉住（`tests/web/fpsOverlay.test.ts`）—— 见设计稿
+   * `docs/specs/2026-10-15-fps-overlay.md` §2。
+   */
+  readonly fps: boolean;
+  /**
    * **`?runlen=N` —— 这一局肉鸽打几场**（开发期跑短局用；设计稿 §2.3）。
    *
    * ⚠️ **不传时是"池子多长就打几场"**（`null`），而**不是 7**：
@@ -110,6 +119,7 @@ export function readUrlParams(search: string): UrlParams {
     skipPrepare: params.get('prepare') === 'skip',
     boss: params.get('boss'),
     noAi: params.get('noai') === '1',
+    fps: params.get('fps') === '1',
     runLength: parsePositiveInt(params.get('runlen')),
     runSeed: parsePositiveInt(params.get('runseed')),
   };

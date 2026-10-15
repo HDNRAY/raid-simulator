@@ -40,11 +40,13 @@ import { PrepareScreen, type PrepareQijiOption } from '../ui/PrepareScreen';
 import type { DetailContext } from '../ui/prepareDetail';
 import type { FreeQiji } from '../ui/prepareLogic';
 import { QijiSelectScreen } from '../ui/QijiSelectScreen';
+import { RunConfirmScreen } from '../ui/RunConfirmScreen';
 import { RunOverScreen } from '../ui/RunOverScreen';
 import { translateSafe } from './translate';
 import { CONTROL_VISIBILITY } from './phaseLogic';
 import { BOSS_ROSTER, PLAYER_ROSTER } from '../data/roster';
 import type { QijiCandidateView } from '../ui/qijiSelectLogic';
+import type { RunConfirmInfo } from '../ui/RunConfirmScreen';
 import type { RunOverSummary } from '../ui/RunOverScreen';
 import type { SettingsToggle } from './settingsToggle';
 
@@ -78,6 +80,12 @@ export interface ScreenSetupDeps {
   readonly chooseQiji: (qijiId: string) => void;
   /** 一局结束屏的摘要（`phaseFlow.runSummary`）。 */
   readonly runSummary: () => RunOverSummary;
+  /**
+   * **确认屏要显示的内容**与它的「开始战斗」（`phaseFlow.runConfirmInfo` /
+   * `phaseFlow.confirmRunBattle`，2026-10-15）。
+   */
+  readonly runConfirmInfo: () => RunConfirmInfo;
+  readonly confirmRunBattle: () => void;
   /** 一局结束屏的确认（回选角色）。 */
   readonly continueRun: () => void;
   /** 备战界面进屏时的初始选择。 */
@@ -103,6 +111,7 @@ export interface Screens {
   readonly home: HomeScreen;
   readonly select: CharacterSelectScreen;
   readonly prepare: PrepareScreen;
+  readonly runConfirm: RunConfirmScreen;
   readonly qijiSelect: QijiSelectScreen;
   readonly runOver: RunOverScreen;
 }
@@ -199,6 +208,27 @@ export function buildScreens(d: ScreenSetupDeps): Screens {
   });
   d.app.stage.addChild(prepare.root);
 
+  /* ---------- 确认屏（肉鸽；每场战斗之前，2026-10-15） ---------- */
+  /**
+   * ⚠️ **没有返回箭头**（`backIn` 那一支里没有它）：这一屏紧接在"开局 /
+   * 选完炁机"之后，没有"回上一屏"可言 —— 要离开这一局，从选炁机屏或
+   * 一局结束屏按返回（见 `phaseLogic.backVisibleIn` 的表）。
+   *
+   * ⚠️ 两栏的取值函数走**备战屏同一个** `prepareDetailContext`：这一屏
+   * 不该有自己的一份详情装配（`ui/RunConfirmScreen` 只负责摆两块面板）。
+   */
+  const runConfirm = new RunConfirmScreen({
+    pixi,
+    translate: translateSafe,
+    getInfo: d.runConfirmInfo,
+    detailContext: d.prepareDetailContext,
+    showKeyHints: d.showKeyHints,
+    f1Label: d.f1Label,
+    onGear,
+    onStart: d.confirmRunBattle,
+  });
+  d.app.stage.addChild(runConfirm.root);
+
   /* ---------- 选炁机屏（P3；每场战斗打完之后） ---------- */
   /**
    * ⚠️ **返回箭头指向 `backToHome`**（而不是"跳过选择"）：按了它 =
@@ -231,5 +261,5 @@ export function buildScreens(d: ScreenSetupDeps): Screens {
   });
   d.app.stage.addChild(runOver.root);
 
-  return { home, select, prepare, qijiSelect, runOver };
+  return { home, select, prepare, runConfirm, qijiSelect, runOver };
 }

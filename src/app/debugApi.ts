@@ -25,6 +25,7 @@
  */
 import type { SettingsTab } from '../ui/settings/tabs';
 import type { PanelTextMetric } from '../ui/settings/panelTextProbe';
+import type { RunConfirmInfo } from '../ui/RunConfirmScreen';
 
 /**
  * ⚠️ **必须把 Pixi 对象在页面里拍平成纯数据**（`toPlain`），不能直接把
@@ -497,6 +498,61 @@ export interface QijiDebugTarget {
 /** 一局结束屏暴露给调试的最小面。 */
 export interface RunOverDebugTarget {
   readonly visible: boolean;
+}
+
+/**
+ * **确认屏**（肉鸽每场战斗之前；2026-10-15）暴露给调试的最小面。
+ *
+ * ⚠️ 为什么需要它（截图证明不了的那件事）：这一屏的内容**每场都不同**
+ * （第几场 / 右栏是哪条炁机），而"第 2 场之前右栏是不是刚选的那条"在
+ * 截图上与"第 1 场的占位"长得不像 —— 但"第几场"这个数**必须从状态读**，
+ * 图上看不出 2 与 3 的差别（尤其只有两场时）。
+ */
+export interface RunConfirmDebugTarget {
+  readonly visible: boolean;
+  /** 上一次重画读到的那一场（`undefined` = 还没画过）。 */
+  readonly currentInfo: RunConfirmInfo | undefined;
+  confirm(): void;
+}
+
+/**
+ * 确认屏的调试入口（`__raidBattle.runConfirm`）。
+ *
+ * ⚠️ 一律**转调界面自己的方法**（`confirm()`），不另写一套 —— 旁路会让
+ * "验证的是探针而不是界面"（见本文件文件头）。
+ * ⚠️ `null` 而不是 `undefined` 跨 JSON 边界（与 `back.bounds` 同一条约定）。
+ */
+export function runConfirmDebugApi(screen: RunConfirmDebugTarget): {
+  readonly runConfirm: {
+    /** 这一屏此刻是否可见（验收"每场之前都到了这里"）。 */
+    open(): boolean;
+    /** 这一屏此刻画的是哪一场（没有则为 `null`）。 */
+    info(): {
+      readonly position: number;
+      readonly length: number;
+      readonly playerId: string;
+      readonly qijiId: string | null;
+    } | null;
+    /** 同 Enter / 点「开始战斗」（**会真的进战斗**）。 */
+    start(): void;
+  };
+} {
+  return {
+    runConfirm: {
+      open: () => screen.visible,
+      info: () => {
+        const i = screen.currentInfo;
+        if (i === undefined) return null;
+        return {
+          position: i.position,
+          length: i.length,
+          playerId: i.playerId,
+          qijiId: i.qijiId ?? null,
+        };
+      },
+      start: () => screen.confirm(),
+    },
+  };
 }
 
 export function qijiDebugApi(

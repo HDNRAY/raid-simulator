@@ -55,6 +55,23 @@ export interface ScreenHitTarget {
   hitTest(px: number, py: number): boolean;
 }
 
+/**
+ * 一个**可以拖拽滚动**的整屏界面的最小面。
+ *
+ * ⚠️ 它现在有**两个**实现方：自由模式（卡片视口 ∪ 详情区）与肉鸽确认屏
+ * （两栏详情）。抽成一个类型而不是各写一遍，是因为 `wireCanvasPointer`
+ * 里那套"按下先占住手势 → 够不够拖 → 松手若没拖过就补一次 `hitTest`"
+ * 的流水**只能有一份**（两份必然漂，而漂的样子是"某一屏点一下没反应"）。
+ */
+export interface ScrollableScreen extends ScreenHitTarget {
+  /** 这个点是不是落在一个可以拖拽滚动的区域里（按下时"先不下结论"的判据）。 */
+  isOnScrollable(px: number, py: number): boolean;
+  /** 滚轮：滚动了就返回 `true`（没滚就让页面自己滚）。 */
+  wheelDetail(px: number, py: number, deltaY: number): boolean;
+  /** 拖拽：这一帧相对上一帧的位移（向上为负）。 */
+  dragDetail(px: number, py: number, deltaY: number): boolean;
+}
+
 /** 指针要路由到的对象。 */
 export interface CanvasInputTargets {
   readonly canvas: HTMLCanvasElement;
@@ -68,22 +85,21 @@ export interface CanvasInputTargets {
    * ⚠️ 它还带**详情区的滚动**（滚轮 / 拖拽）：触屏没有滚轮，而 Boss 的
    * 四条招式说明装不下 —— 拖拽那条路是 §3b 的功能对等要求，不是补充。
    */
-  readonly prepare: ScreenHitTarget & {
-    /**
-     * 这个点是不是落在**可以拖拽滚动的区域**里（展开那一块的卡片视口 ∪
-     * 详情区）。
-     *
-     * ⚠️ 拖拽手势只有**一个**入口判据（它）：分成两个布尔会让"这次手势
-     * 属于谁"在路由层再判一遍 —— 而那件事在 `dragDetail` 里按坐标分。
-     * ⚠️ 这里原来还声明了一个 `isOnDetail`：路由改用 `isOnScrollable`
-     * 之后它就没人调了（死接口），删掉。
-     */
-    isOnScrollable(px: number, py: number): boolean;
-    wheelDetail(px: number, py: number, deltaY: number): boolean;
-    dragDetail(px: number, py: number, deltaY: number): boolean;
-  };
+  readonly prepare: ScrollableScreen;
   /** 选炁机屏（P3；含它自己的齿轮与返回箭头）。 */
   readonly qijiSelect: ScreenHitTarget;
+  /**
+   * **确认屏**（肉鸽每场战斗之前，2026-10-15；含它自己的齿轮）。
+   *
+   * ⚠️ 它**没有返回箭头**（`phaseLogic.backVisibleIn` 的表），所以这一屏
+   * 只可能有"齿轮 + 开始战斗"两个可点物 —— 但契约与别的整屏界面一样：
+   * 路由只把点击交给它，优先级（齿轮先于按钮）由它自己的 `hitTest` 定。
+   *
+   * ⚠️ 它**也是可滚的**：左栏（玩家的技能表）比一屏长 —— 没有滚轮 / 拖拽
+   * 的话第 5 条技能永远看不到（那正是"能读到玩家技能表"这条验收）。
+   * 判据在 `ui/RunConfirmScreen`（两栏按矩形分派），与自由模式同一套流水。
+   */
+  readonly runConfirm: ScrollableScreen;
   /** 一局结束屏（P3；含它自己的齿轮与返回箭头）。 */
   readonly runOver: ScreenHitTarget;
   /**
@@ -171,34 +187,43 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
   let detailDragId: number | null = null;
 
   /**
-   * **备战屏卡片区**拖拽占住的指针 id / 上一帧的 y / 按下点与"是否拖过"。
+   * **可滚动的整屏界面**拖拽时占住的指针 id / 上一帧的 y / 按下点与
+   * "是否拖过" / **这次手势归哪一屏**。
    *
    * ⚠️ 与设置页那个 `detailDragId` 分开记账：两者**不在同一屏**，合成
    * 一个就会出现"手指从设置拖到备战屏还在滚"的串台。
+   *
+   * ⚠️ 记 `scrollDragScreen` 而不是"用的时候按相位现查"：一次手势**一旦
+   * 开始**就属于开始那一屏 —— 拖到一半相位变了（例如拖拽顺带触发了某个
+   * 按钮）时，按相位现查会把这一帧的位移喂给**另一屏**。
    *
    * ==================================================================
    * ⚠️ 为什么还要记"按下点"与"拖过没有"（2026-10-13）
    * ==================================================================
    *
-   * 卡片视口**能滚**时，这一层会先把这次手势**整个占住**（`hitTest` 一次都
-   * 不调）—— 因为"按住拖动"是一次手势，而"点一下"是另一次。但旧代码把
-   * **松手**那一步漏了：`pointerup` 只是把 id 清掉，于是
-   * **在可滚区里点一下卡片什么都不会发生**（既不选卡也不改层数）。
+   * 可滚区（自由模式的卡片视口 / 确认屏的两栏）**能滚**时，这一层会先把
+   * 这次手势**整个占住**（`hitTest` 一次都不调）—— 因为"按住拖动"是一次
+   * 手势，而"点一下"是另一次。但旧代码把**松手**那一步漏了：`pointerup`
+   * 只是把 id 清掉，于是**在可滚区里点一下卡片什么都不会发生**
+   * （既不选卡也不改层数）。
    *
-   * 今天三块都排得下（3 / 8 / 7 张 → 视口 2 行）所以碰不到；只要炁机或
-   * Boss 涨到要滚，**整块卡片区立刻变成点不动**（用户报的"点了没反应"）。
+   * 今天自由模式三块都排得下（3 / 8 / 7 张 → 视口 2 行）所以碰不到；只要
+   * 炁机或 Boss 涨到要滚，**整块卡片区立刻变成点不动**（用户报的"点了没
+   * 反应"）。
    *
-   * 现在按**手势**分：按下记下起点 → 移动超过 `PREPARE_TAP_SLOP` 才算拖 →
+   * 现在按**手势**分：按下记下起点 → 移动超过 `SCROLL_TAP_SLOP` 才算拖 →
    * 松手时若**没拖过**就补一次 `hitTest`（= 那一下是"点击"）。
    * 设置页那条路（先 `hitTest` 再占手势）不适用于这里：卡片上的按下**不能**
    * 立刻生效，否则"想滚动"会顺手把层数改了。
    */
-  let prepareDetailDragId: number | null = null;
-  let prepareDetailLastY = 0;
+  let scrollDragId: number | null = null;
+  let scrollDragLastY = 0;
   /** 这次手势的**按下** y（判"点"还是"拖"的基准）。 */
-  let prepareDragStartY = 0;
-  /** 这次手势**移动过**吗（超过 `PREPARE_TAP_SLOP` 就是拖）。 */
-  let prepareDragMoved = false;
+  let scrollDragStartY = 0;
+  /** 这次手势**移动过**吗（超过 `SCROLL_TAP_SLOP` 就是拖）。 */
+  let scrollDragMoved = false;
+  /** 这次手势**属于哪一屏**（见上：一旦开始就不再按相位现查）。 */
+  let scrollDragScreen: ScrollableScreen | undefined;
 
   /**
    * "点一下"与"拖一下"的**分界**（逻辑像素）。
@@ -208,7 +233,7 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
    * 把一次抖动误判成拖动的代价是"点了没反应"（这次要修的那个 bug），
    * 而把一次极小的拖动误判成点击的代价只是"滚动少了一点 / 顺带选了一张卡"。
    */
-  const PREPARE_TAP_SLOP = 6;
+  const SCROLL_TAP_SLOP = 6;
 
   /**
    * 复盘拖拽**占住了这次手势**的指针 id。
@@ -217,6 +242,41 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
    * `pointercancel`（手指划出画布）与 `pointerup` 同义地结束拖拽。
    */
   let reviewDragId: number | null = null;
+
+  /**
+   * **当前这一屏有没有"可拖拽滚动的区域"**（自由模式 / 肉鸽确认屏）。
+   *
+   * ⚠️ 两个实现方**共用下面那套流水**（占手势 → 判拖 → 松手补点击）：
+   * 抄一份给确认屏的话，"点一下没反应"那个坑就得再踩一次。
+   */
+  const scrollableScreen = (): ScrollableScreen | undefined => {
+    if (t.phase() === 'prepare') return t.prepare;
+    if (t.phase() === 'runConfirm') return t.runConfirm;
+    return undefined;
+  };
+
+  /**
+   * 按下：落在可滚区里就**先占住手势**（不立刻 `hitTest`），否则照常点。
+   *
+   * 见上面 `scrollDragMoved` 的说明：占住 ≠ 吃掉 —— 松手时若没拖过，
+   * `onUp` 会补一次 `hitTest`。
+   */
+  const beginScrollOrHit = (
+    screen: ScrollableScreen,
+    pointerId: number,
+    px: number,
+    py: number,
+  ): void => {
+    if (!screen.isOnScrollable(px, py)) {
+      screen.hitTest(px, py);
+      return;
+    }
+    scrollDragId = pointerId;
+    scrollDragScreen = screen;
+    scrollDragLastY = py;
+    scrollDragStartY = py;
+    scrollDragMoved = false;
+  };
 
   const onDown = (event: PointerEvent): void => {
     const { px, py } = at(event);
@@ -256,8 +316,8 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
     }
 
     /**
-     * ① **三个全屏界面**（首页 / 选角色 / 自由模式）盖住整屏 —— 先让
-     * **当前那一屏**消费，没消费掉的点击才轮到齿轮。
+     * ① **全屏界面**（首页 / 选角色 / 自由模式 / 确认屏 / 选炁机 / 一局结束）
+     * 盖住整屏 —— 先让**当前那一屏**消费，没消费掉的点击才轮到齿轮。
      *
      * ⚠️ **`!t.settingsOpen()` 这个条件是必需的**，不是冗余。
      *
@@ -287,29 +347,16 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
        * ⚠️ 命中即 `return`（各屏内部也一样）：一次点击只能做一件事 ——
        * 继续往下走会同时点中底下的卡片。
        */
+      const scrollable = scrollableScreen();
       if (t.phase() === 'home') t.home.hitTest(px, py);
       else if (t.phase() === 'characterSelect') t.select.hitTest(px, py);
-      else if (t.phase() === 'prepare') {
-        /**
-         * ⚠️ **可拖拽滚动的区域要先占住这次手势**（触屏滚说明 / 滚炁机，
-         * §3b）：`hitTest` 只回答"点了哪张卡"，而"按住拖动"是一次手势 ——
-         * 与设置页详情区（`detailDragId`）同一条处理方式。
-         *
-         * ⚠️ 判据用 `isOnScrollable`（卡片视口 ∪ 详情区）：两块都能拖之后
-         * 这里只问一次，而"哪一块吃下这次滚动"在 `dragDetail` 里按坐标分。
-         *
-         * ⚠️ **占住 ≠ 吃掉**：占手势只是"先不下结论"，松手时若没拖过还要
-         * 补一次 `hitTest`（见 `prepareDragMoved` 的说明）—— 否则可滚区里
-         * **点一下卡片完全没反应**。
-         */
-        if (t.prepare.isOnScrollable(px, py)) {
-          prepareDetailDragId = event.pointerId;
-          prepareDetailLastY = py;
-          prepareDragStartY = py;
-          prepareDragMoved = false;
-        } else {
-          t.prepare.hitTest(px, py);
-        }
+      /**
+       * ⚠️ **可拖拽滚动的两屏**（自由模式 / 确认屏）走**同一条**流水：
+       * 判据是各自的 `isOnScrollable`（哪一块吃下这次滚动在 `dragDetail`
+       * 里按坐标分），而"占了手势还要在松手时补一次点击"由 `onUp` 兜。
+       */
+      else if (scrollable !== undefined) {
+        beginScrollOrHit(scrollable, event.pointerId, px, py);
       } else if (t.phase() === 'qijiSelect') t.qijiSelect.hitTest(px, py);
       else t.runOver.hitTest(px, py);
       return;
@@ -399,18 +446,21 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
       return;
     }
     /**
-     * 备战屏卡片区 / 详情区的拖拽（触屏滚说明 —— 与设置页那条同源）。
-     * ⚠️ 用**上一帧的 y** 算位移：`scrollBy` 要的是增量，而指针事件给的
-     * 是绝对坐标。
+     * 可滚动界面（自由模式 / 确认屏）的拖拽（触屏滚说明 —— 与设置页那条
+     * 同源）。⚠️ 用**上一帧的 y** 算位移：`scrollBy` 要的是增量，而指针事件
+     * 给的是绝对坐标。
      *
-     * ⚠️ `prepareDragMoved` 一旦为真就**不再变回假**：一次手势中间抖回去
+     * ⚠️ `scrollDragMoved` 一旦为真就**不再变回假**：一次手势中间抖回去
      * （拖下去又拖回原点）仍然算"拖过"，松手时不该再补一次点击。
+     *
+     * ⚠️ 喂给**开始那一屏**（`scrollDragScreen`），不是按相位现查 ——
+     * 一次手势中途换屏时，按相位查会把这一帧的位移喂给另一屏。
      */
-    if (prepareDetailDragId === event.pointerId) {
-      const dy = py - prepareDetailLastY;
-      prepareDetailLastY = py;
-      if (dragExceedsTapSlop(prepareDragStartY, py, PREPARE_TAP_SLOP)) prepareDragMoved = true;
-      if (t.prepare.dragDetail(px, py, dy)) return;
+    if (scrollDragId === event.pointerId && scrollDragScreen !== undefined) {
+      const dy = py - scrollDragLastY;
+      scrollDragLastY = py;
+      if (dragExceedsTapSlop(scrollDragStartY, py, SCROLL_TAP_SLOP)) scrollDragMoved = true;
+      if (scrollDragScreen.dragDetail(px, py, dy)) return;
     }
     /**
      * 鼠标悬停到技能格 = **选中它**（需求："方向键选中和鼠标选中，
@@ -438,21 +488,23 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
   };
 
   /**
-   * 松手：备战屏那一次手势若**没拖过**，就补一次 `hitTest`。
+   * 松手：可滚界面那一次手势若**没拖过**，就补一次 `hitTest`。
    *
-   * ⚠️ 这一步是"可滚区里的点击"唯一的实现（见 `prepareDragMoved` 的说明）：
+   * ⚠️ 这一步是"可滚区里的点击"唯一的实现（见 `scrollDragMoved` 的说明）：
    * 按下时不敢下结论（可能是想滚动），松手才知道。
    * ⚠️ 补的是**松手那一刻**的坐标：手指几乎没动，两者等价；而用松手的
    * 那一个与浏览器的手势语义一致（点中的是"抬起时"那一张）。
    */
   const onUp = (event: PointerEvent): void => {
-    if (prepareDetailDragId === event.pointerId) {
-      prepareDetailDragId = null;
-      if (!prepareDragMoved) {
+    if (scrollDragId === event.pointerId) {
+      scrollDragId = null;
+      const screen = scrollDragScreen;
+      scrollDragScreen = undefined;
+      if (!scrollDragMoved && screen !== undefined) {
         const { px, py } = at(event);
-        t.prepare.hitTest(px, py);
+        screen.hitTest(px, py);
       }
-      prepareDragMoved = false;
+      scrollDragMoved = false;
     }
     endReviewDrag(event);
     t.touch.onPointerUp(event.pointerId);
@@ -467,9 +519,10 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
    * （否则"想滚却滑出去了"会顺手改掉层数）。`pointerleave` 也走这一条。
    */
   const onCancel = (event: PointerEvent): void => {
-    if (prepareDetailDragId === event.pointerId) {
-      prepareDetailDragId = null;
-      prepareDragMoved = false;
+    if (scrollDragId === event.pointerId) {
+      scrollDragId = null;
+      scrollDragScreen = undefined;
+      scrollDragMoved = false;
     }
     endReviewDrag(event);
     t.touch.onPointerCancel(event.pointerId);
@@ -477,7 +530,8 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
   };
 
   /**
-   * **滚轮**（桌面）：只服务「按键」页的**技能详情区**（它可能装不下）。
+   * **滚轮**（桌面）：服务**可滚动的整屏界面**（自由模式的详情区 / 确认屏的
+   * 两栏）与「按键」页的技能详情区。
    *
    * ⚠️ 挂在这里而不是面板自己挂 `window`：输入归属只有一个入口
    * （本文件），面板只暴露 `isOnDetail` / `wheelDetail` —— 与滑块的
@@ -488,14 +542,21 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
    */
   const onWheel = (event: WheelEvent): void => {
     /**
-     * ⚠️ **备战屏的详情区先问一次**（它不在设置面板里）：Boss 的招式
-     * 说明装不下时，滚轮要能滚它。没消费才轮到设置面板 / 页面。
+     * ⚠️ **可滚动的整屏界面先问一次**（它们不在设置面板里）：Boss 的招式
+     * 说明 / 确认屏两栏的正文装不下时，滚轮要能滚它。没消费才轮到设置
+     * 面板 / 页面。
+     *
+     * ⚠️ 判据是**当前这一屏**（`scrollableScreen()` = 自由模式 / 确认屏）：
+     * 两屏共用这一条，而不是各写一份"我这一屏的滚轮"。
      */
-    if (!t.settingsOpen() && t.phase() === 'prepare') {
-      const { px, py } = at(event);
-      if (t.prepare.wheelDetail(px, py, event.deltaY)) {
-        event.preventDefault();
-        return;
+    if (!t.settingsOpen()) {
+      const scrollable = scrollableScreen();
+      if (scrollable !== undefined) {
+        const { px, py } = at(event);
+        if (scrollable.wheelDetail(px, py, event.deltaY)) {
+          event.preventDefault();
+          return;
+        }
       }
     }
     if (!t.settingsOpen()) return;

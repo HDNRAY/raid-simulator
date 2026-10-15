@@ -271,10 +271,32 @@ declare global {
         };
         /** 同 ← → / Tab：**只移动光标**，不改已确定的角色。 */
         cycle(delta: number): void;
-        /** 同 Enter：确定光标处的角色；能开始就开始一局（**会真的进战斗**）。 */
+        /** 同 Enter：确定光标处的角色；能开始就开始一局（**会先进确认屏**）。 */
         confirm(): void;
-        /** 同点击卡片：移光标 + 确定 + 开始（一步到位）。 */
+        /** 同点击卡片：移光标 + 确定 + 开始（一步到位，**先进确认屏**）。 */
         pick(id: string): void;
+      };
+      /**
+       * **确认屏**（肉鸽每场战斗之前；2026-10-15）。
+       *
+       * ⚠️ 它是一次**只读确认**（两栏详情 + 「开始战斗」）：探针要能回答
+       * "这一屏此刻画的是第几场、右栏是哪条炁机" —— 截图只能证明"有两栏字"。
+       *
+       * ⚠️ `info()` 的 `qijiId` 用 `null`（不是 `undefined`）：要跨
+       * `Runtime.evaluate` 的 JSON 边界（`undefined` 在那里会被丢掉）。
+       */
+      runConfirm: {
+        /** 这一屏此刻是否可见（验收"每场之前都到了这里"）。 */
+        open(): boolean;
+        /** 这一屏此刻画的是哪一场（没有则为 `null`）。 */
+        info(): {
+          readonly position: number;
+          readonly length: number;
+          readonly playerId: string;
+          readonly qijiId: string | null;
+        } | null;
+        /** 同 Enter / 点「开始战斗」（**会真的进战斗**）。 */
+        start(): void;
       };
       /**
        * **选炁机屏 + 一局结束屏**（P3；调试用）。
@@ -297,7 +319,7 @@ declare global {
         cycle(delta: number): void;
         /** 同 ↑ ↓ / Tab：换行（`wrap` 为真时环绕）。 */
         moveFocus(delta: number, wrap?: boolean): void;
-        /** 同 Enter：选光标处那一个（**会真的生效并进下一场**）。 */
+        /** 同 Enter：选光标处那一个（**会真的生效并进确认屏**）。 */
         confirm(): void;
         /** 一局结束屏此刻是否可见。 */
         overviewOpen(): boolean;

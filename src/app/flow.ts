@@ -38,6 +38,7 @@ import type { PrepareScreen } from '../ui/PrepareScreen';
 import type { HomeScreen } from '../ui/HomeScreen';
 import type { CharacterSelectScreen } from '../ui/CharacterSelectScreen';
 import type { QijiSelectScreen } from '../ui/QijiSelectScreen';
+import type { RunConfirmScreen } from '../ui/RunConfirmScreen';
 import type { RunOverScreen } from '../ui/RunOverScreen';
 import type { KeyBinding } from '../input/keyboard';
 import type { OperationMode } from '../render/platform';
@@ -82,6 +83,14 @@ export interface GameState {
 
   /** 备战界面（自由模式；进战斗时隐藏，回来时显示）。 */
   prepare: PrepareScreen | undefined;
+
+  /**
+   * **肉鸽：每场战斗前的确认屏**（2026-10-15）。
+   *
+   * ⚠️ 与另外几个整屏界面一样是**先声明、后回填**（`applyPhase` 定义得比
+   * 界面早），所有访问点都容忍 `undefined`。
+   */
+  runConfirm: RunConfirmScreen | undefined;
 
   /**
    * **选炁机屏**（P3；每场战斗打完之后选 1 个生效）。
@@ -204,6 +213,7 @@ export function createGameState(
     home: undefined,
     select: undefined,
     prepare: undefined,
+    runConfirm: undefined,
     qijiSelect: undefined,
     runOver: undefined,
     bindings,

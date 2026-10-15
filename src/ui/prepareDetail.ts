@@ -165,6 +165,34 @@ export function focusedTarget(
   return hover ?? cursor;
 }
 
+/**
+ * **肉鸽确认屏那两栏各显示谁**（纯判定；2026-10-15）。
+ *
+ * ==================================================================
+ * 为什么它是纯函数、还住在这个文件里
+ * ==================================================================
+ *
+ * 它回答的是"这一屏该给面板哪两个 `PrepareTarget`"—— 与 `focusedTarget`
+ * 同一类问题（**目标 → 模型**），所以留在同一个文件里；而抽成纯函数是为了
+ * 让**"没有已选炁机"那一支**（第一场之前 → 右栏画占位）能在 node 里钉住：
+ * 那条分支的两种结果在画面上都是"右栏有字"（占位 vs 面板），
+ * 随手写反了**截图看不出来**。
+ *
+ * ⚠️ 左栏恒是玩家（这一屏保证"出战角色已经定了"），右栏是**本局最近选的
+ * 那条炁机**（`RunState.chosen` 的最后一条；一局可以选多条，而这一屏一次
+ * 只画一条 —— 整局的清单在一局结束屏）。见 `app/phaseFlow.runConfirmInfo`。
+ */
+export function runConfirmTargets(info: {
+  readonly playerId: string;
+  readonly qijiId?: string | undefined;
+}): { readonly player: PrepareTarget; readonly qiji: PrepareTarget | undefined } {
+  return {
+    player: { kind: 'player', id: info.playerId },
+    /** `undefined` = 右栏画「本局尚未选择炁机」那一句（第一场之前）。 */
+    qiji: info.qijiId === undefined ? undefined : { kind: 'qiji', id: info.qijiId },
+  };
+}
+
 /* ================================================================== *
  * 数据注入
  * ================================================================== */

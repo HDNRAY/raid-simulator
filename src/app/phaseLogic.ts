@@ -67,10 +67,26 @@ export type Phase =
   | 'prepare'
   | 'battle'
   /**
+   * **肉鸽：每场战斗前的确认屏**（2026-10-15）。
+   *
+   * 用户原话："肉鸽模式 每场战斗开始前 加一个 **确认界面**，显示**玩家详情**、
+   * **玩家选择的炁机及其详情**。"
+   *
+   * ⚠️ 它是**只读确认**（两栏详情 + 一个「开始战斗」）—— 这一屏**不能**改
+   * 角色 / 炁机（要改得回备战 / 选炁机屏）。判据与两栏的来源见
+   * `ui/RunConfirmScreen.ts`。
+   *
+   * ⚠️ **肉鸽里每一条进战斗的路都先经过它**（开局 / 每场打完 / 选完炁机）
+   * —— 三条路都收在 `phaseFlow`，而"下一步去哪一屏"的纯判定在下面
+   * （`phaseAfterAdvance` / `RUN_BATTLE_ENTRY`），所以"漏掉一屏"这件事
+   * 能被单测钉住。自由模式**不受影响**（它本来就有备战屏）。
+   */
+  | 'runConfirm'
+  /**
    * **选炁机**（P3；每场战斗打完之后选 1 个生效）。
    *
    * ⚠️ 它**只在第一场打完之后**才会出现（用户 2026-10-13 的规则第 3 条）：
-   * 开局那一条路（`startRoguelikeRun`）直接进战斗，不经过这里。
+   * 开局那一条路（`startRoguelikeRun`）直接进确认屏，不经过这里。
    */
   | 'qijiSelect'
   /** **一局肉鸽结束**（通关 / 失败）的摘要屏（P3）。 */
@@ -112,6 +128,7 @@ export const ESCAPE_KEY = 'escape';
  * | `home` | ✗ | 首页就是返回的目标，再画一个就自指了 |
  * | `characterSelect` | ✅ | 回首页 |
  * | `prepare` | ✅ | 回首页 |
+ * | `runConfirm` | ✗ | 它是**确认**（紧接在"开局 / 选完炁机"之后）：没有"回上一屏"可言 —— 要离开这一局，从**选炁机屏**或一局结束屏按返回（那两处都还在）。见 `phaseFromEscape` 的表 |
  * | `qijiSelect` | ✅ | 回**选角色**（放弃这一局；见 `BackTarget` 的说明） |
  * | `runOver` | ✅ | 回**选角色**（"再来一局"的起点，与 Enter 同一个目标） |
  * | `battle` | ✗ | 战斗中没有"返回"——见 `phaseFromEscape` 的说明 |
@@ -142,6 +159,7 @@ export function backVisibleIn(phase: Phase): boolean {
  * | `home` | 无目标（首页就是目标本身） |
  * | `characterSelect` | → `'home'` |
  * | `prepare` | → `'home'` |
+ * | `runConfirm` | **无目标**（确认屏没有"回上一屏"——它紧接在开局 / 选炁机之后，见 `backVisibleIn` 的表） |
  * | `qijiSelect` | → `'characterSelect'`（这一局还没完，但可以放弃重开） |
  * | `runOver` | → `'characterSelect'` |
  * | `battle` | 无目标 |
@@ -191,6 +209,7 @@ export type ScreenKey =
   | 'characterSelect'
   | 'prepare'
   | 'battle'
+  | 'runConfirm'
   | 'qijiSelect'
   | 'runOver';
 
@@ -230,6 +249,7 @@ const STAGE_SCREEN: Readonly<Record<Phase, ScreenKey>> = {
   characterSelect: 'characterSelect',
   prepare: 'prepare',
   battle: 'battle',
+  runConfirm: 'runConfirm',
   qijiSelect: 'qijiSelect',
   runOver: 'runOver',
 };
@@ -253,6 +273,7 @@ export function screenVisibilityOf(phase: Phase): Readonly<Record<ScreenKey, boo
     characterSelect: onStage === 'characterSelect',
     prepare: onStage === 'prepare',
     battle: onStage === 'battle',
+    runConfirm: onStage === 'runConfirm',
     qijiSelect: onStage === 'qijiSelect',
     runOver: onStage === 'runOver',
   };
@@ -289,7 +310,74 @@ export function settingsOriginOf(phase: Phase): SettingsOrigin {
    * ⚠️ P3 的 `qijiSelect` **不算这里**：它已经在肉鸽那一局里、角色已经定了，
    * 所以照旧显示「按键」页（走下面的 `'gameplay'`）。`runOver` 同理 ——
    * 它虽然"这一局结束了"，但玩家马上要回选角色，没有"当前角色"可变。
+   * ⚠️ 肉鸽的**确认屏**（`runConfirm`，2026-10-15）同样在 `'gameplay'` 那
+   * 一支里：这一局已经开始、出战角色已经定了（正是它要显示的东西）。
    */
   if (phase === 'characterSelect') return 'characterSelect';
   return 'gameplay';
+}
+
+/* ================================================================== *
+ * 肉鸽：下一屏是哪一屏（"每场战斗前都要经过确认屏"的唯一判据）
+ * ================================================================== */
+
+/**
+ * **整屏界面之间的转移目标** —— `switchTo` 收的那几个相位。
+ *
+ * ⚠️ 它是 `Phase` 的**真子集**（去掉 `battle`）：进战斗是另一条路
+ * （`enterBattle` 要建一局新战斗），所以 `switchTo('battle')` 是**类型错误**
+ * —— 这正是这个别名存在的理由（返回目标的 `BackTarget` 同一条思路）。
+ *
+ * ⚠️ 加一个新整屏界面时，这里是编译期会报错的那一处（配合
+ * `Record<Phase, ScreenKey>`）："加了相位、忘了接进转移路径"编译不过。
+ */
+export type ShiftTarget =
+  | 'home'
+  | 'characterSelect'
+  | 'prepare'
+  | 'runConfirm'
+  | 'qijiSelect'
+  | 'runOver';
+
+/**
+ * **肉鸽：一场战斗之前一律先到确认屏**（用户 2026-10-15 的需求）。
+ *
+ * ```
+ *   开局（选完角色）        → 确认屏 → 战斗
+ *   一场打完（还有下一场）   → 确认屏 → 战斗
+ *   选完炁机               → 确认屏 → 战斗
+ * ```
+ *
+ * ⚠️ 三条路都必须经过它 —— 所以三条路的目标值**只有这一处定义**，
+ * 而不是在 `phaseFlow` 里各写一遍 `switchTo('runConfirm')`（那种三处
+ * 字面量正是"漏改一条路"的形状：表现是"第 2 场之后不再确认"）。
+ */
+export const RUN_BATTLE_ENTRY: ShiftTarget = 'runConfirm';
+
+/**
+ * **选完一个炁机**之后该去哪个整屏界面。
+ *
+ * ⚠️ 与 `RUN_BATTLE_ENTRY` **分开命名**（虽然今天值相同）：这两条是
+ * 不同的时刻（"开局 / 一场打完"与"刚做完一个决策"），而它们将来完全可能
+ * 不同（例如"选完炁机直接进下一场"）。合成一个常量会让改动必须同时改两处
+ * 语义 —— 而分开之后，"它们今天恰好一样"是**读得出来的事实**。
+ */
+export const RUN_BATTLE_ENTRY_AFTER_QIJI: ShiftTarget = 'runConfirm';
+
+/**
+ * 一场打完（`runSession.advance` 的返回值）之后该去的整屏界面。
+ *
+ * ⚠️ 它是一条**纯判定**（`BattleAdvance` 是纯数据）：于是"每场战斗前都
+ * 经过确认屏"这件事能在 node 里用**真的 `RunSession`** 走一遍整局来钉住
+ * （`tests/unit/runConfirmFlow.test.ts`），而不必起 Pixi。
+ *
+ * @param next `runSession.advance(...)` 的结果
+ */
+export function phaseAfterAdvance(next: {
+  readonly kind: 'runOver' | 'selectQiji' | 'battle';
+}): ShiftTarget {
+  if (next.kind === 'selectQiji') return 'qijiSelect';
+  if (next.kind === 'runOver') return 'runOver';
+  /** `battle`：下一场要先确认（不管它是第几场）。 */
+  return RUN_BATTLE_ENTRY;
 }

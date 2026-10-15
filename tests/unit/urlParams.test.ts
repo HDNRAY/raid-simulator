@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { readUrlParams } from '../../src/app/urlParams';
 
 /**
- * **URL 启动参数**（`?prepare=skip` / `?boss=` / `?noai=1` / `?runlen=N` /
- * `?runseed=N`）。
+ * **URL 启动参数**（`?prepare=skip` / `?boss=` / `?noai=1` / `?fps=1` /
+ * `?runlen=N` / `?runseed=N`）。
  *
  * 设计稿：`docs/specs/2026-10-12-roguelike.md` §2.3（开发期怎么跑短局 /
  * 复现某一局的 Boss 顺序）。
@@ -21,6 +21,19 @@ describe('`?prepare=skip` / `?boss=` / `?noai=1`（既有行为，不许变）',
     expect(p.noAi).toBe(false);
     expect(p.runLength).toBeNull();
     expect(p.runSeed).toBeNull();
+    expect(p.fps).toBe(false);
+  });
+
+  it('⚠️ `fps=1` 只在恰好是 `1` 时为真（`?fps` / `?fps=0` 都不开）', () => {
+    /**
+     * 它决定"要不要创建那一层 HTML 调试条"（线上默认不挂）。
+     * 宽松解析（`?fps` 也算真）会让一个手写的空参数在线上多出一层 DOM
+     * —— 所以口径与 `?noai=` 完全一致。
+     */
+    expect(readUrlParams('?fps=1').fps).toBe(true);
+    expect(readUrlParams('?fps').fps).toBe(false);
+    expect(readUrlParams('?fps=0').fps).toBe(false);
+    expect(readUrlParams('?fps=true').fps).toBe(false);
   });
 
   it('`prepare=skip` 只在恰好是 `skip` 时为真', () => {

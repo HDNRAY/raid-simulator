@@ -102,7 +102,7 @@ import {
   portraitBoxOf,
   textSpanOf,
 } from './prepareDetailMetrics';
-import type { TextSpan } from './prepareDetailMetrics';
+import type { DetailRect, TextSpan } from './prepareDetailMetrics';
 import type { TranslateFn } from '../i18n/translator';
 
 /* ------------------------------------------------------------------ *
@@ -191,8 +191,36 @@ export class PrepareDetailPanel {
   /** 右侧那条滚动条（只有真能滚时才画）。 */
   private readonly scrollBar: Graphics;
 
-  constructor(pixi: PixiCtor, private readonly translate: TranslateFn) {
-    const rect = detailRect();
+  /**
+   * **本面板自己的矩形** —— 由构造参数注入，缺省 = 备战屏那一块
+   * （`prepareGeometry.detailRect()`）。
+   *
+   * ==================================================================
+   * ⚠️ 为什么要有这个注入口（2026-10-15）
+   * ==================================================================
+   *
+   * 肉鸽确认屏（`ui/RunConfirmScreen`）要在**同一屏上放两块**详情面板
+   * （「本次出战」/「已选炁机」），而那两块各占半屏 —— 比备战屏那一块
+   * （296 宽）宽，但两块并排。
+   *
+   * 面板的**全部**排版都从矩形派生：折行宽度（`textSpanOf` / `inlineSpan`）、
+   * 顶栏高（`headerBandOf`）、正文视口（裁剪 + 滚动条）、以及"点在面板里
+   * 没有"（`isOnDetail`）。所以"换一块矩形" = "把**同一个**面板画到别处"。
+   *
+   * ⚠️ **不许**复制一份面板去改宽度：那正是 AGENTS.md §2 点名的"同一份
+   * 几何/算法两份实现"—— 两份都会"看起来对"，然后各改一处时漂开
+   * （备战屏那个"顶栏随内容滚出面板"的 bug 就是这么来的）。
+   */
+  private readonly rectOf: () => DetailRect;
+
+  constructor(
+    pixi: PixiCtor,
+    private readonly translate: TranslateFn,
+    /** 面板矩形（缺省 = 备战屏那一块）。 */
+    rectOf: () => DetailRect = detailRect,
+  ) {
+    this.rectOf = rectOf;
+    const rect = this.rectOf();
     this.root = new pixi.Container();
 
     this.gfx = new pixi.Graphics();
@@ -310,7 +338,7 @@ export class PrepareDetailPanel {
       this.lastTargetId = targetId;
       this.view.reset();
     }
-    const rect = detailRect();
+    const rect = this.rectOf();
     const innerX = rect.x + PREPARE_LAYOUT.detailPad;
     const innerW = rect.w - PREPARE_LAYOUT.detailPad * 2;
 
@@ -655,6 +683,6 @@ export class PrepareDetailPanel {
    * 面板顶边 —— 在标题上拖动不该把内容滚走）。
    */
   isOnDetail(px: number, py: number): boolean {
-    return this.view.isOnDetail(detailRect(), px, py);
+    return this.view.isOnDetail(this.rectOf(), px, py);
   }
 }

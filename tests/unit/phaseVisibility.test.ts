@@ -43,12 +43,14 @@ import { screenVisibilityOf, type Phase, type ScreenKey } from '../../src/app/ph
  * 少了它，"6 个相位"与"6 个界面根"就有可能各说各话。
  *
  * P3 加了两个：`qijiSelect`（选炁机）与 `runOver`（一局结束）。
+ * 2026-10-15 加了第三个：`runConfirm`（肉鸽每场战斗之前的确认屏）。
  */
 const PHASES: readonly Phase[] = [
   'home',
   'characterSelect',
   'prepare',
   'battle',
+  'runConfirm',
   'qijiSelect',
   'runOver',
 ];
@@ -59,6 +61,7 @@ const SCREENS: readonly ScreenKey[] = [
   'characterSelect',
   'prepare',
   'battle',
+  'runConfirm',
   'qijiSelect',
   'runOver',
 ];
@@ -138,16 +141,16 @@ describe('"谁该可见"只有一处判据（不许在 applyPhase 里再判一�
      * `state.home` / `state.select` / `state.prepare` / `state.qijiSelect` /
      * `state.runOver` 是 `GameState` 上整屏界面根的唯一入口（见 `flow.ts`）。
      *
-     * ⚠️ P3 加了最后两个：**不补进这条扫描**的话，新屏的显隐就可能被
-     * 别处偷偷写一次 —— 而那正是"两个界面同时可见"的形状（本文件的整个
-     * 存在理由）。
+     * ⚠️ P3 加了最后两个、2026-10-15 又加了 `runConfirm`：**不补进这条
+     * 扫描**的话，新屏的显隐就可能被别处偷偷写一次 —— 而那正是"两个界面
+     * 同时可见"的形状（本文件的整个存在理由）。
      */
     const offenders: string[] = [];
     for (const file of globSync('src/app/**/*.ts')) {
       if (file.endsWith('phaseFlow.ts')) continue;
       const code = stripComments(readFileSync(file, 'utf8'));
       code.split('\n').forEach((line, i) => {
-        if (/state\.(home|select|prepare|qijiSelect|runOver)\?\.setVisible\(/.test(line)) {
+        if (/state\.(home|select|prepare|runConfirm|qijiSelect|runOver)\?\.setVisible\(/.test(line)) {
           offenders.push(`${file}:${i + 1} → ${line.trim().slice(0, 80)}`);
         }
       });
