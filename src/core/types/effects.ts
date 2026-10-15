@@ -172,6 +172,16 @@ export interface HitDef {
   /** 相对技能开始的毫秒偏移 = hit frame */
   readonly at: number;
   readonly effects: readonly Effect[];
-  /** 该段是否可被闪避 */
+  /**
+   * 该段是否可被规避。**`false` = 这一段「必中」**。
+   *
+   * ⚠️ 它声明了很久却**没有任何引擎分支读它** —— 又一个"看起来支持、
+   * 其实无效"的字段（与 `ccImmune` / `damageTakenMult` 同一类病）。
+   * **2026-10-15 接上**（`hitResolution.resolveHit`）：用户要的是「懒惰」的
+   * 「睡眠」**无法被闪避**（但**可以被打断**）。
+   *
+   * ⚠️ 它同时绕开「卸」（`guardBlocked` = 低伤整击作废）：必中段的语义就是
+   * **整段不可被规避**。睡眠没有伤害，所以实际只影响闪避。
+   */
   readonly avoidable?: boolean;
 }

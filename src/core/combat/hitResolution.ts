@@ -222,7 +222,9 @@ export function resolveHit(
      * ⚠️ 两个来源：无敌（`invulnerable`）与「卸」的阈值（`guardBlocked`）。
      * 后者也算"没碰到人"，所以它带的效果同样被免掉 —— 这正是需求。
      */
-    const avoided = victimFlags.invulnerable === true || guardBlocked;
+    /** ⚠️ `avoidable: false` = **这一段必中**（理由写在 `HitDef.avoidable` 上）。 */
+    const unavoidable = hit.avoidable === false;
+    const avoided = !unavoidable && (victimFlags.invulnerable === true || guardBlocked);
 
     /**
      * **是谁吸收的这一击**（`avoided.viaBuffId` / `damage.viaBuffId` 的来源）。

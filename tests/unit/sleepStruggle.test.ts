@@ -4,7 +4,7 @@ import { BattleEngine } from '../../src/core/combat/battleState';
 import { createRegistry } from '../../src/core/content/registry';
 import { applyBuff } from '../../src/core/buffs';
 import { ALL_BUFFS, ALL_SKILLS } from '../../src/data/content';
-import { LAZY_SLEEP } from '../../src/data/lazyBoss';
+import { LAZY_SLEEP, LAZY_SLEEP_SKILL } from '../../src/data/lazyBoss';
 import type { Combatant, SkillDef, StatKey } from '../../src/core/types';
 import { logicMs } from '../../src/core/loopConstants';
 import { makeCombatant, makeSkillDef } from './helpers';
@@ -65,7 +65,12 @@ function sleepingHarness(startTick = 0, energy = 100): Harness {
   const bare = makeCombatant({
     id: 'player',
     side: 'ally',
-    caps: { hp: 200, energy: 100, douqi: 0 },
+    /**
+     * ⚠️ 炁的**上限跟着参数走**：睡眠现在是"每按一次 **−1 秒**"（2026-10-15
+     * 从 3 秒改），10 秒的睡眠**要按 10 次** ⇒ 每次都要付代价，上限 100
+     * 会在醒来之前就付不出来。
+     */
+    caps: { hp: 200, energy: Math.max(100, energy), douqi: 0 },
     resources: { hp: 200, energy, douqi: 0 },
   });
   const player: Combatant = { ...bare, buffs: applyBuff(bare, LAZY_SLEEP, 'boss', startTick).buffs };
@@ -124,14 +129,18 @@ describe('「睡眠」：按技能 = 挣扎（扣资源 + 减 3 秒，技能本�
     );
   });
 
-  it('🎯 按一次 = 睡眠**减 3 秒**', () => {
+  it('🎯 按一次 = 睡眠**减 1 秒**（用户 2026-10-15 从 3 秒改）', () => {
     const h = sleepingHarness(10);
     const before = sleepSecondsLeft(h);
 
     h.press();
 
     const after = sleepSecondsLeft(h);
-    expect(after, '按一次应该少 3 秒').toBeLessThanOrEqual(before - 3 + 0.2);
+    /**
+     * ⚠️ 用户改这条的背景（原话）："睡眠后按技能减的从3秒减到1秒
+     * （**这个要检查一下 我昨天玩的时候感觉 按2下就醒了**）"。
+     */
+    expect(after, '按一次应该少 1 秒').toBeLessThanOrEqual(before - 1 + 0.2);
     expect(after, '但不是"按一下立刻醒"').toBeGreaterThan(0);
   });
 
@@ -164,7 +173,8 @@ describe('「睡眠」：按技能 = 挣扎（扣资源 + 减 3 秒，技能本�
      * 所以"10 秒 ÷ 3 秒 = 4 次"只在"瞬间按完 4 次"时成立。这里让引擎
      * 真的走时间（每 tick 都试一次按键），验的是"**会醒**"，不是某个次数。
      */
-    const h = sleepingHarness(10);
+    /** ⚠️ 炁给足：1 秒/次 ⇒ 10 秒要按 10 次，每次都要付代价（见夹具的说明）。 */
+    const h = sleepingHarness(10, 400);
     for (let i = 0; i < 10 * 60; i += 1) {
       h.press();
       if (!h.player()?.buffs.some((b) => b.defId === LAZY_SLEEP.id)) break;
@@ -185,6 +195,46 @@ describe('「睡眠」：按技能 = 挣扎（扣资源 + 减 3 秒，技能本�
     h.press();
     expect(h.boss()?.resources.hp, '醒了就该打出伤害').toBeLessThan(bossHpBefore);
     expect(h.player()?.cooldowns['test-heavy'], '醒了就该进 CD').toBeDefined();
+  });
+
+  it('🎯 **睡眠中受伤 → 立即醒**（用户 2026-10-15："睡眠中收到伤害立即醒"）', () => {
+    /**
+     * 判据：挨一下打之后睡眠**就没了**（不必等它自然走完，也不必按技能）。
+     * ⚠️ 用户同时留了一句设计约束："（**以后设计延迟自伤技能**）" ——
+     * 延迟自伤会把你打醒，以后做那类技能要考虑这一点。
+     */
+    const h = sleepingHarness(10);
+    expect(
+      h.player()?.buffs.some((b) => b.defId === LAZY_SLEEP.id),
+      '先确认真的睡着了',
+    ).toBe(true);
+
+    /** 让 Boss 打玩家一下（用引擎自己的伤害通路，而不是手改 buffs）。 */
+    h.engine.tick(
+      [{ type: 'useSkill', skillId: 'lazy-blunt', atTick: h.engine.snapshot.tick }],
+      'boss',
+    );
+    for (let i = 0; i < 70; i += 1) h.engine.tick([]);
+    h.engine.drainEvents();
+
+    expect(
+      h.player()?.buffs.some((b) => b.defId === LAZY_SLEEP.id),
+      '挨打之后应当醒了',
+    ).toBe(false);
+  });
+
+  it('🎯 **无法被闪避**，但**可以被打断**（用户："睡眠技能无法被闪避 可以被打断"）', () => {
+    /**
+     * 两半都要钉：
+     *   ① **无敌窗口（闪避）盖不住它** —— 走 `HitDef.avoidable === false`
+     *   ② **但打断照样有效** —— `interruptible: true` 没动
+     *
+     * ⚠️ ① 那条是**接上了一个声明很久却没人读的字段**
+     * （`HitDef.avoidable`），不是新造 flag。
+     */
+    const sleepHit = LAZY_SLEEP_SKILL.hits[0];
+    expect(sleepHit?.avoidable, '睡眠那一段必须是必中').toBe(false);
+    expect(LAZY_SLEEP_SKILL.interruptible, '但仍然可以被中断').toBe(true);
   });
 
   it('资源不够时**付不出代价** → 这一招被拒（也就减不了睡眠）', () => {

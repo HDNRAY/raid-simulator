@@ -86,17 +86,32 @@ export const LAZY_SLEEP: BuffDef = {
   /**
    * `actionLock` = 不能行动；**另两个旗标是"出路"**：
    *   - `movesWhileLocked`：**仍然可以按技能**（任意技能，不挑 tag）
-   *   - `sleepReduceMs`：每按一次，这个 buff 的剩余时长 **−3 秒**
+   *   - `sleepReduceMs`：每按一次，这个 buff 的剩余时长 **−1 秒**（用户 2026-10-15 从 3 秒改）
    *
-   * ⚠️ 合起来就是用户定的那条："按技能 = 挣扎：**扣资源** + **睡眠减 3 秒**，
-   * 但技能本身**不生效**（无伤害 / 无 buff / 不进 CD）" —— 所以按 4 次就醒
-   * （10 秒 / 3 秒），而每次都要**付那个技能的代价**（拿资源换时间）。
+   * ⚠️ 合起来就是用户定的那条："按技能 = 挣扎：**扣资源** + **睡眠减 1 秒**，
+   * 但技能本身**不生效**（无伤害 / 无 buff / 但**进 CD**）"
+   * —— 现在按 1 秒一档（10 秒 / 1 秒 = **要按 10 次**），每次都要付代价。
    */
   flags: {
     actionLock: true,
     movesWhileLocked: true,
-    sleepReduceMs: 3000,
+    sleepReduceMs: 1000,
   },
+  triggers: [
+    {
+      /**
+       * ⚠️ **受伤立即醒**（用户 2026-10-15："**睡眠中收到伤害立即醒**"）。
+       *
+       * 挂在**睡眠 buff 自己**身上：`onHitTaken` 会派发给受击者的 buff
+       * （「怠惰」那条被动就是这么收挨打的）⇒ 一挨打就把这条 debuff 摘掉。
+       *
+       * ⚠️ 用户同时留了一句设计约束："（**以后设计延迟自伤技能**）"
+       * —— 也就是说：**延迟自伤会把你打醒**，以后做那类技能要考虑这一点。
+       */
+      on: 'onHitTaken',
+      then: [{ kind: 'removeBuff', target: { mode: 'self' }, buffId: 'lazy-sleep' }],
+    },
+  ],
 };
 
 /* ================================================================== *
@@ -345,14 +360,21 @@ export const LAZY_SLEEP_SKILL: ActiveSkillDef = {
   descKey: 'lazy.sleep.desc',
   icon: 'lazy_sleep',
   abilities: [
-    { kind: 'grant', on: 'castStart', target: { mode: 'self' }, buff: tel('lazy-sleep', logicMs(12)) },
+    { kind: 'grant', on: 'castStart', target: { mode: 'self' }, buff: tel('lazy-sleep', logicMs(10)) },
   ],
-  castTime: logicMs(12),
+  /** ⚠️ 用户 2026-10-15：“读条只有 **1s**”（原 1.2s）。 */
+  castTime: logicMs(10),
   cooldown: logicMs(120),
   cost: [],
   hits: [
     {
-      at: logicMs(12),
+      at: logicMs(10),
+      /**
+       * ⚠️ **必中**（`avoidable: false`）：用户 2026-10-15 ——
+       * “**睡眠技能无法被闪避** 可以被打断”。
+       * ⇒ 闪避窗口盖不掉它；**但打断照样有效**（`interruptible: true` 没动）。
+       */
+      avoidable: false,
       effects: [{ kind: 'grantBuff', buff: LAZY_SLEEP }],
     },
   ],
@@ -409,7 +431,7 @@ export const LAZY_BUFFS: readonly BuffDef[] = [
   LAZY_RECENT_HIT,
   tel('lazy-blunt', logicMs(10)),
   tel('lazy-pressure', logicMs(16)),
-  tel('lazy-sleep', logicMs(12)),
+  tel('lazy-sleep', logicMs(10)),
 ];
 
 /**
