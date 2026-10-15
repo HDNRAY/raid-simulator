@@ -161,3 +161,35 @@ describe('招式提示：全部从效果推导', () => {
     }
   });
 });
+
+/* ================================================================== *
+ * 「无法闪避」也是**推导**出来的（2026-10-15）
+ * ================================================================== */
+
+describe('「无法闪避」：从 `HitDef.avoidable === false` 推', () => {
+  it('🎯 「催眠」那一段是必中 ⇒ 读条上出「无法闪避」', () => {
+    /**
+     * 用户 2026-10-15："睡眠技能…**加一个tag 显示它不能被闪避，hinttag**"。
+     *
+     * ⚠️ 做法是**推导**（读 `hit.avoidable`），不是加一个静态 `tags: [...]`
+     * —— 后者正是这个文件开头写的那种"两份数据双向漂"。
+     */
+    const hypnosis = ALL_SKILLS.find((skill) => skill.id === 'lazy-sleep');
+    expect(hypnosis, '「催眠」要在技能表里').toBeDefined();
+    if (hypnosis?.kind !== 'activeSkill') throw new Error('催眠不是主动技能');
+    expect(hintKeysOf(hypnosis)).toContain('settings.hintTags.unavoidable');
+  });
+
+  it('⚠️ 反向：**普通技能不会**被标成「无法闪避」', () => {
+    /** 判据是"它真的必中"，不是"它叫睡眠"。 */
+    const plain = ALL_SKILLS.filter((s) => s.kind === 'activeSkill').filter(
+      (s) => !s.hits.some((h) => h.avoidable === false),
+    );
+    expect(plain.length, '应当有大量普通技能').toBeGreaterThan(5);
+    for (const skill of plain) {
+      expect(hintKeysOf(skill), `${skill.id} 不该有必中提示`).not.toContain(
+        'settings.hintTags.unavoidable',
+      );
+    }
+  });
+});

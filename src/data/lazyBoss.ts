@@ -356,8 +356,14 @@ export const LAZY_PRESSURE: ActiveSkillDef = {
 export const LAZY_SLEEP_SKILL: ActiveSkillDef = {
   id: 'lazy-sleep',
   kind: 'activeSkill',
-  nameKey: 'lazy.sleep.name',
-  descKey: 'lazy.sleep.desc',
+  /**
+   * ⚠️ **技能叫「催眠」，它造成的状态叫「睡眠」**（用户 2026-10-15：
+   * "睡眠技能不要叫睡眠 叫 催眠"）⇒ 两者**必须用不同的 key**：
+   * 这个技能原先借用了 `lazy.sleep.*`，那是**那个 debuff 自己的 key**
+   * （`LAZY_SLEEP.nameKey`），改 i18n 会把两边一起改掉。
+   */
+  nameKey: 'lazy.hypnosis.name',
+  descKey: 'lazy.hypnosis.desc',
   icon: 'lazy_sleep',
   abilities: [
     { kind: 'grant', on: 'castStart', target: { mode: 'self' }, buff: tel('lazy-sleep', logicMs(10)) },
@@ -496,7 +502,12 @@ export const LAZY_IDLE_SKILL: PassiveSkillDef = {
   abilities: [
     {
       kind: 'modifier',
-      modifier: { stat: 'hpRegen', op: 'add', value: 1, sourceKey: 'lazy.idle.name' },
+      /**
+       * ⚠️ **基础回血 = 2 点/秒**（用户 2026-10-15："懒惰的基础回血改回2点"）
+       * —— 原本是 1。它**不随层数走**（层数那份是那条 buff 的每层 ×2）
+       * ⇒ **1 层 = 4 点/秒**、2 层 8、9 层 **1024 点/秒**。
+       */
+      modifier: { stat: 'hpRegen', op: 'add', value: 2, sourceKey: 'lazy.idle.name' },
     },
     { kind: 'grant', target: { mode: 'self' }, buff: LAZY_IDLE_PASSIVE },
   ],

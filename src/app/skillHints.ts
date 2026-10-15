@@ -151,6 +151,20 @@ export function derivedHintKeys(skill: SkillDef | undefined): readonly string[] 
     }, 0);
   if (biggestHit >= threshold) out.add(`${HINT_KEY_PREFIX}highDamage`);
 
+  /**
+   * 「无法闪避」：**这一段的 `avoidable === false`**（必中）。
+   *
+   * ⚠️ 与其余提示同一条纪律：**推导，不手写**。用户的诉求是"加一个 tag 显示它
+   * 不能被闪避"，但如果真去加一个静态 `tags: ['unavoidable']`，就立刻回到
+   * 这个文件开头写的那种**双向漂**（漏标 / 错标）—— 而真相本来就在
+   * `HitDef.avoidable` 里。⇒ 读它。
+   *
+   * ⚠️ 判据是**段**（`hit.avoidable`），不是"某条效果"：那段整体不可规避。
+   */
+  if (hits.some((hit) => hit.avoidable === false)) {
+    out.add(`${HINT_KEY_PREFIX}unavoidable`);
+  }
+
   for (const effect of buffEffects) {
     if (effect.kind === 'interrupt') {
       out.add(`${HINT_KEY_PREFIX}interrupt`);
