@@ -32,6 +32,27 @@
  * 以为它们在说两件事，备战界面记着这条）。
  *
  * ==================================================================
+ * ⚠️ 2026-10-15：右侧那块**详情区**（用户："显示当前 hover 角色的详情"）
+ * ==================================================================
+ *
+ * 与备战屏**同一块面板、同一个驱动**：`PrepareDetailController` 把
+ * "鼠标划过的那一项"与"光标所在的那一项"合成一个 `PrepareTarget`
+ * （`focusedTarget`：**hover 优先**），再交给 `PrepareDetailPanel` 画。
+ *
+ * ```
+ *   鼠标  → pointermove 问一次命中（`characterHoverTarget`）→ 详情跟着切
+ *   键盘  → ← → 移动光标 → 详情跟着走（没有 hover 时的**同一条**代码）
+ *   触屏  → 没有 hover → 自动退化成"跟着光标 / 选择走"
+ * ```
+ *
+ * ⚠️ **矩形就是备战屏那一块**（`prepareGeometry.detailRect`，x624 宽296
+ * 通高）：卡片只铺到 x≈616，右边正好是空的 —— "共用右侧详情"是用户
+ * 2026-10-15 的原话（"老规矩"）。所以这里**不新写**任何几何。
+ *
+ * ⚠️ 底部那行提示**必须落在详情区下缘之下**（居中的提示会压在面板左边
+ * 那条边上）—— 它的 y 因此由 `detailRect()` 反推，不是手调的。
+ *
+ * ==================================================================
  * ⚠️ 临时桩（P2 只跑**一场**）
  * ==================================================================
  *
@@ -48,17 +69,21 @@ import { ScreenChrome } from './ScreenChrome';
 import { PALETTE } from '../render/theme';
 import { isDeveloping, type RosterEntry } from '../data/roster';
 import { CARD_RADIUS, CARD_STROKE, CURSOR_RING_GAP, PREPARE_SKIN, cardSkin } from './prepareRender';
+import { detailRect } from './prepareGeometry';
+import { PrepareDetailController } from './prepareDetailController';
 import {
-  CHARACTER_SELECT_LAYOUT,
   canStartRun,
   characterCursorTarget,
+  characterHoverTarget,
   characterSelectHitAreas,
   characterSelection,
   confirmCharacter,
   cycleCharacter,
   pickCharacter,
+  tapCharacterIntent,
 } from './characterSelectLogic';
-import type { PrepareSelection } from './prepareLogic';
+import type { DetailContext } from './prepareDetail';
+import type { PrepareSelection, PrepareTarget } from './prepareLogic';
 import type { TranslateFn } from '../i18n/translator';
 
 export interface CharacterSelectScreenOptions {
@@ -68,6 +93,13 @@ export interface CharacterSelectScreenOptions {
   readonly players: readonly RosterEntry[];
   /** 初始已确定的角色（上次出战的那个）。 */
   readonly initialPlayerId: string;
+  /**
+   * **右侧详情区的数据装配**（`app/prepareDetailContext.prepareDetailContext`）。
+   *
+   * ⚠️ 与备战屏**同一个工厂**：人物详情的取值函数（名字 / 生命上限 /
+   * 技能表）都由它接上内容表 —— 这一屏不该有自己的第二份装配。
+   */
+  readonly detailContext: (free: { readonly on: (id: string) => boolean }) => DetailContext;
   /** 是否显示键位提示（触屏为假）。见 `HomeScreenOptions.showKeyHints`。 */
   readonly showKeyHints: () => boolean;
   /** 点右上角的齿轮（打开设置）。见 `HomeScreenOptions.onGear`。 */
@@ -102,6 +134,13 @@ export class CharacterSelectScreen {
    * 本屏走（不再是挂在 stage 上、靠 `setScreen` 挪位置的那一个）。
    */
   readonly chrome: ScreenChrome;
+  /**
+   * 右侧那块详情区（**与备战屏同一个驱动器**：hover 优先 + 光标兜底）。
+   *
+   * ⚠️ 这一屏的详情只可能显示人物，所以"某条炁机开着没有"（`qijiOn`）
+   * 传 `() => false` —— 那个人物详情里没有一处读它（读它的是炁机详情）。
+   */
+  private readonly detailPanel: PrepareDetailController;
   private readonly players: readonly RosterEntry[];
   private readonly options: CharacterSelectScreenOptions;
 
@@ -159,16 +198,31 @@ export class CharacterSelectScreen {
     this.hint = new Label(pixi, {
       x: LOGICAL.width / 2,
       /**
-       * ⚠️ 位置由布局表算出来（`height - 100`），不写死 `440`：
-       * 卡片行的 y 一改，提示就该跟着走，而两处各写一个数字必然漂。
+       * ⚠️ **必须落在右侧详情区的下缘之下**（提示是居中的，而面板从
+       * x 624 起 —— 两者在纵向上重叠时，提示的尾巴会压到面板边上）。
+       * 所以它的 y 由**面板矩形**反推，不是手调的 `height - 100`。
        */
-      y: CHARACTER_SELECT_LAYOUT.height - 100,
+      y: detailRect().y + detailRect().h + 24,
       size: FONT.small,
       color: PALETTE.textDim,
       anchorX: 0.5,
       anchorY: 0.5,
     });
     this.root.addChild(this.hint.root);
+
+    /**
+     * **右侧详情区**（2026-10-15）：与备战屏同一块面板、同一个驱动器，
+     * 矩形用备战屏那一块（`PrepareDetailPanel` 的缺省）。
+     *
+     * ⚠️ 挂在本屏 root 里（不放 stage）：显隐跟着这一屏走 —— 那是
+     * `phaseVisibility` 那条不变量的一部分（边角控件 / 面板都住在屏里）。
+     */
+    this.detailPanel = new PrepareDetailController({
+      pixi,
+      translate: options.translate,
+      context: options.detailContext({ on: () => false }),
+      parent: this.root,
+    });
 
     /** 齿轮 + 返回箭头（最后加 = 最上层；见 `HomeScreen` 里同一条说明）。 */
     this.chrome = new ScreenChrome({
@@ -231,17 +285,73 @@ export class CharacterSelectScreen {
     this.begin();
   }
 
-  /** 点一下（逻辑坐标）。@returns 是否消费了这次点击 */
+  /**
+   * **只选中**某个角色（移光标 + 确定，**不开局**）。
+   *
+   * ⚠️ 它是触屏 / 鼠标"先看详情"那一步的落点（见 `tapCharacterIntent`）：
+   * 与键盘 ← → + Enter 中的"← →"完全等价。
+   */
+  select(id: string): void {
+    const next = pickCharacter(this.selection, this.players, id);
+    if (next === this.selection) return;
+    this.selection = next;
+    this.redraw();
+  }
+
+  /**
+   * **悬停**（鼠标划过）：只影响右侧详情，**不动光标**（与备战屏同一条）。
+   *
+   * ⚠️ 触屏永远走不到这里（没有 `pointermove`）——那时详情自动退化成
+   * "跟着光标 / 选择走"，同一段代码服务两种输入（`focusedTarget`）。
+   *
+   * @returns 悬停落在某张卡上（供调用方判"要不要重画"）
+   */
+  hover(px: number, py: number): boolean {
+    const next = characterHoverTarget(this.players, px, py);
+    if (this.detailPanel.hoverAt(next)) this.redraw();
+    return next !== undefined;
+  }
+
+  /** 指针离开画布：清掉悬停（否则详情会一直停在最后划过的那一项）。 */
+  clearHover(): void {
+    if (this.detailPanel.clearHover()) this.redraw();
+  }
+
+  /**
+   * 当前**可点区域**（只读；调试 / 截图脚本按它换算坐标）。
+   *
+   * ⚠️ 与备战屏 `hitAreas()` 同一条纪律：脚本**不许自己复制一份布局数字**
+   * —— 布局一调，抄的那份会静默指到别处（"点空了"与"功能坏了"长得一样）。
+   */
+  hitAreas(): ReturnType<typeof characterSelectHitAreas> {
+    return characterSelectHitAreas(this.players);
+  }
+
+  /** 详情区此刻显示的是哪一项（hover 优先，见 `prepareDetail`）。 */
+  detail(): PrepareTarget | undefined {
+    return this.detailPanel.target(characterCursorTarget(this.selection, this.players));
+  }
+
+  /** 悬停那一项（调试探针用；`undefined` = 鼠标不在任何卡上）。 */
+  hovered(): PrepareTarget | undefined {
+    return this.detailPanel.hovered;
+  }
+
+  /**
+   * 点一下（逻辑坐标）。@returns 是否消费了这次点击
+   *
+   * ⚠️ **先选中、再点同一张才开局**（`tapCharacterIntent`）：触屏没有
+   * hover，不这么分就"点谁开谁、永远看不到别人的详情"（§3b）。默认选中的
+   * 是上次出战的那个 —— 点它仍然是**一步**开局，与改之前一样。
+   */
   hitTest(px: number, py: number): boolean {
     /** ⚠️ 齿轮 / 返回箭头先于卡片（顺序即优先级，见 `HomeScreen.hitTest`）。 */
     if (this.chrome.hitTest(px, py)) return true;
-    for (const area of characterSelectHitAreas(this.players)) {
-      if (px < area.x || px > area.x + area.w) continue;
-      if (py < area.y || py > area.y + area.h) continue;
-      this.pick(area.id);
-      return true;
-    }
-    return false;
+    const hit = characterHoverTarget(this.players, px, py);
+    if (hit === undefined) return false;
+    if (tapCharacterIntent(this.selection, hit.id) === 'start') this.pick(hit.id);
+    else this.select(hit.id);
+    return true;
   }
 
   /** 每帧：只在可见时保证画面与选择一致。 */
@@ -342,5 +452,12 @@ export class CharacterSelectScreen {
           .stroke({ color: skin.ringColor, width: CARD_STROKE.cursor });
       }
     });
+
+    /**
+     * 右侧详情：**hover 优先、其次光标**（`PrepareDetailController` 内部就是
+     * `prepareDetail.focusedTarget`）—— 与备战屏**同一句**，所以"鼠标停在
+     * A 上、面板显示 B"这种错位在结构上不可能发生。
+     */
+    this.detailPanel.update(characterCursorTarget(this.selection, this.players));
   }
 }

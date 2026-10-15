@@ -77,7 +77,8 @@
  * （用户："炁机没有头像 → 那一条怎么排，你判断；别留一个空洞"）。
  */
 
-import type { PrepareTarget } from './prepareLogic';
+import type { PrepareSelection, PrepareTarget } from './prepareLogic';
+import type { PrepareSectionKind } from './prepareTypes';
 
 /* ================================================================== *
  * 形状
@@ -166,31 +167,86 @@ export function focusedTarget(
 }
 
 /**
- * **肉鸽确认屏那两栏各显示谁**（纯判定；2026-10-15）。
+ * **肉鸽确认屏那两行各是什么、焦点怎么走**（纯判定；2026-10-15）。
  *
  * ==================================================================
- * 为什么它是纯函数、还住在这个文件里
+ * 为什么它住在 `prepareDetail.ts`（而不是屏幕里）
  * ==================================================================
  *
- * 它回答的是"这一屏该给面板哪两个 `PrepareTarget`"—— 与 `focusedTarget`
- * 同一类问题（**目标 → 模型**），所以留在同一个文件里；而抽成纯函数是为了
- * 让**"没有已选炁机"那一支**（第一场之前 → 右栏画占位）能在 node 里钉住：
- * 那条分支的两种结果在画面上都是"右栏有字"（占位 vs 面板），
- * 随手写反了**截图看不出来**。
+ * 它回答的是"这一屏该给面板哪个 `PrepareTarget`、初始焦点落在谁身上"
+ * —— 与 `focusedTarget` 同一类问题（**目标 → 模型**），而且这里有两条
+ * **会被写错、截图又看不出来**的规则：
  *
- * ⚠️ 左栏恒是玩家（这一屏保证"出战角色已经定了"），右栏是**本局最近选的
- * 那条炁机**（`RunState.chosen` 的最后一条；一局可以选多条，而这一屏一次
- * 只画一条 —— 整局的清单在一局结束屏）。见 `app/phaseFlow.runConfirmInfo`。
+ *   1. **第一场之前没有已选炁机** → 那一行整块不画，焦点必须落到对手上
+ *      （否则焦点停在一个不存在的块上、右侧详情空着 —— 画面像"面板坏了"）
+ *   2. **焦点走到「开始战斗」上时，右侧仍显示上一块**（`expanded` 不动）
+ *      —— 面板忽隐忽现比"停着不动"难看得多
+ *   3. **一局选了不止一条炁机时**：块头上照实写"已激活 N 条：A、B"（那是
+ *      `prepareFold` 的判据、备战屏同一个块头），而**右侧详情只画得出
+ *      一条** —— 画的是**刚选的那条**（最后一条）
+ *
+ * ⚠️ 第 2 条不是这里实现的：`prepareLogic.withFocus` 早就写着这条
+ * （"`focus === 'start'` 时 `expanded` 保持"），本文件只是**读**
+ * `expanded` 而不是读 `focus` —— 这就是那条规则的落点。
  */
-export function runConfirmTargets(info: {
-  readonly playerId: string;
-  readonly qijiId?: string | undefined;
-}): { readonly player: PrepareTarget; readonly qiji: PrepareTarget | undefined } {
+
+/**
+ * 确认屏的**初始焦点 + 初始选择**（`prepareLogic` 那套纯状态机的入参）。
+ *
+ * ⚠️ 焦点顺序、空槽位跳过、环绕全在 `prepareLogic.moveFocus` 里（本屏
+ * **复用**备战屏那套，不另写一份）—— 所以这里只回答"起点在哪"：
+ *
+ * ```
+ *   有已选炁机 → 焦点落在「炁机」（刚选的那条，最该被确认）
+ *   没有       → 落在「对手」（第一场之前唯一存在的那一行）
+ * ```
+ *
+ * ⚠️ `playerId` / `cursor.playerId` 是**空串**：这一屏没有人物那一行。
+ * 这与选角色屏把 `bossId` / `cursor.qijiId` 写成空串是同一个处理
+ * （见 `characterSelectLogic.characterSelection` 的说明）：`PrepareSelection`
+ * 要求每个槽位各记一格，而这一屏到不了那两个槽位。
+ */
+export function runConfirmSelection(info: {
+  readonly boss: DetailUnit;
+  readonly qiji: readonly DetailUnit[];
+}): PrepareSelection {
+  const focus = info.qiji.length === 0 ? 'boss' : 'qiji';
+  const latest = info.qiji[info.qiji.length - 1];
   return {
-    player: { kind: 'player', id: info.playerId },
-    /** `undefined` = 右栏画「本局尚未选择炁机」那一句（第一场之前）。 */
-    qiji: info.qijiId === undefined ? undefined : { kind: 'qiji', id: info.qijiId },
+    playerId: '',
+    bossId: info.boss.id,
+    focus,
+    expanded: focus,
+    cursor: { playerId: '', bossId: info.boss.id, qijiId: latest?.id ?? '' },
   };
+}
+
+/**
+ * 确认屏右侧**该显示谁** —— 读的是 `expanded`（不是 `focus`）。
+ *
+ * ⚠️ 为什么读 `expanded`：焦点走到「开始战斗」时 `focus === 'start'`，而
+ * `expanded` 停在上一块上（`prepareLogic.withFocus`）—— 于是"Tab 到开始
+ * 战斗"不会把右侧详情清空。这与备战屏"焦点在开始键上时那一块照样展开"
+ * 是**同一条**规则的两个表现。
+ *
+ * ⚠️ 一局选了不止一条时画**最后一条**（"刚选的那条"）：面板一次只画得出
+ * 一条，而"这一场之前刚选了什么"正是玩家要确认的；**整局清单**在一局结束屏
+ * （`RunOverScreen` 的「本局炁机」）。
+ *
+ * ⚠️ `expanded` 指向一个**不存在**的块（没有已选炁机）时退回对手：这是
+ * 一条兜底（正常路径到不了 —— `moveFocus` 会跳过空槽位），但它防的是
+ * "焦点在空块上、右侧一片空白"那种**看不出原因**的画面。
+ */
+export function runConfirmDetailTarget(input: {
+  readonly expanded: PrepareSectionKind;
+  readonly boss: DetailUnit;
+  readonly qiji: readonly DetailUnit[];
+}): PrepareTarget {
+  const latest = input.qiji[input.qiji.length - 1];
+  if (input.expanded === 'qiji' && latest !== undefined) {
+    return { kind: 'qiji', id: latest.id };
+  }
+  return { kind: 'boss', id: input.boss.id };
 }
 
 /* ================================================================== *

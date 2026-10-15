@@ -119,6 +119,58 @@ export function characterSelectHitAreas(
 }
 
 /**
+ * 指针划过时**详情区该显示谁**（hover 的命中判据）。
+ *
+ * ⚠️ 它是纯函数、与 `characterSelectHitAreas` **同一份矩形**：鼠标"划过哪张卡"
+ * 与"点中哪张卡"必须是同一个判据 —— 两份各算一遍就会漂出"看着停在 A 上、
+ * 详情却是 B"（备战屏的 `pointerIntentOf` 记着同一条）。
+ *
+ * @returns 没划过任何卡（含划过镂空处 / 画布外）时 `undefined` ——
+ *   调用方据此把悬停清掉（否则详情会一直停在最后划过的那一项）
+ */
+export function characterHoverTarget(
+  players: readonly PrepareOption[],
+  px: number,
+  py: number,
+  L: PrepareLayout = CHARACTER_SELECT_LAYOUT,
+): { readonly kind: 'player'; readonly id: string } | undefined {
+  for (const area of characterSelectHitAreas(players, L)) {
+    if (px < area.x || px > area.x + area.w) continue;
+    if (py < area.y || py > area.y + area.h) continue;
+    return { kind: 'player', id: area.id };
+  }
+  return undefined;
+}
+
+/**
+ * **点某张卡该做什么**（纯判定；触屏与鼠标**同一条**）。
+ *
+ * ```
+ *   点的不是**已确定**的那个角色 → 只选中它（详情区跟着切）
+ *   点的就是**已确定**的那个角色 → 开局
+ * ```
+ *
+ * ==================================================================
+ * ⚠️ 为什么要多这一步（用户 2026-10-15："显示当前 hover 角色的详情"）
+ * ==================================================================
+ *
+ * 鼠标 / 键盘看得到"选中之前"的详情（hover / ← →），而**触屏没有 hover**
+ * —— 若点一下就直接开局，触屏玩家**永远看不到别的角色的详情**（点谁就
+ * 开谁），那是 AGENTS.md §3b 点名的"某个功能只有键盘能用"。
+ *
+ * ⚠️ 判据**不看操作方式**（`OperationMode`）：两套输入走同一条规则，
+ * 于是不会出现"鼠标一个行为、手指另一个行为"（那正是 §3b 要避免的）。
+ * 而代价是零：默认选中的是**上次出战的那个**，手指点它就开局（一步，
+ * 与改之前**逐字相同**）。
+ */
+export function tapCharacterIntent(
+  sel: PrepareSelection,
+  id: string,
+): 'start' | 'select' {
+  return id === sel.playerId ? 'start' : 'select';
+}
+
+/**
  * 初始状态：光标与选择**重合**在"上次出战的那个角色"上。
  *
  * ⚠️ `bossId` 是空串：选角色屏没有 Boss 槽位，这个字段永远不会被读

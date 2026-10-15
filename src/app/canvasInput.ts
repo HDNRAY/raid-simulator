@@ -72,20 +72,39 @@ export interface ScrollableScreen extends ScreenHitTarget {
   dragDetail(px: number, py: number, deltaY: number): boolean;
 }
 
+/**
+ * 一个**带鼠标悬停**的整屏界面的最小面（自由模式 / 选角色屏）。
+ *
+ * ⚠️ 它存在的理由：**详情区跟着鼠标走**这件事在 app 层**从来没接线**
+ * （2026-10-15 查出来的：`prepare.hover()` 只有调试入口在调，`pointermove`
+ * 一次都没调过它）—— 于是"鼠标划过卡片、右侧详情跟着切"只活在注释里，
+ * 实际只有键盘 / 点击会切。两屏共用下面这一条流水（抄一份必然只修一处）。
+ */
+export interface HoverScreen {
+  /** 划过 (px, py)：更新悬停项。@returns 有没有落在某一项上 */
+  hover(px: number, py: number): boolean;
+  /** 指针离开画布：清掉悬停。 */
+  clearHover(): void;
+}
+
 /** 指针要路由到的对象。 */
 export interface CanvasInputTargets {
   readonly canvas: HTMLCanvasElement;
   /** 首页（默认入口；含它自己的齿轮）。 */
   readonly home: ScreenHitTarget;
-  /** 选角色屏（肉鸽模式的第一屏；含它自己的齿轮与返回箭头）。 */
-  readonly select: ScreenHitTarget;
+  /**
+   * 选角色屏（肉鸽模式的第一屏；含它自己的齿轮与返回箭头）。
+   *
+   * ⚠️ 它带**右侧详情区**（2026-10-15）：hover 划过卡片时详情跟着切。
+   */
+  readonly select: ScreenHitTarget & HoverScreen;
   /**
    * 自由模式（原备战界面；含它自己的齿轮与返回箭头）。
    *
    * ⚠️ 它还带**详情区的滚动**（滚轮 / 拖拽）：触屏没有滚轮，而 Boss 的
    * 四条招式说明装不下 —— 拖拽那条路是 §3b 的功能对等要求，不是补充。
    */
-  readonly prepare: ScrollableScreen;
+  readonly prepare: ScrollableScreen & HoverScreen;
   /** 选炁机屏（P3；含它自己的齿轮与返回箭头）。 */
   readonly qijiSelect: ScreenHitTarget;
   /**
@@ -278,6 +297,19 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
     scrollDragMoved = false;
   };
 
+  /**
+   * **当前这一屏有没有 hover**（详情区跟着鼠标走）。
+   *
+   * ⚠️ 只有"设置面板没开"时才问：面板是模态的，鼠标划过它不该悄悄把
+   * 底下那一屏的详情换掉（`onDown` 里对整屏界面用的是同一条守卫）。
+   */
+  const hoverScreen = (): HoverScreen | undefined => {
+    if (t.settingsOpen()) return undefined;
+    if (t.phase() === 'prepare') return t.prepare;
+    if (t.phase() === 'characterSelect') return t.select;
+    return undefined;
+  };
+
   const onDown = (event: PointerEvent): void => {
     const { px, py } = at(event);
     /**
@@ -463,6 +495,16 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
       if (scrollDragScreen.dragDetail(px, py, dy)) return;
     }
     /**
+     * **当前这一屏的悬停**（详情区跟着鼠标走）——自由模式与选角色屏。
+     *
+     * ⚠️ 它排在设置面板的悬停**之前**，而两屏与面板**不会同时**吃这一下
+     * （面板开着时 `hoverScreen()` 返回 `undefined`）—— 所以这不是"优先级"，
+     * 而是"这一下属于谁"（`inputRouter` 那条纪律）。
+     */
+    const hover = hoverScreen();
+    if (hover !== undefined) hover.hover(px, py);
+
+    /**
      * 鼠标悬停到技能格 = **选中它**（需求："方向键选中和鼠标选中，
      * 应该合并"）。与方向键走同一条路径，所以高亮与详情完全一致。
      */
@@ -519,6 +561,13 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
    * （否则"想滚却滑出去了"会顺手改掉层数）。`pointerleave` 也走这一条。
    */
   const onCancel = (event: PointerEvent): void => {
+    /**
+     * ⚠️ 指针离开画布 / 手势被打断：把悬停清掉。
+     *
+     * 不清的话详情区会一直停在最后划过的那一项 —— 而玩家看到的是
+     * "鼠标已经不在任何卡片上了，面板却还写着某个人的技能表"。
+     */
+    hoverScreen()?.clearHover();
     if (scrollDragId === event.pointerId) {
       scrollDragId = null;
       scrollDragScreen = undefined;

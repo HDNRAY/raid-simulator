@@ -237,7 +237,31 @@ export interface CharacterSelectDebugTarget {
   readonly current: PrepareDebugTarget['current'];
   cycle(delta: number): void;
   confirm(): void;
+  /** 一步到位：选中 + 开局（调试 / 截图脚本用）。 */
   pick(id: string): void;
+  /** **只选中**（移光标 + 确定，不开局）—— 玩家点卡片的**第一步**。 */
+  select(id: string): void;
+  /** 鼠标悬停到逻辑坐标（右侧详情跟着切；返回有没有命中）。 */
+  hover(px: number, py: number): boolean;
+  /** 详情区**此刻显示的是哪一项**（hover 优先；`undefined` = 没聚焦）。 */
+  detail(): { readonly kind: 'player' | 'qiji' | 'boss'; readonly id: string } | undefined;
+  /** 悬停那一项（`undefined` = 鼠标不在任何卡上）。 */
+  hovered(): { readonly kind: 'player' | 'qiji' | 'boss'; readonly id: string } | undefined;
+  /**
+   * 三张卡的**可点矩形**（只读）。
+   *
+   * ⚠️ 它是"截图脚本不许自己抄一份几何"的落点（与 `prepare.hitAreas()` 同
+   * 一条）：布局一调，脚本不该跟着改；脚本问页面要坐标，点在真实命中区上，
+   * "点空了"与"功能坏了"才不会混成一个样子。
+   */
+  hitAreas(): readonly {
+    readonly kind: string;
+    readonly id: string;
+    readonly x: number;
+    readonly y: number;
+    readonly w: number;
+    readonly h: number;
+  }[];
 }
 
 /**
@@ -253,6 +277,11 @@ export function characterSelectDebugApi(select: CharacterSelectDebugTarget): {
     cycle(delta: number): void;
     confirm(): void;
     pick(id: string): void;
+    select(id: string): void;
+    hover(px: number, py: number): boolean;
+    detail(): ReturnType<CharacterSelectDebugTarget['detail']>;
+    hovered(): ReturnType<CharacterSelectDebugTarget['hovered']>;
+    hitAreas(): ReturnType<CharacterSelectDebugTarget['hitAreas']>;
   };
 } {
   const copy = (): PrepareDebugTarget['current'] => ({
@@ -271,8 +300,21 @@ export function characterSelectDebugApi(select: CharacterSelectDebugTarget): {
       cycle: (delta) => select.cycle(delta),
       /** 同 Enter：确定光标处的角色；能开始就开始一局（会真的进战斗）。 */
       confirm: () => select.confirm(),
-      /** 同点击卡片：移光标 + 确定 + 开始（一步到位）。 */
+      /** 一步到位：移光标 + 确定 + 开始（调试 / 截图脚本用）。 */
       pick: (id) => select.pick(id),
+      /**
+       * 同点击卡片**第一步**：只选中（不开局）—— 右侧详情跟着切。
+       *
+       * ⚠️ 玩家点卡片走的是"先选中、再点同一张才开局"（`tapCharacterIntent`），
+       * 而脚本要"一步到位"时用 `pick`。两个都留着是**有意**的。
+       */
+      select: (id) => select.select(id),
+      /** 同鼠标划过：只影响右侧详情（不动光标）。 */
+      hover: (px, py) => select.hover(px, py),
+      /** 详情区此刻显示的是哪一项（"是**谁的**字"只有这个读数能钉死）。 */
+      detail: () => select.detail(),
+      hovered: () => select.hovered(),
+      hitAreas: () => select.hitAreas().map((a) => ({ ...a })),
     },
   };
 }
@@ -512,6 +554,8 @@ export interface RunConfirmDebugTarget {
   readonly visible: boolean;
   /** 上一次重画读到的那一场（`undefined` = 还没画过）。 */
   readonly currentInfo: RunConfirmInfo | undefined;
+  /** 焦点此刻停在哪一站（`'qiji' | 'boss' | 'start'`）—— Tab 的读数。 */
+  readonly focus: 'player' | 'qiji' | 'boss' | 'start';
   confirm(): void;
 }
 
@@ -526,13 +570,21 @@ export function runConfirmDebugApi(screen: RunConfirmDebugTarget): {
   readonly runConfirm: {
     /** 这一屏此刻是否可见（验收"每场之前都到了这里"）。 */
     open(): boolean;
-    /** 这一屏此刻画的是哪一场（没有则为 `null`）。 */
+    /**
+     * 这一屏此刻画的是哪一场（没有则为 `null`）。
+     *
+     * ⚠️ `qijiIds` 是**本局已选的全部**（块头照实写"已激活 N 条"），
+     * 空数组 = **第一场之前**（那一行整块不画）—— 这与"画了一行空块头"
+     * 在截图上完全不同，所以它必须是结构化读数。
+     */
     info(): {
       readonly position: number;
       readonly length: number;
-      readonly playerId: string;
-      readonly qijiId: string | null;
+      readonly bossId: string;
+      readonly qijiIds: readonly string[];
     } | null;
+    /** 焦点此刻停在哪一站（`'qiji' | 'boss' | 'start'`）—— Tab 的读数。 */
+    focus(): 'player' | 'qiji' | 'boss' | 'start';
     /** 同 Enter / 点「开始战斗」（**会真的进战斗**）。 */
     start(): void;
   };
@@ -546,10 +598,11 @@ export function runConfirmDebugApi(screen: RunConfirmDebugTarget): {
         return {
           position: i.position,
           length: i.length,
-          playerId: i.playerId,
-          qijiId: i.qijiId ?? null,
+          bossId: i.boss.id,
+          qijiIds: i.qiji.map((q) => q.id),
         };
       },
+      focus: () => screen.focus,
       start: () => screen.confirm(),
     },
   };

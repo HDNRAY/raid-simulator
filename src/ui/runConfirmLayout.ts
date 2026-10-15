@@ -1,129 +1,153 @@
 /**
- * **肉鸽确认屏的几何**（纯几何：两栏 + 「开始战斗」）。
+ * **肉鸽确认屏的几何**（纯几何：两行只读块头 + 「开始战斗」）。
  *
  * ==================================================================
  * 它是什么（一句话，没有"和"）
  * ==================================================================
  *
- * 它是这一屏的**唯一一张布局表**：两栏详情区各占哪块地方、栏目标题画在
- * 哪、按钮画在哪 —— 渲染层与命中测试读的是**同一份几何**，所以"看到的
- * 按钮"与"点中的按钮"结构上不可能错位（备战屏那条"文字飘在按钮右边
- * 152px"的账见 `prepareFooter` 文件头）。
+ * 它是这一屏**自己那点几何**的唯一出处：两行块头的**顶边从哪递推**、
+ * 栏目标题画在哪、哪一块在不在。
  *
  * ==================================================================
- * 纵向预算（算出来的，不是手调的）
+ * ⚠️ 其余几何**一律复用备战屏那一套**（用户说的"老规矩"）
  * ==================================================================
  *
- * 画布是死高的 960×540，这一屏的纵向账必须一次算平：
+ * | 这一屏的东西 | 从哪来 | 为什么 |
+ * |---|---|---|
+ * | 块头的矩形 | `prepareGeometry.foldRect` | 与备战屏**同一条**高 40 的块头 |
+ * | 块头的命中区（含标题带外扩） | `prepareGeometry.foldHitRect` | 同一句"命中 = 内容盒 ∪ 标题带" |
+ * | 块头里那行字 | `prepareFold.foldSummaryOf` | 同一句"块头显示**已确定的选择**" |
+ * | 右侧详情面板 | `prepareGeometry.detailRect`（x624 / 宽296 / 通高） | **共用**那块详情区 |
+ * | 「开始战斗」+ 提示那一格 | `prepareGeometry.startRect` / `footerHintSlot` | 同一个按钮、同一处（锚定底部） |
+ *
+ * ⚠️ 所以本文件**只回答一件事**：两行块头在纵向怎么排（`runConfirmBlockTops`）。
+ * 抄一份矩形 / 按钮 / 详情区的坐标过来，就是 §2 点名的"同一份几何两份实现"
+ * —— 两份都会"看起来对"，然后各改一处时漂开。
+ *
+ * ==================================================================
+ * ⚠️ 纵向链是**按"这一块在不在"递推**的（与备战屏 `rowTopsOf` 同一条）
+ * ==================================================================
+ *
+ * 肉鸽第一场之前**没有已选炁机** —— 那一块（标签 + 块头）**整块不画**，
+ * 于是对手那一行**顶上来**（不是留一个空洞）。写死两个 y 就会出现
+ * "第一场上面空一块、第三块压住按钮"这种形状。
  *
  * ```
  *   ① 标题            中心 56（32px 楷体）
  *   ② 第几场 / 共几场  中心 92
- *   ③ 栏目标题        中心 132（两栏各一行）
- *   ④ 两栏详情面板    144 .. 416
- *   ⑤ 「开始战斗」     446 .. 486
- *   ⑥ 操作提示        中心 508
+ *   ③ 第一块标签      中心 124
+ *   ④ 第一行块头      148 .. 188
+ *   ⑤ 第二块标签      中心 212
+ *   ⑥ 第二行块头      236 .. 276
+ *   （「开始战斗」+ 提示：底边那一排，锚定底部 —— 与备战屏同一处）
  * ```
- *
- * ⚠️ 两栏的**宽度**由 `side`（左右留白）与 `gap`（栏间空隙）算出来，
- * 不是各自写一个数：两栏各写一个宽度，改动留白时它们就会一宽一窄
- * （而截图上看起来只是"有点歪"）。
- *
- * ⚠️ 这一屏**没有**素材声明那一行（`PrepareFooter` 的 `notice`）：它是
- * **满屏界面**，声明只在备战屏 / 战斗那一屏画（`RunOverScreen` 同样没有）
- * —— 这里不重复它是**有意**的，不是漏了。
  */
 
-import { LOGICAL } from './layout';
-import type { DetailRect } from './prepareDetailMetrics';
+import { PREPARE_LAYOUT } from './prepareLayout';
+import { foldHitRect, foldRect } from './prepareGeometry';
+import type { Rect } from './prepareCardGrid';
 
-/** 这一屏的两栏（左 = 本次出战，右 = 已选炁机）。 */
-export type RunConfirmColumn = 'left' | 'right';
+/** 确认屏的两行块头（顺序 = 从上到下）。 */
+export type RunConfirmBlock = 'qiji' | 'boss';
 
 export const RUN_CONFIRM_LAYOUT = {
   /** 标题中心 y。 */
   titleY: 56,
   /** 「第 N / M 场」那一行的中心 y。 */
   progressY: 92,
-  /** 栏目标题的中心 y 到面板顶边的距离（行框的一半 + 呼吸位）。 */
-  columnLabelGap: 20,
-  /** 两栏面板的顶边 / 底边。 */
-  columnsTop: 144,
-  columnsBottom: 416,
-  /** 画布左右留白（两栏各自的外侧）。 */
-  side: 40,
-  /** 两栏之间的空隙。 */
-  gap: 40,
-  /** 「开始战斗」的尺寸与垂直中心。 */
-  startW: 200,
-  startH: 40,
-  startCenterY: 466,
-  /** 操作提示那一行的中心 y。 */
-  hintY: 508,
+  /**
+   * **第一块**的栏目标题中心 y（块头的顶边 = 它 + `labelGap`）。
+   *
+   * ⚠️ 后面的块由 `runConfirmBlockTops` 递推，**不许**再写 y。
+   */
+  firstLabelY: 124,
 } as const;
 
-/** 一栏的宽度（两栏同宽 —— 只由留白与空隙算出来）。 */
-export function runConfirmColumnW(): number {
-  return (LOGICAL.width - RUN_CONFIRM_LAYOUT.side * 2 - RUN_CONFIRM_LAYOUT.gap) / 2;
+/**
+ * 两行块头的**顶边**（按"炁机那一块在不在"递推）。
+ *
+ * 递推规则与备战屏 `rowTopsOf` **同一个**（见那个函数的说明）：
+ *
+ * ```
+ *   下一块的行顶 = 上一块的底边 + rowGap + 标题行框 + labelGap
+ * ```
+ *
+ * ⚠️ `qiji` 为 `undefined` = 这一局还没有已选炁机 → 那一块（标签 + 块头）
+ * 整块不画，对手顶上来。
+ */
+export function runConfirmBlockTops(hasQiji: boolean): {
+  readonly qiji: number | undefined;
+  readonly boss: number;
+} {
+  /** 标题的行框（与布局测试同一个保守估计：`1.3 × labelSize`）。 */
+  const labelBox = Math.ceil(PREPARE_LAYOUT.labelSize * 1.3);
+  /** 第一块的顶边：标签中心 + `labelGap`（备战屏的 `prepareLabelY` 是反过来的）。 */
+  const first = RUN_CONFIRM_LAYOUT.firstLabelY + PREPARE_LAYOUT.labelGap;
+  if (!hasQiji) return { qiji: undefined, boss: first };
+  /**
+   * ⚠️ 与 `prepareGeometry.rowTopsOf` 的 `below()` **逐字同一条**：
+   * `rowGap + 标题行框 + labelGap`。
+   *
+   * 少了 `labelGap` 就会让下一行的**命中区**（`foldHitRect` 向上多吃一条
+   * 标题带）压到上一行上 —— 那正是"点上一行却切到下一行"的形状，而截图
+   * 完全看不出来（两行画得都不重叠，重叠的是命中区）。
+   */
+  const boss = first + PREPARE_LAYOUT.foldH + PREPARE_LAYOUT.rowGap + labelBox + PREPARE_LAYOUT.labelGap;
+  return { qiji: first, boss };
 }
 
 /**
- * 某一栏的矩形（也是**详情面板自己的矩形** —— 面板按注入的矩形排版）。
+ * 某一块的**栏目标题**中心 y（在块头上边）。
  *
- * ⚠️ 它同时是"点得中哪一栏"的判据来源：两栏的滚动（滚轮 / 拖拽）要按
- * 矩形分派（见 `RunConfirmScreen.isOnDetail`），各写一份必然漂。
+ * ⚠️ 它由**块头的顶边**反推（`top - labelGap`），与备战屏
+ * `prepareLabelY` 同一条：标题与它那一行是同一次推导里的东西 ——
+ * 各写一个 y 就会漂出"标题压在块头上"。
  */
-export function runConfirmColumnRect(side: RunConfirmColumn): DetailRect {
-  const { side: margin, gap, columnsTop, columnsBottom } = RUN_CONFIRM_LAYOUT;
-  const w = runConfirmColumnW();
-  const x = side === 'left' ? margin : margin + w + gap;
-  return { x, y: columnsTop, w, h: columnsBottom - columnsTop };
-}
-
-/** 栏目标题那一行的中心 y（在面板**上边**）。 */
-export function runConfirmColumnLabelY(): number {
-  return RUN_CONFIRM_LAYOUT.columnsTop - RUN_CONFIRM_LAYOUT.columnLabelGap;
-}
-
-/** 「开始战斗」的矩形（渲染与命中测试共用）。 */
-export function runConfirmStartRect(): DetailRect {
-  const { startW, startH, startCenterY } = RUN_CONFIRM_LAYOUT;
-  return {
-    x: (LOGICAL.width - startW) / 2,
-    y: startCenterY - startH / 2,
-    w: startW,
-    h: startH,
-  };
-}
-
-/** 「开始战斗」四个字的对齐基准 = 矩形中心（**不是** `LOGICAL.width / 2`）。 */
-export function runConfirmStartCenterX(): number {
-  const rect = runConfirmStartRect();
-  return rect.x + rect.w / 2;
+export function runConfirmBlockLabelY(top: number): number {
+  return top - PREPARE_LAYOUT.labelGap;
 }
 
 /**
- * 这个逻辑点是不是落在**某一栏**里。
+ * 某一块**画出来**的矩形（= 备战屏那条块头，见 `prepareGeometry.foldRect`）。
  *
- * ⚠️ 它是"滚轮 / 拖拽该滚哪一栏"的**唯一**判据（渲染与命中测试共用同一份
- * 矩形）—— 两栏各写一份范围判断必然漂，而漂的样子是"拖左边滚了右边"。
+ * @returns 这一块**不在**时 `undefined`（调用方不该画它 —— 连标题也不画）
  */
-export function isOnRunConfirmColumn(
-  side: RunConfirmColumn,
+export function runConfirmBlockRect(
+  block: RunConfirmBlock,
+  hasQiji: boolean,
+): Rect | undefined {
+  const top = blockTop(block, hasQiji);
+  return top === undefined ? undefined : foldRect(top);
+}
+
+/**
+ * 某一块的**可点矩形**（块头 ∪ 它上面那行标题，见 `foldHitRect`）。
+ *
+ * ⚠️ 比画出来的那一条大一圈是**有意**的（触屏点的是"整块"，而画出来的
+ * 只有 40px）—— 与备战屏同一个 `foldHitRect`。
+ */
+export function runConfirmBlockHitRect(
+  block: RunConfirmBlock,
+  hasQiji: boolean,
+): Rect | undefined {
+  const top = blockTop(block, hasQiji);
+  return top === undefined ? undefined : foldHitRect(top);
+}
+
+/** 这个逻辑点是不是落在某一块上（点它 = 把焦点 / 右侧详情切到它）。 */
+export function isOnRunConfirmBlock(
+  block: RunConfirmBlock,
+  hasQiji: boolean,
   px: number,
   py: number,
 ): boolean {
-  const rect = runConfirmColumnRect(side);
+  const rect = runConfirmBlockHitRect(block, hasQiji);
+  if (rect === undefined) return false;
   return px >= rect.x && px <= rect.x + rect.w && py >= rect.y && py <= rect.y + rect.h;
 }
 
-/**
- * 这个逻辑点是不是落在「开始战斗」上。
- *
- * ⚠️ 它**只**回答按钮本身：这一屏没有别的可点物（两栏是只读展示），
- * 而"点击分派"的顺序（齿轮 / 返回箭头先于按钮）在屏幕自己的 `hitTest` 里。
- */
-export function isOnRunConfirmStart(px: number, py: number): boolean {
-  const rect = runConfirmStartRect();
-  return px >= rect.x && px <= rect.x + rect.w && py >= rect.y && py <= rect.y + rect.h;
+/** 某一块的块头顶边（不在时 `undefined`）。 */
+function blockTop(block: RunConfirmBlock, hasQiji: boolean): number | undefined {
+  const tops = runConfirmBlockTops(hasQiji);
+  return block === 'qiji' ? tops.qiji : tops.boss;
 }

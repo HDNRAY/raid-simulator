@@ -177,6 +177,12 @@ export function buildScreens(d: ScreenSetupDeps): Screens {
     translate: translateSafe,
     players: PLAYER_ROSTER,
     initialPlayerId: d.initial.playerId,
+    /**
+     * ⚠️ **与备战屏同一个详情装配**（2026-10-15："选角色界面显示当前
+     * hover 角色的详情"）：这一屏不该有自己的一份 —— 两份必然漂
+     * （同一个角色的技能表会长出两个样子）。
+     */
+    detailContext: d.prepareDetailContext,
     showKeyHints: d.showKeyHints,
     f1Label: d.f1Label,
     onGear,

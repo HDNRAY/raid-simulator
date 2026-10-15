@@ -3,11 +3,13 @@ import {
   CHARACTER_SELECT_LAYOUT,
   canStartRun,
   characterCursorTarget,
+  characterHoverTarget,
   characterSelectHitAreas,
   characterSelection,
   confirmCharacter,
   cycleCharacter,
   pickCharacter,
+  tapCharacterIntent,
 } from '../../src/ui/characterSelectLogic';
 import { NO_SCROLL, prepareHitAreas, type PrepareOption } from '../../src/ui/prepareLogic';
 import { PLAYER_ROSTER, isDeveloping } from '../../src/data/roster';
@@ -160,5 +162,59 @@ describe('能不能开一局：开发中的角色**不能**', () => {
     const moved = cycleCharacter(characterSelection('player'), players, 1);
     expect(moved.cursor.playerId).toBe('kaili');
     expect(canStartRun(moved, isDeveloping)).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * 2026-10-15：右侧详情（hover 命中）与"点卡片"的两步规则
+ * ------------------------------------------------------------------ */
+
+describe('hover 命中：与"点中哪张卡"**同一份矩形**', () => {
+  const areas = characterSelectHitAreas(players);
+  const inside = (i: number): { readonly px: number; readonly py: number } => {
+    const a = areas[i]!;
+    return { px: a.x + a.w / 2, py: a.y + a.h / 2 };
+  };
+
+  it('划过某张卡 → 就是那一项（详情区据此切）', () => {
+    for (let i = 0; i < players.length; i += 1) {
+      const { px, py } = inside(i);
+      expect(characterHoverTarget(players, px, py), `第 ${i} 张`).toEqual({
+        kind: 'player',
+        id: players[i]!.id,
+      });
+    }
+  });
+
+  it('划过卡片之间的空隙 / 画布外 → `undefined`（详情区清悬停）', () => {
+    const first = areas[0]!;
+    expect(characterHoverTarget(players, first.x - 4, first.y + first.h / 2)).toBeUndefined();
+    expect(characterHoverTarget(players, -10, -10)).toBeUndefined();
+    expect(characterHoverTarget(players, 9999, 9999)).toBeUndefined();
+  });
+});
+
+describe('⚠️ 点卡片的规则：**先选中、再点同一张才开局**', () => {
+  it('点的不是已确定的那个 → 只选中（触屏才有机会看详情）', () => {
+    const sel = characterSelection('player');
+    expect(tapCharacterIntent(sel, 'kaili')).toBe('select');
+  });
+
+  it('点的就是已确定的那个 → 开局（默认那个角色仍然**一步**开局）', () => {
+    const sel = characterSelection('player');
+    expect(tapCharacterIntent(sel, 'player')).toBe('start');
+  });
+
+  it('判据看的是**已确定的**（`selection.playerId`），不是光标', () => {
+    /**
+     * ⚠️ 光标被人用 ← → 挪到凯丽、而选择仍是林晚风时：点凯丽 = **只选中**
+     * （光标与选择此时才重合），再点一次才开局 —— 与"点已确定的那个"
+     * 完全一致。
+     */
+    const moved = cycleCharacter(characterSelection('player'), players, 1);
+    expect(moved.cursor.playerId).toBe('kaili');
+    expect(moved.playerId).toBe('player');
+    expect(tapCharacterIntent(moved, 'kaili')).toBe('select');
+    expect(tapCharacterIntent(moved, 'player')).toBe('start');
   });
 });

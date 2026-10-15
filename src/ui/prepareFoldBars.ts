@@ -35,7 +35,7 @@ import { Label, type PixiCtor } from './primitives';
 import { PALETTE } from '../render/theme';
 import { PREPARE_LAYOUT, SECTION_ORDER } from './prepareLayout';
 import type { Rect } from './prepareGeometry';
-import { CARD_RADIUS, centeredTextTopY } from './prepareRender';
+import { CARD_RADIUS, cardSkin, centeredTextTopY } from './prepareRender';
 import { portraitFor } from '../render/portraitAssets';
 import { PortraitSprite } from '../render/portraitSprite';
 import type { PrepareSectionKind } from './prepareTypes';
@@ -48,6 +48,15 @@ export interface FoldBarDraw {
   /** **已本地化**的那行字（见 `prepareFold`）。 */
   readonly text: string;
   readonly portraitId?: string | undefined;
+  /**
+   * 这一条此刻是不是**焦点所在**（2026-10-15 加；目前只有肉鸽确认屏会传）。
+   *
+   * ⚠️ 备战屏**永远不传**：那里的焦点是"哪一块展开"，而收起的两块不可能
+   * 有焦点（见文件头）。确认屏两行**全是只读块头**，焦点就落在它们身上 ——
+   * 不给个可见的光标态就会出现"Tab 切过去画面没变、右侧详情却换了"
+   * （最难查的那类：看不出按没按上）。
+   */
+  readonly focused?: boolean;
 }
 
 export interface PrepareFoldBarsOptions {
@@ -99,6 +108,11 @@ export class PrepareFoldBars {
    */
   draw(bars: readonly FoldBarDraw[]): void {
     this.gfx.clear();
+    /**
+     * 焦点那一条用**光标皮肤**（冷白）：与卡片上的光标**同一个颜色语言**
+     * （`cardSkin({ cursored: true })`）—— 本作里"光标"只有这一种画法。
+     */
+    const cursorSkin = cardSkin({ developing: false, cursored: true, selected: false });
     const drawn = new Set<PrepareSectionKind>();
     for (const bar of bars) {
       drawn.add(bar.kind);
@@ -107,10 +121,17 @@ export class PrepareFoldBars {
 
       this.gfx
         .roundRect(x, y, w, h, CARD_RADIUS)
-        .fill({ color: PALETTE.panel, alpha: 0.55 });
+        .fill({
+          color: bar.focused === true ? cursorSkin.fillColor : PALETTE.panel,
+          alpha: bar.focused === true ? cursorSkin.fillAlpha : 0.55,
+        });
       this.gfx
         .roundRect(x, y, w, h, CARD_RADIUS)
-        .stroke({ color: PALETTE.panelLine, width: 1, alpha: 0.8 });
+        .stroke({
+          color: bar.focused === true ? cursorSkin.strokeColor : PALETTE.panelLine,
+          width: bar.focused === true ? cursorSkin.strokeWidth : 1,
+          alpha: bar.focused === true ? 1 : 0.8,
+        });
 
       const label = this.labels.get(bar.kind);
       if (label === undefined) continue;
@@ -119,7 +140,7 @@ export class PrepareFoldBars {
       const pad = PREPARE_LAYOUT.cardPad;
       const hasPortrait = this.placePortrait(bar, x + pad + box / 2, centerY);
       label.set(bar.text);
-      label.setColor(PALETTE.text);
+      label.setColor(bar.focused === true ? cursorSkin.nameColor : PALETTE.text);
       label.root.x = x + pad + (hasPortrait ? box + gap : 0);
       /**
        * ⚠️ 与卡片同一条：**按实测盒高**垂直居中（不是 `nameLineH / 2`）。

@@ -273,8 +273,30 @@ declare global {
         cycle(delta: number): void;
         /** 同 Enter：确定光标处的角色；能开始就开始一局（**会先进确认屏**）。 */
         confirm(): void;
-        /** 同点击卡片：移光标 + 确定 + 开始（一步到位，**先进确认屏**）。 */
+        /** 一步到位：移光标 + 确定 + 开始（调试 / 截图脚本用，**先进确认屏**）。 */
         pick(id: string): void;
+        /**
+         * 同点击卡片**第一步**：只选中（不开局）—— 右侧详情跟着切。
+         *
+         * ⚠️ 玩家点卡片是"先选中、再点同一张才开局"（触屏没有 hover，
+         * 不这么分就看不到别人的详情）—— 见 `ui/characterSelectLogic.tapCharacterIntent`。
+         */
+        select(id: string): void;
+        /** 同鼠标划过：只影响右侧详情（不动光标）。 */
+        hover(px: number, py: number): boolean;
+        /** 详情区此刻显示的是哪一项（`undefined` = 没聚焦任何卡）。 */
+        detail(): { readonly kind: 'player' | 'qiji' | 'boss'; readonly id: string } | undefined;
+        /** 悬停那一项（`undefined` = 鼠标不在任何卡上）。 */
+        hovered(): { readonly kind: 'player' | 'qiji' | 'boss'; readonly id: string } | undefined;
+        /** 三张卡的**可点矩形**（只读；脚本按它换算坐标，别自己抄布局）。 */
+        hitAreas(): readonly {
+          readonly kind: string;
+          readonly id: string;
+          readonly x: number;
+          readonly y: number;
+          readonly w: number;
+          readonly h: number;
+        }[];
       };
       /**
        * **确认屏**（肉鸽每场战斗之前；2026-10-15）。
@@ -288,13 +310,21 @@ declare global {
       runConfirm: {
         /** 这一屏此刻是否可见（验收"每场之前都到了这里"）。 */
         open(): boolean;
-        /** 这一屏此刻画的是哪一场（没有则为 `null`）。 */
+        /**
+         * 这一屏此刻画的是哪一场（没有则为 `null`）。
+         *
+         * ⚠️ `qijiIds` 是**本局已选的全部**；空数组 = **第一场之前**
+         * （那一行整块不画）—— 与"画了一行空块头"在截图上完全不同，
+         * 所以它必须是结构化读数。
+         */
         info(): {
           readonly position: number;
           readonly length: number;
-          readonly playerId: string;
-          readonly qijiId: string | null;
+          readonly bossId: string;
+          readonly qijiIds: readonly string[];
         } | null;
+        /** 焦点停在哪一站（Tab 的读数：`'qiji' | 'boss' | 'start'`）。 */
+        focus(): 'player' | 'qiji' | 'boss' | 'start';
         /** 同 Enter / 点「开始战斗」（**会真的进战斗**）。 */
         start(): void;
       };

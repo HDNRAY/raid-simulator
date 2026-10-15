@@ -10,35 +10,40 @@ import {
 } from '../../src/app/phaseLogic';
 import {
   RUN_CONFIRM_LAYOUT,
-  isOnRunConfirmColumn,
-  isOnRunConfirmStart,
-  runConfirmColumnLabelY,
-  runConfirmColumnRect,
-  runConfirmColumnW,
-  runConfirmStartCenterX,
-  runConfirmStartRect,
+  isOnRunConfirmBlock,
+  runConfirmBlockHitRect,
+  runConfirmBlockLabelY,
+  runConfirmBlockRect,
+  runConfirmBlockTops,
+  type RunConfirmBlock,
 } from '../../src/ui/runConfirmLayout';
+import { detailModelOf, runConfirmDetailTarget, runConfirmSelection, type DetailContext } from '../../src/ui/prepareDetail';
+import { moveFocus } from '../../src/ui/prepareLogic';
+import { foldRect, footerHintSlot, startRect } from '../../src/ui/prepareGeometry';
+import { PREPARE_LAYOUT } from '../../src/ui/prepareLayout';
 import { LOGICAL } from '../../src/ui/layout';
-import { runConfirmTargets, detailModelOf, type DetailContext } from '../../src/ui/prepareDetail';
 
 /**
  * ==================================================================
  * 肉鸽：**每场战斗前的确认屏**（2026-10-15）
  * ==================================================================
  *
- * 设计稿：`docs/specs/2026-10-15-roguelike-confirm-screen.md`。
+ * 设计稿：`docs/specs/2026-10-15-roguelike-confirm-screen.md`（内容口径当天
+ * 改过一次：玩家详情挪到选角色屏、右边改成**一块共用详情**、Tab 在
+ * 炁机 / 对手 / 开始战斗间切 —— 见 `ui/RunConfirmScreen` 文件头）。
  *
- * 这一份钉两件事，都是**截图定不了**的：
+ * 这一份钉的都是**截图定不了**的事：
  *
  *   1. **"每场战斗之前都经过确认屏"** —— 走**真的 `RunSession`**（真洗牌 /
- *      真推进 / 真候选），把整局的相位序列走出来，断言"确认屏的次数 =
- *      打的场数"。只拍一张图分不清"第 2 场之前漏了确认屏"与"那张图是
- *      第 1 场的"。
- *   2. **两栏几何不重叠、不出界** —— 两栏各写一个宽度时，"有点歪"在图上
- *      看不出来，而"按钮压在右栏上"是明显的坏（却只在某些字号下出现）。
+ *      真推进 / 真候选），把整局的相位序列走出来
+ *   2. **两行块头的纵向链**：没有已选炁机时那一行**整块不画**、对手**顶上来**
+ *      （"少一行"与"画了一行空的"在图上完全不同）
+ *   3. **焦点状态机**：炁机 → 对手 → 开始战斗（环绕）、空槽位自动跳过、
+ *      焦点走到开始键上时右侧仍显示上一块
  *
- * ⚠️ 这里**不测** `RunConfirmScreen` 的 Pixi 绘制（那要真 canvas），
- * 与其余整屏界面同一条纪律：几何 / 流程走单测，画面走截图。
+ * ⚠️ 这里**不测** `RunConfirmScreen` 的 Pixi 绘制（那要真 canvas，jsdom 里
+ * Pixi 的文字量不出高度）—— 与其余整屏界面同一条纪律：几何 / 状态走单测，
+ * 画面走截图。
  */
 
 /* ------------------------------------------------------------------ *
@@ -68,7 +73,7 @@ function walkRun(runLength: number, outcome: 'victory' | 'defeat'): {
     if (phase === 'runConfirm') {
       /**
        * ⚠️ 「开始战斗」这一刻，账本里**必须**有这一场的对手 —— 它是
-       * `confirmRunBattle` 唯一的输入。对手为空 = 会开一场不存在的战斗。
+       * 确认屏右侧那一行与 `confirmRunBattle` 唯一的输入。
        */
       expect(session.bossId(), `第 ${battles + 1} 场之前账本里没有对手`).toBeDefined();
       battles += 1;
@@ -102,7 +107,6 @@ describe('肉鸽流程：每场战斗之前都经过确认屏（真 RunSession�
     const { visited, battles } = walkRun(1, 'victory');
     expect(visited).toEqual(['runConfirm', 'runOver']);
     expect(battles).toBe(1);
-    expect(visited.filter((p) => p === 'runConfirm')).toHaveLength(battles);
   });
 
   it('第一场就输：确认过再打（不是"没确认就结束"）', () => {
@@ -140,11 +144,6 @@ describe('⚠️ "进战斗"在 `phaseFlow` 里只有一个调用点（结构上
      * ⚠️ 只算**调用语句**：`createPhaseFlow` 的返回类型里有一行
      * `enterBattle(playerId: string, bossId: string): void;`（那是签名，
      * 不是调用），用"行尾是不是 `: void;`"把它排掉。
-     *
-     * 这条断言的意义：肉鸽里"进战斗"的三条路（开局 / 一场打完 / 选完炁机）
-     * 都只切到确认屏，**唯一的开战点是玩家按的那个按钮**
-     * （`confirmRunBattle`）—— 所以"跳过确认"在结构上不存在，
-     * 而不是靠三条路各自记得不跳过。
      */
     const calls = lines
       .map((line, index) => ({ line, index }))
@@ -161,117 +160,228 @@ describe('⚠️ "进战斗"在 `phaseFlow` 里只有一个调用点（结构上
 });
 
 /* ------------------------------------------------------------------ *
- * ② 两栏各显示谁（纯判定；"没有已选炁机"那一支截图看不出来）
+ * ② 两行各是什么、焦点怎么走（纯判定）
  * ------------------------------------------------------------------ */
 
-describe('确认屏两栏的目标（纯判定）', () => {
-  it('左栏恒是玩家；有已选炁机 → 右栏是它', () => {
-    expect(runConfirmTargets({ playerId: 'player', qijiId: 'vitality' })).toEqual({
-      player: { kind: 'player', id: 'player' },
-      qiji: { kind: 'qiji', id: 'vitality' },
+/** 假详情上下文（真实的那个要读内容表 + i18n）。 */
+const ctx: DetailContext = {
+  playerById: (id) => ({ id, nameKey: 'roster.player.name' }),
+  bossById: (id) => ({ id, nameKey: 'roster.boss.name' }),
+  qijiById: (id) => ({ id, nameKey: 'qiji.name', descKey: 'qiji.desc' }),
+  playerHp: () => 150,
+  bossHp: () => 420,
+  playerSkills: () => [],
+  bossSkills: () => [],
+  bossPassives: () => [],
+  developing: () => false,
+  qijiOn: (id) => id === 'vitality',
+};
+
+const BOSS = { id: 'pride', nameKey: 'boss.pride.name' } as const;
+const QIJI = { id: 'vitality', nameKey: 'qiji.vitality.name' } as const;
+/** 第二条炁机（一局可能选不止一条 —— 块头照实写「已激活 2 条」）。 */
+const QIJI2 = { id: 'jieShengJi', nameKey: 'qiji.jieShengJi.name' } as const;
+
+describe('确认屏：初始焦点与"右侧显示谁"（纯判定）', () => {
+  it('有已选炁机 → 焦点落在炁机（刚选的那条，最该被确认）', () => {
+    const sel = runConfirmSelection({ boss: BOSS, qiji: [QIJI] });
+    expect(sel.focus).toBe('qiji');
+    expect(sel.expanded).toBe('qiji');
+    /** ⚠️ 玩家那两格是空串（这一屏没有人物行，见 `runConfirmSelection`）。 */
+    expect(sel.playerId).toBe('');
+    expect(sel.cursor.qijiId).toBe('vitality');
+  });
+
+  it('⚠️ 第一场之前（没有已选炁机）→ 焦点必须在**对手**上，不能停在空块上', () => {
+    const sel = runConfirmSelection({ boss: BOSS, qiji: [] });
+    expect(sel.focus).toBe('boss');
+    expect(sel.expanded).toBe('boss');
+    expect(runConfirmDetailTarget({ expanded: sel.expanded, boss: BOSS, qiji: [] })).toEqual({ kind: 'boss', id: 'pride' });
+  });
+
+  it('⚠️ 焦点走到「开始战斗」上时，右侧仍显示**上一块**（面板不忽隐忽现）', () => {
+    /**
+     * `expanded` 由 `prepareLogic.withFocus` 保住（"focus === 'start' 时
+     * expanded 保持"）—— 这里钉的是"详情读的是 `expanded`、不是 `focus`"。
+     */
+    const sel = runConfirmSelection({ boss: BOSS, qiji: [QIJI] });
+    const onStart = moveFocus(sel, 1, { wrap: true, players: [], qiji: [QIJI], bosses: [BOSS] });
+    expect(onStart.focus).toBe('boss');
+    const again = moveFocus(onStart, 1, { wrap: true, players: [], qiji: [QIJI], bosses: [BOSS] });
+    expect(again.focus).toBe('start');
+    expect(again.expanded).toBe('boss');
+    expect(runConfirmDetailTarget({ expanded: again.expanded, boss: BOSS, qiji: [QIJI] })).toEqual({
+      kind: 'boss',
+      id: 'pride',
     });
   });
 
-  it('⚠️ 第一场之前（没有已选炁机）→ 右栏 `undefined`（画占位那句）', () => {
+  it('⚠️ 一局选了不止一条时：右侧画**最后一条**（刚选的那条）', () => {
     /**
-     * ⚠️ 这一支的两种结果在画面上**都是"右栏有字"**（「本局尚未选择炁机」
-     * 与面板的标题）—— 写反了截图看不出来，所以在这里钉住。
+     * 块头照实写「已激活 2 条：…」（`prepareFold` 那条判据），而面板一次
+     * 只画得出**一条** —— 画刚选的那条（整局清单在一局结束屏）。
      */
-    expect(runConfirmTargets({ playerId: 'player' }).qiji).toBeUndefined();
+    const sel = runConfirmSelection({ boss: BOSS, qiji: [QIJI, QIJI2] });
+    expect(sel.cursor.qijiId).toBe('jieShengJi');
+    expect(
+      runConfirmDetailTarget({ expanded: sel.expanded, boss: BOSS, qiji: [QIJI, QIJI2] }),
+    ).toEqual({ kind: 'qiji', id: 'jieShengJi' });
   });
 
-  it('接上真实的 `detailModelOf` → 右栏拿到的就是那条炁机的详情（"已激活"）', () => {
-    /**
-     * ⚠️ 用**假的**上下文（`detailModelOf` 的活是 `prepareDetail.test.ts`
-     * 的）：这里钉的是"两栏选出来的目标**真的能喂给面板**"，
-     * 而不是又测一遍炁机详情的内容。
-     */
-    const ctx: DetailContext = {
-      playerById: (id) => ({ id, nameKey: 'roster.player.name' }),
-      bossById: (id) => ({ id, nameKey: 'roster.boss.name' }),
-      qijiById: (id) => ({ id, nameKey: 'qiji.name', descKey: 'qiji.desc' }),
-      playerHp: () => 150,
-      bossHp: () => 420,
-      playerSkills: () => [],
-      bossSkills: () => [],
-      bossPassives: () => [],
-      developing: () => false,
-      /** ⚠️ 确认屏只把"本局已选的那条"当激活（见屏幕的 `on` 闭包）。 */
-      qijiOn: (id) => id === 'vitality',
-    };
-    const targets = runConfirmTargets({ playerId: 'player', qijiId: 'vitality' });
-    const qiji = detailModelOf(targets.qiji, ctx);
-    expect(qiji?.kind).toBe('qiji');
-    expect(qiji?.subtitle).toEqual({ kind: 'text', key: 'roster.ui.detail.qijiOn' });
-    const player = detailModelOf(targets.player, ctx);
-    expect(player?.kind).toBe('player');
-    expect(player?.portraitId).toBe('player');
+  it('⚠️ `expanded` 指向一个**不存在**的块时退回对手（兜底，不画空白面板）', () => {
+    expect(runConfirmDetailTarget({ expanded: 'qiji', boss: BOSS, qiji: [] })).toEqual({
+      kind: 'boss',
+      id: 'pride',
+    });
+  });
+
+  it('接上真实的 `detailModelOf`：两行的详情都取得到（炁机"已激活" / Boss 招式）', () => {
+    const withQiji = runConfirmSelection({ boss: BOSS, qiji: [QIJI] });
+    const qijiModel = detailModelOf(
+      runConfirmDetailTarget({ expanded: withQiji.expanded, boss: BOSS, qiji: [QIJI] }),
+      ctx,
+    );
+    expect(qijiModel?.kind).toBe('qiji');
+    expect(qijiModel?.subtitle).toEqual({ kind: 'text', key: 'roster.ui.detail.qijiOn' });
+
+    const bossModel = detailModelOf(
+      runConfirmDetailTarget({ expanded: 'boss', boss: BOSS, qiji: [QIJI] }),
+      ctx,
+    );
+    expect(bossModel?.kind).toBe('boss');
+    expect(bossModel?.subtitle).toEqual({
+      kind: 'text',
+      key: 'roster.ui.detail.hpMax',
+      params: { hp: 420 },
+    });
+  });
+});
+
+describe('确认屏焦点顺序：炁机 → 对手 → 开始战斗（环绕；空槽位跳过）', () => {
+  /**
+   * 走一步焦点（把"这一屏有哪几个槽位"喂给 `prepareLogic.moveFocus`）。
+   *
+   * ⚠️ 槽位列表就是**屏幕每帧算的那一份**（`RunConfirmScreen.blockOptions`）
+   * —— 有空炁机时给空数组，于是那一站被跳过（与备战屏跳过空槽位同一段代码）。
+   */
+  const step = (
+    from: ReturnType<typeof runConfirmSelection>,
+    delta: number,
+    lists: { readonly qiji: readonly (typeof QIJI)[]; readonly bosses: readonly (typeof BOSS)[] },
+  ): string => moveFocus(from, delta, { wrap: true, players: [], ...lists }).focus;
+
+  const BOTH = { qiji: [QIJI], bosses: [BOSS] } as const;
+  const BOSS_ONLY = { qiji: [], bosses: [BOSS] } as const;
+
+  it('有已选炁机时是三站，并且**环绕**', () => {
+    const atQiji = runConfirmSelection({ boss: BOSS, qiji: [QIJI] });
+    expect(step(atQiji, 1, BOTH)).toBe('boss');
+    const atBoss = moveFocus(atQiji, 1, { wrap: true, players: [], ...BOTH });
+    expect(step(atBoss, 1, BOTH)).toBe('start');
+    const atStart = moveFocus(atBoss, 1, { wrap: true, players: [], ...BOTH });
+    expect(step(atStart, 1, BOTH)).toBe('qiji');
+    /** 反向同理（从炁机往回 = 开始战斗）。 */
+    expect(step(atQiji, -1, BOTH)).toBe('start');
+  });
+
+  it('⚠️ 没有已选炁机时**只有两站**（炁机那一站自动跳过）', () => {
+    const atBoss = runConfirmSelection({ boss: BOSS, qiji: [] });
+    expect(step(atBoss, 1, BOSS_ONLY)).toBe('start');
+    const atStart = moveFocus(atBoss, 1, { wrap: true, players: [], ...BOSS_ONLY });
+    expect(step(atStart, 1, BOSS_ONLY)).toBe('boss');
+    expect(step(atStart, -1, BOSS_ONLY)).toBe('boss');
   });
 });
 
 /* ------------------------------------------------------------------ *
- * ③ 几何：两栏不重叠、不出界，按钮在下面那一排
+ * ③ 几何：两行块头 + 复用备战屏那一套（"老规矩"）
  * ------------------------------------------------------------------ */
 
 describe('确认屏几何（纯函数）', () => {
-  const left = runConfirmColumnRect('left');
-  const right = runConfirmColumnRect('right');
-  const start = runConfirmStartRect();
+  const withQiji = runConfirmBlockTops(true);
+  const withoutQiji = runConfirmBlockTops(false);
+  const qijiRect = runConfirmBlockRect('qiji', true);
+  const bossRect = runConfirmBlockRect('boss', true);
+  const bossOnlyRect = runConfirmBlockRect('boss', false);
 
-  it('两栏同宽、等高，且都落在画布内', () => {
-    expect(left.w).toBe(right.w);
-    expect(left.w).toBe(runConfirmColumnW());
-    expect(left.h).toBe(right.h);
-    for (const rect of [left, right]) {
-      expect(rect.x).toBeGreaterThanOrEqual(0);
-      expect(rect.x + rect.w).toBeLessThanOrEqual(LOGICAL.width);
-      expect(rect.y).toBeGreaterThanOrEqual(0);
-      expect(rect.y + rect.h).toBeLessThanOrEqual(LOGICAL.height);
-    }
+  it('⚠️ 没有已选炁机时：炁机那一行**整块不在**，对手**顶上来**', () => {
+    expect(withoutQiji.qiji).toBeUndefined();
+    expect(runConfirmBlockRect('qiji', false)).toBeUndefined();
+    expect(runConfirmBlockHitRect('qiji', false)).toBeUndefined();
+    /** 对手落在**第一行**的位置（不是留在第二行、上面空一块）。 */
+    expect(bossOnlyRect?.y).toBe(withQiji.qiji);
+    expect(bossOnlyRect?.y).toBeLessThan(bossRect?.y ?? 0);
   });
 
-  it('两栏左右排列、**不重叠**（中间正好是 `gap`）', () => {
-    expect(right.x).toBe(left.x + left.w + RUN_CONFIRM_LAYOUT.gap);
-    expect(right.x).toBeGreaterThan(left.x + left.w);
-    /** 两栏加起来 + 两侧留白 + 中间空隙 = 整张画布（没有第三个数在漂）。 */
-    expect(left.w * 2 + RUN_CONFIRM_LAYOUT.gap + RUN_CONFIRM_LAYOUT.side * 2).toBe(LOGICAL.width);
+  it('两行块头都在画布内、不重叠，顺序是炁机在上对手在下', () => {
+    expect(qijiRect).toBeDefined();
+    expect(bossRect).toBeDefined();
+    if (qijiRect === undefined || bossRect === undefined) return;
+    expect(bossRect.y).toBeGreaterThanOrEqual(qijiRect.y + qijiRect.h);
+    expect(bossRect.y + bossRect.h).toBeLessThan(LOGICAL.height);
+    /** 两块同宽同高（就是备战屏那条块头：`foldRect`）。 */
+    expect(qijiRect.w).toBe(bossRect.w);
+    expect(qijiRect.h).toBe(bossRect.h);
+    expect(qijiRect.h).toBe(PREPARE_LAYOUT.foldH);
   });
 
-  it('栏目标题在面板**上面**那一条（不与面板内容重叠）', () => {
-    expect(runConfirmColumnLabelY()).toBeLessThan(left.y);
-    expect(runConfirmColumnLabelY()).toBeGreaterThan(RUN_CONFIRM_LAYOUT.progressY);
+  it('块头几何**就是**备战屏那一份（`foldRect` —— 不是抄一份坐标）', () => {
+    expect(qijiRect).toEqual(foldRect(runConfirmBlockTops(true).qiji ?? 0));
+    expect(bossRect).toEqual(foldRect(runConfirmBlockTops(true).boss));
   });
 
-  it('「开始战斗」在两栏**下面**、画布内、水平居中于整张画布', () => {
-    expect(start.y).toBeGreaterThanOrEqual(left.y + left.h);
-    expect(start.y + start.h).toBeLessThanOrEqual(LOGICAL.height);
-    expect(runConfirmStartCenterX()).toBe(LOGICAL.width / 2);
-    /** 提示行在按钮之下、仍在画布内。 */
-    expect(RUN_CONFIRM_LAYOUT.hintY).toBeGreaterThan(start.y + start.h);
-    expect(RUN_CONFIRM_LAYOUT.hintY).toBeLessThan(LOGICAL.height);
+  it('栏目标题在块头**上面**那一条，且不与上一块重叠', () => {
+    const tops = runConfirmBlockTops(true);
+    expect(runConfirmBlockLabelY(tops.boss)).toBeLessThan(tops.boss);
+    expect(runConfirmBlockLabelY(tops.boss)).toBeGreaterThan((tops.qiji ?? 0) + PREPARE_LAYOUT.foldH);
+    /** ⚠️ 第一行的标题要落在进度行（`progressY`）之下。 */
+    expect(runConfirmBlockLabelY(tops.qiji ?? 0)).toBeGreaterThan(RUN_CONFIRM_LAYOUT.progressY);
   });
 
-  it('命中测试与矩形**同源**（中心命中 / 四角外不命中）', () => {
-    expect(isOnRunConfirmStart(start.x + start.w / 2, start.y + start.h / 2)).toBe(true);
-    expect(isOnRunConfirmStart(start.x - 2, start.y + start.h / 2)).toBe(false);
-    expect(isOnRunConfirmStart(start.x + start.w / 2, start.y - 2)).toBe(false);
-    /** 点两栏上不会开战（它是只读展示）。 */
-    expect(isOnRunConfirmStart(left.x + left.w / 2, left.y + 10)).toBe(false);
+  it('命中区比画出来的那一条**大一圈**（含标题带，触屏才点得中）', () => {
+    const hit = runConfirmBlockHitRect('boss', true);
+    expect(hit).toBeDefined();
+    if (hit === undefined || bossRect === undefined) return;
+    expect(hit.y).toBeLessThan(bossRect.y);
+    expect(hit.h).toBeGreaterThan(bossRect.h);
   });
 
-  it('两栏的命中判据**各归各**（拖拽滚动的分派基础）', () => {
-    /** 左栏中心 → 只命中左栏。 */
-    const lx = left.x + left.w / 2;
-    const ly = left.y + left.h / 2;
-    expect(isOnRunConfirmColumn('left', lx, ly)).toBe(true);
-    expect(isOnRunConfirmColumn('right', lx, ly)).toBe(false);
-    /** 右栏中心 → 反之。 */
-    const rx = right.x + right.w / 2;
-    expect(isOnRunConfirmColumn('right', rx, ly)).toBe(true);
-    expect(isOnRunConfirmColumn('left', rx, ly)).toBe(false);
-    /** 两栏之间的空隙 / 按钮那一排都不属于任何一栏。 */
-    expect(isOnRunConfirmColumn('left', left.x + left.w + 1, ly)).toBe(false);
-    expect(isOnRunConfirmColumn('right', right.x - 1, ly)).toBe(false);
-    expect(isOnRunConfirmColumn('left', lx, start.y + start.h / 2)).toBe(false);
+  it('命中判据与矩形**同源**（块内命中 / 块外不命中）', () => {
+    if (qijiRect === undefined) throw new Error('炁机那一行本该在');
+    const cx = qijiRect.x + qijiRect.w / 2;
+    const cy = qijiRect.y + qijiRect.h / 2;
+    expect(isOnRunConfirmBlock('qiji', true, cx, cy)).toBe(true);
+    expect(isOnRunConfirmBlock('boss', true, cx, cy)).toBe(false);
+    /** 没有炁机那一行时，同一个点不再命中它。 */
+    expect(isOnRunConfirmBlock('qiji', false, cx, cy)).toBe(false);
+    /** 块与块之间的空隙不属于任何一块。 */
+    expect(isOnRunConfirmBlock('qiji', true, cx, bossRect?.y ?? 0)).toBe(false);
+  });
+
+  it('「开始战斗」+ 提示那一排**复用备战屏的几何**（锚定底部、同一处）', () => {
+    const start = startRect();
+    const hint = footerHintSlot();
+    expect(start.y).toBeGreaterThan(bossRect?.y ?? 0);
+    expect(start.y + start.h).toBeLessThan(LOGICAL.height);
+    expect(hint.x).toBe(start.x + start.w + PREPARE_LAYOUT.footerRowGap);
+    expect(hint.y).toBe(start.y);
+    /** 它不与右侧详情区（x624 起）重叠。 */
+    expect(start.x + start.w).toBeLessThan(624);
+    /** ⚠️ 也不与两行块头重叠：那一排在第三块块头下面。 */
+    expect(start.y).toBeGreaterThan((bossRect?.y ?? 0) + PREPARE_LAYOUT.foldH);
+  });
+
+  it('标题 / 进度 / 第一行标题 自上而下', () => {
+    expect(RUN_CONFIRM_LAYOUT.titleY).toBeLessThan(RUN_CONFIRM_LAYOUT.progressY);
+    expect(RUN_CONFIRM_LAYOUT.progressY).toBeLessThan(RUN_CONFIRM_LAYOUT.firstLabelY);
+    expect(RUN_CONFIRM_LAYOUT.firstLabelY).toBeLessThan(withQiji.qiji ?? 0);
+  });
+});
+
+/** 编译期对照面：`RunConfirmBlock` 只有这两块（加第三块会在这里报错）。 */
+const BLOCKS: readonly RunConfirmBlock[] = ['qiji', 'boss'];
+describe('块清单', () => {
+  it('就是炁机与对手两块', () => {
+    expect(BLOCKS).toEqual(['qiji', 'boss']);
   });
 });

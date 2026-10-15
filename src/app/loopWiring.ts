@@ -77,14 +77,16 @@ export interface CanvasHost {
   /**
    * **确认屏**（肉鸽每场战斗之前，2026-10-15）。
    *
-   * ⚠️ 它只有一个动作（开始这一场），所以契约只有 `frame` + `confirm`
-   * —— 与一局结束屏同一个形状（`Enter` / `Space` 都走 `confirm`）。
-   * 另外它**能滚**（`Shift+↑↓` 只滚左栏，见屏幕自己的 `scrollDetail`）。
+   * ⚠️ 它有三件事：**Tab / ↑↓ 切焦点**（炁机 → 对手 → 开始战斗，与备战屏
+   * 同一套状态机）、**Enter / Space 开始这一场**、**Shift+↑↓ 滚右侧详情**
+   * （Boss 的招式 + 被动比一屏长）。
    */
   readonly runConfirm: {
     frame(): void;
     confirm(): void;
-    /** **Shift + ↑ ↓**：滚左栏正文（不切焦点、不动光标 —— 这一屏没有光标）。 */
+    /** **Tab / Shift+Tab / ↑ / ↓**：焦点在炁机 → 对手 → 开始战斗间切（环绕）。 */
+    moveFocus(delta: number): void;
+    /** **Shift + ↑ ↓**：滚右侧详情正文（不切焦点）。 */
     scrollDetail(dir: 'up' | 'down'): void;
   };
   /** 一局结束屏（P3；Enter / 点屏幕 = 回选角色）。 */
@@ -335,8 +337,9 @@ export function wireLoop(o: WireOptions): void {
      * | 自由模式 | Shift + ↑ ↓ | **滚详情区正文**（不切焦点、不动光标；见下） |
      * | 自由模式 | Tab / Shift+Tab | 同上但**环绕**（Tab 的通用语义） |
      * | 自由模式 | Enter | **确定**光标处的那一项；在「开始战斗」上时开战 |
-     * | 确认屏 | Enter / Space | 开始这一场（肉鸽；整屏只有这一个动作） |
-     * | 确认屏 | Shift + ↑ ↓ | 滚左栏正文（那一条比一屏长） |
+     * | 确认屏 | Tab / ↑ ↓ | 焦点在炁机 → 对手 → 开始战斗间切（环绕） |
+     * | 确认屏 | Enter / Space | 开始这一场 |
+     * | 确认屏 | Shift + ↑ ↓ | 滚右侧详情正文（Boss 的招式比一屏长） |
      * | 自由模式 / 选角色 | `Esc` | **返回首页**（战斗中无反应，见上） |
      *
      * ⚠️ **移动光标 ≠ 确定选择**（需求原话："用 enter 来确定选择，
@@ -423,27 +426,42 @@ export function wireLoop(o: WireOptions): void {
         return;
       }
       /**
-       * **确认屏（肉鸽；2026-10-15）**：整屏也只有一个动作（开始这一场）。
+       * **确认屏（肉鸽；2026-10-15）**：Tab 切焦点、Enter 开始、Shift+↑↓ 滚详情。
        *
-       * ⚠️ `Enter` 与 `Space` **都**认：`Space` 是"确认"的通用键（触屏
-       * 对等不受影响 —— 触屏走点「开始战斗」那一条），而这一屏是"确认 /
-       * 继续"语义，正是空格的传统含义。一局结束屏只认 `Enter`（那里没有
-       * 需要防的歧义），两者不同**是有意的**。
+       * ⚠️ 这一屏的分工与备战屏**逐条对应**（"老规矩"）：
        *
-       * ⚠️ `Shift+↑↓` 滚左栏（本次出战）：那一条比一屏长（1 行标题 + 5 条
-       * 技能），与备战屏**同一个键位习惯**（裸 ↑↓ 在这一屏没有别的意思
-       * —— 没有光标可移）。
+       * ```
+       *   Tab / Shift+Tab  → 焦点跨块（炁机 → 对手 → 开始战斗，环绕）
+       *   ↑ ↓              → 同上（这一屏的块内没有游标，所以不另设一条）
+       *   Shift + ↑ ↓      → 滚右侧详情正文（不切焦点）
+       *   Enter / Space    → 开始这一场（确认屏上"Enter = 确认"）
+       * ```
+       *
+       * ⚠️ `Space` 也认：它是"确认"的通用键（触屏对等不受影响 —— 触屏走
+       * 点「开始战斗」那一条），而这一屏是"确认 / 继续"语义，正是空格的
+       * 传统含义。一局结束屏只认 `Enter`（那里没有需要防的歧义），
+       * 两者不同**是有意的**。
        */
       if (layer === 'runConfirm') {
-        if (event.key === 'Enter' || event.key === ' ') {
-          host.runConfirm.confirm();
-          return;
+        switch (event.key) {
+          case 'Tab':
+            host.runConfirm.moveFocus(event.shiftKey ? -1 : 1);
+            event.preventDefault();
+            return;
+          case 'ArrowUp':
+          case 'ArrowDown': {
+            const dir = event.key === 'ArrowUp' ? 'up' : 'down';
+            if (event.shiftKey) host.runConfirm.scrollDetail(dir);
+            else host.runConfirm.moveFocus(dir === 'up' ? -1 : 1);
+            return;
+          }
+          case 'Enter':
+          case ' ':
+            host.runConfirm.confirm();
+            return;
+          default:
+            return;
         }
-        if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && event.shiftKey) {
-          host.runConfirm.scrollDetail(event.key === 'ArrowUp' ? 'up' : 'down');
-          return;
-        }
-        return;
       }
       if (layer === 'characterSelect') {
         switch (event.key) {

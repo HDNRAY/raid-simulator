@@ -28,7 +28,7 @@
  * 建 / 释放战斗循环）—— 它要碰场景与存储，所以只做接线、不再判一次。
  */
 
-import { BOSS_POOL, resolveBossId, resolvePlayerId } from '../data/roster';
+import { BOSS_POOL, BOSS_ROSTER, findEntry, resolveBossId, resolvePlayerId } from '../data/roster';
 import { ALL_QIJI, qijiById } from '../data/qiji';
 import { buildPlayerKit, type PlayerKit } from '../data/kit';
 import type { QijiEntity } from '../core/types/qiji';
@@ -152,17 +152,26 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
   /** 当前一局的 `RunState`（没有时 `undefined`）。⚠️ 只读引用，别改它。 */
   runState(): RunState | undefined;
   /**
-   * **确认屏要显示的内容**（2026-10-15）：第几场 / 共几场 / 出战角色 /
-   * 本局最近选的那条炁机。
+   * **确认屏要显示的内容**（2026-10-15）：第几场 / 共几场 / 这一场的对手 /
+   * 本局已选的那条炁机。
    *
-   * ⚠️ 渲染层不认识 `RunState`，所以摊平在这一层做（与 `runSummary` 同一条
-   * 纪律：接口形状由消费者声明）。
+   * ⚠️ 渲染层不认识 `RunState`，也**不认识内容表**，所以"id → 名字 key"
+   * 的翻译在这一层做（与 `qijiCandidates` 同一个做法：接口形状由消费者
+   * 声明）。玩家的详情不在这里 —— 它已经挪到**选角色屏**（用户 2026-10-15：
+   * "战斗开始之前，只显示炁机 和 boss详情"）。
    */
   runConfirmInfo(): {
     readonly position: number;
     readonly length: number;
-    readonly playerId: string;
-    readonly qijiId?: string | undefined;
+    readonly boss: { readonly id: string; readonly nameKey: string };
+    /**
+     * 本局已选的炁机（**全部**，按选的先后）。
+     *
+     * ⚠️ 给的是**一份清单**（不是"最后一条"）：确认屏那一行的块头照实写
+     * "已激活 N 条：A、B"（与备战屏同一个块头判据），而右侧详情画最后一条。
+     * 空数组 = 第一场之前（那一行整块不画）。
+     */
+    readonly qiji: readonly { readonly id: string; readonly nameKey: string }[];
   };
   /**
    * **确认屏的「开始战斗」**：真的开这一场（`enterBattle` 的唯一肉鸽入口
@@ -562,31 +571,34 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
   const runConfirmInfo = (): {
     readonly position: number;
     readonly length: number;
-    readonly playerId: string;
-    readonly qijiId?: string | undefined;
+    readonly boss: { readonly id: string; readonly nameKey: string };
+    readonly qiji: readonly { readonly id: string; readonly nameKey: string }[];
   } => {
     const run = runSession.state();
-    if (run === undefined) {
-      /**
-       * 没有进行中的一局（理论上到不了这一屏 —— 肉鸽那三条路都会先
-       * `begin`）。给一份能读的零值，而不是崩。
-       */
-      return { position: 0, length: 0, playerId: d.selection.playerId };
-    }
+    /**
+     * ⚠️ 没有进行中的一局 / 这一场没有对手：给一份**能读的**零值，而不是崩
+     * （对手那一行的名字用空串 —— 界面拿到的名字 key 取不到时会落回 id，
+     * 见 `data/roster.ts` 的兜底口径）。
+     */
+    const bossId = run === undefined ? undefined : runSession.bossId();
+    const bossEntry = bossId === undefined ? undefined : findEntry(BOSS_ROSTER, bossId);
+    const boss = { id: bossId ?? '', nameKey: bossEntry?.nameKey ?? bossId ?? '' };
+    if (run === undefined) return { position: 0, length: 0, boss, qiji: [] };
+
     const length = runLengthOf(run);
     const position = Math.min(Math.max(run.position, 1), Math.max(length, 1));
     /**
-     * ⚠️ 右栏画的是**最近选的那一条**（`chosen` 的最后一条）：一局每场之后
-     * 可以选一条，而"这一场之前刚选了什么"正是玩家要确认的东西。
-     * 第一场之前 `chosen` 是空的 → `undefined`（由界面画占位那一句）。
+     * ⚠️ 炁机那一行给的是**本局已选的全部**（`RunState.chosen`，按选的先后）
+     * —— 块头照实写"已激活 N 条：A、B"（与备战屏**同一个** `foldSummaryOf`），
+     * 而右侧详情画**最后一条**（见 `ui/prepareDetail.runConfirmDetailTarget`）。
+     * 第一场之前 `chosen` 是空的 → 空数组（界面**整行不画**）。
      */
-    const last = run.chosen[run.chosen.length - 1];
-    return {
-      position,
-      length,
-      playerId: run.playerId,
-      qijiId: last?.qijiId,
-    };
+    const qiji = run.chosen.flatMap((choice) => {
+      /** ⚠️ 走 `qijiById`（内容表自己的 id→定义 查找）—— 与 `activeQiji()` 同一处口径。 */
+      const def = qijiById(choice.qijiId);
+      return def === undefined ? [] : [{ id: def.id, nameKey: def.nameKey ?? def.id }];
+    });
+    return { position, length, boss, qiji };
   };
 
   /**
