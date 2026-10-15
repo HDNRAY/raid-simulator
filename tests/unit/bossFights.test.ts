@@ -88,6 +88,23 @@ function fight(bossId: string, seed = 20261014): FightResult {
 /** 今天做的四个 + 早先的两个，全跑一遍并把结果打出来（调平衡时看它）。 */
 const BOSSES = ['meiichiro', 'lust', 'envy', 'greed', 'sloth', 'gluttony', 'wrath'] as const;
 
+/**
+ * **一整场至少该活多久**（秒）—— 两条守卫都用它。
+ *
+ * ⚠️ 从 **20 降到 15**（2026-10-15，用户确认"懒惰开局半血"之后）：
+ * 20 秒会**误伤一个有意的设计** —— 「懒惰」开局 250/500 ⇒ 它一上来就吃到
+ * 「残血增伤」的一半（**+50% 伤害**），参考策略在约 **17.5 秒**被打死。
+ *
+ * 用户原话（纠正我把这当成事故）：
+ * > 为什么不退？**他有回血啊**…而且**主角有闪避**…**有防御技能**。
+ *
+ * （"它只增不减"是错的：它有「怠惰」回血，挨打掉的血会被回上去，
+ * 损失比随之下降 ⇒ 加成会退。）
+ *
+ * 15 秒仍然抓得住这一组真正要抓的东西：**"一开场就被秒"** 与 **时长算错**。
+ */
+const MIN_FIGHT_SECONDS = 15;
+
 describe('六个 Boss 各跑一整场（整场级回归）', () => {
   const results = BOSSES.map((id) => fight(id));
 
@@ -124,12 +141,14 @@ describe('六个 Boss 各跑一整场（整场级回归）', () => {
       });
 
       it('不会一开场就把玩家秒了', () => {
-        /** 参考策略是个"会闪避"的玩家；它至少该活过 20 秒。 */
-        expect(r().ticks, '活过 20 秒').toBeGreaterThan(60 * 20);
+        /** 参考策略是个"会闪避"的玩家；它至少该活过 `MIN_FIGHT_SECONDS`。 */
+        expect(r().ticks, `活过 ${MIN_FIGHT_SECONDS} 秒`).toBeGreaterThan(
+          60 * MIN_FIGHT_SECONDS,
+        );
       });
 
-      it('时长在合理量级（20 秒 ~ 5 分钟）', () => {
-        expect(r().ticks / 60).toBeGreaterThanOrEqual(20);
+      it(`时长在合理量级（${MIN_FIGHT_SECONDS} 秒 ~ 5 分钟）`, () => {
+        expect(r().ticks / 60).toBeGreaterThanOrEqual(MIN_FIGHT_SECONDS);
         expect(r().ticks / 60).toBeLessThanOrEqual(300);
       });
     });
