@@ -4,7 +4,12 @@ import { BattleEngine } from '../../src/core/combat/battleState';
 import { createRegistry } from '../../src/core/content/registry';
 import { applyBuff, aggregateFlags } from '../../src/core/buffs';
 import { ALL_BUFFS, ALL_SKILLS } from '../../src/data/content';
-import { GREED_HOARD, GREED_WEAK_POINT, GREED_WEAK_POINT_PASSIVE } from '../../src/data/greedBoss';
+import {
+  GREED_BEHAVIORS,
+  GREED_HOARD,
+  GREED_WEAK_POINT,
+  GREED_WEAK_POINT_PASSIVE,
+} from '../../src/data/greedBoss';
 import type { BuffDef, Combatant, SkillDef, StatKey } from '../../src/core/types';
 import { makeCombatant, makeSkillDef } from './helpers';
 
@@ -123,6 +128,46 @@ describe('「敛财」：每层伤害 / 回血 / 读条一起变强，且卡在 
    * `hastedCastTime` / `hastedCooldown` 都读它）—— 所以"减读条时间、减 CD"
    * 是**公共机制**，任何内容都能用，不是贪婪专属。这条钉住那个契约。
    */
+  /**
+   * ⚠️ **2026-10-15 补的一条**（它抓的是一个真实的坑）。
+   *
+   * 「敛财」的层数上限一直是 9，但**实战里永远到不了** —— `stacking.mode`
+   * 当时是 `'stack'`（**不刷新时长**），于是 12 秒是从**第 1 层**起算的：
+   * 真引擎实测（玩家不还手）`2.0s→1 层 / 7.8s→2 层 / 13.0s→3 层`，
+   * 然后整条过期、从头再来。用户原话："3. 修复9层"。
+   *
+   * ⚠️ 这条断言**不钉时间**（叠满要几秒是平衡，会变），只钉"**这个上限
+   * 是能到达的**"：一只"写了 9 层却永远到不了"的 Boss，与"没有这一招"
+   * 在玩家眼里是一样的（而这里正是"越拖越难"的全部内容）。
+   */
+  it('只要不打断，层数真的会叠到上限（`stackRefresh`：时长随施放刷新）', () => {
+    const engine = engineWith({
+      player: {
+        caps: { hp: 99_999, energy: 120, douqi: 0 },
+        resources: { hp: 99_999, energy: 120, douqi: 0 },
+      },
+      boss: { behaviors: GREED_BEHAVIORS },
+      skills: [],
+    });
+    const stacksNow = (): number =>
+      engine.snapshot.combatants
+        .find((c) => c.id === 'boss')
+        ?.buffs.filter((b) => b.defId === GREED_HOARD.id)
+        .reduce((sum, b) => sum + b.stacks, 0) ?? 0;
+
+    let max = 0;
+    /** 上限只是"别跑太久"：真值远小于它（叠满约 20 秒）。 */
+    for (let t = 0; t < 60 * 90; t += 1) {
+      if (engine.snapshot.status !== 'running') break;
+      engine.tick();
+      engine.drainEvents();
+      max = Math.max(max, stacksNow());
+    }
+    expect(max, '这一招的上限必须**到得了**（否则 9 层只是装饰）').toBe(
+      GREED_HOARD.maxStacks,
+    );
+  });
+
   it('`haste` 的钳制生效（[0, 0.5]）：9 层的读条收益被封顶，但伤害照涨', () => {
     const e = engineWith({
       player: {},

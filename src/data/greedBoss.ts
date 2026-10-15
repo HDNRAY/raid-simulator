@@ -64,9 +64,26 @@ function tel(skillId: string, ms: number): BuffDef {
  * ⚠️ 三层修正**必须都在**（用户原话"全面"）：只写伤害会让它变成
  * 一个普通的增伤 buff；有了读条与回血才是"越拖越没法打"。
  *
- * ⚠️ `stacking.mode: 'stack'` 且 `max: 9` —— 用户把"无限"收成 9 层，
- * 所以到顶之后 `applyBuff` 不再加层（`stack` 的语义就是不刷新时长、
- * 只加层到上限）。
+ * ⚠️ `stacking.mode: 'stackRefresh'` 且 `max: 9` —— 用户把"无限"收成 9 层，
+ * 所以到顶之后 `applyBuff` 不再加层、只**刷新时长**。
+ *
+ * ==================================================================
+ * ⚠️ 2026-10-15：`'stack'` → `'stackRefresh'`（**9 层以前到不了**）
+ * ==================================================================
+ *
+ * 用户原话："3. 修复9层"。
+ *
+ * 根因：`'stack'` **不刷新时长**（见 `core/buffs/index.ts`）—— 12 秒是从
+ * **第 1 层**那一刻起算的，所以第 3 层拿到手 1 秒后整条就过期了。
+ * 真引擎实测（玩家完全不还手、CD 还是 6 秒时）：
+ *
+ * ```
+ *   2.0s → 1 层     7.8s → 2 层     13.0s → 3 层     （12 秒到点，整条清空重来）
+ * ```
+ *
+ * 于是"最高 9 层"永远不出现、这一招的威胁也自己会消失 ✗ ——
+ * 而设计要的是"**不打断就一直涨**"（所以止损点才是打断）。
+ * 现在每次施放都刷新那 12 秒 ⇒ 只要它还在放这一招，层数就一直涨到 9。
  */
 export const GREED_HOARD: BuffDef = {
   id: 'greed-hoard',
@@ -75,10 +92,16 @@ export const GREED_HOARD: BuffDef = {
   /** 从**它自己**的角度是增益。 */
   polarity: 'buff',
   color: 0xd8b34a,
-  /** 每层 12 秒，够玩家看着它涨（见 `GREED_HOARD_SKILL` 的 CD）。 */
+  /**
+   * 12 秒（每次施放**刷新**）—— 够玩家看着它涨。
+   *
+   * ⚠️ 与 `GREED_HOARD_SKILL` 的 CD 是一对：CD 必须**远短于**它，否则
+   * 层数还没涨起来就自己掉了（`'stack'` 那版就是这么坏的，见文件头）。
+   * 今天 CD 3 秒 vs 12 秒 ⇒ 只要不被连续打断，一定能叠到 9。
+   */
   duration: logicMs(120),
   maxStacks: 9,
-  stacking: { mode: 'stack', max: 9 },
+  stacking: { mode: 'stackRefresh', max: 9 },
   /** 每层：伤害 +10%（乘子，所以 9 层 ≈ ×2.56）。 */
   damageMultBoost: 1.1,
   modifiers: [
@@ -161,8 +184,15 @@ export const GREED_WEAK_POINT_PASSIVE: BuffDef = {
  * 「敛财」——叠一层 `GREED_HOARD`。
  *
  * ⚠️ 它**可以被打断**（用户明确要的）：这是全场唯一的"止损点"。
- * 读条 2.0 秒（层数高了会被 `haste` 缩短到 1.22 秒 —— 所以"越晚越难断"
- * 是**同一个机制的自然结果**，不需要另写一条规则）。
+ *
+ * 读条 **2.0 秒**，而层数越高它自己放得越快（`haste`）—— 所以"越晚越难断"
+ * 是**同一个机制的自然结果**，不需要另写一条规则。`haste` 有 0.5 的封顶
+ * （`core/stats/aggregate.ts`），所以读条最快 **1.0 秒**、CD 最快 **1.5 秒**
+ * （⚠️ 这里曾写"缩短到 1.22 秒"，那是 haste 还没接上限时的读数）。
+ *
+ * ⚠️ **2026-10-15：CD 6 秒 → 3 秒**（用户原话："1 改成3秒cd"）。
+ * 与 `'stackRefresh'` 一起把"越拖越难"做成真的：3 秒的 CD 让层数在
+ * ~30 秒内叠满，而 12 秒的时长每次施放都刷新（见 `GREED_HOARD`）。
  */
 export const GREED_HOARD_SKILL: ActiveSkillDef = {
   id: 'greed-hoard',
@@ -175,7 +205,7 @@ export const GREED_HOARD_SKILL: ActiveSkillDef = {
     { kind: 'grant', on: 'castFinish', target: { mode: 'self' }, buff: GREED_HOARD },
   ],
   castTime: logicMs(20),
-  cooldown: logicMs(60),
+  cooldown: logicMs(30),
   cost: [],
   hits: [],
   targeting: { mode: 'primaryEnemy' },
@@ -250,9 +280,13 @@ export const GREED_BUFFS: readonly BuffDef[] = [
  * 轮转：**顺序即优先级**（`rotation` 取第一个就绪的）。
  *
  * ⚠️ 顺序 = "**先把层数叠起来，再打人**"：
- *   敛财(6s) → 重利(8s) → 掠夺(3s)
+ *   敛财(3s) → 重利(8s) → 掠夺(3s)
  * 这不是"长 CD 在前"（重利比敛财长）—— 那是**有意的**：贪婪的题是
  * "层数在涨"，所以叠层必须**优先于**输出，否则它退化成一个普通 Boss。
+ *
+ * ⚠️ 代价（2026-10-15 记下来，改 CD 时看的）：CD 越短，"先叠层"这条
+ * 优先级就越占满它的节奏 —— 3 秒 CD 下它**几乎一直在敛财**，
+ * 重利只在读条之间的空档里出。这是用户要的取舍（"越拖越难"优先于输出）。
  *
  * ⚠️ 「弱点」**不在轮转里**：它是 `onTick` 被动（按时间、不看它出什么招）。
  */
