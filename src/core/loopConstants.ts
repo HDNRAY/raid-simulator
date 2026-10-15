@@ -131,7 +131,8 @@ export function tickToMs(tick: number): number {
  * 0.1 秒作为最小单位：
  *
  *   - 公共冷却 = 0.5 秒 = 5 个逻辑步
- *   - 「闪」的无敌窗口 = 0.5 秒 = 5 个逻辑步
+ *   - 无敌窗口： 「避」0.4 秒 = 4 个逻辑步、「闪」0.2 秒 = 2 个逻辑步
+ *     （⚠️ 秒数住在各自的 buff 上：`kits/linwanfeng.ts` / `kits/kaili.ts`）
  *   - 「卸」每 0.1 秒扣一次炁（`holdDrain`，见 `data/balance.ts`）
  *
  * 为什么不让引擎直接跑 10Hz：那样渲染插值粒度太粗，60fps 的画面

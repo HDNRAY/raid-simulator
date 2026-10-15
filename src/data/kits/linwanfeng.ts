@@ -11,7 +11,7 @@
  * | 劈 | `pi` | 缠 50 | 1200ms | — | 伤害 45 |
  * | 凝 | `focus` | 缠 40 | 0 | — | 增伤 +60%（10 秒） |
  * | 卸 | `guard` | 免费·按住 15 炁/秒（净 −5） | 0 | — | **阈值抵消**（见 `GUARD_THRESHOLD`） |
- * | 避 | `dodge` | 炁 15 | 0 | 1s | 无敌 0.5s |
+ * | 避 | `dodge` | 炁 15 | 0 | 1s | 无敌 0.4s |
  *
  * ⚠️ **她没有「截」、「闪」**（「截」「闪」都归凯丽）—— 这是用户逐条定过的，
  * 不是漏了。「击」仍然在内容里（P3 由炁机接回），见 `../playerSkills.ts`。
@@ -34,14 +34,25 @@ import { FOCUS } from './shared';
  * buff
  * ================================================================== */
 
-/** 避：0.5 秒完全无敌。 */
+/**
+ * 避：**0.4 秒**完全无敌。
+ *
+ * ⚠️ **2026-10-15：0.5 秒 → 0.4 秒**（用户原话："避 和 闪 的无敌时间变成
+ * 0.4 和 0.2"）。「闪」本来就是 0.2 秒（见 `kaili.ts` 的 `FLASH_IFRAME`），
+ * 所以这次**只动了「避」**。
+ *
+ * ⚠️ 秒数**只有这一处**：设置页技能详情里的"获得 N 秒完全无敌"是**从
+ * 这个 `duration` 推导**的（`app/descParams.ts` + `app/keyRows.ts`），
+ * 文案里不写死数字（见 `i18n/locales/zh-CN.ts` 那条注释）——
+ * 所以改这一个数就够，不会漏。
+ */
 export const DODGE_IFRAME: BuffDef = {
   id: 'dodge-iframe',
   nameKey: 'skill.dodge.name',
   icon: 'char_dodge',
   polarity: 'buff',
   color: C.dodge,
-  duration: logicMs(5),
+  duration: logicMs(4),
   maxStacks: 1,
   stacking: { mode: 'refresh' },
   flags: { invulnerable: true },
@@ -275,7 +286,7 @@ export const GUARD: ActiveSkillDef = {
   interruptible: false,
 };
 
-/** 避：0.5 秒完全无敌。代价是 15 炁。 */
+/** 避：0.4 秒完全无敌。代价是 15 炁。 */
 export const DODGE: ActiveSkillDef = {
   id: 'dodge',
   kind: 'activeSkill',

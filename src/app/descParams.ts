@@ -7,7 +7,7 @@
  *
  * 已经犯过两次：
  *
- *   1. `skill.dodge.desc` 写着"获得 0.5 秒完全无敌"，而 0.5 秒真正的家是
+ *   1. `skill.dodge.desc` 把秒数写死（当时是"0.5 秒"），而它真正的家是
  *      `DODGE_IFRAME.duration` —— 改「闪」0.1 → 0.2 那次差点漏掉文案
  *   2. `boss.*.desc` / `lust.*.desc` 写着前摇 / 伤害 / 冷却 / 眩晕时长，
  *      那些数各自住在 `SkillDef` 里（`castTime` / `hits[].effects[].damage.base`

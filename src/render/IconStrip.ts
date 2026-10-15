@@ -237,7 +237,7 @@ export class IconStrip {
        * 剩余时间走 `formatCountdown` 的**同一条规则**（`viewModel.ts`）。
        *
        * ⚠️ 原来这里是 `Math.ceil(view.remainingMs / 1000)` —— 于是「闪」
-       * （0.2 秒）与「避」（0.5 秒）都显示成 `1`，而且窗口缩短看不出来。
+       * （0.2 秒）与「避」（0.4 秒）都显示成 `1`，而且窗口缩短看不出来。
        * 那条规则（10 秒以下一位小数、以上整秒、都向上取整、不显示尾零）
        * 只在 `formatCountdown` 里写一次，buff 条 / 两条读条 / 预警提示共用。
        *

@@ -315,9 +315,9 @@ export const zhCN = {
     /**
      * ⚠️ **2026-10-12：秒数不再写死**（"两份真相"根治）。
      *
-     * 这里原先写 `获得 0.5 秒完全无敌` —— 而 0.5 秒住在
-     * `DODGE_IFRAME.duration`（`data/kits/linwanfeng.ts`）。同一个数字
-     * 有两份表达 ⇒ 改一处必漏另一处。现在文案只留模板 `{seconds}`，
+     * 这里原先把秒数写死（当时是 `获得 0.5 秒完全无敌`；现在「避」是
+     * 0.4 秒）—— 而那个秒数住在 `DODGE_IFRAME.duration`
+     * （`data/kits/linwanfeng.ts`）。同一个数字有两份表达 ⇒ 改一处必漏另一处。现在文案只留模板 `{seconds}`，
      * 数值由 `app/keyRows.ts` 的 `descParams` 从那个 buff 的 `duration`
      * **推导**后传进来（与 `settings.detailCd` / `detailCast` 同一套参数）。
      *

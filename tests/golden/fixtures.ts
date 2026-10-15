@@ -445,19 +445,37 @@ function onlyRefreshesActiveBuff(skill: SkillDef | undefined, player: Combatant 
  *
  * @param priority 技能 id，顺序即优先级（必须全是林晚风有的技能）
  * @param dodgeSkillId 看到 Boss 读条时要插的防御技（不给则不躲、也不攒炁）
- * @param dodgeLeadMs 在命中前多少毫秒闪避。默认 500。
+ * @param dodgeLeadMs 在命中前多少毫秒闪避。**默认从那条 buff 的时长推导**
+ *   （见下），不要写死。
  */
 export function planPriority(
   priority: readonly string[],
   options: {
     readonly dodgeSkillId?: string;
     /**
-     * 在命中前多少毫秒闪避。默认 500。
+     * 在命中前多少毫秒闪避。
      *
-     * 无敌窗口是 0.5 秒（500ms），所以要在命中前
-     * **不超过 500ms、也不要太接近 0** 的时刻按下。
+     * ==================================================================
+     * ⚠️ 默认值**从数据推导**（2026-10-15 修）：以前写死 500ms
+     * ==================================================================
      *
-     * ⚠️ 下面那组扫描数字来自 **旧数值**（斩 10 炁 / 避 30 炁），
+     * 这条策略的语义是"**反应**：看见读条、在命中前按下防御" —— 而它能
+     * 提前多少，**完全由那条无敌窗口的长度决定**：
+     *
+     * ```
+     *   窗口 W ms  →  命中前 ≤ W ms 时按下（buff 撑到命中那一刻）
+     * ```
+     *
+     * 旧版把 `500` 抄在这里，于是"无敌窗口 = 0.5 秒"成了**第二份表达**。
+     * 2026-10-15 把「避」改成 **0.4 秒**之后，这段仍然提前 500ms 按 ——
+     * buff 在命中前就掉了，参考策略**从"会闪避的玩家"退化成"不会闪避"**，
+     * 于是 `prideBoss` / `bossFights` / `runLoop` 一片红（表现是"平衡坏了"，
+     * 根因是一份会漂的抄写）。
+     *
+     * 现在默认值 = 那条防御技**自己授予的那个 buff 的 `duration`**；
+     * 传 `dodgeLeadMs` 仍然可以覆盖（扫描窗口两端时才需要）。
+     *
+     * ⚠️ 下面那组扫描数字来自 **更旧的数值**（斩 10 炁 / 避 30 炁），
      * 只当"这是个窗口、两端都会变差"的旁证看，不要当当前平衡：
      *   lead=  0ms → 剩 27 血      lead= 500ms → 剩 100 血（免伤）
      *   lead=200ms → 剩 57 血      lead= 600ms → 剩 100 血（免伤）
@@ -475,7 +493,29 @@ export function planPriority(
     readonly dodgeAboveDamage?: number;
   } = {},
 ): (tick: number, state: BattleState) => readonly Action[] {
-  const leadMs = options.dodgeLeadMs ?? 500;
+  /**
+   * 那条防御技**自己授予**的 buff 时长（= 无敌窗口；推导不出来时 `undefined`）。
+   *
+   * ⚠️ 找不到 / 不是主动技 / 没有自我授予 —— 三种情况都返回 `undefined`
+   * 而不是猜一个数：猜出来的数会再次变成"窗口的第二份表达"。
+   */
+  const dodgeWindowMs = ((): number | undefined => {
+    const id = options.dodgeSkillId;
+    if (id === undefined) return undefined;
+    const skill = registry.skills.get(id);
+    if (skill === undefined || skill.kind !== 'activeSkill') return undefined;
+    const grant = skill.abilities.find(
+      (ability) => ability.kind === 'grant' && ability.target.mode === 'self',
+    );
+    if (grant === undefined || grant.kind !== 'grant') return undefined;
+    return Number.isFinite(grant.buff.duration) ? grant.buff.duration : undefined;
+  })();
+  /**
+   * ⚠️ 兜底只在"这条技能不在注册表里"时用到 —— 那时 `canDodge` 恒为假
+   * （见下面那段），所以这个数**不影响任何断言**。留着它是为了不给
+   * `remainingMs <= leadMs` 一个 `NaN`。
+   */
+  const leadMs = options.dodgeLeadMs ?? dodgeWindowMs ?? 0;
   const guardLeadMs = options.guardLeadMs ?? 300;
   const dodgeAbove = options.dodgeAboveDamage ?? GUARD_THRESHOLD * 2;
   /** 「卸」是按住型，所以策略必须记住"我现在按着吗"。 */
