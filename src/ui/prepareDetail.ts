@@ -77,8 +77,9 @@
  * （用户："炁机没有头像 → 那一条怎么排，你判断；别留一个空洞"）。
  */
 
-import type { PrepareSelection, PrepareTarget } from './prepareLogic';
-import type { PrepareSectionKind } from './prepareTypes';
+import type { PrepareTarget } from './prepareLogic';
+import type { DetailKind } from './prepareDetailMetrics';
+import type { RunConfirmBlock } from './runConfirmLayout';
 
 /* ================================================================== *
  * 形状
@@ -121,7 +122,7 @@ export type DetailRow = DetailSkillRow | DetailTextRow | DetailKVRow;
 
 /** 详情区当前该画的东西。 */
 export interface DetailModel {
-  readonly kind: 'player' | 'qiji' | 'boss';
+  readonly kind: DetailKind;
   readonly id: string;
   /** 标题（人物 / Boss 就是它的名字）。 */
   readonly titleKey: string;
@@ -206,20 +207,13 @@ export function focusedTarget(
  * （见 `characterSelectLogic.characterSelection` 的说明）：`PrepareSelection`
  * 要求每个槽位各记一格，而这一屏到不了那两个槽位。
  */
-export function runConfirmSelection(info: {
-  readonly boss: DetailUnit;
-  readonly qiji: readonly DetailUnit[];
-}): PrepareSelection {
-  const focus = info.qiji.length === 0 ? 'boss' : 'qiji';
-  const latest = info.qiji[info.qiji.length - 1];
-  return {
-    playerId: '',
-    bossId: info.boss.id,
-    focus,
-    expanded: focus,
-    cursor: { playerId: '', bossId: info.boss.id, qijiId: latest?.id ?? '' },
-  };
-}
+/**
+ * ⚠️ **焦点状态**已经搬到 `./runConfirmFocus.ts`（2026-10-16）—— 这一屏
+ * 现在有**四站**（多了一行「恶魔低语」），而备战屏那台状态机的
+ * `PrepareFocus` / `PrepareSectionKind` 是围着"三块手风琴 + 块内光标"长的，
+ * 塞进去会让两边都变糊（理由逐条写在那个文件头）。这里只留"焦点状态 →
+ * 右侧该画谁"这一段：它属于**详情**的职责。
+ */
 
 /**
  * 确认屏右侧**该显示谁** —— 读的是 `expanded`（不是 `focus`）。
@@ -238,15 +232,63 @@ export function runConfirmSelection(info: {
  * "焦点在空块上、右侧一片空白"那种**看不出原因**的画面。
  */
 export function runConfirmDetailTarget(input: {
-  readonly expanded: PrepareSectionKind;
+  readonly expanded: RunConfirmBlock;
   readonly boss: DetailUnit;
   readonly qiji: readonly DetailUnit[];
-}): PrepareTarget {
+  /**
+   * 这一层的「恶魔低语」；**第 1 层是 `undefined`**（那一行写「本层纯净」）。
+   *
+   * ⚠️ 用**一个**可选参数而不是"两个分支"：判据只有一条 —— **焦点在哪一行
+   * 就画那一行**。低语那一行永远在，所以 `undefined` 时也照样返回它
+   * （面板画"本层纯净"那一段，而不是退回去画对手）。
+   */
+  readonly whisper: DetailWhisper | undefined;
+}): RunConfirmDetailTarget {
+  if (input.expanded === 'whisper') {
+    return { kind: 'whisper', id: input.whisper?.id ?? '' };
+  }
   const latest = input.qiji[input.qiji.length - 1];
   if (input.expanded === 'qiji' && latest !== undefined) {
     return { kind: 'qiji', id: latest.id };
   }
   return { kind: 'boss', id: input.boss.id };
+}
+
+/** 确认屏右侧可能画的三类（**没有** `'player'` —— 玩家详情在选角色屏）。 */
+export type RunConfirmDetailTarget =
+  | { readonly kind: 'boss' | 'qiji'; readonly id: string }
+  | { readonly kind: 'whisper'; readonly id: string };
+
+/**
+ * 一条「恶魔低语」在详情区需要的最小形状（内容实体满足它）。
+ *
+ * ⚠️ 与 `DetailQiji` 分开：低语**没有**"激活 / 未激活"这个状态
+ * （它要么在这一层生效、要么这一层没有），所以它**不需要** `on` 那一套。
+ */
+export interface DetailWhisper {
+  readonly id: string;
+  readonly nameKey: string;
+  readonly descKey: string;
+}
+
+/**
+ * 「恶魔低语」的详情模型（标题 = 它的名字，正文 = 一句话说明）。
+ *
+ * ⚠️ 顶部那一行（`subtitle`）写的是**栏目标题**（"恶魔低语"）—— 三类顶部
+ * 结构一致那条要求"这一行必须有值"，而低语没有"已激活 / 未激活"这种状态，
+ * 它的关键信息就是"它是这一层的哪一类惩罚"。
+ */
+export function whisperDetailModel(
+  unit: DetailWhisper | undefined,
+  none: { readonly nameKey: string; readonly descKey: string },
+): DetailModel {
+  return {
+    kind: 'whisper',
+    id: unit?.id ?? '',
+    titleKey: unit?.nameKey ?? none.nameKey,
+    subtitle: { kind: 'text', key: 'screen.runConfirm.whisperBlock' },
+    rows: [{ kind: 'text', key: unit?.descKey ?? none.descKey }],
+  };
 }
 
 /* ================================================================== *

@@ -40,9 +40,17 @@ import { portraitFor } from '../render/portraitAssets';
 import { PortraitSprite } from '../render/portraitSprite';
 import type { PrepareSectionKind } from './prepareTypes';
 
-/** 一条块头要画的东西（`foldSummaryOf` 的产物 + 几何）。 */
-export interface FoldBarDraw {
-  readonly kind: PrepareSectionKind;
+/**
+ * 一条块头要画的东西（`foldSummaryOf` 的产物 + 几何）。
+ *
+ * ⚠️ `kind` 是**泛型**（2026-10-16）：肉鸽确认屏要画的第三行是
+ * 「恶魔低语」，它不属于备战屏那三个手风琴块（`PrepareSectionKind`）。
+ * 把那个联合塞进 `PrepareSectionKind` 会逼**备战屏**也认一个它永远没有的
+ * 块（它的边框是 `Record<PrepareSectionKind, Label>`）—— 所以这里只要求
+ * "某个能当槽位名的字符串"，各屏用自己的联合。
+ */
+export interface FoldBarDraw<T extends string = PrepareSectionKind> {
+  readonly kind: T;
   /** 画出来的那一条（`prepareLayout.foldRect`）。 */
   readonly rect: Rect;
   /** **已本地化**的那行字（见 `prepareFold`）。 */
@@ -67,12 +75,12 @@ export interface PrepareFoldBarsOptions {
   readonly parent: Container;
 }
 
-export class PrepareFoldBars {
+export class PrepareFoldBars<T extends string = PrepareSectionKind> {
   private readonly pixi: PixiCtor;
   private readonly gfx: Graphics;
   private readonly parent: Container;
   /** 每个槽位一条（只有收起的那两块会被画，第三条永远藏着）。 */
-  private readonly labels = new Map<PrepareSectionKind, Label>();
+  private readonly labels = new Map<T, Label>();
   /**
    * 块头上的那一颗头像（**只有人物有素材**）。
    *
@@ -87,7 +95,14 @@ export class PrepareFoldBars {
     this.pixi = options.pixi;
     this.gfx = options.gfx;
     this.parent = options.parent;
-    for (const kind of SECTION_ORDER) {
+    /**
+     * ⚠️ **懒建**（2026-10-16 泛型化之后改的）：`SECTION_ORDER` 是**备战屏**
+     * 那三个块的名字，而泛型参数可以是别的字符串（确认屏的「恶魔低语」）。
+     * 所以标签按"第一次画到这一块"建 —— 与上面那颗头像同一条纪律
+     * （构造时不假设"会有哪几块"）。
+     */
+    void SECTION_ORDER;
+    for (const kind of [] as T[]) {
       const label = new Label(this.pixi, {
         x: 0,
         y: 0,
@@ -100,20 +115,36 @@ export class PrepareFoldBars {
     }
   }
 
+  /** 这一块的标签（没有就建一个 —— 见构造里那段"懒建"）。 */
+  private labelOf(kind: T): Label {
+    const existing = this.labels.get(kind);
+    if (existing !== undefined) return existing;
+    const label = new Label(this.pixi, {
+      x: 0,
+      y: 0,
+      size: PREPARE_LAYOUT.nameSize,
+      color: PALETTE.text,
+      kai: true,
+    });
+    this.labels.set(kind, label);
+    this.parent.addChild(label.root);
+    return label;
+  }
+
   /**
    * 画**收起的那几块**（展开的那块不传进来）。
    *
    * ⚠️ 位置取自调用方给的 `rect`（=`prepareLayout.foldRect`），本组件不
    * 自己算几何 —— 与卡片同一条纪律："看到的"与"点中的"是同一个矩形。
    */
-  draw(bars: readonly FoldBarDraw[]): void {
+  draw(bars: readonly FoldBarDraw<T>[]): void {
     this.gfx.clear();
     /**
      * 焦点那一条用**光标皮肤**（冷白）：与卡片上的光标**同一个颜色语言**
      * （`cardSkin({ cursored: true })`）—— 本作里"光标"只有这一种画法。
      */
     const cursorSkin = cardSkin({ developing: false, cursored: true, selected: false });
-    const drawn = new Set<PrepareSectionKind>();
+    const drawn = new Set<T>();
     for (const bar of bars) {
       drawn.add(bar.kind);
       const { x, y, w, h } = bar.rect;
@@ -133,8 +164,7 @@ export class PrepareFoldBars {
           alpha: bar.focused === true ? 1 : 0.8,
         });
 
-      const label = this.labels.get(bar.kind);
-      if (label === undefined) continue;
+      const label = this.labelOf(bar.kind);
       const box = PREPARE_LAYOUT.portraitBox;
       const gap = PREPARE_LAYOUT.nameAvatarGap;
       const pad = PREPARE_LAYOUT.cardPad;
@@ -163,7 +193,7 @@ export class PrepareFoldBars {
    * @returns 有没有真的画（没素材 / 没配对 = `false`，调用方据此决定
    *   文字要不要让位）。
    */
-  private placePortrait(bar: FoldBarDraw, x: number, y: number): boolean {
+  private placePortrait(bar: FoldBarDraw<T>, x: number, y: number): boolean {
     const id = bar.portraitId;
     if (id === undefined) return false;
     const asset = portraitFor(id);

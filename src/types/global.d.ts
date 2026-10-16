@@ -322,9 +322,16 @@ declare global {
           readonly length: number;
           readonly bossId: string;
           readonly qijiIds: readonly string[];
+          /**
+           * 这一层的「恶魔低语」id；`null` = 第 1 层（纯净）。
+           *
+           * ⚠️ 用 `null` 而不是 `undefined`：要跨 `Runtime.evaluate` 的
+           * JSON 边界（`undefined` 在那里会被丢掉）。
+           */
+          readonly whisperId: string | null;
         } | null;
-        /** 焦点停在哪一站（Tab 的读数：`'qiji' | 'boss' | 'start'`）。 */
-        focus(): 'player' | 'qiji' | 'boss' | 'start';
+        /** 焦点停在哪一站（Tab 的读数，含 `'whisper'`）。 */
+        focus(): 'player' | 'qiji' | 'boss' | 'whisper' | 'start';
         /** 同 Enter / 点「开始战斗」（**会真的进战斗**）。 */
         start(): void;
       };

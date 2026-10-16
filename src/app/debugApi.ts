@@ -554,8 +554,13 @@ export interface RunConfirmDebugTarget {
   readonly visible: boolean;
   /** 上一次重画读到的那一场（`undefined` = 还没画过）。 */
   readonly currentInfo: RunConfirmInfo | undefined;
-  /** 焦点此刻停在哪一站（`'qiji' | 'boss' | 'start'`）—— Tab 的读数。 */
-  readonly focus: 'player' | 'qiji' | 'boss' | 'start';
+  /**
+   * 焦点此刻停在哪一站 —— Tab 的读数。
+   *
+   * ⚠️ 2026-10-16 起多了 `'whisper'`（「恶魔低语」那一行）；`'player'`
+   * 留着是因为**类型来自备战屏那台状态机**，确认屏永远不会停在它上面。
+   */
+  readonly focus: 'player' | 'qiji' | 'boss' | 'whisper' | 'start';
   confirm(): void;
 }
 
@@ -582,9 +587,15 @@ export function runConfirmDebugApi(screen: RunConfirmDebugTarget): {
       readonly length: number;
       readonly bossId: string;
       readonly qijiIds: readonly string[];
+      /**
+       * 这一层的「恶魔低语」id；`null` = 第 1 层（纯净）。
+       *
+       * ⚠️ 它是**结构化读数**：截图能证明"那一行有字"，证明不了"那是哪一条"。
+       */
+      readonly whisperId: string | null;
     } | null;
-    /** 焦点此刻停在哪一站（`'qiji' | 'boss' | 'start'`）—— Tab 的读数。 */
-    focus(): 'player' | 'qiji' | 'boss' | 'start';
+    /** 焦点此刻停在哪一站（含 `'whisper'`）—— Tab 的读数。 */
+    focus(): 'player' | 'qiji' | 'boss' | 'whisper' | 'start';
     /** 同 Enter / 点「开始战斗」（**会真的进战斗**）。 */
     start(): void;
   };
@@ -600,6 +611,7 @@ export function runConfirmDebugApi(screen: RunConfirmDebugTarget): {
           length: i.length,
           bossId: i.boss.id,
           qijiIds: i.qiji.map((q) => q.id),
+          whisperId: i.whisper?.id ?? null,
         };
       },
       focus: () => screen.focus,

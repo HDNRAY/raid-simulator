@@ -58,11 +58,28 @@
 | 3 | ⑤ 回炁 ×0.8 |
 | 4 | ② 所有伤害 −5（保底 1，见 §0b） |
 | 5 | ④ 回血读条 |
-| 6 | ⑥ **【空缺 —— 还差这一条】** |
+| 6 | ⑥ **【空缺 —— 还差这一条：回血读条 / 二阶段是内容活，还没做】** |
 | 7 | ③ 二阶段（每个 Boss 各自；那 7 句**暂时不动**，后面再改） |
 
 ⚠️ **算术**：7 个 Boss = 7 档；第 1 档不挂 ⇒ 需要 **6 条**机制，现在有 **5 条** ⇒
 **第 6 条待定**（候选见 §1b）。⚠️ 3/4/5 的**先后**是草案（口径都是用户定的，顺序我排的）。
+
+### 1a. ✅ 已落地（2026-10-16）：4 条机制 + 每层抽 1 条 + **确认屏显示**（用户已验收）
+
+| 项 | 落在哪 |
+|---|---|
+| 所有伤害 −5（保底 3） | `core/combat/damage.ts` 的 `flatDamageReduce`（**不是**「卸」的 `damageThreshold`） |
+| 回炁 ×0.8 | `core/types/stats.ts` 的 `energyRegenScale` + `core/combat/energyRhythm.ts`（**整数节奏**：每 5 步跳 1 步） |
+| 挨打不回缠 | `core/combat/holds.ts` 的 `gainsDouqiOnHitTaken`（与"施放者回不回缠"并排） |
+| 狂暴 | `data/units.ts` 的 `makeBoss(id, { enrage })`（**只**裁 `kind: 'enrage'`） |
+| 每层抽 1 条 | `core/run/whispers.ts`（种子化、不放回、池子不够再洗一轮） |
+| 确认屏那一行 | `ui/RunConfirmScreen` 第三行「恶魔低语」+ `ui/runConfirmFocus`（**四站**）+ `ui/prepareDetail.whisperDetailModel` |
+
+⚠️ 走位算法**只有一份**（`ui/focusOrder.stepFocus`，备战屏与确认屏共用）；
+确认屏的**状态形状**不同（四站、没有块内光标），理由写在 `runConfirmFocus.ts` 文件头。
+
+⚠️ 池子今天**4 条**（回血读条 / 二阶段是内容活，还没做）⇒ 一局打满 7 层时后几层
+会重复；池子长大后自然消失。
 
 ### 1b. 第 6 条的候选（都在"一个数、小幅、可理解"的风格上，不加伤害）
 

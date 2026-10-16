@@ -599,9 +599,20 @@ export class PrepareDetailPanel {
   }
 
   private textOf(row: DetailRow): string {
-    if (row.kind === 'text') return this.translate(row.key, row.params);
+    /**
+     * ⚠️ **`text` 行也要过 `stripEmphasis`**（2026-10-16）。
+     *
+     * 语言包里的 `**加粗**` 是**给读源码的人**看的重音标记，画面上不该出现
+     * 星号 —— 技能说明那条路（上面 `stripEmphasis(...)`）一直是这么做的，
+     * 而 `text` 行漏了：肉鸽确认屏的「恶魔低语」详情就是这么把
+     * `这一层**没有难度惩罚**…` 原样画到屏上的（截图里一眼可见）。
+     *
+     * 放在这里（而不是"把文案里的 `**` 删掉"）：后者只是**这一次**不出现，
+     * 下一条 `text` 行还会踩同一个坑。
+     */
+    if (row.kind === 'text') return stripEmphasis(this.translate(row.key, row.params));
     if (row.kind === 'kv') return row.value;
-    return this.translate(row.nameKey);
+    return stripEmphasis(this.translate(row.nameKey));
   }
 
   /** 实测高度（`prepareDetailViewport.measuredHeight` 的转发：这里只读 Pixi 的盒高）。 */

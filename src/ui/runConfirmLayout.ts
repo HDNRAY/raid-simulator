@@ -39,6 +39,8 @@
  *   ④ 第一行块头      148 .. 188
  *   ⑤ 第二块标签      中心 212
  *   ⑥ 第二行块头      236 .. 276
+ *   ⑦ 第三块标签      中心 300      ← 「恶魔低语」（永远在）
+ *   ⑧ 第三行块头      324 .. 364
  *   （「开始战斗」+ 提示：底边那一排，锚定底部 —— 与备战屏同一处）
  * ```
  */
@@ -47,8 +49,14 @@ import { PREPARE_LAYOUT } from './prepareLayout';
 import { foldHitRect, foldRect } from './prepareGeometry';
 import type { Rect } from './prepareCardGrid';
 
-/** 确认屏的两行块头（顺序 = 从上到下）。 */
-export type RunConfirmBlock = 'qiji' | 'boss';
+/**
+ * 确认屏的三行块头（顺序 = 从上到下）：**炁机 → 对手 → 恶魔低语**。
+ *
+ * ⚠️ 「恶魔低语」那一行**永远在**（第 1 层写「本层纯净」）—— 与炁机那一行
+ * 不同：炁机没选过就**整块不画**（它在第一场之前确实不存在），而"这一层
+ * 有没有惩罚"本身就是要给玩家看的信息（2026-10-16）。
+ */
+export type RunConfirmBlock = 'qiji' | 'boss' | 'whisper';
 
 export const RUN_CONFIRM_LAYOUT = {
   /** 标题中心 y。 */
@@ -78,22 +86,25 @@ export const RUN_CONFIRM_LAYOUT = {
 export function runConfirmBlockTops(hasQiji: boolean): {
   readonly qiji: number | undefined;
   readonly boss: number;
+  /** 「恶魔低语」那一行的顶边 —— **永远存在**（见 `RunConfirmBlock`）。 */
+  readonly whisper: number;
 } {
   /** 标题的行框（与布局测试同一个保守估计：`1.3 × labelSize`）。 */
   const labelBox = Math.ceil(PREPARE_LAYOUT.labelSize * 1.3);
   /** 第一块的顶边：标签中心 + `labelGap`（备战屏的 `prepareLabelY` 是反过来的）。 */
   const first = RUN_CONFIRM_LAYOUT.firstLabelY + PREPARE_LAYOUT.labelGap;
-  if (!hasQiji) return { qiji: undefined, boss: first };
   /**
-   * ⚠️ 与 `prepareGeometry.rowTopsOf` 的 `below()` **逐字同一条**：
-   * `rowGap + 标题行框 + labelGap`。
+   * 下一块的顶边（与 `prepareGeometry.rowTopsOf` 的 `below()` 逐字同一条）。
    *
    * 少了 `labelGap` 就会让下一行的**命中区**（`foldHitRect` 向上多吃一条
    * 标题带）压到上一行上 —— 那正是"点上一行却切到下一行"的形状，而截图
    * 完全看不出来（两行画得都不重叠，重叠的是命中区）。
    */
-  const boss = first + PREPARE_LAYOUT.foldH + PREPARE_LAYOUT.rowGap + labelBox + PREPARE_LAYOUT.labelGap;
-  return { qiji: first, boss };
+  const below = (top: number): number =>
+    top + PREPARE_LAYOUT.foldH + PREPARE_LAYOUT.rowGap + labelBox + PREPARE_LAYOUT.labelGap;
+  if (!hasQiji) return { qiji: undefined, boss: first, whisper: below(first) };
+  const boss = below(first);
+  return { qiji: first, boss, whisper: below(boss) };
 }
 
 /**
@@ -149,5 +160,6 @@ export function isOnRunConfirmBlock(
 /** 某一块的块头顶边（不在时 `undefined`）。 */
 function blockTop(block: RunConfirmBlock, hasQiji: boolean): number | undefined {
   const tops = runConfirmBlockTops(hasQiji);
-  return block === 'qiji' ? tops.qiji : tops.boss;
+  if (block === 'qiji') return tops.qiji;
+  return block === 'boss' ? tops.boss : tops.whisper;
 }

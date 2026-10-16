@@ -117,9 +117,23 @@ export function portraitBoxOf(innerW: number): number {
  * 头像素材）。将来给某个 Boss 配了头像，它会自己走"真头像"那条分支
  * （`prepareDetailPanel.placeImage` 读 `portraitFor`）。
  */
-export function headerBoxOf(kind: 'player' | 'qiji' | 'boss', innerW: number): number {
-  return kind === 'qiji' ? 0 : portraitBoxOf(innerW);
+export function headerBoxOf(kind: DetailKind, innerW: number): number {
+  /**
+   * ⚠️ **只有人物与 Boss 有头像方框**：炁机没有配对头像，而
+   * 「恶魔低语」（2026-10-16 新增的那一类）也不是一个人/一只 Boss ——
+   * 它是**一条规则**，给它一个脸只会让人以为那是谁。
+   */
+  return kind === 'player' || kind === 'boss' ? portraitBoxOf(innerW) : 0;
 }
+
+/**
+ * 详情区能画的**类**。
+ *
+ * ⚠️ 四类里前三类有"实体"（人物 / 炁机 / Boss），第四类
+ * （`'whisper'` = 「恶魔低语」，2026-10-16）是**一条难度规则** ——
+ * 它与炁机一样**没有头像方框**（见 `headerBoxOf`）。
+ */
+export type DetailKind = 'player' | 'qiji' | 'boss' | 'whisper';
 
 /** 详情区面板的矩形（本模块只读它的 `x/y/w`）。 */
 export interface DetailRect {
@@ -146,7 +160,7 @@ export interface DetailRect {
  * 这正是"把 icon 槽收掉"之后"不留空洞"的样子。
  */
 export function headerBandOf(
-  kind: 'player' | 'qiji' | 'boss',
+  kind: DetailKind,
   rect: DetailRect,
 ): {
   readonly top: number;
@@ -172,7 +186,7 @@ export interface TextSpan {
 }
 
 /** 顶栏那两行（名字 / 关键数值）的横宽：**有方框就让位**。 */
-export function textSpanOf(kind: 'player' | 'qiji' | 'boss', rect: DetailRect): TextSpan {
+export function textSpanOf(kind: DetailKind, rect: DetailRect): TextSpan {
   const innerX = rect.x + PREPARE_LAYOUT.detailPad;
   const innerW = rect.w - PREPARE_LAYOUT.detailPad * 2;
   const band = headerBandOf(kind, rect);
@@ -194,7 +208,7 @@ export function inlineSpan(innerX: number, innerW: number): TextSpan {
  * ⚠️ 它是"顶栏钉住、只让正文滚"这条规则里**两个区域的分界**：
  * 上面的部分不参与滚动，下面的部分在 `[它, 面板底 − 内边距]` 里滚。
  */
-export function bodyTopOf(kind: 'player' | 'qiji' | 'boss', rect: DetailRect): number {
+export function bodyTopOf(kind: DetailKind, rect: DetailRect): number {
   const band = headerBandOf(kind, rect);
   return band.top + band.h + METRICS.rowGap * 2;
 }

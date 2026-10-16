@@ -17,8 +17,18 @@ import {
   runConfirmBlockTops,
   type RunConfirmBlock,
 } from '../../src/ui/runConfirmLayout';
-import { detailModelOf, runConfirmDetailTarget, runConfirmSelection, type DetailContext } from '../../src/ui/prepareDetail';
-import { moveFocus } from '../../src/ui/prepareLogic';
+import {
+  detailModelOf,
+  runConfirmDetailTarget,
+  whisperDetailModel,
+  type DetailContext,
+  type DetailWhisper,
+} from '../../src/ui/prepareDetail';
+import {
+  focusRunConfirmBlock,
+  moveRunConfirmFocus,
+  runConfirmSelection,
+} from '../../src/ui/runConfirmFocus';
 import { foldRect, footerHintSlot, startRect } from '../../src/ui/prepareGeometry';
 import { PREPARE_LAYOUT } from '../../src/ui/prepareLayout';
 import { LOGICAL } from '../../src/ui/layout';
@@ -179,6 +189,12 @@ const ctx: DetailContext = {
 
 const BOSS = { id: 'pride', nameKey: 'boss.pride.name' } as const;
 const QIJI = { id: 'vitality', nameKey: 'qiji.vitality.name' } as const;
+/** 这一层的「恶魔低语」（2026-10-16）。 */
+const WHISPER: DetailWhisper = {
+  id: 'blunt',
+  nameKey: 'whisper.blunt.name',
+  descKey: 'whisper.blunt.desc',
+};
 /** 第二条炁机（一局可能选不止一条 —— 块头照实写「已激活 2 条」）。 */
 const QIJI2 = { id: 'jieShengJi', nameKey: 'qiji.jieShengJi.name' } as const;
 
@@ -187,16 +203,15 @@ describe('确认屏：初始焦点与"右侧显示谁"（纯判定）', () => {
     const sel = runConfirmSelection({ boss: BOSS, qiji: [QIJI] });
     expect(sel.focus).toBe('qiji');
     expect(sel.expanded).toBe('qiji');
-    /** ⚠️ 玩家那两格是空串（这一屏没有人物行，见 `runConfirmSelection`）。 */
-    expect(sel.playerId).toBe('');
-    expect(sel.cursor.qijiId).toBe('vitality');
   });
 
   it('⚠️ 第一场之前（没有已选炁机）→ 焦点必须在**对手**上，不能停在空块上', () => {
     const sel = runConfirmSelection({ boss: BOSS, qiji: [] });
     expect(sel.focus).toBe('boss');
     expect(sel.expanded).toBe('boss');
-    expect(runConfirmDetailTarget({ expanded: sel.expanded, boss: BOSS, qiji: [] })).toEqual({ kind: 'boss', id: 'pride' });
+    expect(
+      runConfirmDetailTarget({ expanded: sel.expanded, boss: BOSS, qiji: [], whisper: WHISPER }),
+    ).toEqual({ kind: 'boss', id: 'pride' });
   });
 
   it('⚠️ 焦点走到「开始战斗」上时，右侧仍显示**上一块**（面板不忽隐忽现）', () => {
@@ -205,15 +220,23 @@ describe('确认屏：初始焦点与"右侧显示谁"（纯判定）', () => {
      * expanded 保持"）—— 这里钉的是"详情读的是 `expanded`、不是 `focus`"。
      */
     const sel = runConfirmSelection({ boss: BOSS, qiji: [QIJI] });
-    const onStart = moveFocus(sel, 1, { wrap: true, players: [], qiji: [QIJI], bosses: [BOSS] });
-    expect(onStart.focus).toBe('boss');
-    const again = moveFocus(onStart, 1, { wrap: true, players: [], qiji: [QIJI], bosses: [BOSS] });
-    expect(again.focus).toBe('start');
-    expect(again.expanded).toBe('boss');
-    expect(runConfirmDetailTarget({ expanded: again.expanded, boss: BOSS, qiji: [QIJI] })).toEqual({
-      kind: 'boss',
-      id: 'pride',
-    });
+    const step = (from: typeof sel, delta: number): typeof sel =>
+      moveRunConfirmFocus({ selection: from, delta, hasQiji: true });
+    const atBoss = step(sel, 1);
+    expect(atBoss.focus).toBe('boss');
+    const atWhisper = step(atBoss, 1);
+    expect(atWhisper.focus).toBe('whisper');
+    const atStart = step(atWhisper, 1);
+    expect(atStart.focus).toBe('start');
+    expect(atStart.expanded).toBe('whisper');
+    expect(
+      runConfirmDetailTarget({
+        expanded: atStart.expanded,
+        boss: BOSS,
+        qiji: [QIJI],
+        whisper: WHISPER,
+      }),
+    ).toEqual({ kind: 'whisper', id: 'blunt' });
   });
 
   it('⚠️ 一局选了不止一条时：右侧画**最后一条**（刚选的那条）', () => {
@@ -222,31 +245,47 @@ describe('确认屏：初始焦点与"右侧显示谁"（纯判定）', () => {
      * 只画得出**一条** —— 画刚选的那条（整局清单在一局结束屏）。
      */
     const sel = runConfirmSelection({ boss: BOSS, qiji: [QIJI, QIJI2] });
-    expect(sel.cursor.qijiId).toBe('jieShengJi');
     expect(
-      runConfirmDetailTarget({ expanded: sel.expanded, boss: BOSS, qiji: [QIJI, QIJI2] }),
+      runConfirmDetailTarget({
+        expanded: sel.expanded,
+        boss: BOSS,
+        qiji: [QIJI, QIJI2],
+        whisper: WHISPER,
+      }),
     ).toEqual({ kind: 'qiji', id: 'jieShengJi' });
   });
 
   it('⚠️ `expanded` 指向一个**不存在**的块时退回对手（兜底，不画空白面板）', () => {
-    expect(runConfirmDetailTarget({ expanded: 'qiji', boss: BOSS, qiji: [] })).toEqual({
-      kind: 'boss',
-      id: 'pride',
-    });
+    expect(
+      runConfirmDetailTarget({ expanded: 'qiji', boss: BOSS, qiji: [], whisper: WHISPER }),
+    ).toEqual({ kind: 'boss', id: 'pride' });
   });
 
   it('接上真实的 `detailModelOf`：两行的详情都取得到（炁机"已激活" / Boss 招式）', () => {
     const withQiji = runConfirmSelection({ boss: BOSS, qiji: [QIJI] });
-    const qijiModel = detailModelOf(
-      runConfirmDetailTarget({ expanded: withQiji.expanded, boss: BOSS, qiji: [QIJI] }),
-      ctx,
+    /**
+     * ⚠️ `detailModelOf` 只认人物 / 炁机 / Boss（它按 `DetailContext` 查内容
+     * 表），低语走 `whisperDetailModel` —— 与 `RunConfirmScreen` 里那个
+     * 分支**同一条**（这里照着写一遍，是为了让"两类各走哪条路"在测试里可见）。
+     */
+    const modelOf = (
+      target: ReturnType<typeof runConfirmDetailTarget>,
+    ): ReturnType<typeof detailModelOf> =>
+      target.kind === 'whisper' ? undefined : detailModelOf(target, ctx);
+
+    const qijiModel = modelOf(
+      runConfirmDetailTarget({
+        expanded: withQiji.expanded,
+        boss: BOSS,
+        qiji: [QIJI],
+        whisper: WHISPER,
+      }),
     );
     expect(qijiModel?.kind).toBe('qiji');
     expect(qijiModel?.subtitle).toEqual({ kind: 'text', key: 'roster.ui.detail.qijiOn' });
 
-    const bossModel = detailModelOf(
-      runConfirmDetailTarget({ expanded: 'boss', boss: BOSS, qiji: [QIJI] }),
-      ctx,
+    const bossModel = modelOf(
+      runConfirmDetailTarget({ expanded: 'boss', boss: BOSS, qiji: [QIJI], whisper: WHISPER }),
     );
     expect(bossModel?.kind).toBe('boss');
     expect(bossModel?.subtitle).toEqual({
@@ -258,38 +297,66 @@ describe('确认屏：初始焦点与"右侧显示谁"（纯判定）', () => {
 });
 
 describe('确认屏焦点顺序：炁机 → 对手 → 开始战斗（环绕；空槽位跳过）', () => {
-  /**
-   * 走一步焦点（把"这一屏有哪几个槽位"喂给 `prepareLogic.moveFocus`）。
-   *
-   * ⚠️ 槽位列表就是**屏幕每帧算的那一份**（`RunConfirmScreen.blockOptions`）
-   * —— 有空炁机时给空数组，于是那一站被跳过（与备战屏跳过空槽位同一段代码）。
-   */
+  /** 走一步焦点（`runConfirmFocus` —— 决策算法与备战屏共用 `stepFocus`）。 */
   const step = (
     from: ReturnType<typeof runConfirmSelection>,
     delta: number,
-    lists: { readonly qiji: readonly (typeof QIJI)[]; readonly bosses: readonly (typeof BOSS)[] },
-  ): string => moveFocus(from, delta, { wrap: true, players: [], ...lists }).focus;
+    hasQiji: boolean,
+  ): string => moveRunConfirmFocus({ selection: from, delta, hasQiji }).focus;
 
-  const BOTH = { qiji: [QIJI], bosses: [BOSS] } as const;
-  const BOSS_ONLY = { qiji: [], bosses: [BOSS] } as const;
+  /** 走 n 步（状态逐步传递 —— 走位是**有状态**的，别拿焦点字符串当状态）。 */
+  const walk = (
+    from: ReturnType<typeof runConfirmSelection>,
+    deltas: readonly number[],
+    hasQiji: boolean,
+  ): ReturnType<typeof runConfirmSelection> =>
+    deltas.reduce((sel, delta) => moveRunConfirmFocus({ selection: sel, delta, hasQiji }), from);
 
-  it('有已选炁机时是三站，并且**环绕**', () => {
+  it('有已选炁机时是**四站**：炁机 → 对手 → 恶魔低语 → 开始（环绕）', () => {
     const atQiji = runConfirmSelection({ boss: BOSS, qiji: [QIJI] });
-    expect(step(atQiji, 1, BOTH)).toBe('boss');
-    const atBoss = moveFocus(atQiji, 1, { wrap: true, players: [], ...BOTH });
-    expect(step(atBoss, 1, BOTH)).toBe('start');
-    const atStart = moveFocus(atBoss, 1, { wrap: true, players: [], ...BOTH });
-    expect(step(atStart, 1, BOTH)).toBe('qiji');
+    expect(walk(atQiji, [1], true).focus).toBe('boss');
+    expect(walk(atQiji, [1, 1], true).focus).toBe('whisper');
+    expect(walk(atQiji, [1, 1, 1], true).focus).toBe('start');
+    /** 环绕：再往前一步回到炁机。 */
+    expect(walk(atQiji, [1, 1, 1, 1], true).focus).toBe('qiji');
     /** 反向同理（从炁机往回 = 开始战斗）。 */
-    expect(step(atQiji, -1, BOTH)).toBe('start');
+    expect(step(atQiji, -1, true)).toBe('start');
   });
 
-  it('⚠️ 没有已选炁机时**只有两站**（炁机那一站自动跳过）', () => {
+  it('⚠️ 没有已选炁机时**跳过炁机那一站**（三站）', () => {
     const atBoss = runConfirmSelection({ boss: BOSS, qiji: [] });
-    expect(step(atBoss, 1, BOSS_ONLY)).toBe('start');
-    const atStart = moveFocus(atBoss, 1, { wrap: true, players: [], ...BOSS_ONLY });
-    expect(step(atStart, 1, BOSS_ONLY)).toBe('boss');
-    expect(step(atStart, -1, BOSS_ONLY)).toBe('boss');
+    expect(walk(atBoss, [1], false).focus).toBe('whisper');
+    expect(walk(atBoss, [1, 1], false).focus).toBe('start');
+    /** 环绕：从「开始战斗」往前走回到对手（**不经过空着的炁机**）。 */
+    expect(walk(atBoss, [1, 1, 1], false).focus).toBe('boss');
+    expect(step(atBoss, -1, false)).toBe('start');
+  });
+
+  it('点某一行 = 把焦点放上去（点空着的炁机那一行 = 什么都不做）', () => {
+    const atBoss = runConfirmSelection({ boss: BOSS, qiji: [] });
+    expect(focusRunConfirmBlock({ selection: atBoss, block: 'whisper', hasQiji: false }).focus).toBe(
+      'whisper',
+    );
+    expect(focusRunConfirmBlock({ selection: atBoss, block: 'qiji', hasQiji: false })).toBe(atBoss);
+  });
+
+  it('「恶魔低语」的详情：抽到的那条画它的说明；第 1 层画「本层纯净」', () => {
+    const drawn = whisperDetailModel(WHISPER, {
+      nameKey: 'screen.runConfirm.whisperNone',
+      descKey: 'screen.runConfirm.whisperNoneDesc',
+    });
+    expect(drawn.kind).toBe('whisper');
+    expect(drawn.titleKey).toBe(WHISPER.nameKey);
+    expect(drawn.rows).toEqual([{ kind: 'text', key: WHISPER.descKey }]);
+    /** ⚠️ 顶栏那一行三类都要有值（低语写的是栏目标题）。 */
+    expect(drawn.subtitle).toEqual({ kind: 'text', key: 'screen.runConfirm.whisperBlock' });
+
+    const none = whisperDetailModel(undefined, {
+      nameKey: 'screen.runConfirm.whisperNone',
+      descKey: 'screen.runConfirm.whisperNoneDesc',
+    });
+    expect(none.titleKey).toBe('screen.runConfirm.whisperNone');
+    expect(none.rows).toEqual([{ kind: 'text', key: 'screen.runConfirm.whisperNoneDesc' }]);
   });
 });
 

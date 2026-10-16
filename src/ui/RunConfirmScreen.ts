@@ -78,19 +78,26 @@ import { PALETTE } from '../render/theme';
 import { CARD_RADIUS, startSkin } from './prepareRender';
 import { PrepareDetailPanel } from './prepareDetailPanel';
 import { PrepareFoldBars, type FoldBarDraw } from './prepareFoldBars';
-import { foldSummaryOf } from './prepareFold';
+import { foldSummaryOf, type FoldSummary } from './prepareFold';
 import { foldTextMaxChars, footerHintSlot, startCenterX, startRect } from './prepareGeometry';
 import {
   detailModelOf,
   runConfirmDetailTarget,
-  runConfirmSelection,
+  whisperDetailModel,
   type DetailContext,
   type DetailModel,
   type DetailUnit,
+  type DetailWhisper,
 } from './prepareDetail';
+import {
+  focusRunConfirmBlock,
+  moveRunConfirmFocus,
+  runConfirmSelection,
+  type RunConfirmFocus,
+  type RunConfirmSelection,
+} from './runConfirmFocus';
 import { DETAIL_SCROLL_STEP } from './prepareDetailMetrics';
-import { moveFocus, focusTarget } from './prepareLogic';
-import type { PrepareFocus, PrepareOption, PrepareSelection } from './prepareLogic';
+
 import {
   RUN_CONFIRM_LAYOUT,
   isOnRunConfirmBlock,
@@ -123,6 +130,13 @@ export interface RunConfirmInfo {
    * `foldSummaryOf`），而右侧详情一次只画得出**最后一条**（刚选的那条）。
    */
   readonly qiji: readonly DetailUnit[];
+  /**
+   * **这一层的「恶魔低语」**（2026-10-16）；第 1 层是 `undefined`。
+   *
+   * ⚠️ `undefined` 不是"这一行不画" —— 那一行**永远在**（写「本层纯净」），
+   * 因为"这一层有没有惩罚"本身就是要给玩家看的信息。
+   */
+  readonly whisper: DetailWhisper | undefined;
 }
 
 export interface RunConfirmScreenOptions {
@@ -159,6 +173,8 @@ export class RunConfirmScreen {
   private readonly progress: Label;
   private readonly qijiLabel: Label;
   private readonly bossLabel: Label;
+  /** 「恶魔低语」那一行的栏目标题（永远在，见 `RunConfirmInfo.whisper`）。 */
+  private readonly whisperLabel: Label;
   private readonly startLabel: Label;
   private readonly hint: Label;
   /**
@@ -168,7 +184,7 @@ export class RunConfirmScreen {
    * 块头）—— `PrepareFoldBars.draw` 会 `clear()` 那一支笔，所以不能与
    * 按钮共用。
    */
-  private readonly bars: PrepareFoldBars;
+  private readonly bars: PrepareFoldBars<RunConfirmBlock>;
   private readonly barGfx: Graphics;
   /** 右侧那块**共用**详情面板（与备战屏同一个类、同一块矩形）。 */
   private readonly panel: PrepareDetailPanel;
@@ -177,10 +193,13 @@ export class RunConfirmScreen {
 
   private readonly options: RunConfirmScreenOptions;
   /**
-   * 焦点状态（`prepareLogic` 那套纯状态机）—— 本屏**复用**它，
-   * 所以顺序 / 跳空槽 / 环绕 / `expanded` 四条规则都不用重写。
+   * 焦点状态（`runConfirmFocus` 那台**确认屏自己的**状态机）。
+   *
+   * ⚠️ 走位算法与备战屏**共用**（`ui/focusOrder.stepFocus`），但状态形状
+   * 不同：这一屏有**四站**（多一行「恶魔低语」）、没有块内光标 ——
+   * 理由逐条写在 `runConfirmFocus.ts` 的文件头。
    */
-  private selection: PrepareSelection;
+  private selection: RunConfirmSelection;
   /** 详情上下文（**构造一次**；`on` 读的是下面那个字段，见 `redraw`）。 */
   private readonly ctx: DetailContext;
   /** 本局已选的炁机 id（`ctx.qijiOn` 的判据：选了的那些就是"激活"）。 */
@@ -239,11 +258,13 @@ export class RunConfirmScreen {
      */
     this.qijiLabel = this.makeBlockLabel(pixi);
     this.bossLabel = this.makeBlockLabel(pixi);
+    /** 第三行：「恶魔低语」（**永远在**，第 1 层写「本层纯净」）。 */
+    this.whisperLabel = this.makeBlockLabel(pixi);
 
     /** 两行块头：共用`Graphics` + 每行一个 `Label`（`PrepareFoldBars` 内部建）。 */
     this.barGfx = new pixi.Graphics();
     this.root.addChild(this.barGfx);
-    this.bars = new PrepareFoldBars({ pixi, gfx: this.barGfx, parent: this.root });
+    this.bars = new PrepareFoldBars<RunConfirmBlock>({ pixi, gfx: this.barGfx, parent: this.root });
 
     /** 右侧那块共用详情面板（与备战屏同一块矩形，见 `PrepareDetailPanel`）。 */
     this.panel = new PrepareDetailPanel(pixi, options.translate);
@@ -290,8 +311,8 @@ export class RunConfirmScreen {
     return this.lastInfo;
   }
 
-  /** 焦点此刻在哪一站（调试读数：`'qiji' | 'boss' | 'start'`）。 */
-  get focus(): PrepareFocus {
+  /** 焦点此刻在哪一站（调试读数：`'qiji' | 'boss' | 'whisper' | 'start'`）。 */
+  get focus(): RunConfirmFocus {
     return this.selection.focus;
   }
 
@@ -319,7 +340,11 @@ export class RunConfirmScreen {
    * —— 本屏不复制一份"哪几站可以停"。
    */
   moveFocus(delta: number): void {
-    const next = moveFocus(this.selection, delta, { ...this.blockOptions(), wrap: true });
+    const next = moveRunConfirmFocus({
+      selection: this.selection,
+      delta,
+      hasQiji: (this.lastInfo?.qiji.length ?? 0) > 0,
+    });
     if (next === this.selection) return;
     this.selection = next;
     this.redraw();
@@ -327,7 +352,11 @@ export class RunConfirmScreen {
 
   /** 把焦点**直接**放到某一行（点块头；与 Tab 同一个状态机）。 */
   focusBlock(block: RunConfirmBlock): void {
-    const next = focusTarget(this.selection, block, this.blockOptions());
+    const next = focusRunConfirmBlock({
+      selection: this.selection,
+      block,
+      hasQiji: (this.lastInfo?.qiji.length ?? 0) > 0,
+    });
     if (next === this.selection) return;
     this.selection = next;
     this.redraw();
@@ -362,7 +391,7 @@ export class RunConfirmScreen {
   hitTest(px: number, py: number): boolean {
     if (this.chrome.hitTest(px, py)) return true;
     const hasQiji = (this.lastInfo?.qiji.length ?? 0) > 0;
-    for (const block of ['qiji', 'boss'] as const) {
+    for (const block of ['qiji', 'boss', 'whisper'] as const) {
       if (!isOnRunConfirmBlock(block, hasQiji, px, py)) continue;
       this.focusBlock(block);
       return true;
@@ -426,17 +455,6 @@ export class RunConfirmScreen {
     return label;
   }
 
-  /**
-   * 焦点状态机要的两个"槽位列表"（`moveFocus` / `focusTarget` 收的形状）。
-   *
-   * ⚠️ 没有已选炁机时给**空数组** —— 于是 `prepareLogic` 的 `canFocus`
-   * 自动跳过那一站（备战屏跳过空槽位的**同一段代码**）。
-   */
-  private blockOptions(): { readonly qiji: readonly PrepareOption[]; readonly bosses: readonly PrepareOption[] } {
-    const info = this.options.getInfo();
-    return { qiji: info.qiji, bosses: [info.boss] };
-  }
-
   private redraw(): void {
     const t = this.options.translate;
     const info = this.options.getInfo();
@@ -465,11 +483,20 @@ export class RunConfirmScreen {
 
     /** 块头文字 = "当前选了什么"（`prepareFold` 那条判据），不是"光标指着谁"。 */
     const maxChars = foldTextMaxChars();
-    const summaries = {
+    /**
+     * ⚠️ 块头文字 = "当前选了什么"（`prepareFold` 那条判据），不是"光标指着谁"。
+     * 这一屏没有人物行，所以 `playerId` 恒为空串（`foldSummaryOf` 的入参形状
+     * 与备战屏共用，空值 = 没有那一行）。
+     */
+    const chosen = { playerId: '', bossId: info.boss.id };
+    const summaries: {
+      readonly qiji: FoldSummary | undefined;
+      readonly boss: FoldSummary | undefined;
+    } = {
       qiji: hasQiji
         ? foldSummaryOf({
             kind: 'qiji',
-            selection: { playerId: this.selection.playerId, bossId: this.selection.bossId },
+            selection: chosen,
             players: [],
             bosses: [],
             qiji: info.qiji,
@@ -480,7 +507,7 @@ export class RunConfirmScreen {
         : undefined,
       boss: foldSummaryOf({
         kind: 'boss',
-        selection: { playerId: this.selection.playerId, bossId: this.selection.bossId },
+        selection: chosen,
         players: [],
         bosses: [info.boss],
         qiji: [],
@@ -494,16 +521,24 @@ export class RunConfirmScreen {
      * 两行块头的画（含**焦点那条**的光标皮肤）—— 位置全部来自
      * `runConfirmLayout`（它内部又走备战屏的 `foldRect`）。
      */
-    const bars: FoldBarDraw[] = [];
+    const bars: FoldBarDraw<RunConfirmBlock>[] = [];
+    const labelOf = (block: RunConfirmBlock): Label =>
+      block === 'qiji' ? this.qijiLabel : block === 'boss' ? this.bossLabel : this.whisperLabel;
+    const titleOf = (block: RunConfirmBlock): string =>
+      block === 'qiji'
+        ? t('roster.ui.qijiLabel')
+        : block === 'boss'
+          ? t('screen.runConfirm.bossBlock')
+          : t('screen.runConfirm.whisperBlock');
     const place = (block: RunConfirmBlock, summary: { readonly text: string } | undefined): void => {
       const rect = runConfirmBlockRect(block, hasQiji);
-      const label = block === 'qiji' ? this.qijiLabel : this.bossLabel;
+      const label = labelOf(block);
       if (rect === undefined || summary === undefined) {
         /** 这一行不存在：连标题一起藏（不是"画一条空的"）。 */
         label.root.visible = false;
         return;
       }
-      label.set(block === 'qiji' ? t('roster.ui.qijiLabel') : t('screen.runConfirm.bossBlock'));
+      label.set(titleOf(block));
       label.root.x = rect.x;
       label.root.y = blockLabelY(block, hasQiji);
       label.root.visible = true;
@@ -516,6 +551,11 @@ export class RunConfirmScreen {
     };
     place('qiji', summaries.qiji);
     place('boss', summaries.boss);
+    /**
+     * 「恶魔低语」那一行的块头文字：抽到的那条的名字，第 1 层写「本层纯净」。
+     * 它**没有** `foldSummaryOf` 那一套（那不是"选择"，是"这一层的规则"）。
+     */
+    place('whisper', { text: info.whisper === undefined ? t('screen.runConfirm.whisperNone') : t(info.whisper.nameKey) });
     this.bars.draw(bars);
 
     /** 右侧**共用**详情：读 `expanded`（焦点在开始键上时它仍是上一块）。 */
@@ -523,8 +563,20 @@ export class RunConfirmScreen {
       expanded: this.selection.expanded,
       boss: info.boss,
       qiji: info.qiji,
+      whisper: info.whisper,
     });
-    const model: DetailModel | undefined = detailModelOf(target, this.ctx);
+    /**
+     * ⚠️ 低语那一条**不走** `detailModelOf`：那台机器按 `DetailContext` 查
+     * "内容表里有什么"（人物 / 炁机 / Boss 各自的取数函数），而低语是一段
+     * **这一层现算出来的规则**（名字 + 一句话），没有第二个来源可查。
+     */
+    const model: DetailModel | undefined =
+      target.kind === 'whisper'
+        ? whisperDetailModel(info.whisper, {
+            nameKey: 'screen.runConfirm.whisperNone',
+            descKey: 'screen.runConfirm.whisperNoneDesc',
+          })
+        : detailModelOf(target, this.ctx);
     this.panel.setVisible(true);
     this.panel.update(model);
 
@@ -556,9 +608,9 @@ export class RunConfirmScreen {
   }
 }
 
-/** 某一块的栏目标题中心 y（不在时按对手那一行算 —— 调用方不会传它）。 */
+/** 某一块的栏目标题中心 y（炁机那一行不在时按对手算 —— 调用方不会传它）。 */
 function blockLabelY(block: RunConfirmBlock, hasQiji: boolean): number {
   const tops = runConfirmBlockTops(hasQiji);
-  const top = block === 'qiji' ? tops.qiji : tops.boss;
-  return runConfirmBlockLabelY(top ?? tops.boss);
+  if (block === 'qiji') return runConfirmBlockLabelY(tops.qiji ?? tops.boss);
+  return runConfirmBlockLabelY(block === 'boss' ? tops.boss : tops.whisper);
 }

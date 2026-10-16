@@ -64,6 +64,7 @@ import {
   type SectionScroll,
 } from './prepareGeometry';
 import { stepGrid, type GridDirection } from './gridNav';
+import { stepFocus } from './focusOrder';
 
 export type { PrepareFocus, PrepareOption, PrepareSectionKind } from './prepareTypes';
 export type { PrepareHitArea, PrepareHitKind } from './prepareLayout';
@@ -399,27 +400,30 @@ export function moveFocus(
   const players = options.players ?? [];
   const bosses = options.bosses ?? [];
   const qiji = options.qiji ?? [];
-  const order: readonly PrepareFocus[] = ['player', 'qiji', 'boss', 'start'];
-  const canFocus = (f: PrepareFocus): boolean =>
-    f === 'start' || optionsOf(f, players, bosses, qiji).length > 0;
-  const step = delta >= 0 ? 1 : -1;
-  const from = Math.max(0, order.indexOf(sel.focus));
-
-  if (options.wrap === true) {
-    for (let i = 1; i <= order.length; i += 1) {
-      const idx = (from + step * i + order.length) % order.length;
-      const candidate = order[idx];
-      if (candidate !== undefined && canFocus(candidate)) return withFocus(sel, candidate);
-    }
-    return sel;
-  }
-
-  for (let idx = from + step; idx >= 0 && idx < order.length; idx += step) {
-    const candidate = order[idx];
-    if (candidate !== undefined && canFocus(candidate)) return withFocus(sel, candidate);
-  }
-  return sel;
+  /**
+   * ⚠️ **走位算法在 `./focusOrder.ts`**（2026-10-16 抽出去）：肉鸽确认屏
+   * 也要同一套"顺序 / 跳过不能停的站 / 环绕"，那边站的**集合**不同
+   * （多了「恶魔低语」那一行）。写两遍必然漂 —— 这里只负责"这一屏哪几站
+   * 能停"与"停下来之后状态怎么写"。
+   */
+  const next = stepFocus({
+    current: sel.focus,
+    order: PREPARE_FOCUS_ORDER,
+    delta,
+    ...(options.wrap === undefined ? {} : { wrap: options.wrap }),
+    canFocus: (f) => f === 'start' || optionsOf(f, players, bosses, qiji).length > 0,
+  });
+  return next === sel.focus ? sel : withFocus(sel, next);
 }
+
+/**
+ * 备战屏的站顺序（Tab 的方向）：**人物 → 炁机 → 对手 → 开始**。
+ *
+ * ⚠️ 顺序与 `SECTION_ORDER`（手风琴那三块）**不是同一件事**：这里是四个
+ * **焦点站**（含「开始」），那里是三块**内容区**。两者恰好同序是有意的，
+ * 但类型不同、消费者不同。
+ */
+const PREPARE_FOCUS_ORDER: readonly PrepareFocus[] = ['player', 'qiji', 'boss', 'start'];
 
 /**
  * 直接指定焦点槽位（调试入口用；`focusSlot` 的实现）。
