@@ -19,7 +19,7 @@
  * 依赖用 `HoldsContext` 写清楚（见 `hitResolution.ts` 的同名说明）。
  */
 
-import type { ActiveSkillDef, BuffDef, Combatant, EventDef, SkillDef } from '../types';
+import type { ActiveSkillDef, BuffDef, BuffFlags, Combatant, EventDef, SkillDef } from '../types';
 import { DOUQI_PER_INTERNAL_DAMAGE } from '../../data/balance';
 import { LOGIC_TICKS_PER_SECOND, TICKS_PER_LOGIC_TICK } from '../loopConstants';
 import { changeResource } from './index';
@@ -241,6 +241,27 @@ export function douqiFromDamage(damage: number): number {
  */
 export function casterGainsDouqiFromDamage(skill: ActiveSkillDef): boolean {
   return !skill.cost.some((cost) => cost.resource === 'douqi');
+}
+
+/**
+ * 这一击的**承受方**该不该按伤害回缠。
+ *
+ * ==================================================================
+ * 「恶魔低语」的**挨打不回缠**（2026-10-16）
+ * ==================================================================
+ *
+ * 默认两边都是"伤害 × 0.5 换缠"（`DOUQI_PER_DAMAGE`）。上面那条管
+ * **施放者**（代价含缠的技能不回缠），这条管**承受方**：
+ * 被挂了 `noDouqiOnHitTaken` 的人**挨打不再拿缠**。
+ *
+ * ⚠️ 于是"防住"第一次有了资源上的正收益 —— 挨打就是白挨，连缠都不给。
+ * 这是难度惩罚里最"轻"的一条：它不改伤害、不改时间，只改**资源曲线**。
+ *
+ * ⚠️ 放在这里（而不是 `hitResolution` 里就地问一句）的理由与上面那条
+ * 相同：**"谁该回缠"是一件事，两个方向都该在同一个文件里读**。
+ */
+export function gainsDouqiOnHitTaken(flags: BuffFlags): boolean {
+  return flags.noDouqiOnHitTaken !== true;
 }
 
 export function gainDouqiFromDamage(

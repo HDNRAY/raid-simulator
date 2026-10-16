@@ -64,6 +64,26 @@ export interface BuffFlags {
    */
   readonly damageThreshold?: number;
   /**
+   * **平减**（「恶魔低语」的"所有伤害 −5，但保底 3"，2026-10-16）。
+   *
+   * ⚠️ 与 `damageThreshold` **不是同一件事**，别混：那条是「卸」的语义
+   * （`≤N` **整击作废**、连效果一起免），这条**只平减**、保底且不碰效果。
+   * 详见 `core/combat/damage.ts` 的 `DefenseFlags.flatDamageReduce`
+   * （那里写了"为什么不能复用"的完整理由）。
+   */
+  readonly flatDamageReduce?: {
+    readonly amount: number;
+    readonly floor: number;
+  };
+  /**
+   * **挨打不回缠**（「恶魔低语」的一条，2026-10-16）。
+   *
+   * 默认两边都是"造成 / 承受伤害都换缠"（`DOUQI_PER_DAMAGE`）——
+   * 这条 flag 关掉的是**承受**那一半：挨打的人**不再**拿到缠。
+   * （攻击者那一半由 `casterGainsDouqiFromDamage` 管，是另一条规则。）
+   */
+  readonly noDouqiOnHitTaken?: boolean;
+  /**
    * **荆棘**：受到伤害时，把其中的 `reflectFraction` 比例反弹给攻击者。
    *
    * ==================================================================

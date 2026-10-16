@@ -316,6 +316,12 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
   let invulnerable = false;
   let damageReduce = 0;
   let damageThreshold = 0;
+  /**
+   * 平减（「恶魔低语」）—— **取 `amount` 最大的那一条**，与
+   * `damageReduce` / `damageThreshold` 同一条理由（相加会越过"完全免疫"）。
+   */
+  let flatDamageReduce: { readonly amount: number; readonly floor: number } | undefined;
+  let noDouqiOnHitTaken = false;
   let ccImmune = false;
   let interruptImmune = false;
   let actionLock = false;
@@ -347,6 +353,12 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
     if (f.damageThreshold !== undefined) {
       damageThreshold = Math.max(damageThreshold, f.damageThreshold);
     }
+    if (f.flatDamageReduce !== undefined) {
+      if (flatDamageReduce === undefined || f.flatDamageReduce.amount > flatDamageReduce.amount) {
+        flatDamageReduce = f.flatDamageReduce;
+      }
+    }
+    if (f.noDouqiOnHitTaken === true) noDouqiOnHitTaken = true;
     if (f.ccImmune) ccImmune = true;
     if (f.interruptImmune) interruptImmune = true;
     if (f.actionLock) actionLock = true;
@@ -363,6 +375,8 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
     ...(invulnerable ? { invulnerable: true } : {}),
     ...(damageReduce > 0 ? { damageReduce } : {}),
     ...(damageThreshold > 0 ? { damageThreshold } : {}),
+    ...(flatDamageReduce === undefined ? {} : { flatDamageReduce }),
+    ...(noDouqiOnHitTaken ? { noDouqiOnHitTaken: true } : {}),
     ...(ccImmune ? { ccImmune: true } : {}),
     ...(interruptImmune ? { interruptImmune: true } : {}),
     ...(actionLock ? { actionLock: true } : {}),

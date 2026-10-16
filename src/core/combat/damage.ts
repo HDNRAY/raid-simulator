@@ -68,6 +68,44 @@ export interface DefenseFlags {
   readonly damageReduce?: number;
   readonly damageThreshold?: number;
   /**
+   * **平减**（「恶魔低语」的"所有伤害 −5，但**保底 3**"，2026-10-16）。
+   *
+   * ==================================================================
+   * 为什么**不能**复用 `damageThreshold`
+   * ==================================================================
+   *
+   * `damageThreshold` 是「卸」的语义，**自带两半**：
+   * `≤N` → **整击作废（连效果一起免）**；`>N` → 伤害 − N。
+   *
+   * 把"所有伤害 −5"挂成它，就会继承那两半 —— 于是玩家的「击」（5 点）
+   * 被**整击作废**（一点伤害都没有），而且小伤害段上挂的打断 / 眩晕
+   * 会被"连效果一起免"顺带吃掉。用户 2026-10-16 点名的就是这一条
+   * （"小于等于五整击无效，这个要稍微调整一下…我平砍只有 5 点"）。
+   *
+   * 所以这里是**第三种形态**：**只平减**，不整击作废、不碰效果，
+   * 且**保底**（削完至少 `floor`，但**不会超过**本来该有的伤害 ——
+   * 保底不是"凭空加伤"）。
+   *
+   * ```
+   * afterThreshold = max(0, floor(…) − damageThreshold)
+   * after          = afterThreshold − amount
+   * final          = after > 0 ? after : min(afterThreshold, floor)
+   * ```
+   *
+   * ⚠️ 与 `damageThreshold` 一样，它**不参与**「卸」的
+   * `≤N` 判定（`flatBlocked` 只看 `damageThreshold`）—— 两者是
+   * 两条独立的规则，谁也别猜谁。
+   *
+   * ⚠️ 多个来源**取 `amount` 最大的那一条**（与 `damageReduce` /
+   * `damageThreshold` 同一条理由：相加会越过"完全免疫"，玩家无法预期）。
+   */
+  readonly flatDamageReduce?: {
+    /** 平减多少点（「恶魔低语」当前是 5）。 */
+    readonly amount: number;
+    /** 保底：削完至少留多少（当前是 3）。⚠️ 上限是本来的伤害，不会加伤。 */
+    readonly floor: number;
+  };
+  /**
    * **受到的伤害倍率**（`damageTakenMult`，基准 1）。
    *
    * ⚠️ 这个属性**声明了很久但没有任何引擎分支读它**（与 `ccImmune` /
@@ -224,16 +262,35 @@ export function computeDamage(
 
   const flatReduce = targetFlags.damageThreshold ?? 0;
   const afterFlat = flatReduce > 0 ? value - flatReduce : value;
-  const rounded = roundDamage(afterFlat);
+  let rounded = roundDamage(afterFlat);
+
+  /**
+   * **平减**（`flatDamageReduce`：「恶魔低语」的"所有伤害 −5，保底 3"）。
+   *
+   * ⚠️ 位置就在**阈值之后、取整之前的那一步**：与 `damageThreshold` 是
+   * 两条独立的规则（那条是「卸」，带"≤N 整击作废"的另一半，这条没有）。
+   * 判据与"为什么不能复用"写在 `DefenseFlags.flatDamageReduce` 上。
+   *
+   * ⚠️ **保底不是加伤**：`min(afterThreshold, floor)` —— 本来只有 2 点的
+   * 一击削完还是 2 点，不会因为"保底 3"变成 3。
+   */
+  const spill = targetFlags.flatDamageReduce;
+  const spillAmount = spill !== undefined && spill.amount > 0 ? spill.amount : 0;
+  if (spillAmount > 0 && rounded > 0) {
+    const afterSpill = rounded - spillAmount;
+    rounded = afterSpill > 0 ? afterSpill : Math.min(rounded, Math.max(0, spill?.floor ?? 0));
+  }
+
   /**
    * `thinned` = "本来要打出来的"减去"实际打出来的"。
    *
-   * ⚠️ 两个值都先过 `roundDamage` 再相减，而且**钳到 `flatReduce`**：
-   * `15.9 − 15 = 0.9 → floor 0`（实际 0 点），若按浮点差算会得到 15.9
-   * 这种"挡掉的比规则还多"的数字。平减的上限就是 N 本身。
+   * ⚠️ 两个值都先过 `roundDamage` 再相减，而且**钳到规则承诺的上限**
+   * （阈值 + 平减）：`15.9 − 15 = 0.9 → floor 0`（实际 0 点），
+   * 若按浮点差算会得到 15.9 这种"挡掉的比规则还多"的数字。
    */
-  const beforeFlat = flatReduce > 0 ? roundDamage(value) : 0;
-  const thinned = flatReduce > 0 ? Math.min(flatReduce, Math.max(0, beforeFlat - rounded)) : 0;
+  const reduceBudget = flatReduce + spillAmount;
+  const beforeFlat = reduceBudget > 0 ? roundDamage(value) : 0;
+  const thinned = reduceBudget > 0 ? Math.min(reduceBudget, Math.max(0, beforeFlat - rounded)) : 0;
 
   return {
     amount: Math.max(0, rounded),

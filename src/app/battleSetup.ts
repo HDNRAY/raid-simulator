@@ -57,6 +57,7 @@
 import { BattleLoop } from './battleLoop';
 import { slotsFromBindings } from './viewAdapter';
 import { makeBoss, makePlayer } from '../data/units';
+import { whisperCombatants, whisperForRun } from './whisperApply';
 import { bossDefById } from '../data/bossDefs';
 import { buildPlayerKit, type PlayerKit } from '../data/kit';
 import { applySkillTweaks } from '../data/skillTweak';
@@ -213,6 +214,16 @@ export function createStartBattle(d: StartBattleDeps): () => BattleLoop {
      * 那会造出"技能是凯丽的、名字是林晚风的"这种不可能解释的状态。
      */
     const { playerId, bossId } = d.getSelection();
+
+    /**
+     * **这一层的「恶魔低语」**（2026-10-16）。
+     *
+     * ⚠️ 每次开局**现读** `d.getRun?.()` —— 与下面 `seed` 同一条理由
+     * （`position` 一场一变，快照一份会让第 2 场还用第 1 场的低语）。
+     * 自由模式 / 直接单场没有一局 ⇒ `undefined` = **纯净**（与今天一致）。
+     */
+    const run = d.getRun?.();
+    const whisper = run === undefined ? undefined : whisperForRun(run);
     const registry = d.registryFor(playerId);
     const bindings = bindingsForPlayer(d.getBindings(), playerId);
     /**
@@ -262,7 +273,21 @@ export function createStartBattle(d: StartBattleDeps): () => BattleLoop {
          * 名字与血上限都由 `makePlayer(id)` 按角色取值（林晚风 150 /
          * 凯丽 120），见 `data/units.ts` 的 `PLAYER_HP_BY_ID`。
          */
-        combatants: [makePlayer(playerId, { kit }), makeBoss(bossId, { noAi: d.noAi })],
+        combatants: (() => {
+          /**
+           * ⚠️ `enrage` 只有**肉鸽**才裁：「狂暴」是抽到才有的低语，
+           * 第 1 层一定没有；自由模式不传 ⇒ 保留内容里写的（基线不动）。
+           */
+          const withWhisper = whisperCombatants({
+            player: makePlayer(playerId, { kit }),
+            boss: makeBoss(bossId, {
+              noAi: d.noAi,
+              ...(run === undefined ? {} : { enrage: whisper?.apply.kind === 'bossEnrage' }),
+            }),
+            whisper,
+          });
+          return [withWhisper.player, withWhisper.boss];
+        })(),
         /**
          * **一场战斗的种子**（见 `battleSeedOf`）：
          *   - 肉鸽 → `battleSeed(runSeed, position)`（每场独立，§7.1）

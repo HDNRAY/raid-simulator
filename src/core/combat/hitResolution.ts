@@ -43,7 +43,7 @@ import type {
 import { aggregateFlags, applyBuff } from '../buffs';
 import { runAbilities, runTriggers } from './triggers';
 import { absorbedByOf, withAbsorbedByBuffId } from './avoidedSource';
-import { casterGainsDouqiFromDamage } from './holds';
+import { casterGainsDouqiFromDamage, gainsDouqiOnHitTaken } from './holds';
 import {
   actsOnVictim, absorbShieldDamage, firePostHitHooks, applyStunEffect,
   applyThornReflect, transferResources,
@@ -375,7 +375,13 @@ export function resolveHit(
             if (casterGainsDouqiFromDamage(skill)) {
               ctx.gainDouqiFromDamage(actor.id, result.amount, ctx.state.tick);
             }
-            ctx.gainDouqiFromDamage(target.id, result.amount, ctx.state.tick);
+            /**
+             * ⚠️ 「恶魔低语」的**挨打不回缠**：承受方那一半的规则与
+             * 施放方那条并排放在 `holds.ts`（`gainsDouqiOnHitTaken`）。
+             */
+            if (gainsDouqiOnHitTaken(victimFlags)) {
+              ctx.gainDouqiFromDamage(target.id, result.amount, ctx.state.tick);
+            }
           }
           break;
         }

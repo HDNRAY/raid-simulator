@@ -28,7 +28,7 @@
  * 建 / 释放战斗循环）—— 它要碰场景与存储，所以只做接线、不再判一次。
  */
 
-import { BOSS_POOL, BOSS_ROSTER, findEntry, resolveBossId, resolvePlayerId } from '../data/roster';
+import { BOSS_POOL, resolveBossId, resolvePlayerId } from '../data/roster';
 import { ALL_QIJI, qijiById } from '../data/qiji';
 import { buildPlayerKit, type PlayerKit } from '../data/kit';
 import type { QijiEntity } from '../core/types/qiji';
@@ -41,6 +41,7 @@ import { switchPlayerProfile } from './playerKeys';
 import { phaseFromEscape, phaseAfterAdvance, RUN_BATTLE_ENTRY, RUN_BATTLE_ENTRY_AFTER_QIJI, screenVisibilityOf } from './phaseLogic';
 import type { Phase, ShiftTarget } from './phaseLogic';
 import type { BattleLoop } from './battleLoop';
+import { runConfirmInfoOf, type RunConfirmInfo } from './runScreenInfo';
 import type { GameState } from './flow';
 import type { ContentRegistry } from '../core/content/registry';
 import type { SettingsStore } from './settingsStore';
@@ -172,6 +173,15 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
      * 空数组 = 第一场之前（那一行整块不画）。
      */
     readonly qiji: readonly { readonly id: string; readonly nameKey: string }[];
+    /**
+     * **这一层的「恶魔低语」**（2026-10-16）。
+     *
+     * ⚠️ 给 `undefined` 有两种情况，界面要用**同一种**画法（那一行右侧写
+     * 「本层纯净」）：第 1 层，或者没有进行中的一局（理论上到不了）。
+     */
+    readonly whisper:
+      | { readonly id: string; readonly nameKey: string; readonly descKey: string }
+      | undefined;
   };
   /**
    * **确认屏的「开始战斗」**：真的开这一场（`enterBattle` 的唯一肉鸽入口
@@ -561,45 +571,11 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
   };
 
   /**
-   * **确认屏要显示的内容**（2026-10-15）—— 纯读取，不改任何状态。
-   *
-   * ⚠️ `position` / `length` 与 `runSummary` 同一条口径（夹回 `1..length`）：
-   * `RunState.position` 在"通关"那一刻是 `len + 1`（见 `core/run/lifecycle.ts`），
-   * 虽然确认屏只在**一局还没结束时**出现，但这一层不该指望"调用点保证它
-   * 没结束" —— 夹一次的成本是零，而漏一次会显示"第 3 / 2 场"。
+   * **确认屏要显示的内容** —— 纯读取，实现在 `./runScreenInfo.ts`
+   * （2026-10-16 从本文件搬出去：本文件撞到 700 行上限，按
+   * `AGENTS.md` §3e「倾向于拆 util 方法」而不是压注释）。
    */
-  const runConfirmInfo = (): {
-    readonly position: number;
-    readonly length: number;
-    readonly boss: { readonly id: string; readonly nameKey: string };
-    readonly qiji: readonly { readonly id: string; readonly nameKey: string }[];
-  } => {
-    const run = runSession.state();
-    /**
-     * ⚠️ 没有进行中的一局 / 这一场没有对手：给一份**能读的**零值，而不是崩
-     * （对手那一行的名字用空串 —— 界面拿到的名字 key 取不到时会落回 id，
-     * 见 `data/roster.ts` 的兜底口径）。
-     */
-    const bossId = run === undefined ? undefined : runSession.bossId();
-    const bossEntry = bossId === undefined ? undefined : findEntry(BOSS_ROSTER, bossId);
-    const boss = { id: bossId ?? '', nameKey: bossEntry?.nameKey ?? bossId ?? '' };
-    if (run === undefined) return { position: 0, length: 0, boss, qiji: [] };
-
-    const length = runLengthOf(run);
-    const position = Math.min(Math.max(run.position, 1), Math.max(length, 1));
-    /**
-     * ⚠️ 炁机那一行给的是**本局已选的全部**（`RunState.chosen`，按选的先后）
-     * —— 块头照实写"已激活 N 条：A、B"（与备战屏**同一个** `foldSummaryOf`），
-     * 而右侧详情画**最后一条**（见 `ui/prepareDetail.runConfirmDetailTarget`）。
-     * 第一场之前 `chosen` 是空的 → 空数组（界面**整行不画**）。
-     */
-    const qiji = run.chosen.flatMap((choice) => {
-      /** ⚠️ 走 `qijiById`（内容表自己的 id→定义 查找）—— 与 `activeQiji()` 同一处口径。 */
-      const def = qijiById(choice.qijiId);
-      return def === undefined ? [] : [{ id: def.id, nameKey: def.nameKey ?? def.id }];
-    });
-    return { position, length, boss, qiji };
-  };
+  const runConfirmInfo = (): RunConfirmInfo => runConfirmInfoOf({ runSession });
 
   /**
    * **确认屏的「开始战斗」**：真的开这一场。

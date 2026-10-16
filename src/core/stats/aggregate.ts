@@ -94,6 +94,14 @@ export const STAT_RULES: Record<StatKey, StatRule> = {
   hpRegen: { combine: 'sum', kind: 'accumulator' },
   energyRegen: { combine: 'sum', kind: 'accumulator' },
   douqiRegen: { combine: 'sum', kind: 'accumulator' },
+  /**
+   * **炁回复倍率**（基准 1，乘算）——「恶魔低语」的"回炁变慢 80%"。
+   *
+   * ⚠️ `mult` 贡献按 ∏ 累积，所以内容是
+   * `{ stat: 'energyRegenScale', op: 'mult', value: 0.8 }` ⇒ 0.8 ✓。
+   * 上限放到 2 是给"回炁加速"留位置（现在没有消费者）。
+   */
+  energyRegenScale: { combine: 'sum', kind: 'multiplier', clamp: [0, 2], percent: true },
 
   /* ---- 次级属性 ---- */
   /** 暴击率上限 100% —— 超过没有意义，且会让"必定暴击"的判定变得含糊 */

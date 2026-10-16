@@ -227,6 +227,23 @@ export function behaviorsFor(id: string): readonly Behavior[] {
 }
 
 /**
+ * **按这一场的选项裁过的**行为表（`makeBoss` 用它）。
+ *
+ * 两处裁剪，都与"谁决定"有关：
+ *   - `noAi`：截图 / 调试用，清空全部行为（理由见 `makeBoss` 的注释）
+ *   - `enrage === false`：**只**裁掉 `kind: 'enrage'` —— 那是「恶魔低语」
+ *     的「狂暴」，一局里抽到才有（第 1 层一定没有）
+ */
+function behaviorsForBattle(
+  id: string,
+  options?: { readonly noAi?: boolean; readonly enrage?: boolean },
+): readonly Behavior[] {
+  if (options?.noAi === true) return [];
+  const all = behaviorsFor(id);
+  return options?.enrage === false ? all.filter((b) => b.kind !== 'enrage') : all;
+}
+
+/**
  * @param options.noAi 清空全部行为 —— **截图/调试用**。
  *
  *   ⚠️ 为什么需要它：Boss 的轮转会不停打玩家，几秒内就死，于是"等某个
@@ -240,7 +257,23 @@ export function behaviorsFor(id: string): readonly Behavior[] {
  *   ⚠️ 用**参数**而不是在函数里读 `location.search`：本文件会被 Node 侧
  *   的单测 import，而那里没有 `location` —— 读它会让测试**直接崩**。
  */
-export function makeBoss(id: string, options?: { readonly noAi?: boolean }): Combatant {
+export function makeBoss(
+  id: string,
+  options?: {
+    readonly noAi?: boolean;
+    /**
+     * **这一场要不要「狂暴」**（`undefined` = 保留内容里写的，2026-10-16）。
+     *
+     * ⚠️ 这是「恶魔低语」里那条 `kind: 'bossEnrage'` 的落点：一局肉鸽
+     * **每一层抽一条**惩罚，抽到「狂暴」才有 —— 第 1 层一定没有。
+     *
+     * ⚠️ 不传（自由模式 / 直接单场 / 黄金夹具）⇒ 与今天**逐位一致**，
+     * 所以基线不动。判据：`enrage === false` 时只裁 `kind: 'enrage'`
+     * 那一条，别的一律不动。
+     */
+    readonly enrage?: boolean;
+  },
+): Combatant {
   return {
     id,
     nameKey: findEntry(BOSS_ROSTER, id)?.nameKey ?? 'boss.name',
@@ -253,7 +286,7 @@ export function makeBoss(id: string, options?: { readonly noAi?: boolean }): Com
     cooldowns: {},
     casts: [],
     uses: {},
-    behaviors: options?.noAi === true ? [] : behaviorsFor(id),
+    behaviors: behaviorsForBattle(id, options),
     alive: true,
     /**
      * ⚠️ **固有 buff**（常驻被动）在构造时就挂上。

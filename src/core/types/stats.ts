@@ -20,6 +20,15 @@ export type StatKey =
   | 'hpRegen'
   | 'energyRegen'
   | 'douqiRegen'
+  /**
+   * **炁回复的倍率**（基准 1；「恶魔低语」的"回炁变慢"用它，2026-10-16）。
+   *
+   * ⚠️ 与 `energyRegen`（每秒**加多少**）不同：这是**乘在回复上的比例**。
+   * 引擎读它的地方是 `core/combat/energyRhythm.ts` —— 而且是**整数节奏**
+   * （每 N 个逻辑步跳过 1 步）而不是直接乘：资源是整数，直接乘会被
+   * `Math.round` / `Math.floor` 吃掉（见那个文件的说明）。
+   */
+  | 'energyRegenScale'
   // 次级属性
   | 'critChance'
   | 'critDamage'

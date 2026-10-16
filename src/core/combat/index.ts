@@ -36,6 +36,7 @@ import type {
 import { aggregateFlags, applyBuff } from '../buffs';
 import { LOGIC_TICKS_PER_SECOND, TICKS_PER_LOGIC_TICK } from '../loopConstants';
 import { ENERGY_PER_LOGIC_TICK } from '../../data/balance';
+import { skipEnergyRegenStep } from './energyRhythm';
 
 /** 结算环境：引擎把内容定义与属性查询注入进来。 */
 export interface CombatContext {
@@ -494,8 +495,25 @@ export function regenerate(
 
   if (tick % TICKS_PER_LOGIC_TICK !== 0) return { combatant: current, events };
 
+  /**
+   * ⚠️ **这一步要不要跳过回炁**（「恶魔低语」的"回炁变慢"，2026-10-16）。
+   *
+   * `energyRegenScale < 1` 时按**整数节奏**跳步（0.8 ⇒ 每 5 步跳 1 步
+   * ⇒ 8/秒）。⚠️ 不能直接乘 0.8，也**不能**走 `energyRegen` 属性 ——
+   * 两条路都会被取整吃掉（一个照样 +1、一个变成 0），
+   * 完整理由与那张表在 `./energyRhythm.ts`。
+   *
+   * ⚠️ 跳的是**整个炁回复**（下面的固定回复**和**属性回复），
+   * 而不是其中一半 —— "回炁速度"只有一条口径。
+   */
+  const energyScale = stats.energyRegenScale ?? 1;
+  const skipEnergy = skipEnergyRegenStep({
+    step: tick / TICKS_PER_LOGIC_TICK,
+    scale: energyScale,
+  });
+
   // 缠：固定每逻辑步回复（不再受精神加成影响 —— 刻度太小，加法会失真）
-  if (ENERGY_PER_LOGIC_TICK > 0) {
+  if (ENERGY_PER_LOGIC_TICK > 0 && !skipEnergy) {
     const result = changeResource(current, 'energy', ENERGY_PER_LOGIC_TICK, tick);
     current = result.combatant;
     events.push(...result.events);
@@ -528,7 +546,7 @@ export function regenerate(
    *   （`REPLAY_FORMAT_VERSION` 的账）。
    */
   const energyPerLogicTick = Math.floor((stats.energyRegen ?? 0) / LOGIC_TICKS_PER_SECOND);
-  if (energyPerLogicTick > 0) {
+  if (energyPerLogicTick > 0 && !skipEnergy) {
     const result = changeResource(current, 'energy', energyPerLogicTick, tick);
     current = result.combatant;
     events.push(...result.events);
