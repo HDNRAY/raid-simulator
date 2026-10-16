@@ -64,6 +64,7 @@ import {
   LIN_WANFENG_SKILLS,
 } from './kits/linwanfeng';
 import { PENDING_SKILLS } from './kits/reserved';
+import { WHISPER_BUFFS, WHISPER_SKILLS } from './whispers';
 import { FOCUS_BUFF } from './kits/shared';
 export {
   /**
@@ -332,7 +333,18 @@ export const ALL_SKILLS: readonly SkillDef[] = [
   ...PENDING_SKILLS.map((p) => p.skill),
   /** ⚠️ 三个 Boss 的技能都由 `bossDefs` 聚合（**只有一处**，见那个文件头）。 */
   ...BOSS_SKILLS,
+  /**
+   * ⚠️ **「恶魔低语」自己的技能**（2026-10-16）—— 它不属于任何角色、
+   * 也不属于某个 Boss 的常规表：**抽到那条低语的 Boss 才会用它**
+   * （行为表在 `data/whispers.ts`，落点在 `data/whispers` + `app/deps`）。
+   */
+  ...WHISPER_SKILLS,
 ];
+
+/** 「恶魔低语」自己带的那几条技能 id（`app/deps` 的装配要按它筛）。 */
+export const WHISPER_SKILL_IDS: ReadonlySet<string> = new Set(
+  WHISPER_SKILLS.map((s) => s.id),
+);
 
 /** 玩家技能里"某个角色带哪一套"的**定义**（不含「击」那种派生技）。 */
 export const PLAYER_KITS: Readonly<Record<string, readonly SkillDef[]>> = {
@@ -414,4 +426,6 @@ export const ALL_BUFFS: readonly BuffDef[] = [
    * `docs/specs/2026-10-12-player-kits.md`。
    */
   COMBO_WINDOW,
+  /** ⚠️ 「恶魔低语」自己带的 buff（与技能同一条理由：抽到才用，但必须注册）。 */
+  ...WHISPER_BUFFS,
 ];

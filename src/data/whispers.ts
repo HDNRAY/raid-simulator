@@ -33,12 +33,15 @@
 
 import {
   WHISPER_ENERGY_REGEN_SCALE,
+  WHISPER_MEND_HEAL,
   WHISPER_FLAT_REDUCE,
   WHISPER_FLAT_REDUCE_FLOOR,
 } from './balance';
-import type { BuffDef } from '../core/types';
+import { logicMs } from '../core/loopConstants';
+import { BOSS_TELEGRAPH } from './bossShared';
+import type { ActiveSkillDef, Behavior, BuffDef, SkillDef } from '../core/types';
 
-export const WHISPER_IDS = ['enrage', 'blunt', 'slowBreath', 'cutDouqi'] as const;
+export const WHISPER_IDS = ['enrage', 'blunt', 'slowBreath', 'cutDouqi', 'mend'] as const;
 
 export type WhisperId = (typeof WHISPER_IDS)[number];
 
@@ -61,7 +64,16 @@ export interface WhisperDef {
     /** 挂给 **Boss** 的光环（玩家打出来的伤害会受影响）。 */
     | { readonly kind: 'bossBuff'; readonly buff: BuffDef }
     /** 挂给 **玩家** 的光环（防御预算 / 资源曲线受影响）。 */
-    | { readonly kind: 'playerBuff'; readonly buff: BuffDef };
+    | { readonly kind: 'playerBuff'; readonly buff: BuffDef }
+    /**
+     * 给 **Boss 的行为表**追加一条（"这一层它多会一件事"）。
+     *
+     * ⚠️ 这是唯一能让 Boss **多学一招**的路：`grantSkill` 那类能力**还没实现**
+     * （见 `core/content/capabilityAudit.ts`），所以"让它在某一层学会读条回血"
+     * 只能靠**行为表 + 一条已经注册好的技能**（技能本身在 `WHISPER_SKILLS` 里，
+     * 与"哪个 Boss 的常规表"无关 —— 抽到这条低语的 Boss 才会用它）。
+     */
+    | { readonly kind: 'bossBehavior'; readonly behaviors: readonly Behavior[] };
 }
 
 /* ------------------------------------------------------------------ *
@@ -133,6 +145,67 @@ export const WHISPER_CUT_DOUQI: BuffDef = {
 };
 
 /* ------------------------------------------------------------------ *
+ * 「自愈」：周期性读条回血（**可打断**）
+ * ------------------------------------------------------------------ */
+
+/**
+ * 这一条读条有多长（逻辑步）—— **2.0 秒**。
+ *
+ * 判据（用户对这条的原话是"回血读条"）：读条必须**长到来得及反应**，
+ * 否则"可打断"是一句空话。2 秒与「敛财」同量级（那条也是 2 秒、也可打断）。
+ */
+const WHISPER_MEND_CAST = logicMs(20);
+
+/** 两次「自愈」之间 **9 秒**（一场里大概放 3~5 次，够玩家决定要不要留打断）。 */
+const WHISPER_MEND_COOLDOWN = logicMs(90);
+
+/**
+ * 读条标记（`BOSS_TELEGRAPH` 的一份拷贝，**时长 = 这一招的 `castTime`**）。
+ *
+ * ⚠️ 与各 Boss 文件里那个本地 `tel()`/`telegraphFor()` 同一条约定：
+ * 玩家靠它**看见**它在读条（同时也是"可以打断"的提示）。
+ */
+export const WHISPER_MEND_TELEGRAPH: BuffDef = {
+  ...BOSS_TELEGRAPH,
+  id: 'whisper-mend-telegraph',
+  duration: WHISPER_MEND_CAST,
+};
+
+/**
+ * 「自愈」——**周期性、可打断**的回血读条。
+ *
+ * ⚠️ 结算在 `castFinish`（`resource` 不带 `on` 就是这个语义）⇒
+ * **打断它就一点血都不回**。这正是这条低语的全部内容：
+ * "把打断留给它"（与「敛财」同族：那条是叠增伤、这条是回血）。
+ *
+ * ⚠️ `hits: []`：它**不造成伤害** ⇒ 顺带绕开了"急速会让 `hits[].at`
+ * 落在读条之外"那个坑（见 `core/combat/castPipeline.ts` 的说明）。
+ */
+export const WHISPER_MEND: ActiveSkillDef = {
+  id: 'whisper-mend',
+  kind: 'activeSkill',
+  nameKey: 'whisper.mend.name',
+  descKey: 'whisper.mend.skillDesc',
+  icon: 'boss_armor',
+  abilities: [
+    { kind: 'grant', on: 'castStart', target: { mode: 'self' }, buff: WHISPER_MEND_TELEGRAPH },
+    { kind: 'resource', resource: 'hp', delta: WHISPER_MEND_HEAL, target: { mode: 'self' } },
+  ],
+  castTime: WHISPER_MEND_CAST,
+  cooldown: WHISPER_MEND_COOLDOWN,
+  cost: [],
+  hits: [],
+  targeting: { mode: 'primaryEnemy' },
+  tags: ['spell'],
+  interruptible: true,
+};
+
+/** 「自愈」的行为：**CD 一好就出**（不看轮转 —— 它是"这一层多出来的事"）。 */
+const WHISPER_MEND_BEHAVIOR: readonly Behavior[] = [
+  { kind: 'onCooldown', skillId: WHISPER_MEND.id },
+];
+
+/* ------------------------------------------------------------------ *
  * 池子
  * ------------------------------------------------------------------ */
 
@@ -165,6 +238,34 @@ export const WHISPER_POOL: readonly WhisperDef[] = [
     descKey: 'whisper.cutDouqi.desc',
     apply: { kind: 'playerBuff', buff: WHISPER_CUT_DOUQI },
   },
+  {
+    id: 'mend',
+    nameKey: 'whisper.mend.name',
+    descKey: 'whisper.mend.desc',
+    apply: { kind: 'bossBehavior', behaviors: WHISPER_MEND_BEHAVIOR },
+  },
+];
+
+/**
+ * 低语自己带的技能（**给战斗注册表用**）。
+ *
+ * ⚠️ 必须在每一局战斗的注册表里：Boss 的行为表按 id 引用它，而"引擎不
+ * 认识这个 id"的症状是**静默的**（每 9 秒一次 `skillRejected`，画面上
+ * 什么都看不到）。落点在 `app/deps.ts` 的 `registryFor`。
+ */
+export const WHISPER_SKILLS: readonly SkillDef[] = [WHISPER_MEND];
+
+/**
+ * 低语自己带的 buff（**给内容注册表用**）。
+ *
+ * ⚠️ 逐条列出（与 `ALL_BUFFS` 里那份"看得见谁注册了"的清单同一条理由）：
+ * 漏注册的后果是"引擎认识、校验器看不见"。
+ */
+export const WHISPER_BUFFS: readonly BuffDef[] = [
+  WHISPER_BLUNT,
+  WHISPER_SLOW_BREATH,
+  WHISPER_CUT_DOUQI,
+  WHISPER_MEND_TELEGRAPH,
 ];
 
 /** 按 id 找一条；找不到给 `undefined`（调用方回落"没有低语"）。 */

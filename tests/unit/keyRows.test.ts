@@ -30,6 +30,7 @@ import {
   PENDING_SKILLS,
   PLAYER_SKILL_IDS,
   PLAYER_SKILLS,
+  WHISPER_SKILL_IDS,
 } from '../../src/data/content';
 import type { ActiveSkillDef } from '../../src/core/types';
 import { LUST_SKILLS } from '../../src/data/lustBoss';
@@ -149,7 +150,7 @@ describe('按键设置只列玩家技能', () => {
    * 之后多出第三个桶（`PENDING_SKILLS`：「破」，黛玄的、还没接线）。
    * 所以期望值显式列出它，而不是把它当成"多出来的那个"忽略掉。
    */
-  it('ALL_SKILLS 减去玩家技能 = 七个 Boss 的技能 + 待接线技能', () => {
+  it('ALL_SKILLS 减去玩家技能 = 七个 Boss 的技能 + 待接线技能 + 低语技能', () => {
     const nonPlayer = ALL_SKILLS.filter((s) => !PLAYER_SKILL_IDS.has(s.id)).map((s) => s.id);
     const expected = [
       ...LUST_SKILLS,
@@ -160,6 +161,12 @@ describe('按键设置只列玩家技能', () => {
       ...GLUTTONY_SKILLS,
       ...WRATH_SKILLS,
       ...PENDING_SKILLS.map((p) => p.skill),
+      /**
+       * ⚠️ **2026-10-16：第四个桶**（「恶魔低语」的技能：「自愈」读条）。
+       * 它不属于任何角色、也不属于某个 Boss 的常规表 —— 只有抽到那条低语的
+       * Boss 才会用它（行为表在 `data/whispers.ts`）。
+       */
+      ...ALL_SKILLS.filter((s) => WHISPER_SKILL_IDS.has(s.id)),
     ].map((s) => s.id);
 
     expect([...nonPlayer].sort()).toEqual([...expected].sort());

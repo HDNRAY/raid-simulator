@@ -17,6 +17,7 @@ import {
   ALL_SKILLS,
   BOSS_SKILL_IDS,
   DERIVED_SKILL_IDS,
+  WHISPER_SKILL_IDS,
   skillsForPlayer,
 } from '../data/content';
 import { DEFAULT_PLAYER_ID, resolvePlayerId } from '../data/roster';
@@ -162,6 +163,12 @@ export function createGameDeps(): GameDeps {
         ...ALL_SKILLS.filter((s) => loadoutIds.has(s.id)),
         ...ALL_SKILLS.filter((s) => DERIVED_SKILL_IDS.has(s.id)),
         ...ALL_SKILLS.filter((s) => BOSS_SKILL_IDS.has(s.id)),
+        /**
+         * ⚠️ **「恶魔低语」的技能**（2026-10-16）：Boss 的行为表在抽到那条
+         * 低语时按 id 引用它（「自愈」读条）。**不在**这个 bundle 里的后果是
+         * 静默的：每 9 秒一次 `skillRejected`，画面上什么都看不到。
+         */
+        ...ALL_SKILLS.filter((s) => WHISPER_SKILL_IDS.has(s.id)),
       ],
       buffs: [...ALL_BUFFS],
     };

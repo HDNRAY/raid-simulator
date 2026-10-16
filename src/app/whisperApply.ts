@@ -59,6 +59,17 @@ export function whisperCombatants(args: {
   if (apply.kind === 'playerBuff') {
     return { player: withBuff(args.player, apply.buff), boss: args.boss };
   }
+  if (apply.kind === 'bossBehavior') {
+    /**
+     * ⚠️ **给 Boss 追加行为**（不是 buff）：`grantSkill` 那类能力还没实现，
+     * 所以"这一层它多会一招"只能落在行为表上 —— 技能本身由
+     * `data/whispers.ts` 提供，注册在每一局的 bundle 里（`app/deps.ts`）。
+     */
+    return {
+      player: args.player,
+      boss: { ...args.boss, behaviors: [...args.boss.behaviors, ...apply.behaviors] },
+    };
+  }
   return { player: args.player, boss: args.boss };
 }
 

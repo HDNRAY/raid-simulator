@@ -119,6 +119,17 @@ const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
   sunder: 'debuff.sunder.name',
   'boss-enrage': 'buffShort.enrage',
   /**
+   * ⚠️ **「恶魔低语」的三条常驻光环**（2026-10-16）：它们会一直挂在玩家 /
+   * Boss 的增益或减益行上，所以必须有短标签 —— 否则玩家看到的是一个「？」，
+   * 而"我的伤害为什么变低了"就没法从画面上回答。
+   *
+   * 名字**复用低语自己的**（`whisper.*.name`：钝击 / 迟炁 / 断缠）：
+   * 同一件事在确认屏与战斗里该叫同一个名字。
+   */
+  'whisper-blunt': 'whisper.blunt.name',
+  'whisper-slow-breath': 'whisper.slowBreath.name',
+  'whisper-cut-douqi': 'whisper.cutDouqi.name',
+  /**
    * ⚠️ **引擎现造的 buff**（不在 `ALL_BUFFS` 里，见上面的说明）：
    * 「狂暴开始」那一刻挂上的，显示名沿用同一个「狂暴」。
    */

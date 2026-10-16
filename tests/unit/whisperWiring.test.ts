@@ -55,6 +55,19 @@ describe('「恶魔低语」· 挂在谁身上', () => {
     }
   });
 
+  it('`bossBehavior` ⇒ 给 **Boss 的行为表**追加一条（玩家那一侧不动）', () => {
+    const whisper = WHISPER_POOL.find((w) => w.id === 'mend');
+    const out = whisperCombatants({ player, boss, whisper });
+    const applied = whisper?.apply;
+    const wanted = applied?.kind === 'bossBehavior' ? applied.behaviors : [];
+    expect(wanted.length, '这一条低语该带一条行为').toBeGreaterThan(0);
+    for (const behavior of wanted) {
+      expect(out.boss.behaviors).toContain(behavior);
+    }
+    expect(out.boss.behaviors.length).toBe(boss.behaviors.length + wanted.length);
+    expect(out.player.behaviors.length).toBe(player.behaviors.length);
+  });
+
   it('「狂暴」不在 buff 那一层（它由 `makeBoss` 的行为裁剪负责）', () => {
     const whisper = WHISPER_POOL.find((w) => w.id === 'enrage');
     const out = whisperCombatants({ player, boss, whisper });
