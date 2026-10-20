@@ -555,10 +555,11 @@ const QIJI_CHONGJI: QijiEntity = {
   icon: 'char_attack',
   category: 'offense',
   rarity: 'rare',
+  /** ⚠️ 2026-10-20 用户："劈 5次 就解锁"（原来 30 —— 太靠后）。 */
   unlock: {
     kind: 'statAtLeast',
     stat: { s: 'skillUses', skillId: PI.id, scope: 'run' },
-    value: 30,
+    value: 5,
   },
   abilities: [],
   skillTweak: {
