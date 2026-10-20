@@ -5,6 +5,7 @@ import { createRegistry } from '../../src/core/content/registry';
 import { applyBuff } from '../../src/core/buffs';
 import { ALL_BUFFS, ALL_SKILLS } from '../../src/data/content';
 import {
+  WRATH_BUFFS,
   WRATH_BEHAVIORS,
   WRATH_FURY,
   WRATH_MAX_RAGE,
@@ -213,16 +214,27 @@ describe('「泄怒」：伤害**按层数加成**', () => {
       : undefined;
     expect(step, '「泄怒」必须在轮转里').toBeDefined();
     /**
-     * ⚠️ 2026-10-20：二阶段把这一条扩成了 `any[层数≥4, 二阶段+血量≤40%]`
-     * （"它随时可以泄怒"）—— 所以这里钉"**层数门槛仍在**"，而不是"`when`
-     * 必须正好是那一句"。
+     * ⚠️ 2026-10-20：**二阶段改在「怒火清零」那一条**（`notHasBuff(wrath-phase2)`），
+     * 轮转这一步仍然是原版的"层数 ≥ 4"—— 所以这里钉回原样。
      */
-    const when = step?.when;
-    expect(when, '而且要带条件').toBeDefined();
-    const flat = JSON.stringify(when);
-    expect(flat, '层数门槛必须还在（4 层）').toContain(String(4));
-    expect(flat).toContain(WRATH_RAGE.id);
-    expect(flat, '二阶段那一支也在').toContain('whisper-phase2');
+    expect(step?.when, '而且要带层数门槛').toMatchObject({
+      kind: 'buffStacks',
+      buffId: WRATH_RAGE.id,
+      minStacks: 4,
+    });
+  });
+
+  it('二阶段：**「怒火」不再清零**（清零那一条挂在 `wrath-phase2` 的反面）', () => {
+    const rage = WRATH_BUFFS.find((b) => b.id === WRATH_RAGE.id);
+    const clearTrigger = rage?.triggers?.find((trigger) =>
+      (trigger.then ?? []).some((ability) => ability.kind === 'removeBuff'),
+    );
+    const clear = (clearTrigger?.then ?? []).find((ability) => ability.kind === 'removeBuff');
+    expect(clear, '一阶段该有"清零"那一条').toBeDefined();
+    expect(clear?.when, '它要守着二阶段的门禁').toMatchObject({
+      kind: 'notHasBuff',
+      buffId: 'wrath-phase2',
+    });
   });
 
   it('它**不消耗**层数（清层是「暴怒」形态的事）', () => {

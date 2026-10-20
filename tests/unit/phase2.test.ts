@@ -47,11 +47,9 @@ describe('「恶魔低语」· 二阶段（池子与开关）', () => {
   it('**7 个 Boss 都写了 40% 的开关**，而且能力全守在 `PHASE2_GATE` 后面', () => {
     for (const entry of BOSS_POOL) {
       /**
-       * ⚠️ **暴怒是例外**：它的二阶段做在**轮转的条件**里（"随时可以泄怒"），
-       * 不在 `onHpBelow` 上 —— 见 `wrathBoss.ts` 里那条注释（原设计"怒火
-       * 不清零"会踩到急速/命中的 bug，先换成这个方向）。
+       * ⚠️ 7 个 Boss **全都**在 `onHpBelow` 上开二阶段（2026-10-20 起）。
+       * 暴怒额外把"怒火清零"那一条也加了 `notHasBuff(wrath-phase2)`。
        */
-      if (entry.id === 'wrath') continue;
       const boss = makeBoss(entry.id);
       const switchBehavior = boss.behaviors.find((b) => b.kind === 'onHpBelow');
       expect(switchBehavior, `${entry.id} 缺二阶段开关`).toBeDefined();

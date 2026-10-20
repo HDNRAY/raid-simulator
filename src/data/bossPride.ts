@@ -395,14 +395,18 @@ export const PRIDE_SKILLS: readonly SkillDef[] = [BOSS_SCORN, BOSS_REBUKE, BOSS_
 
 /** 「傲慢」用到的 buff。 */
 /**
- * **傲慢·二阶段「狂傲」**：**霸体**（`interruptImmune`）—— 它的招打不断了。
+ * **傲慢·二阶段「狂傲」**：**前摇缩短 + 霸体**（原设计，2026-10-20 补全）。
  *
- * ⚠️ 原设计是"前摇缩短 + 霸体"。**前摇缩短这次没做**：唯一能缩短读条的
- * 是 `haste`，而 `haste > 0` 会让 `hits[].at === castTime` 的招式**永远
- * 结算不到**（`castPipeline.advanceCasts` 的 `castDone && hit.at <= elapsed`
- * —— 读条被缩短之后 `at` 落在读条之外，那一击被静默丢掉）。修它要动
- * `advanceCasts`，并且会让「贪婪」「暴怒」的高急速阶段**从"打不出伤害"
- * 变成"打得出来"**（平衡与黄金基线都会动）⇒ 等用户拍板，先只上霸体。
+ * - **霸体**：`interruptImmune` —— 它的招打不断
+ * - **前摇缩短**：`haste +0.25` ⇒ 读条与冷却 ×0.75（2.0 秒的刀变 1.5 秒）
+ *
+ * ⚠️ 这条曾经做不了：`haste > 0` 会让 `hits[].at === castTime` 的招式
+ * **永远结算不到**（`castPipeline.advanceCasts` 的命中判据只看
+ * `hit.at <= elapsedMs`）。**2026-10-20 那个 bug 修好了**（读条一结束，
+ * 凡"排在这段读条之内"的命中都算到期），所以这里可以放心给急速。
+ *
+ * ⚠️ **与「卸」的阈值别混**：急速缩短的是读条，不是伤害 —— 玩家该留的
+ * 反应时间变短，但每一刀的数值不变。
  */
 export const PRIDE_PHASE2: BuffDef = {
   id: 'pride-phase2',
@@ -414,6 +418,10 @@ export const PRIDE_PHASE2: BuffDef = {
   maxStacks: 1,
   stacking: { mode: 'refresh' },
   flags: { interruptImmune: true },
+  modifiers: [
+    /** 前摇 −25%（读条与冷却都走 `haste`，见 `castPipeline.hastedCastTime`）。 */
+    { stat: 'haste', op: 'add', value: 0.25, sourceKey: 'phase2.pride.name' },
+  ],
 };
 
 export const PRIDE_BUFFS: readonly BuffDef[] = [

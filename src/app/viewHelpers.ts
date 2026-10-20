@@ -134,6 +134,7 @@ const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
   'greed-phase2': 'phase2.greed.name',
   'lust-phase2': 'phase2.lust.name',
   'jealousy-phase2': 'phase2.jealousy.name',
+  'wrath-phase2': 'phase2.wrath.name',
   /**
    * ⚠️ **引擎现造的 buff**（不在 `ALL_BUFFS` 里，见上面的说明）：
    * 「狂暴开始」那一刻挂上的，显示名沿用同一个「狂暴」。

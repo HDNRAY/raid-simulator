@@ -115,7 +115,16 @@ export const WRATH_RAGE: BuffDef = {
       when: { kind: 'buffStacks', who: 'self', buffId: 'wrath-rage', minStacks: WRATH_MAX_RAGE },
       then: [
         { kind: 'grant', target: { mode: 'self' }, buff: WRATH_FURY },
-        { kind: 'removeBuff', target: { mode: 'self' }, buffId: 'wrath-rage' },
+        /**
+         * ⚠️ **二阶段不再清零**（`wrath-phase2` 在 ⇒ 这一条跳过）：
+         * 「暴怒形态」照发，但怒火留在 8 层。
+         */
+        {
+          kind: 'removeBuff',
+          target: { mode: 'self' },
+          buffId: 'wrath-rage',
+          when: { kind: 'notHasBuff', who: 'self', buffId: 'wrath-phase2' },
+        },
       ],
     },
   ],
@@ -299,7 +308,30 @@ export const WRATH_VENT: ActiveSkillDef = {
 
 export const WRATH_SKILLS: readonly SkillDef[] = [WRATH_SMASH, WRATH_SWEEP, WRATH_VENT];
 
+/**
+ * **暴怒·二阶段「暴走」**：**「怒火」不再清零**（2026-10-20 恢复原设计）。
+ *
+ * 一阶段：满 8 层 → 发「暴怒形态」+ **把怒火清零**（可再攒）。
+ * 二阶段：**清零那一条被跳过** ⇒ 层数停在 8（×1.85 伤害 + `haste 0.4`）。
+ *
+ * ⚠️ 这条曾经不敢做：`haste > 0` 会让 `hits[].at === castTime` 的招式
+ * **永远结算不到** ⇒ 常驻 8 层 = 常驻 0.4 急速 = **打不出伤害的木桩** ✗。
+ * 2026-10-20 那个 bug 修好了，于是这条设计**终于**能按原样成立。
+ */
+export const WRATH_PHASE2: BuffDef = {
+  id: 'wrath-phase2',
+  nameKey: 'phase2.wrath.name',
+  icon: 'char_attack',
+  polarity: 'buff',
+  color: 0xe08a2a,
+  hidden: true,
+  duration: Number.POSITIVE_INFINITY,
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+};
+
 export const WRATH_BUFFS: readonly BuffDef[] = [
+  WRATH_PHASE2,
   WRATH_RAGE,
   WRATH_FURY,
   WRATH_RAGE_PASSIVE,
@@ -317,40 +349,22 @@ export const WRATH_BUFFS: readonly BuffDef[] = [
  * 玩家才会把"我打得太狠了"和"它要还手了"连起来。
  */
 export const WRATH_BEHAVIORS: readonly Behavior[] = [
+  /**
+   * **「恶魔低语·二阶段」的开关**（2026-10-20）：血量 ≤40% 时进入「暴走」。
+   * 能力守在 `PHASE2_GATE`（这一层抽到二阶段的隐藏标记）后面。
+   */
+  {
+    kind: 'onHpBelow',
+    ratio: 0.4,
+    then: [
+      { kind: 'grant', target: { mode: 'self' }, buff: WRATH_PHASE2, when: { kind: 'hasBuff', who: 'self', buffId: 'whisper-phase2' } },
+    ],
+  },
   { kind: 'enrage', atMs: 120_000, dmgMult: 2 },
   {
     kind: 'rotation',
     steps: [
-      /**
-       * ⚠️ **二阶段「不再需要攒 4 层」**（2026-10-20）。
-       *
-       * 原设计是"「怒火」不再清零"。**没按原样做**：不清零 ⇒ 它长期停在
-       * 8 层（`haste` 0.4），而 `haste > 0` 会让 `hits[].at === castTime`
-       * 的招式**永远结算不到**（`castPipeline.advanceCasts` 的命中判定）——
-       * 那条设计会把它变成**打不出伤害**的木桩 ✗。修那个 bug 会动到
-       * 「贪婪」「暴怒」两侧的平衡与黄金基线，等用户拍板。
-       *
-       * 所以二阶段换成"**它随时可以泄怒**"（同一个"更凶"的方向、且不靠急速）：
-       * 只要抽到二阶段，40% 之后 `wrath-vent` 不再需要 4 层。
-       */
-      {
-        skillId: 'wrath-vent',
-        when: {
-          kind: 'any',
-          of: [
-            { kind: 'buffStacks', who: 'self', buffId: 'wrath-rage', minStacks: 4 },
-            {
-              kind: 'all',
-              of: [
-                { kind: 'hasBuff', who: 'self', buffId: 'whisper-phase2' },
-                { kind: 'hpBelow', who: 'self', ratio: 0.4 },
-              ],
-            },
-          ],
-        },
-      },
-      { skillId: 'wrath-sweep' },
-      { skillId: 'wrath-smash' },
+      { skillId: 'wrath-vent', when: { kind: 'buffStacks', who: 'self', buffId: 'wrath-rage', minStacks: 4 } },
     ],
   },
 ];

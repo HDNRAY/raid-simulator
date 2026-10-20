@@ -150,9 +150,34 @@ export function advanceCasts(
          * 对急速同样成立。
          */
         const castDone = elapsedMs >= cast.castTimeMs;
+        /**
+         * ================================================================
+         * ⚠️ **急速会把命中"吃掉"—— 2026-10-20 修掉的真 bug**
+         * ================================================================
+         *
+         * 原先的判据是 `castDone && hit.at <= elapsedMs`，其中：
+         *   - `castDone` 比的是**已经算过急速**的 `castTimeMs`
+         *   - `hit.at` 是内容里写的**原始**偏移（Boss 的招全是
+         *     `at === castTime`，例如 2.0 秒）
+         *
+         * 于是**任何 `haste > 0`** 都会让读条提前结束（比如 1.5 秒），
+         * 而第一条 `castDone` 为真的那一 tick `elapsedMs ≈ 1500 < 2000`
+         * ⇒ 这一击**永远不结算**，读条随即被丢掉 ⇒ **静默无伤害**
+         * （贪婪的「敛财」叠满、暴怒的「怒火」高层都踩了这条）。
+         *
+         * 修法：**一旦读条结束，凡"本来就排在这段读条之内"的命中都算到期**
+         * （`hit.at <= skill.castTime`，用**未压缩**的原始读条比）。
+         * `skill.castTime` 才是内容作者真正参照的那个数 ✗ 不是 `castTimeMs`。
+         *
+         * ⚠️ `hit.at > skill.castTime` 的段**仍然**会在读条结束时被丢掉 ——
+         * 那是"排在读条之后"的写法，今天没有内容这么写，语义也还没定义
+         * （保留原行为，不在这次动）。
+         */
         const dueHits = skill.hits.filter(
           (hit: HitDef, index: number) =>
-            index >= cast.resolvedHits && castDone && hit.at <= elapsedMs,
+            index >= cast.resolvedHits &&
+            castDone &&
+            (hit.at <= elapsedMs || hit.at <= skill.castTime),
         );
 
         /**

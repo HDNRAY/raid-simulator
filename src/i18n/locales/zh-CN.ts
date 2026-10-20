@@ -1376,6 +1376,7 @@ export const zhCN = {
     jealousy: { name: '嫉恨' },
     gluttony: { name: '饥馑' },
     sloth: { name: '沉眠' },
+    wrath: { name: '暴走' },
   },
 
   screen: {
