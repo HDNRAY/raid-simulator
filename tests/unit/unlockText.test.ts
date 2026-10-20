@@ -39,8 +39,9 @@ const skillName = (id: string): string =>
 const deps = { translate, skillName };
 
 describe('解锁条件的文案（从结构推导）', () => {
-  it('**10 条炁机全部**都有非空的解锁说明', () => {
-    expect(ALL_QIJI).toHaveLength(10);
+  it('**池子里每一条**都有非空的解锁说明', () => {
+    /** ⚠️ 不钉条数（内容会长）：只要求"一条不漏地翻得出来"。 */
+    expect(ALL_QIJI.length).toBeGreaterThanOrEqual(10);
     for (const qiji of ALL_QIJI) {
       const text = unlockTextOf(qiji.unlock, deps);
       expect(text.length, qiji.id).toBeGreaterThan(0);

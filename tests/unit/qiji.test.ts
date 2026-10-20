@@ -43,18 +43,25 @@ const TWEAKED = ALL_QIJI.filter((q) => q.skillTweak !== undefined);
 const PASSIVE = ALL_QIJI.filter((q) => q.passiveBuffs !== undefined);
 
 describe('炁机池：数量与形状', () => {
-  it('一共 10 条：2 条兜底 + 3 条派生 + 4 条改技能 + 1 条装 buff', () => {
+  it('一共 **12** 条：2 条兜底 + 3 条派生 + 5 条改技能 + 3 条装 buff', () => {
     /**
      * ⚠️ 2026-10-14 加了**两条**「用 30 次」的（拳 → 黑闪、斩 → 斩法）：
      *   - 「黑闪」**不改技能**，它靠 `passiveBuffs` 装一条常驻 buff
      *     ⇒ 落在下面的 `PASSIVE` 那一类
      *   - 「斩法」是 `skillTweak`（读条减半 + 伤害 +30%）⇒ `TWEAKED` 变 4 条
      */
-    expect(ALL_QIJI).toHaveLength(10);
+    /**
+     * ⚠️ 2026-10-20 又加了**两条**（用户："斩+凝流派…重击流…"）：
+     *   - 「凝神斩意」：**不改技能**，靠 `passiveBuffs` 的触发器
+     *     （`onHitDealt` 命中「斩」且身上有「凝」⇒ 追加一次命中）⇒ `PASSIVE`
+     *   - 「重击回缠」：`skillTweak`（劈回缠）**加** `passiveBuffs`
+     *     （`onAvoided` 回缠）⇒ **两类都算**（它是"改技能 + 装 buff"的合体）
+     */
+    expect(ALL_QIJI).toHaveLength(12);
     expect(DERIVED).toHaveLength(3);
-    expect(TWEAKED).toHaveLength(4);
+    expect(TWEAKED).toHaveLength(5);
     expect(ALL_QIJI.filter((q) => q.unlock.kind === 'always')).toHaveLength(2);
-    expect(PASSIVE).toHaveLength(1);
+    expect(PASSIVE).toHaveLength(3);
   });
 
   it('每条都是 `kind: "qiji"`（W8 的类型那一半：不再是假 kind）', () => {
@@ -361,9 +368,10 @@ describe('三条 `skillTweak`：解锁条件 + 效果形状', () => {
   const cost = qijiById('ningShenJuQi') as QijiEntity;
   const boost = qijiById('ningShenRuDao') as QijiEntity;
 
-  it('恰好四条，且都**不带** `comboWindow`（两类炁机不混）', () => {
+  it('恰好五条，且都**不带** `comboWindow`（两类炁机不混）', () => {
     expect(TWEAKED.map((q) => q.id).sort()).toEqual([
       'biShiJiXu',
+      'chongJiHuiChan',
       'ningShenJuQi',
       'ningShenRuDao',
       'zhanFa',

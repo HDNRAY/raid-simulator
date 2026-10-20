@@ -42,7 +42,7 @@ import { Label, type PixiCtor } from './primitives';
 import { ScreenChrome } from './ScreenChrome';
 import { PALETTE } from '../render/theme';
 import { cardSkin } from './prepareRender';
-import { CODEX_LAYOUT, codexCardRects, type CodexEntry } from './codexLogic';
+import { CODEX_LAYOUT, codexCardRects, wrapByChars, type CodexEntry } from './codexLogic';
 import type { TranslateFn } from '../i18n/translator';
 
 export interface CodexScreenOptions {
@@ -214,13 +214,13 @@ export class CodexScreen {
         .stroke({ color: skin.strokeColor, width: skin.strokeWidth });
 
       nameLabel.root.x = rect.x + rect.w / 2;
-      nameLabel.root.y = rect.y + 34;
+      nameLabel.root.y = rect.y + 28;
       nameLabel.set(entry.nameKey === undefined ? t('screen.codex.locked') : t(entry.nameKey));
       nameLabel.setColor(entry.nameKey === undefined ? PALETTE.textDim : PALETTE.text);
       nameLabel.root.visible = true;
 
       stateLabel.root.x = rect.x + rect.w / 2;
-      stateLabel.root.y = rect.y + 60;
+      stateLabel.root.y = rect.y + 52;
       stateLabel.set(
         entry.unlocked ? t('screen.codex.unlocked') : t('screen.codex.notUnlocked'),
       );
@@ -230,7 +230,12 @@ export class CodexScreen {
       if (conditionLabel !== undefined) {
         conditionLabel.root.x = rect.x + rect.w / 2;
         conditionLabel.root.y = rect.y + rect.h - 30;
-        conditionLabel.set(entry.unlockText);
+        /**
+         * ⚠️ 中文按 `FONT.small`（13，`ui/layout.ts` 的下限）画，一行约 15 字；
+         * 长条件（"同时满足：…"）折两行，再长就省略 —— 不许压到邻卡上。
+         */
+        conditionLabel.set(wrapByChars(entry.unlockText, { perLine: 15, maxLines: 2 }).join('\n'));
+        conditionLabel.setColor(PALETTE.textDim);
         conditionLabel.root.visible = true;
       }
     });
@@ -276,7 +281,8 @@ export class CodexScreen {
       const condition = new Label(pixi, {
         x: 0,
         y: 0,
-        size: FONT.tiny,
+        /** 中文下限 13（`FONT.small`）—— 条件那行不能更小。 */
+        size: FONT.small,
         color: PALETTE.textDim,
         anchorX: 0.5,
         anchorY: 0.5,

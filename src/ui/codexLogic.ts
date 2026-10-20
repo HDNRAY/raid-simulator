@@ -74,11 +74,19 @@ export const CODEX_LAYOUT: CodexLayout = {
    * ⚠️ 2026-10-20：卡片加高（104 → 132）—— 多了一行"解锁条件"
    * （用户："要显示 炁机解锁条件"）。5 列 × 2 行仍然装得下（高 280）。
    */
-  cardW: 176,
-  cardH: 132,
+  /**
+   * ⚠️ 2026-10-20：池子 10 → **12** 条（两条新炁机）⇒ 3 行；列从 5 降到 **4**。
+   *
+   * 判据是**字号**（`ui/layout.ts`：中文 ≥ 13）：解锁条件要按 `FONT.small`
+   * 画，5 列 176 宽一行只放得下 ~13 个字，长条件（"同时满足：…"）会溢到邻卡上。
+   * 4 列 × 210 宽一行 ~15 个字 → 两行放得下；`108 + 12` 让三行收在 480，
+   * 不压 `hintY 500`。
+   */
+  cardW: 210,
+  cardH: 108,
   gapX: 14,
-  gapY: 16,
-  cols: 5,
+  gapY: 12,
+  cols: 4,
   hintY: 500,
 };
 
@@ -121,4 +129,29 @@ export function codexCardRects(
     }
   }
   return out;
+}
+
+/**
+ * 把一段**中文**按字数折行（给卡片上的解锁条件用）。
+ *
+ * ⚠️ 为什么不量像素：`Label` 的宽度要等 Pixi 排完版才知道，而这里要的是
+ * "画几行"的**确定性**（布局测试要能算）。中文是等宽的，所以"一行几个字"
+ * 已经够准；拉丁字符按 1 个字算（保守）。
+ *
+ * ⚠️ 超过 `maxLines` 就**截断加省略号**：条件再长也不许压到下一张卡上。
+ */
+export function wrapByChars(text: string, args: { readonly perLine: number; readonly maxLines: number }): readonly string[] {
+  const perLine = Math.max(1, Math.trunc(args.perLine));
+  const maxLines = Math.max(1, Math.trunc(args.maxLines));
+  const chars = [...text];
+  const lines: string[] = [];
+  for (let i = 0; i < chars.length; i += perLine) {
+    lines.push(chars.slice(i, i + perLine).join(''));
+    if (lines.length === maxLines) break;
+  }
+  if (lines.length === maxLines && chars.length > perLine * maxLines) {
+    const last = lines[maxLines - 1] ?? '';
+    lines[maxLines - 1] = `${[...last].slice(0, Math.max(1, perLine - 1)).join('')}…`;
+  }
+  return lines;
 }
