@@ -287,6 +287,17 @@ export function runAbilities(
   payload: TriggerPayload,
 ): void {
   for (const ability of abilities) {
+    /**
+     * ⚠️ **能力级 `when` 门禁**（2026-10-20）：假 ⇒ 这一条不执行，同一批里的
+     * 其它能力照常。「恶魔低语·二阶段」靠它把"每个 Boss 自己的二阶段能力"
+     * 关在一条**隐藏标记**后面（没抽到就一条都不生效）。
+     */
+    if (ability.when !== undefined) {
+      /** 主语与触发器同一条：**能力的主人**（`who: 'target'` 也能写）。 */
+      if (!evaluateCondition(ctx.current(ownerId), ability.when, ctx, ctx.opponentOf(ownerId))) {
+        continue;
+      }
+    }
     switch (ability.kind) {
       case 'grant': {
         const who = whoOf(ctx, ownerId, ability.target, payload);

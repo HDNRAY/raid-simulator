@@ -6,28 +6,37 @@ import type { Expr, StatModifier } from './stats';
 import type { BuffDef } from './buffs';
 import type { TriggerDef } from './triggers';
 import type { HitDef, TargetRule } from './effects';
+import type { Condition } from './stats';
 
 /* ================================================================== *
  * 7. Ability —— 唯一的原子单位
  * ================================================================== */
 
 export interface ModifierAbility {
+  /** 条件：假 ⇒ **这一条能力不执行**（同一批里的其它能力照常）。 */
+  readonly when?: Condition;
   readonly kind: 'modifier';
   readonly modifier: StatModifier;
 }
 
 export interface DerivedAbility {
+  /** 条件：假 ⇒ **这一条能力不执行**（同一批里的其它能力照常）。 */
+  readonly when?: Condition;
   readonly kind: 'derived';
   readonly modifier: Omit<StatModifier, 'value'>;
   readonly value: Expr;
 }
 
 export interface TriggerAbility {
+  /** 条件：假 ⇒ **这一条能力不执行**（同一批里的其它能力照常）。 */
+  readonly when?: Condition;
   readonly kind: 'trigger';
   readonly trigger: TriggerDef;
 }
 
 export interface GrantAbility {
+  /** 条件：假 ⇒ **这一条能力不执行**（同一批里的其它能力照常）。 */
+  readonly when?: Condition;
   readonly kind: 'grant';
   readonly buff: BuffDef;
   readonly target: TargetRule;
@@ -49,6 +58,8 @@ export interface GrantAbility {
 }
 
 export interface DealAbility {
+  /** 条件：假 ⇒ **这一条能力不执行**（同一批里的其它能力照常）。 */
+  readonly when?: Condition;
   readonly kind: 'deal';
   readonly target: TargetRule;
   readonly hit: HitDef;
@@ -70,6 +81,8 @@ export interface DealAbility {
  * `{ strict: false }`（见 `AGENTS.md` §2）。实现之后把那条对账项删掉。
  */
 export interface GrantSkillAbility {
+  /** 条件：假 ⇒ **这一条能力不执行**（同一批里的其它能力照常）。 */
+  readonly when?: Condition;
   readonly kind: 'grantSkill';
   readonly skillId: SkillId;
   readonly autoEquip?: boolean;
@@ -82,6 +95,8 @@ export interface GrantSkillAbility {
  * 于是"产生 12 点炁"会变成"每秒 12 点"。语义不同。
  */
 export interface ResourceAbility {
+  /** 条件：假 ⇒ **这一条能力不执行**（同一批里的其它能力照常）。 */
+  readonly when?: Condition;
   readonly kind: 'resource';
   readonly target: TargetRule;
   readonly resource: ResourceKey | string;
@@ -112,6 +127,8 @@ export interface ResourceAbility {
  * 而且"清零"要的正是这个 —— 不是"减一层"。
  */
 export interface RemoveBuffAbility {
+  /** 条件：假 ⇒ **这一条能力不执行**（同一批里的其它能力照常）。 */
+  readonly when?: Condition;
   readonly kind: 'removeBuff';
   readonly target: TargetRule;
   readonly buffId: BuffId;
@@ -133,6 +150,8 @@ export interface RemoveBuffAbility {
  * 保留原因同 `GrantSkillAbility`；同样会被 `ABILITY_UNIMPLEMENTED` 拒绝。
  */
 export interface ConsumeAbility {
+  /** 条件：假 ⇒ **这一条能力不执行**（同一批里的其它能力照常）。 */
+  readonly when?: Condition;
   readonly kind: 'consume';
   readonly pool: ResourcePoolRef;
   readonly resource: ResourceKey | string;
@@ -158,6 +177,36 @@ export interface ConsumeAbility {
  */
 export type AbilityTiming = 'castStart' | 'castFinish';
 
+/**
+ * **每条能力都可以带一个条件**（`when`，2026-10-20 加的）。
+ *
+ * ==================================================================
+ * 为什么"能力"需要它（而不是只让触发器有 `when`）
+ * ==================================================================
+ *
+ * 「恶魔低语·二阶段」的做法是：**每个 Boss 自己**写一条
+ * `onHpBelow(0.4)` 行为，而"这一层到底抽没抽到二阶段"由一条**隐藏标记**
+ * 决定。可是 `Ability` 原先**没有** `when` ⇒ 到了 40% 血，那批能力会
+ * **无条件**执行（没抽到二阶段也照切）✗。
+ *
+ * 另一条路是"每个 Boss 再加一条开关 buff，用触发器条件过滤"—— 能work，
+ * 但每个 Boss 多两个 buff（开关 + 形态）且要读两遍数据；有了 `when` 之后
+ * 只需要"能力上挂一个条件"，判据与其它 `when` **同一套**（`Condition`）。
+ *
+ * ⚠️ 语义：`when` 为假 ⇒ **这一条能力不执行**（同一批里的其它能力照常）。
+ * ⚠️ 刻意**不**加在 `Effect` 上：命中效果已经有 `when`（`HitDef.effects[].when`）。
+ */
+/**
+ * **能力**：内容声明"到某个时机做什么"的原子单位。
+ *
+ * ⚠️ **每条能力都可以带 `when`**（2026-10-20 加的）—— 那是「恶魔低语·
+ * 二阶段」的开关：每个 Boss 自己写一条 `onHpBelow(0.4)` 行为，而"这一层
+ * 到底抽没抽到二阶段"由一条**隐藏标记**决定；没有 `when` 的话，到了 40%
+ * 血那批能力会**无条件**执行（没抽到也照切）✗。
+ *
+ * 判据与其它 `when` **同一套**（`Condition`）；`Effect` 那边早就有
+ * `when`（`HitDef.effects[].when`），这里是补上"能力"这一侧。
+ */
 export type Ability =
   | ModifierAbility
   | DerivedAbility

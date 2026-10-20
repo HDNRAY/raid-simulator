@@ -20,6 +20,7 @@
  */
 
 import type { ActiveSkillDef, Behavior, BuffDef, PassiveSkillDef, SkillDef } from '../core/types';
+import { PHASE2_GATE } from './whispers';
 import type { BossDef } from './bossDefs';
 import { logicMs } from '../core/loopConstants';
 import { S } from './scale';
@@ -394,7 +395,40 @@ export const LUST_SKILLS: readonly SkillDef[] = [LUST_HUM, LUST_ENTANGLE, LUST_C
  * `DUP_ID`。而且它本来也不该注册：`grant` 是**按对象内联** buff 的
  * （见 `GrantAbility.buff`），不走 id 查表。
  */
+/**
+ * **色欲·二阶段「贪欢」**：**挨打就回血** —— 一阶段的反伤**照旧**。
+ *
+ * 用户 2026-10-20（原话）："二阶段就同时 **反伤+回血**"。
+ * ⇒ 一阶段那条「欲望印记 → 反伤」一个字不改，这条自己再挂一个
+ * `onHitTaken → 回血`，于是"晚点打"也不免疫惩罚：它既反你、又在回血。
+ *
+ * ⚠️ 回血带 **1.2 秒内部 CD**：不带的话，连击型角色（凯丽）一秒能送它
+ * 几十点血 —— 那不是"停手博弈"，是"打一下就输"。
+ */
+const LUST_PHASE2_HEAL = 12;
+
+export const LUST_PHASE2: BuffDef = {
+  id: 'lust-phase2',
+  nameKey: 'phase2.lust.name',
+  icon: 'lust_mark',
+  polarity: 'buff',
+  color: 0xd06b6b,
+  duration: Number.POSITIVE_INFINITY,
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+  triggers: [
+    {
+      on: 'onHitTaken',
+      cooldownMs: 1200,
+      then: [
+        { kind: 'resource', target: { mode: 'self' }, resource: 'hp', delta: LUST_PHASE2_HEAL },
+      ],
+    },
+  ],
+};
+
 export const LUST_BUFFS: readonly BuffDef[] = [
+  LUST_PHASE2,
   LUST_MARK,
   LUST_PASSIVE,
   LUST_STUN,
@@ -421,6 +455,17 @@ export const LUST_BUFFS: readonly BuffDef[] = [
  *   - 「魅惑」CD 140 → gap 12.0s
  */
 export const LUST_BEHAVIORS: readonly Behavior[] = [
+  /**
+   * **「恶魔低语·二阶段」的开关**（2026-10-20）：血量 ≤40% 时切形态。
+   * 能力全部守在 `PHASE2_GATE`（这一层抽到二阶段的隐藏标记）后面。
+   */
+  {
+    kind: 'onHpBelow',
+    ratio: 0.4,
+    then: [
+      { kind: 'grant', target: { mode: 'self' }, buff: LUST_PHASE2, when: PHASE2_GATE },
+    ],
+  },
   { kind: 'enrage', atMs: 120_000, dmgMult: 2 },
   /** 开场先「轻吟」：第一次就让它是一记**快招**，与傲慢的「碾压」形成对比。 */
   { kind: 'opener', skillId: 'lust-hum', delayMs: 1000 },

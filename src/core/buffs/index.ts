@@ -335,6 +335,8 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
   /** 「睡眠」的两个出路旗标（取**任意一个来源**即可，不做叠加）。 */
   let movesWhileLocked = false;
   let sleepReduceMs = 0;
+  /** 挣扎倍率（取**最小**：多个来源都只会让它更"沉"）。 */
+  let sleepStruggleMult = 1;
   const comboWindow: string[] = [];
   /**
    * 技能 tag 白名单 —— 多个来源取**并集**。
@@ -364,6 +366,9 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
     if (f.actionLock) actionLock = true;
     if (f.movesWhileLocked === true) movesWhileLocked = true;
     if (f.sleepReduceMs !== undefined) sleepReduceMs = Math.max(sleepReduceMs, f.sleepReduceMs);
+    if (f.sleepStruggleMult !== undefined) {
+      sleepStruggleMult = Math.min(sleepStruggleMult, f.sleepStruggleMult);
+    }
     if (f.reflectFraction !== undefined) {
       reflectFraction = Math.max(reflectFraction, f.reflectFraction);
     }
@@ -382,6 +387,7 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
     ...(actionLock ? { actionLock: true } : {}),
     ...(movesWhileLocked ? { movesWhileLocked: true } : {}),
     ...(sleepReduceMs > 0 ? { sleepReduceMs } : {}),
+    ...(sleepStruggleMult < 1 ? { sleepStruggleMult } : {}),
     ...(reflectFraction > 0 ? { reflectFraction } : {}),
     ...(comboWindow.length > 0 ? { comboWindow } : {}),
     ...(restrictToTags.length > 0 ? { restrictToTags } : {}),

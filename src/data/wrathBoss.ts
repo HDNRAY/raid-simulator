@@ -321,7 +321,34 @@ export const WRATH_BEHAVIORS: readonly Behavior[] = [
   {
     kind: 'rotation',
     steps: [
-      { skillId: 'wrath-vent', when: { kind: 'buffStacks', who: 'self', buffId: 'wrath-rage', minStacks: 4 } },
+      /**
+       * ⚠️ **二阶段「不再需要攒 4 层」**（2026-10-20）。
+       *
+       * 原设计是"「怒火」不再清零"。**没按原样做**：不清零 ⇒ 它长期停在
+       * 8 层（`haste` 0.4），而 `haste > 0` 会让 `hits[].at === castTime`
+       * 的招式**永远结算不到**（`castPipeline.advanceCasts` 的命中判定）——
+       * 那条设计会把它变成**打不出伤害**的木桩 ✗。修那个 bug 会动到
+       * 「贪婪」「暴怒」两侧的平衡与黄金基线，等用户拍板。
+       *
+       * 所以二阶段换成"**它随时可以泄怒**"（同一个"更凶"的方向、且不靠急速）：
+       * 只要抽到二阶段，40% 之后 `wrath-vent` 不再需要 4 层。
+       */
+      {
+        skillId: 'wrath-vent',
+        when: {
+          kind: 'any',
+          of: [
+            { kind: 'buffStacks', who: 'self', buffId: 'wrath-rage', minStacks: 4 },
+            {
+              kind: 'all',
+              of: [
+                { kind: 'hasBuff', who: 'self', buffId: 'whisper-phase2' },
+                { kind: 'hpBelow', who: 'self', ratio: 0.4 },
+              ],
+            },
+          ],
+        },
+      },
       { skillId: 'wrath-sweep' },
       { skillId: 'wrath-smash' },
     ],

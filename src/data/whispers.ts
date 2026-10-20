@@ -39,9 +39,16 @@ import {
 } from './balance';
 import { logicMs } from '../core/loopConstants';
 import { BOSS_TELEGRAPH } from './bossShared';
-import type { ActiveSkillDef, Behavior, BuffDef, SkillDef } from '../core/types';
+import type { ActiveSkillDef, Behavior, BuffDef, Condition, SkillDef } from '../core/types';
 
-export const WHISPER_IDS = ['enrage', 'blunt', 'slowBreath', 'cutDouqi', 'mend'] as const;
+export const WHISPER_IDS = [
+  'enrage',
+  'blunt',
+  'slowBreath',
+  'cutDouqi',
+  'mend',
+  'phase2',
+] as const;
 
 export type WhisperId = (typeof WHISPER_IDS)[number];
 
@@ -145,6 +152,45 @@ export const WHISPER_CUT_DOUQI: BuffDef = {
 };
 
 /* ------------------------------------------------------------------ *
+ * 「二阶段」：每个 Boss 自己的第二形态（**40% 血**触发）
+ * ------------------------------------------------------------------ */
+
+/**
+ * **二阶段的开关**：一条挂在 Boss 身上的**隐藏标记**。
+ *
+ * 用户 2026-10-20：**"二阶段也进池子吧"** ⇒ 它也是"每层抽 1 条"里的一条，
+ * 抽到了这一层的 Boss 才会在 40% 血换形态。
+ *
+ * ⚠️ 为什么是"一个标记 + 每个 Boss 自己的内容"：
+ * 二阶段的规则**每个 Boss 都不同**，而低语是**与 Boss 无关**的（抽签在
+ * 知道打谁之前就定了）。所以低语只发一个标记，7 个 Boss 各自在
+ * `onHpBelow(0.4)` 上挂自己的形态 —— 那些能力用 `when: PHASE2_GATE`
+ * 守在标记后面（`Ability.when` 是 2026-10-20 为此加的）。
+ */
+export const WHISPER_PHASE2: BuffDef = {
+  id: 'whisper-phase2',
+  nameKey: 'whisper.phase2.name',
+  icon: 'boss_empower',
+  polarity: 'debuff',
+  color: 0x8a2b2b,
+  hidden: true,
+  duration: Number.POSITIVE_INFINITY,
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+};
+
+/**
+ * **二阶段能力的门禁**：`hasBuff(whisper-phase2)`。
+ *
+ * ⚠️ 主语是**能力的主人**（Boss 自己）—— 与其它 `when` 同一条口径。
+ */
+export const PHASE2_GATE: Condition = {
+  kind: 'hasBuff',
+  who: 'self',
+  buffId: WHISPER_PHASE2.id,
+};
+
+/* ------------------------------------------------------------------ *
  * 「自愈」：周期性读条回血（**可打断**）
  * ------------------------------------------------------------------ */
 
@@ -244,6 +290,12 @@ export const WHISPER_POOL: readonly WhisperDef[] = [
     descKey: 'whisper.mend.desc',
     apply: { kind: 'bossBehavior', behaviors: WHISPER_MEND_BEHAVIOR },
   },
+  {
+    id: 'phase2',
+    nameKey: 'whisper.phase2.name',
+    descKey: 'whisper.phase2.desc',
+    apply: { kind: 'bossBuff', buff: WHISPER_PHASE2 },
+  },
 ];
 
 /**
@@ -266,6 +318,7 @@ export const WHISPER_BUFFS: readonly BuffDef[] = [
   WHISPER_SLOW_BREATH,
   WHISPER_CUT_DOUQI,
   WHISPER_MEND_TELEGRAPH,
+  WHISPER_PHASE2,
 ];
 
 /** 按 id 找一条；找不到给 `undefined`（调用方回落"没有低语"）。 */

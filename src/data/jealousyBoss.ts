@@ -38,6 +38,7 @@
  */
 
 import type { ActiveSkillDef, Behavior, BuffDef, Expr, SkillDef } from '../core/types';
+import { PHASE2_GATE } from './whispers';
 import type { BossDef } from './bossDefs';
 import { logicMs } from '../core/loopConstants';
 import { S } from './scale';
@@ -284,7 +285,41 @@ export const JEALOUSY_SKILLS: readonly SkillDef[] = [
   JEALOUSY_FLAME,
 ];
 
+/**
+ * **嫉妒·二阶段「嫉恨」**：**每次施放都偷缠**（偷 5 点），**无论是否命中**。
+ *
+ * 用户 2026-10-20：原来的"每段都偷炁"体验太差 ⇒
+ *   1. 改成偷**缠**（`douqi`），不是炁
+ *   2. **无论是否命中** ⇒ 触发器挂在 `onCastFinish`（触发器不经过命中判定，
+ *      所以闪避 / 卸力都挡不住"被偷"这件事）
+ *   3. **不要内部 CD**（用户："不用cd，如果觉得每次施放都偷太多了，可以减少偷的量"）
+ *      ⇒ 靠**量**来调：现在一次 5 点
+ */
+const JEALOUSY_STEAL_DOUQI = 5;
+
+export const JEALOUSY_PHASE2: BuffDef = {
+  id: 'jealousy-phase2',
+  nameKey: 'phase2.jealousy.name',
+  icon: 'boss_sweep',
+  polarity: 'buff',
+  color: 0x8a5ab0,
+  duration: Number.POSITIVE_INFINITY,
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+  triggers: [
+    {
+      on: 'onCastFinish',
+      then: [
+        /** ⚠️ 先扣玩家、再给它自己 —— 两条都走 `resource`，数值同一个常量。 */
+        { kind: 'resource', target: { mode: 'primaryEnemy' }, resource: 'douqi', delta: -JEALOUSY_STEAL_DOUQI },
+        { kind: 'resource', target: { mode: 'self' }, resource: 'douqi', delta: JEALOUSY_STEAL_DOUQI },
+      ],
+    },
+  ],
+};
+
 export const JEALOUSY_BUFFS: readonly BuffDef[] = [
+  JEALOUSY_PHASE2,
   JEALOUSY_MARK,
   tel('jealousy-rend', logicMs(6)),
   tel('jealousy-reap', logicMs(18)),
@@ -305,6 +340,17 @@ export const JEALOUSY_BUFFS: readonly BuffDef[] = [
  * 而且优先级排在轮转**之前** —— 所以它出现的那一次，轮转让位。
  */
 export const JEALOUSY_BEHAVIORS: readonly Behavior[] = [
+  /**
+   * **「恶魔低语·二阶段」的开关**（2026-10-20）：血量 ≤40% 时切形态。
+   * 能力全部守在 `PHASE2_GATE`（这一层抽到二阶段的隐藏标记）后面。
+   */
+  {
+    kind: 'onHpBelow',
+    ratio: 0.4,
+    then: [
+      { kind: 'grant', target: { mode: 'self' }, buff: JEALOUSY_PHASE2, when: PHASE2_GATE },
+    ],
+  },
   { kind: 'enrage', atMs: 120_000, dmgMult: 2 },
   { kind: 'onCooldown', skillId: 'jealousy-flame' },
   {

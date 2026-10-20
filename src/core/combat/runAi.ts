@@ -17,9 +17,9 @@
  * "怎么决策"借出去。
  */
 
-import type { Ability, Combatant, EventDef, SkillDef } from '../types';
+import type { Ability, Combatant, EventDef, SkillDef, StatKey } from '../types';
 import { decide, type AiState, type AiView } from '../ai';
-import { changeResource } from './index';
+import { changeResource, evaluateCondition } from './index';
 import { applyBuff } from '../buffs';
 import { reduceBuffStacks } from './triggerContext';
 
@@ -89,6 +89,17 @@ export interface AbilitiesContext {
   current(id: string): Combatant;
   replaceCombatant(updated: Combatant): void;
   opponentOf(id: string): Combatant | undefined;
+  /**
+   * ⚠️ **条件求值要的那四项**（2026-10-20 加）：能力的 `when` 门禁走
+   * `evaluateCondition`，而它要一个 `CombatContext`。
+   *
+   * 为什么是"补全这个接口"而不是"在这里造一个假 ctx"：`statAbove` /
+   * `buffDef` 那类条件会**静默读到错的值**（返回空属性表 = 永远为假），
+   * 那是"用了不报错、结果错"✗。宁可让这个上下文完整。
+   */
+  readonly statsOf: (combatantId: string) => Readonly<Record<StatKey, number>>;
+  readonly buffDef: (buffId: string) => import('../types').BuffDef | undefined;
+  readonly skillDef: (skillId: string) => SkillDef | undefined;
 }
 
   /**
@@ -105,7 +116,28 @@ export function runAbilities(
     for (const ability of abilities) {
       const actor = ctx.current(actorId);
       if (!actor) return;
+      /**
+       * ⚠️ **能力级 `when` 门禁**（2026-10-20）—— 与 `triggers.ts` 里那个
+       * `runAbilities` 的同一道门。
+       *
+       * ⚠️ 这里**有第二份 `runAbilities`**（本文件一份、`triggers.ts` 一份，
+       * 形状不同、各自被不同的调用方用）。「二阶段」的能力走的是**这一份**
+       * （`onHpBelow` 的阈值路径）—— 第一版只给 `triggers.ts` 那份加了门禁，
+       * 于是"没抽到二阶段也照切"✗（实测抓到的）。两份都加是当前的最小修法；
+       * 合并它们**不在这次改动范围**（会动到两个上下文的形状）。
+       */
       const opponent = ctx.opponentOf(actorId);
+      if (ability.when !== undefined) {
+        const conditionCtx = {
+          statsOf: ctx.statsOf,
+          buffDef: ctx.buffDef,
+          skillDef: ctx.skillDef,
+          currentTick: () => ctx.tick,
+        };
+        if (!evaluateCondition(actor, ability.when, conditionCtx, opponent)) {
+          continue;
+        }
+      }
       const targetIdOf = (mode: string): string =>
         mode === 'self' ? actorId : (opponent?.id ?? actorId);
 
@@ -232,7 +264,12 @@ export function runAi(
     for (const event of decision.events) {
       if (event.kind === 'thresholdReached') {
         // 血量阈值被跨过：执行内容声明的能力（通常是授予阶段 buff）
-        runAbilities(ctx, bossId, event.abilities);
+        /**
+         * ⚠️ 走 `ctx.runAbilities`（不是直接调那个函数）：`AiContext` 只暴露
+         * 这个入口，而它在 `buildAiContext` 里装配的是**带条件求值**的
+         * `AbilitiesContext`（2026-10-20 起 `when` 门禁要 `statsOf` 等）。
+         */
+        ctx.runAbilities(bossId, event.abilities);
         ctx.events.push({
           kind: 'behaviorTriggered',
           tick: ctx.state.tick,

@@ -431,7 +431,14 @@ function strugglesOutOfSleep(
   const reduceMs = flags.sleepReduceMs ?? 0;
   if (reduceMs <= 0) return undefined;
 
-  const reduceTicks = Math.round(reduceMs / (1000 / 60));
+  /**
+   * ⚠️ **挣扎倍率**（`sleepStruggleMult`，2026-10-20）：「恶魔低语·二阶段」的
+   * 懒惰用它把"每次挣扎 −1 秒"变成 **−0.5 秒**（0.5 × 1000ms）。
+   * 时间网格是 0.1 秒 ⇒ 0.5 秒 = 3 tick？不，0.5s = 30 tick；这里照 `sleepReduceMs`
+   * 的毫秒口径算，`Math.round` 到 tick。
+   */
+  const mult = flags.sleepStruggleMult ?? 1;
+  const reduceTicks = Math.max(1, Math.round((reduceMs * mult) / (1000 / 60)));
   let changed = false;
   const buffs = actor.buffs.flatMap((buff) => {
     const amount = buff.def?.flags?.sleepReduceMs;

@@ -54,6 +54,7 @@
  */
 
 import type { ActiveSkillDef, Behavior, BuffDef, SkillDef } from '../core/types';
+import { PHASE2_GATE } from './whispers';
 import { logicMs } from '../core/loopConstants';
 import { C, S } from './scale';
 import { KNOCKDOWN } from './bossShared';
@@ -393,7 +394,30 @@ export const BOSS_MEND: ActiveSkillDef = {
 export const PRIDE_SKILLS: readonly SkillDef[] = [BOSS_SCORN, BOSS_REBUKE, BOSS_HEAVY, BOSS_MEND];
 
 /** 「傲慢」用到的 buff。 */
+/**
+ * **傲慢·二阶段「狂傲」**：**霸体**（`interruptImmune`）—— 它的招打不断了。
+ *
+ * ⚠️ 原设计是"前摇缩短 + 霸体"。**前摇缩短这次没做**：唯一能缩短读条的
+ * 是 `haste`，而 `haste > 0` 会让 `hits[].at === castTime` 的招式**永远
+ * 结算不到**（`castPipeline.advanceCasts` 的 `castDone && hit.at <= elapsed`
+ * —— 读条被缩短之后 `at` 落在读条之外，那一击被静默丢掉）。修它要动
+ * `advanceCasts`，并且会让「贪婪」「暴怒」的高急速阶段**从"打不出伤害"
+ * 变成"打得出来"**（平衡与黄金基线都会动）⇒ 等用户拍板，先只上霸体。
+ */
+export const PRIDE_PHASE2: BuffDef = {
+  id: 'pride-phase2',
+  nameKey: 'phase2.pride.name',
+  icon: 'boss_armor',
+  polarity: 'buff',
+  color: 0xd8b34a,
+  duration: Number.POSITIVE_INFINITY,
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+  flags: { interruptImmune: true },
+};
+
 export const PRIDE_BUFFS: readonly BuffDef[] = [
+  PRIDE_PHASE2,
   SCORN_TELEGRAPH,
   REBUKE_TELEGRAPH,
   HEAVY_TELEGRAPH,
@@ -422,6 +446,20 @@ export const PRIDE_BUFFS: readonly BuffDef[] = [
  * 保底 —— 那会让它退化成固定顺序，把设计目标毁掉。
  */
 export const PRIDE_BEHAVIORS: readonly Behavior[] = [
+  /**
+   * **「恶魔低语·二阶段」的开关**（2026-10-20）：血量 ≤40% 时切形态。
+   *
+   * ⚠️ 能力全部挂在 `PHASE2_GATE`（"这一层抽到了二阶段"的隐藏标记）后面 ——
+   * 没抽到就一条都不生效。判据与各 Boss 的题写在 `data/whispers.ts` 的
+   * `WHISPER_PHASE2` 上。
+   */
+  {
+    kind: 'onHpBelow',
+    ratio: 0.4,
+    then: [
+      { kind: 'grant', target: { mode: 'self' }, buff: PRIDE_PHASE2, when: PHASE2_GATE },
+    ],
+  },
   { kind: 'enrage', atMs: 120_000, dmgMult: 2 },
 
   /**

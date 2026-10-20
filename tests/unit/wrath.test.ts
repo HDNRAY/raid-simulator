@@ -212,10 +212,17 @@ describe('「泄怒」：伤害**按层数加成**', () => {
       ? rotation.steps.find((s) => s.skillId === WRATH_VENT.id)
       : undefined;
     expect(step, '「泄怒」必须在轮转里').toBeDefined();
-    expect(step?.when, '而且要带层数门槛').toMatchObject({
-      kind: 'buffStacks',
-      buffId: WRATH_RAGE.id,
-    });
+    /**
+     * ⚠️ 2026-10-20：二阶段把这一条扩成了 `any[层数≥4, 二阶段+血量≤40%]`
+     * （"它随时可以泄怒"）—— 所以这里钉"**层数门槛仍在**"，而不是"`when`
+     * 必须正好是那一句"。
+     */
+    const when = step?.when;
+    expect(when, '而且要带条件').toBeDefined();
+    const flat = JSON.stringify(when);
+    expect(flat, '层数门槛必须还在（4 层）').toContain(String(4));
+    expect(flat).toContain(WRATH_RAGE.id);
+    expect(flat, '二阶段那一支也在').toContain('whisper-phase2');
   });
 
   it('它**不消耗**层数（清层是「暴怒」形态的事）', () => {

@@ -145,6 +145,15 @@ export interface BuffFlags {
    */
   readonly sleepReduceMs?: number;
   /**
+   * **挣扎效果的倍率**（基准 1；「恶魔低语·二阶段」的懒惰用它：0.5 ⇒ 每次
+   * 挣扎只减**一半**时长）。
+   *
+   * ⚠️ 为什么不是"再挂一条带 `sleepReduceMs` 的 buff"：那个字段是**每条
+   * buff 自己的**（`strugglesOutOfSleep` 逐条读 `buff.def.flags.sleepReduceMs`），
+   * 聚合又取 `max` —— 再挂一条只会**更强**，减不了半。
+   */
+  readonly sleepStruggleMult?: number;
+  /**
    * 派生窗口：**只有这个 buff 在时，列表里的技能才被激活**（与
    * `restrictToTags` 方向相反，见本接口头部）。
    */

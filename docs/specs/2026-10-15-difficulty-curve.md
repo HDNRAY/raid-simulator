@@ -87,6 +87,44 @@
 ⚠️ 回多少：绝对值（与「自愈」同一个数量级起步），先按 `WHISPER_MEND_HEAL` 的
 一半估，实测再调。
 
+### 1d. ✅ 已实现（2026-10-20）—— 最终数值与两条**偏差**
+
+池子 **6 条**（狂暴 / 钝击 / 迟炁 / 断缠 / 自愈 / 二阶段）；抽到「二阶段」的那一层，
+Boss 在 **40% 血**切形态（开关是那条**隐藏标记** `whisper-phase2`）。
+
+| Boss | 二阶段做了什么 | 实现 | **最终数值** |
+|---|---|---|---|
+| 傲慢 | **霸体**（打不断） | `pride-phase2`（`interruptImmune`） | — |
+| 色欲 | 反伤**照旧** + **挨打回血** | `lust-phase2` 的 `onHitTaken` 触发器 | 每次 **+12** 血，**内部 CD 1.2 秒** |
+| 嫉妒 | **每次施放偷缠**（无论是否命中） | `jealousy-phase2` 的 `onCastFinish` 触发器 | 每次 **5 缠**，**无 CD** |
+| 贪婪 | **霸体**（「敛财」不可打断） | `greed-phase2`（`interruptImmune`） | — |
+| 懒惰 | **立即催眠一次** + **挣扎减半** | 开关 `then` 里挂 `LAZY_SLEEP` + `LAZY_DEEP_SLEEP` | 挣扎 **−0.5 秒/次**（原 −1 秒） |
+| 暴食 | 血盾**打穿也不还** | `gluttony-phase2` + 把 `onBreak` 两条能力 gate 掉 | — |
+| 暴怒 | **「泄怒」不再需要 4 层** | 轮转那一步的 `when` 放宽 | 40% 之后门槛 **4 → 0** |
+
+⚠️ **两条与最初设计不同**（都是同一条引擎 bug 逼出来的）：
+
+1. **傲慢的"前摇缩短"没做**：唯一能缩短读条的是 `haste`，而 `haste > 0` 会让
+   `hits[].at === castTime` 的招式**永远结算不到**（`advanceCasts` 的
+   `castDone && hit.at <= elapsed` —— 读条被缩短后 `at` 落在读条之外，那一击被
+   静默丢掉）。修它会让「贪婪」「暴怒」的高急速阶段从"打不出伤害"变成"打得出来"
+   ⇒ 平衡与黄金基线都会动，**等用户拍板**。
+2. **暴怒的"怒火不清零"换成了"泄怒门槛取消"**：不清零 ⇒ 它长期停在 8 层
+   （`haste` 0.4）⇒ 撞上同一条 bug ⇒ **变成打不出伤害的木桩** ✗。所以换了
+   一个同方向、且不依赖急速的表达。
+
+### 1e. 二阶段的实现细节（给下一个人）
+
+- **开关**：每个 Boss 的 `*_BEHAVIORS` 里一条 `onHpBelow(ratio 0.4)`，`then` 里的
+  每条能力都带 `when: PHASE2_GATE`（`hasBuff(whisper-phase2)`）—— `Ability.when`
+  是这次新加的（引擎里 `runAbilities` 有两份：`runAi.ts` 与 `triggers.ts`，
+  **两份都加了门禁**；⚠️ 那两份重复本身是既有问题，这次没合并）
+- **暴食**是靠"把 `onBreak` 的两条能力 gate 掉"（`notHasBuff(gluttony-phase2)`）
+- **懒惰**的「挣扎减半」走新字段 `sleepStruggleMult`（0.5）——
+  `sleepReduceMs` 聚合取 `max`，再挂一条 buff 只会更强
+- 形态 buff 都会挂在 Boss 的增益行上（除 `lazy-deep-sleep` / `gluttony-phase2`
+  这两个纯标记，它们 `hidden`）；短标签登记在 `viewHelpers.SHORT_LABEL_KEYS`
+
 ### 1b. 二阶段要动的引擎能力（两处小改）
 
 | 需求 | 做法 | 量级 |

@@ -44,6 +44,7 @@
  */
 
 import type { ActiveSkillDef, Behavior, BuffDef, PassiveSkillDef, SkillDef } from '../core/types';
+import { PHASE2_GATE } from './whispers';
 import type { BossDef } from './bossDefs';
 import { logicMs } from '../core/loopConstants';
 import { S } from './scale';
@@ -267,7 +268,26 @@ export const GREED_USURY: ActiveSkillDef = {
 
 export const GREED_SKILLS: readonly SkillDef[] = [GREED_HOARD_SKILL, GREED_PLUNDER, GREED_USURY];
 
+/**
+ * **贪婪·二阶段「无餍」**：**霸体** —— 「敛财」不再能打断（止损点消失）。
+ *
+ * ⚠️ 霸体是**全部招**都打断不了（引擎的 `interruptImmune` 没有"只对某一招"
+ * 的粒度）。对这条设计来说正好：玩家的"止损点"本来就只有打断。
+ */
+export const GREED_PHASE2: BuffDef = {
+  id: 'greed-phase2',
+  nameKey: 'phase2.greed.name',
+  icon: 'boss_empower',
+  polarity: 'buff',
+  color: 0xd8b34a,
+  duration: Number.POSITIVE_INFINITY,
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+  flags: { interruptImmune: true },
+};
+
 export const GREED_BUFFS: readonly BuffDef[] = [
+  GREED_PHASE2,
   GREED_HOARD,
   GREED_WEAK_POINT_PASSIVE,
   GREED_WEAK_POINT,
@@ -291,6 +311,20 @@ export const GREED_BUFFS: readonly BuffDef[] = [
  * ⚠️ 「弱点」**不在轮转里**：它是 `onTick` 被动（按时间、不看它出什么招）。
  */
 export const GREED_BEHAVIORS: readonly Behavior[] = [
+  /**
+   * **「恶魔低语·二阶段」的开关**（2026-10-20）：血量 ≤40% 时切形态。
+   *
+   * ⚠️ 能力全部挂在 `PHASE2_GATE`（"这一层抽到了二阶段"的隐藏标记）后面 ——
+   * 没抽到就一条都不生效。判据与各 Boss 的题写在 `data/whispers.ts` 的
+   * `WHISPER_PHASE2` 上。
+   */
+  {
+    kind: 'onHpBelow',
+    ratio: 0.4,
+    then: [
+      { kind: 'grant', target: { mode: 'self' }, buff: GREED_PHASE2, when: PHASE2_GATE },
+    ],
+  },
   { kind: 'enrage', atMs: 120_000, dmgMult: 2 },
   {
     kind: 'rotation',

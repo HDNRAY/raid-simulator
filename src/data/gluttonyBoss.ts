@@ -237,12 +237,17 @@ export const GLUTTONY_SHIELD: BuffDef = {
    * 打穿再退）—— 那需要"到期时也能读到壳的 `custom`"，属于另一条改动。
    */
   onBreak: [
+    /**
+     * ⚠️ **二阶段「饥馑」：打穿也不还**（2026-10-20）。
+     * 两条能力都加同一条门禁 —— 形态 buff 在 ⇒ 这次"还"整个不发生。
+     */
     /** ① 把当初偷的血**还回玩家**。 */
     {
       kind: 'resource',
       target: { mode: 'primaryEnemy' },
       resource: 'hp',
       delta: { e: 'payloadCustom' },
+      when: { kind: 'notHasBuff', who: 'self', buffId: 'gluttony-phase2' },
     },
     /** ② 同时从**它自己**身上扣掉那 N（撤销 `transfer` 的另一半）。 */
     {
@@ -250,6 +255,7 @@ export const GLUTTONY_SHIELD: BuffDef = {
       target: { mode: 'self' },
       resource: 'hp',
       delta: { e: 'mul', of: [{ e: 'payloadCustom' }, { e: 'const', value: -1 }] },
+      when: { kind: 'notHasBuff', who: 'self', buffId: 'gluttony-phase2' },
     },
   ],
 };
@@ -388,7 +394,27 @@ export const GLUTTONY_SKILLS: readonly SkillDef[] = [
   GLUTTONY_GRAB_HP,
 ];
 
+/**
+ * **暴食·二阶段「饥馑」**：血盾**打穿也不还**你（一阶段是"打穿 = 撤销那次偷"）。
+ *
+ * ⚠️ 它自己**没有**任何效果 —— 它只是那条"不还"判据的**主语**：
+ * `GLUTTONY_SHIELD.onBreak` 的两条能力都加了
+ * `when: notHasBuff(gluttony-phase2)`（`Ability.when` 是 2026-10-20 为此加的）。
+ */
+export const GLUTTONY_PHASE2: BuffDef = {
+  id: 'gluttony-phase2',
+  nameKey: 'phase2.gluttony.name',
+  icon: 'boss_armor',
+  polarity: 'buff',
+  color: 0xd06b6b,
+  hidden: true,
+  duration: Number.POSITIVE_INFINITY,
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+};
+
 export const GLUTTONY_BUFFS: readonly BuffDef[] = [
+  GLUTTONY_PHASE2,
   GLUTTONY_SATED,
   GLUTTONY_COUNT_PASSIVE,
   GLUTTONY_COUNT,
@@ -400,6 +426,16 @@ export const GLUTTONY_BUFFS: readonly BuffDef[] = [
 
 /** 行为：**攻速高** —— `gapMs` 比傲慢的 4000 短不少；三条啃噬优先。 */
 export const GLUTTONY_BEHAVIORS: readonly Behavior[] = [
+  /**
+   * **「恶魔低语·二阶段」的开关**（2026-10-20）：血量 ≤40% 时切「饥馑」。
+   */
+  {
+    kind: 'onHpBelow',
+    ratio: 0.4,
+    then: [
+      { kind: 'grant', target: { mode: 'self' }, buff: GLUTTONY_PHASE2, when: { kind: 'hasBuff', who: 'self', buffId: 'whisper-phase2' } },
+    ],
+  },
   { kind: 'enrage', atMs: 120_000, dmgMult: 2 },
   {
     kind: 'rotation',

@@ -231,6 +231,10 @@ export class BattleEngine {
       current: (id) => this.current(id),
       replaceCombatant: (updated) => this.replaceCombatant(updated),
       opponentOf: (id) => opponentOf(this.state.combatants, id),
+      /** 能力 `when` 门禁要条件求值 —— 见 `AbilitiesContext` 的说明。 */
+      statsOf: (id) => this.statsOf(id),
+      buffDef: (id) => this.options.buffs.get(id),
+      skillDef: (id) => this.options.skills.get(id),
     };
   }
 

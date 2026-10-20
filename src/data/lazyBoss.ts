@@ -40,6 +40,7 @@
  */
 
 import type { ActiveSkillDef, Behavior, BuffDef, Expr, PassiveSkillDef, SkillDef } from '../core/types';
+import { PHASE2_GATE } from './whispers';
 import type { BossDef } from './bossDefs';
 import { logicMs } from '../core/loopConstants';
 import { S } from './scale';
@@ -429,7 +430,32 @@ export const LAZY_LOW_HP_RAGE_SKILL: PassiveSkillDef = {
 
 export const LAZY_SKILLS: readonly SkillDef[] = [LAZY_BLUNT, LAZY_PRESSURE, LAZY_SLEEP_SKILL];
 
+/**
+ * **懒惰·二阶段「沉眠」**：进二阶段**立即催眠一次**，之后**挣扎效果减半**。
+ *
+ * 用户 2026-10-20：原来的"催眠必中且**不能挣扎**"被否（"不太好"）⇒
+ * 换成"立即睡一次 + 挣扎减半"（每次 **−0.5 秒**；`LAZY_SLEEP` 现在是 −1 秒）。
+ *
+ * ⚠️ 减半**不能**靠"再挂一条带 `sleepReduceMs` 的 buff"：那个字段是**每条
+ * buff 自己的**、聚合取 `max` ⇒ 再挂一条只会更强。所以走 `sleepStruggleMult`
+ * （2026-10-20 新加的 flag），`castPipeline.strugglesOutOfSleep` 里乘一下。
+ */
+export const LAZY_DEEP_SLEEP: BuffDef = {
+  id: 'lazy-deep-sleep',
+  nameKey: 'phase2.sloth.name',
+  icon: 'lazy_sleep',
+  polarity: 'debuff',
+  color: 0x6f8fb0,
+  /** 它只是一个"挣扎变慢"的标记，画在 buff 行上只会让人问"这是什么"。 */
+  hidden: true,
+  duration: Number.POSITIVE_INFINITY,
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+  flags: { sleepStruggleMult: 0.5 },
+};
+
 export const LAZY_BUFFS: readonly BuffDef[] = [
+  LAZY_DEEP_SLEEP,
   LAZY_LOW_HP_RAGE,
   LAZY_SLEEP,
   LAZY_IDLE,
@@ -453,6 +479,20 @@ export const LAZY_BUFFS: readonly BuffDef[] = [
 const ASLEEP = { kind: 'notHasBuff', who: 'target', buffId: 'lazy-sleep' } as const;
 
 export const LAZY_BEHAVIORS: readonly Behavior[] = [
+  /**
+   * **「恶魔低语·二阶段」的开关**（2026-10-20）：血量 ≤40% 时切形态。
+   * 能力全部守在 `PHASE2_GATE`（这一层抽到二阶段的隐藏标记）后面。
+   */
+  {
+    kind: 'onHpBelow',
+    ratio: 0.4,
+    then: [
+      /** ① **立即催眠一次**（用户："要不就立即催眠一次"）。 */
+      { kind: 'grant', target: { mode: 'primaryEnemy' }, buff: LAZY_SLEEP, when: PHASE2_GATE },
+      /** ② 之后**挣扎减半**（每次 −0.5 秒 —— 见 `LAZY_DEEP_SLEEP`）。 */
+      { kind: 'grant', target: { mode: 'primaryEnemy' }, buff: LAZY_DEEP_SLEEP, when: PHASE2_GATE },
+    ],
+  },
   { kind: 'enrage', atMs: 120_000, dmgMult: 2 },
   {
     kind: 'rotation',

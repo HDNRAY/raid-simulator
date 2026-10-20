@@ -129,6 +129,11 @@ const SHORT_LABEL_KEYS: Readonly<Record<string, string>> = {
   'whisper-blunt': 'whisper.blunt.name',
   'whisper-slow-breath': 'whisper.slowBreath.name',
   'whisper-cut-douqi': 'whisper.cutDouqi.name',
+  /** 各 Boss 的二阶段形态（会挂在它的增益行上，玩家要看得见"它换形态了"）。 */
+  'pride-phase2': 'phase2.pride.name',
+  'greed-phase2': 'phase2.greed.name',
+  'lust-phase2': 'phase2.lust.name',
+  'jealousy-phase2': 'phase2.jealousy.name',
   /**
    * ⚠️ **引擎现造的 buff**（不在 `ALL_BUFFS` 里，见上面的说明）：
    * 「狂暴开始」那一刻挂上的，显示名沿用同一个「狂暴」。
