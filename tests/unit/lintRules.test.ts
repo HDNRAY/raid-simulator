@@ -1,3 +1,5 @@
+import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { ESLint } from 'eslint';
 import { describe, expect, it, beforeAll } from 'vitest';
 
@@ -155,6 +157,102 @@ describe('架构约束的反向用例（lint 规则真的生效）', () => {
  * ⚠️ 扫描范围必须包含 `tests/` 和 `tools/` —— 违规最常出现在测试里
  * （"构造一个非法输入"），只扫 `src/` 会漏掉大多数。
  */
+/**
+ * 列出 `src/` 下的 `.ts` 文件（相对项目根的路径，正斜杠）。
+ *
+ * ⚠️ 用 `fs` 而不是 `import.meta.glob`：这个测试在 vitest 的 node 环境里跑，
+ * 不需要打包器参与（与 `PLACEHOLDER` 那几条扫描同一种做法）。
+ */
+function walkTs(dir: string): readonly string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) out.push(...walkTs(path));
+    else if (entry.name.endsWith('.ts')) out.push(path);
+  }
+  return out;
+}
+
+/**
+ * ⚠️ 用 `import.meta.url` 定位 `src/`，**不要**用相对 cwd 的 `'src'`：
+ * 测试里踩过一次 —— `readdirSync('src')` 在某些跑法下拿到空数组（cwd 不是
+ * 项目根），于是扫描"扫了 0 个文件"却**通过**了 ✗（假绿）。
+ */
+const PROJECT_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const SRC_ROOT = `${PROJECT_ROOT}src`;
+
+/**
+ * 一个 TS 文件里**字符串字面量**的内容（去注释后扫 `'` / `"` / 反引号）。
+ *
+ * ⚠️ 正则而不是 TS AST：这里只回答"这行源码里有没有用引号包起来的中文标点"，
+ * 不需要类型信息；而 AST 会把模板字符串的静态段与表达式拆开，反而更啰嗦。
+ */
+function stringLiteralsOf(file: string): readonly string[] {
+  const source = readFileSync(file, 'utf8');
+  /** 去掉注释（保留字符串），否则注释里的标点会被当成字面量。 */
+  let code = '';
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
+    if (ch === '/' && source[i + 1] === '/') {
+      while (i < source.length && source[i] !== '\n') i += 1;
+      code += '\n';
+    } else if (ch === '/' && source[i + 1] === '*') {
+      i += 2;
+      while (i + 1 < source.length && !(source[i] === '*' && source[i + 1] === '/')) i += 1;
+      i += 1;
+    } else {
+      code += ch;
+    }
+  }
+  const out: string[] = [];
+  for (const match of code.matchAll(/'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"/g)) {
+    out.push(match[1] ?? match[2] ?? '');
+  }
+  return out;
+}
+
+/**
+ * **I1 的补充：CJK 标点也是文案**（2026-10-20）。
+ *
+ * ⚠️ 为什么需要这一条：`raid/i18n/no-hardcoded-cjk` 的判据是**汉字 / 假名 /
+ * 谚文**（`CJK_RE`），**不含中文标点**（`、，。：；！？` 在 U+3000–303F /
+ * U+FF00–FFEF）。于是「用 `、` 拼列表」这种写法**能过 lint** —— 而它确实是
+ * 文案的一部分（英文该是 `, `，间距也不同）。用户 2026-10-20："现在所有的
+ * text 都确保用了 i18n 吧" ⇒ 这里用一次源码扫描把那个盲区补上。
+ *
+ * 允许的两处是**明账**（不是"顺手放过"）：
+ *   - `render/theme.ts`：字体族列表（`楷体` 是系统字体名，不是给玩家看的字）
+ *   - `ui/settings/wrapText.ts`：断行禁则的**标点集合**（排版规则，与语言无关的
+ *     实现细节 —— 它就是"哪些符号不能出现在行首"的定义）
+ */
+describe('I1 补充 — 中文标点 / 全角符号也必须来自语言包', () => {
+  /** 中文标点与全角符号（汉字本身由 ESLint 规则管，这里只管标点）。 */
+  const PUNCT = /[\u3000-\u303f\uff01-\uff60]/;
+  /** 允许出现 CJK 标点字面量的两个文件（明账，只会变短）。 */
+  const ALLOWED = new Set(['src/render/theme.ts', 'src/ui/settings/wrapText.ts']);
+
+  it('src/ 里除语言包 / 两处明账外，没有只含中文标点的字符串字面量', () => {
+    const offenders: string[] = [];
+    const files = walkTs(SRC_ROOT);
+    /** 先断言"真的扫到了文件"——否则空数组会让下面恒等于 []（假绿）。 */
+    expect(files.length).toBeGreaterThan(200);
+    for (const abs of files) {
+      const file = abs.slice(PROJECT_ROOT.length);
+      if (file.includes('src/i18n/locales/')) continue;
+      if (ALLOWED.has(file)) continue;
+      for (const literal of stringLiteralsOf(abs)) {
+        /** 只关心"没有汉字、但有中文标点"的那种（有汉字的已被 ESLint 拦）。 */
+        if (PUNCT.test(literal) && !/[\u4e00-\u9fff]/.test(literal)) {
+          offenders.push(`${file}: ${JSON.stringify(literal)}`);
+        }
+      }
+    }
+    expect(offenders, `这些字面量应该进 src/i18n/locales/：\n${offenders.join('\n')}`).toEqual(
+      [],
+    );
+  });
+});
+
 describe('AGENTS.md 硬规则：禁止类型断言逃生舱', () => {
   /** 扫描的源码根目录 */
   const ROOTS = ['src', 'tests', 'tools'];

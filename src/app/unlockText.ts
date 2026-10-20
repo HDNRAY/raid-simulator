@@ -82,11 +82,11 @@ export function unlockTextOf(unlock: QijiUnlock, d: UnlockTextDeps): string {
        * 不写这一支的话，界面会显示一句空的"同时满足："。
        */
       if (parts.length === 0) return d.translate('screen.codex.unlock.always');
-      return d.translate('screen.codex.unlock.all', { parts: parts.join('、') });
+      return d.translate('screen.codex.unlock.all', { parts: parts.join(d.translate('common.listSeparator')) });
     }
     case 'any':
       return d.translate('screen.codex.unlock.any', {
-        parts: unlock.of.map((child) => unlockTextOf(child, d)).join('、'),
+        parts: unlock.of.map((child) => unlockTextOf(child, d)).join(d.translate('common.listSeparator')),
       });
     case 'not':
       return d.translate('screen.codex.unlock.not', { part: unlockTextOf(unlock.of, d) });

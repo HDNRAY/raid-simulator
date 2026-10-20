@@ -180,7 +180,9 @@ export class CodexScreen {
 
     this.title.set(t('screen.codex.title'));
     const unlocked = entries.filter((entry) => entry.unlocked).length;
-    const dev = this.options.devMode() ? ` · ${t('screen.codex.devMode')}` : '';
+    const dev = this.options.devMode()
+      ? `${t('common.dotSeparator')}${t('screen.codex.devMode')}`
+      : '';
     this.summary.set(
       `${t('screen.codex.summary', {
         unlocked: String(unlocked),

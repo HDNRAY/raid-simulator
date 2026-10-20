@@ -92,7 +92,13 @@ export function foldSummaryOf(args: FoldSummaryArgs): FoldSummary | undefined {
    */
   const tokens = on.map((q) => t(q.nameKey));
   return {
-    text: joinWithin(t('roster.ui.summary.qijiOn', { n: on.length }), tokens, args.maxChars),
+    text: joinWithin({
+      prefix: t('roster.ui.summary.qijiOn', { n: on.length }),
+      tokens,
+      maxChars: args.maxChars,
+      /** 分隔符也是文案（`、` vs `, `）—— 从语言包取，不写在这里。 */
+      separator: t('common.listSeparator'),
+    }),
   };
 }
 
@@ -108,10 +114,16 @@ function pick(list: readonly FoldEntry[], id: string): FoldEntry | undefined {
  * （`foldH`），一旦折行，下面两块的位置就跟着变 —— 那正是"随手写一行
  * 文案把布局搞坏"的形状。所以宁可少显示几条，也不许它变高。
  */
-function joinWithin(prefix: string, tokens: readonly string[], maxChars: number): string {
+function joinWithin(args: {
+  readonly prefix: string;
+  readonly tokens: readonly string[];
+  readonly maxChars: number;
+  readonly separator: string;
+}): string {
+  const { prefix, tokens, maxChars, separator } = args;
   let out = prefix;
   for (const token of tokens) {
-    const piece = (out === prefix ? '' : '、') + token;
+    const piece = (out === prefix ? '' : separator) + token;
     if (out.length + piece.length > maxChars) {
       return out === prefix ? `${prefix}…` : `${out}…`;
     }
