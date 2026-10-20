@@ -73,6 +73,8 @@ export class CodexScreen {
   /** 每张卡片的两个 Label（名字 / 状态）；卡片数量按最大池子预建。 */
   private readonly nameLabels: Label[] = [];
   private readonly stateLabels: Label[] = [];
+  /** 解锁条件那一行（小字、暗色；**未解锁的也照写** —— 那正是玩家要知道的）。 */
+  private readonly conditionLabels: Label[] = [];
   readonly chrome: ScreenChrome;
 
   constructor(options: CodexScreenOptions) {
@@ -213,23 +215,32 @@ export class CodexScreen {
         .stroke({ color: skin.strokeColor, width: skin.strokeWidth });
 
       nameLabel.root.x = rect.x + rect.w / 2;
-      nameLabel.root.y = rect.y + rect.h / 2 - 12;
+      nameLabel.root.y = rect.y + 34;
       nameLabel.set(entry.nameKey === undefined ? t('screen.codex.locked') : t(entry.nameKey));
       nameLabel.setColor(entry.nameKey === undefined ? PALETTE.textDim : PALETTE.text);
       nameLabel.root.visible = true;
 
       stateLabel.root.x = rect.x + rect.w / 2;
-      stateLabel.root.y = rect.y + rect.h / 2 + 18;
+      stateLabel.root.y = rect.y + 60;
       stateLabel.set(
         entry.unlocked ? t('screen.codex.unlocked') : t('screen.codex.notUnlocked'),
       );
       stateLabel.root.visible = true;
+
+      const conditionLabel = this.conditionLabels[index];
+      if (conditionLabel !== undefined) {
+        conditionLabel.root.x = rect.x + rect.w / 2;
+        conditionLabel.root.y = rect.y + rect.h - 30;
+        conditionLabel.set(entry.unlockText);
+        conditionLabel.root.visible = true;
+      }
     });
 
     /** 多余的 Label（池子变小）藏起来。 */
     for (let i = entries.length; i < this.nameLabels.length; i += 1) {
       this.nameLabels[i]?.root && (this.nameLabels[i]!.root.visible = false);
       this.stateLabels[i]?.root && (this.stateLabels[i]!.root.visible = false);
+      this.conditionLabels[i]?.root && (this.conditionLabels[i]!.root.visible = false);
     }
 
     /**
@@ -263,9 +274,18 @@ export class CodexScreen {
         anchorX: 0.5,
         anchorY: 0.5,
       });
-      this.root.addChild(name.root, state.root);
+      const condition = new Label(pixi, {
+        x: 0,
+        y: 0,
+        size: FONT.tiny,
+        color: PALETTE.textDim,
+        anchorX: 0.5,
+        anchorY: 0.5,
+      });
+      this.root.addChild(name.root, state.root, condition.root);
       this.nameLabels.push(name);
       this.stateLabels.push(state);
+      this.conditionLabels.push(condition);
     }
   }
 }

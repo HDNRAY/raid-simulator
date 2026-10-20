@@ -32,6 +32,13 @@ export interface CodexEntry {
   readonly nameKey: string | undefined;
   readonly descKey: string | undefined;
   readonly unlocked: boolean;
+  /**
+   * **解锁条件的人话**（2026-10-20，用户："要显示 炁机解锁条件"）。
+   *
+   * ⚠️ 已解锁的也照写（"怎么来的"也是图鉴该说的）—— 由 `app/unlockText`
+   * 从 `QijiUnlock` **推导**，不是手写的第二份。
+   */
+  readonly unlockText: string;
 }
 
 /* ------------------------------------------------------------------ *
@@ -63,9 +70,13 @@ export const CODEX_LAYOUT: CodexLayout = {
   titleY: 56,
   summaryY: 92,
   firstCardY: 132,
-  cardW: 160,
-  cardH: 104,
-  gapX: 16,
+  /**
+   * ⚠️ 2026-10-20：卡片加高（104 → 132）—— 多了一行"解锁条件"
+   * （用户："要显示 炁机解锁条件"）。5 列 × 2 行仍然装得下（高 280）。
+   */
+  cardW: 176,
+  cardH: 132,
+  gapX: 14,
   gapY: 16,
   cols: 5,
   hintY: 500,

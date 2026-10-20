@@ -23,6 +23,7 @@
 import { isUnlocked, type UnlockStats } from '../core/run/index';
 import type { QijiEntity } from '../core/types/qiji';
 import type { CodexEntry } from '../ui/codexLogic';
+import type { QijiUnlock } from '../core/types/qiji';
 
 /**
  * 图鉴的条目（顺序 = 池子顺序）。
@@ -34,6 +35,8 @@ export function codexEntriesOf(args: {
   readonly pool: readonly QijiEntity[];
   readonly stats: UnlockStats | undefined;
   readonly devMode: boolean;
+  /** 解锁条件 → 人话（`app/unlockText.unlockTextOf`；注入是为了可测）。 */
+  readonly unlockText: (unlock: QijiUnlock) => string;
 }): readonly CodexEntry[] {
   return args.pool.map((qiji) => {
     const unlocked = args.stats === undefined
@@ -45,6 +48,7 @@ export function codexEntriesOf(args: {
       nameKey: show ? qiji.nameKey : undefined,
       descKey: show ? qiji.descKey : undefined,
       unlocked,
+      unlockText: args.unlockText(qiji.unlock),
     };
   });
 }

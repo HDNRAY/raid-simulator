@@ -1480,6 +1480,29 @@ export const zhCN = {
       devMode: '开发模式：全部显示',
       /** 只读屏：标签 + 键位由渲染层拼（键位不进 i18n）。 */
       hint: '点屏幕任意处或按 ',
+      /**
+       * **解锁条件**（2026-10-20，用户："解锁条件 现在没有描述 就都加上"）。
+       *
+       * ⚠️ 这些是**模板**，数值 / 技能名 / 作用域全部由 `app/unlockText.ts`
+       * 从 `QijiUnlock` **推导** —— 条件改了文案自动跟上，不用手写第二份。
+       */
+      unlock: {
+        always: '开局即可选',
+        scopeRun: '本局',
+        scopeBattle: '这一场',
+        skillUses: '{scope}累计用「{skill}」{value} 次',
+        skillDamage: '{scope}用「{skill}」累计造成 {value} 点伤害',
+        skillHits: '{scope}用「{skill}」命中 {value} 次',
+        skillInterrupts: '{scope}用「{skill}」打断 {value} 次',
+        /** 「挡下」：真的挡下了几击（不是"按了几次"）。 */
+        skillAvoids: '{scope}用「{skill}」挡下 {value} 次',
+        dodges: '{scope}闪避 {value} 次',
+        battlesWon: '{scope}赢下 {value} 场',
+        flawlessBattles: '{scope}满血赢下 {value} 场',
+        all: '同时满足：{parts}',
+        any: '满足任意一条：{parts}',
+        not: '不满足：{part}',
+      },
     },
     /**
      * ================================================================

@@ -44,6 +44,8 @@ import { RunConfirmScreen } from '../ui/RunConfirmScreen';
 import { RunOverScreen } from '../ui/RunOverScreen';
 import { CodexScreen } from '../ui/CodexScreen';
 import { codexEntriesOf } from './codexEntries';
+import { unlockTextOf } from './unlockText';
+import { ALL_SKILLS } from '../data/content';
 import { ALL_QIJI } from '../data/qiji';
 import { DEV_MODE } from './config';
 import { readUrlParams } from './urlParams';
@@ -308,6 +310,14 @@ export function buildScreens(d: ScreenSetupDeps): Screens {
         pool: ALL_QIJI,
         stats,
         devMode: DEV_MODE || readUrlParams(globalThis.location.search).dev,
+        unlockText: (unlock) =>
+          unlockTextOf(unlock, {
+            translate: translateSafe,
+            skillName: (skillId) => {
+              const skill = ALL_SKILLS.find((each) => each.id === skillId);
+              return translateSafe(skill?.nameKey ?? `skill.${skillId}.name`);
+            },
+          }),
       });
     },
     hasRun: () => d.getRun?.() !== undefined,

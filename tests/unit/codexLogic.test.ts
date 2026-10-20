@@ -14,9 +14,12 @@ import { codexEntriesOf } from '../../src/app/codexEntries';
  * 钉的是**三种输入下条目的形状**：无统计 / 开发模式 / 顺序。
  */
 
+/** 测试里用的"解锁条件 → 人话"（这层的形状与 `app/unlockText` 无关）。 */
+const stubUnlockText = (unlock: { readonly kind: string }): string => `条件:${unlock.kind}`;
+
 describe('图鉴条目：已解锁的露名字，未解锁的 ？？？', () => {
   it('没有进行中的一局（无统计）⇒ 只认 `unlock: always` 的那几条', () => {
-    const entries = codexEntriesOf({ pool: ALL_QIJI, stats: undefined, devMode: false });
+    const entries = codexEntriesOf({ pool: ALL_QIJI, stats: undefined, devMode: false, unlockText: stubUnlockText });
     expect(entries).toHaveLength(ALL_QIJI.length);
 
     const always = ALL_QIJI.filter((qiji) => qiji.unlock.kind === 'always').map((q) => q.id);
@@ -30,7 +33,7 @@ describe('图鉴条目：已解锁的露名字，未解锁的 ？？？', () => 
   });
 
   it('**开发模式** ⇒ 全部显示名字与说明（但"未解锁"这个状态仍然是真话）', () => {
-    const entries = codexEntriesOf({ pool: ALL_QIJI, stats: undefined, devMode: true });
+    const entries = codexEntriesOf({ pool: ALL_QIJI, stats: undefined, devMode: true, unlockText: stubUnlockText });
     for (const entry of entries) {
       expect(entry.nameKey, entry.id).toBeDefined();
       expect(entry.descKey, entry.id).toBeDefined();
@@ -40,7 +43,12 @@ describe('图鉴条目：已解锁的露名字，未解锁的 ？？？', () => 
   });
 
   it('顺序 = 池子顺序（图鉴不做排序，排序是池子的事）', () => {
-    const entries = codexEntriesOf({ pool: ALL_QIJI, stats: undefined, devMode: true });
+    const entries = codexEntriesOf({
+      pool: ALL_QIJI,
+      stats: undefined,
+      devMode: true,
+      unlockText: stubUnlockText,
+    });
     expect(entries.map((entry) => entry.id)).toEqual(ALL_QIJI.map((qiji) => qiji.id));
   });
 });
