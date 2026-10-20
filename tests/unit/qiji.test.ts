@@ -43,7 +43,7 @@ const TWEAKED = ALL_QIJI.filter((q) => q.skillTweak !== undefined);
 const PASSIVE = ALL_QIJI.filter((q) => q.passiveBuffs !== undefined);
 
 describe('炁机池：数量与形状', () => {
-  it('一共 **12** 条：2 条兜底 + 3 条派生 + 5 条改技能 + 3 条装 buff', () => {
+  it('一共 **13** 条：2 条兜底 + 3 条派生 + 5 条改技能 + 3 条装 buff', () => {
     /**
      * ⚠️ 2026-10-14 加了**两条**「用 30 次」的（拳 → 黑闪、斩 → 斩法）：
      *   - 「黑闪」**不改技能**，它靠 `passiveBuffs` 装一条常驻 buff
@@ -57,7 +57,7 @@ describe('炁机池：数量与形状', () => {
      *   - 「重击回缠」：`skillTweak`（劈回缠）**加** `passiveBuffs`
      *     （`onAvoided` 回缠）⇒ **两类都算**（它是"改技能 + 装 buff"的合体）
      */
-    expect(ALL_QIJI).toHaveLength(12);
+    expect(ALL_QIJI).toHaveLength(13);
     expect(DERIVED).toHaveLength(3);
     expect(TWEAKED).toHaveLength(5);
     expect(ALL_QIJI.filter((q) => q.unlock.kind === 'always')).toHaveLength(2);

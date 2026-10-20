@@ -82,12 +82,16 @@ export const CODEX_LAYOUT: CodexLayout = {
    * 4 列 × 210 宽一行 ~15 个字 → 两行放得下；`108 + 12` 让三行收在 480，
    * 不压 `hintY 500`。
    */
-  cardW: 210,
+  /**
+   * ⚠️ 2026-10-20 又一条（「重击回缠」拆成两条 ⇒ 池子 13）⇒ 回到 **5 列**。
+   * 5×180 + 4×8 = 932 宽；3 行（5+5+3）收在 476，提示行下移到 524。
+   */
+  cardW: 180,
   cardH: 108,
-  gapX: 14,
-  gapY: 12,
-  cols: 4,
-  hintY: 500,
+  gapX: 8,
+  gapY: 10,
+  cols: 5,
+  hintY: 524,
 };
 
 export interface CodexRect {

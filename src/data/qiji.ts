@@ -483,11 +483,14 @@ const QIJI_FOCUS_SLASH: QijiEntity = {
   icon: 'char_focus',
   category: 'offense',
   rarity: 'epic',
-  /** 用「斩」30 次 + 用「凝」3 次（两个流派都摸过才给这条"合流"）。 */
+  /**
+   * 用「斩」**3 次** + 用「凝」**3 次**（2026-10-20 用户："条件降低一点吧，
+   * 各 3 次就行了"—— 原来斩要 30 次，太靠后）。
+   */
   unlock: {
     kind: 'all',
     of: [
-      { kind: 'statAtLeast', stat: { s: 'skillUses', skillId: ATTACK.id, scope: 'run' }, value: 30 },
+      { kind: 'statAtLeast', stat: { s: 'skillUses', skillId: ATTACK.id, scope: 'run' }, value: 3 },
       { kind: 'statAtLeast', stat: { s: 'skillUses', skillId: 'focus', scope: 'run' }, value: 3 },
     ],
   },
@@ -535,13 +538,14 @@ const CHONGJI_DOUQI_BACK = 10;
 const DODGE_DOUQI_BACK = 5;
 
 /**
- * **「重击回缠」**（重击流：**劈回缠、闪避也回缠**）。
+ * **「重击回缠」**：**用出「劈」就回缠**（重击流的一半）。
  *
- * - 「劈」：`skillTweak.onUse` 的 `resource`（`castFinish` 结算）回
- *   `CHONGJI_DOUQI_BACK` 点缠 —— 它的代价本来就是缠（50），所以这是"部分返还"
- * - **闪避**：走 `onAvoided` 触发器（"成功躲掉一击"），**不是**"用了几次避"
- *   —— 用户原话是"闪避也回缠"，躲掉才算 ✓ 而且对「避」「闪」两个角色的
- *   闪避都成立（它们都靠 `invulnerable` 规避）
+ * ⚠️ 2026-10-20 用户："重击回缠，拆3成2个 炁机" —— 原先"劈回缠 + 闪避回缠"
+ * 挤在一条里，现在拆成两条（这条管**劈**，闪避那条见 `QIJI_DODGE_DOUQI`）。
+ * 拆开的好处是**解锁条件可以分开**（想玩重击的人先拿到劈，爱闪的人另有路）。
+ *
+ * `skillTweak.onUse` 的 `resource`（`castFinish` 结算）回
+ * `CHONGJI_DOUQI_BACK` 点缠 —— 劈的代价本来就是缠（50），这是部分返还。
  */
 const QIJI_CHONGJI: QijiEntity = {
   id: 'chongJiHuiChan',
@@ -566,10 +570,36 @@ const QIJI_CHONGJI: QijiEntity = {
       delta: CHONGJI_DOUQI_BACK,
     },
   },
+};
+
+/**
+ * **「闪避回缠」**：**成功躲掉一击就回缠**（重击流的另一半）。
+ *
+ * 判据是 `onAvoided`（"真的躲掉了"），不是"按了几次避" —— 用户原话
+ * "闪避也回缠"。于是林晚风的「避」、凯丽的「闪」、乃至炁机带来的无敌
+ * 窗口都算 ✓（它们都走 `invulnerable` 的 `avoided` 通路）。
+ *
+ * ⚠️ 解锁看 `dodges`（成功闪避的次数），不是 `skillUses`：这条炁机讲的
+ * 就是"闪避"，用 `skillUses(dodge)` 会把凯丽（没有「避」）排除在外 ✗。
+ */
+const QIJI_DODGE_DOUQI: QijiEntity = {
+  id: 'shanBiHuiChan',
+  kind: 'qiji',
+  nameKey: 'qiji.shanBiHuiChan.name',
+  descKey: 'qiji.shanBiHuiChan.desc',
+  icon: 'char_dodge',
+  category: 'defense',
+  rarity: 'uncommon',
+  unlock: {
+    kind: 'statAtLeast',
+    stat: { s: 'dodges', scope: 'run' },
+    value: 3,
+  },
+  abilities: [],
   passiveBuffs: [
     {
-      id: 'qiji-chongji-dodge-douqi',
-      nameKey: 'qiji.chongJiHuiChan.name',
+      id: 'qiji-dodge-douqi',
+      nameKey: 'qiji.shanBiHuiChan.name',
       icon: 'char_dodge',
       polarity: 'buff',
       duration: Number.POSITIVE_INFINITY,
@@ -600,6 +630,7 @@ export const ALL_QIJI: readonly QijiEntity[] = [
   QIJI_ZHAN,
   QIJI_FOCUS_SLASH,
   QIJI_CHONGJI,
+  QIJI_DODGE_DOUQI,
 ];
 
 /** 按 id 取一个炁机（`chosen` 里存的是 id，记录 / UI 要还原定义）。 */

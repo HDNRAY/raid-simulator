@@ -234,7 +234,7 @@ export class CodexScreen {
          * ⚠️ 中文按 `FONT.small`（13，`ui/layout.ts` 的下限）画，一行约 15 字；
          * 长条件（"同时满足：…"）折两行，再长就省略 —— 不许压到邻卡上。
          */
-        conditionLabel.set(wrapByChars(entry.unlockText, { perLine: 15, maxLines: 2 }).join('\n'));
+        conditionLabel.set(wrapByChars(entry.unlockText, { perLine: 12, maxLines: 2 }).join('\n'));
         conditionLabel.setColor(PALETTE.textDim);
         conditionLabel.root.visible = true;
       }

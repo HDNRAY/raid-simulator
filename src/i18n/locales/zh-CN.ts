@@ -1490,7 +1490,7 @@ export const zhCN = {
         always: '开局即可选',
         scopeRun: '本局',
         scopeBattle: '这一场',
-        skillUses: '{scope}累计用「{skill}」{value} 次',
+        skillUses: '{scope}用「{skill}」{value} 次',
         skillDamage: '{scope}用「{skill}」累计造成 {value} 点伤害',
         skillHits: '{scope}用「{skill}」命中 {value} 次',
         skillInterrupts: '{scope}用「{skill}」打断 {value} 次',
@@ -1683,7 +1683,14 @@ export const zhCN = {
      */
     chongJiHuiChan: {
       name: '重击回缠',
-      desc: '「劈」每次用出**回 10 缠**；**成功闪避**一次也回 5 缠。\n重击流：缠越打越多。',
+      desc: '「劈」每次用出**回 10 缠** —— 它的代价本来就是缠。\n重击流的一半。',
+    },
+    /**
+     * 「闪避回缠」：重击流的另一半（2026-10-20 用户："拆3成2个 炁机"）。
+     */
+    shanBiHuiChan: {
+      name: '闪避回缠',
+      desc: '**成功闪避**一次就**回 5 缠**（真的躲掉了才算）。\n「避」与「闪」都吃。',
     },
     /** 「截」→「击」：**成功打断**之后开派生窗口。 */
     jieShengJi: {
