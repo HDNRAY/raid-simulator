@@ -198,15 +198,14 @@ export class CodexScreen {
       if (rect === undefined || nameLabel === undefined || stateLabel === undefined) return;
 
       /**
-       * 卡片皮肤：已解锁 = 选中态（暖色）、未解锁 = 暗态（**同一块几何**）。
-       * ⚠️ 用户要求"未解锁的**保持 UI**、内容 ？？？" ⇒ 两者画法必须一致，
-       * 只有文字与色调不同。
+       * 卡片皮肤：**所有卡片同一种**（2026-10-20 用户："黄色的是初始就能
+       * 解锁的？**不需要这种区别**"）。
+       *
+       * 状态已经由**文字**说清了（名字 vs ？？？、已解锁 / 未解锁、解锁条件），
+       * 再给已解锁的卡片换一套暖色皮肤只是多一层"这只在首页/图鉴里才有"的
+       * 视觉语言 —— 图鉴是清单，不是选择界面。
        */
-      const skin = cardSkin({
-        developing: false,
-        cursored: false,
-        selected: entry.unlocked,
-      });
+      const skin = cardSkin({ developing: false, cursored: false, selected: false });
       this.gfx
         .roundRect(rect.x, rect.y, rect.w, rect.h, 8)
         .fill({ color: skin.fillColor, alpha: skin.fillAlpha });
