@@ -40,7 +40,13 @@ export interface StageHandle {
  *
  * @throws 页面里缺 `#stage` 容器时（说明 `index.html` 被改坏了）。
  */
-export async function createStage(): Promise<StageHandle> {
+export async function createStage(
+  /**
+   * **渲染缓冲倍率**（1 或 2，见 `render/stageScale.ts`）：逻辑空间仍是
+   * 960×540，这个数只决定"一个逻辑像素用几个设备像素画"。
+   */
+  scale: number,
+): Promise<StageHandle> {
   const stage = document.querySelector<HTMLElement>('#stage');
   if (!stage) throw new Error('index.html is missing the #stage container');
 
@@ -51,7 +57,7 @@ export async function createStage(): Promise<StageHandle> {
   await app.init({
     width: LOGICAL_W,
     height: LOGICAL_H,
-    resolution: 1,
+    resolution: scale,
     autoDensity: false,
     antialias: false,
     roundPixels: true,

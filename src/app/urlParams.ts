@@ -111,6 +111,14 @@ export interface UrlParams {
    * （种子是 uint32），所以"给个很大的数"是合法的、不是错误。
    */
   readonly runSeed: number | null;
+  /**
+   * **渲染缓冲倍率**：`?scale=1` / `?scale=2`（2026-10-20）。
+   *
+   * ⚠️ 与 `?touch=` 同一条用途：截图验证 / 用户自救 —— 让"猜设备"变成
+   * **默认值**而不是结论（`render/stageScale.ts` 的 `resolveStageScale`）。
+   * 写错了（`?scale=3`）当没传。
+   */
+  readonly stageScale: string | null;
 }
 
 export function readUrlParams(search: string): UrlParams {
@@ -122,6 +130,7 @@ export function readUrlParams(search: string): UrlParams {
     fps: params.get('fps') === '1',
     runLength: parsePositiveInt(params.get('runlen')),
     runSeed: parsePositiveInt(params.get('runseed')),
+    stageScale: params.get('scale'),
   };
 }
 

@@ -1,4 +1,7 @@
 import { createStage } from './app/bootstrap';
+import { parseStageScale, resolveStageScale } from './render/stageScale';
+import { capsOf } from './render/platform';
+import { readUrlParams } from './app/urlParams';
 import { createGameDeps } from './app/deps';
 import { createGame } from './app/game';
 import './styles.css';
@@ -36,9 +39,22 @@ import './styles.css';
  * （延后回填的那几处都有注释说明为什么不能整理顺序），**没有全局变量**。
  */
 async function bootstrap(): Promise<void> {
-  const { app, stage } = await createStage();
+  /**
+   * ⚠️ **顺序有讲究**：`deps` 要**先**造（它解析操作方式那个唯一 flag），
+   * 而缓冲倍率要在 `createStage()` **之前**定（`resolution` 只能 init 时给）。
+   * 于是：deps → scale → stage。`createGameDeps()` 不碰 stage，所以可以提前。
+   */
   const deps = createGameDeps();
-  const game = createGame({ app, stage, deps });
+  const scale = resolveStageScale({
+    touch: capsOf(deps.inputMode).touch,
+    viewportWidth: globalThis.innerWidth,
+    ...(() => {
+      const override = parseStageScale(readUrlParams(globalThis.location.search).stageScale);
+      return override === undefined ? {} : { override };
+    })(),
+  });
+  const { app, stage } = await createStage(scale);
+  const game = createGame({ app, stage, deps, scale });
   game.start();
 }
 

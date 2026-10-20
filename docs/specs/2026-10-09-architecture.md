@@ -613,8 +613,17 @@ src/main.ts 存在    ->  构建并推送到 HDNRAY.github.io/raid/
 | A. 改 renderer 分辨率 | 按容器尺寸反复 `renderer.resize()` | 每次 resize 重分配 framebuffer；逻辑坐标被拉伸，像素比例失控 |
 | **B. 定尺寸 canvas + CSS 缩放**（选这个） | canvas 内部永远是 960×540，用 CSS 居中缩放 | 需要处理 CSS 缩放的采样方式 |
 
-**选 B**：`app.init()` 里的 `resolution` 固定为 1，`autoDensity: false`，
-**渲染器尺寸在生命周期内永不改变**。缩放完全交给 CSS。
+**选 B**：`autoDensity: false`，**渲染器尺寸在生命周期内永不改变**（不响应
+窗口尺寸），缩放完全交给 CSS。
+
+⚠️ **2026-10-20 修订：`resolution` 不再固定为 1** —— 它是 `STAGE_SCALE`
+（`render/stageScale.ts`，**1 或 2**，启动时按设备定一次）：
+`1080p` 屏上 960×540 的缓冲被 CSS 拉伸 2 倍会发虚，改用 2 倍缓冲（1920×1080）
+正好 1:1。**逻辑空间仍是 960×540、布局常量一个不动**，所以"缩放只改 CSS"
+这条规则没有变 —— 变的只是"一个逻辑像素用几个设备像素画"，而它由
+`senders`：`?scale=1|2` 覆盖 / 触屏 1 × / 视口宽 ≥1200 → 2×。
+`render/sizes.applyStageSize` 的断言随之改成 `backing = 逻辑 × scale`
+（防止有人运行期偷偷 `renderer.resize`，那仍然会抛错）。
 
 ```ts
 // render/scaling.ts

@@ -103,6 +103,11 @@ export interface CreateGameDeps {
   readonly stage: HTMLElement;
   /** 主干第二步的产物（内容 / 存储 / 键位 / 输入方式）。 */
   readonly deps: GameDeps;
+  /**
+   * **渲染缓冲倍率**（1 或 2，`render/stageScale.ts`）—— 与 `createStage()`
+   * 拿到的是同一个数：`start()` 里 `observeStage` 要按它断言 backing size。
+   */
+  readonly scale: number;
 }
 
 /**
@@ -113,7 +118,7 @@ export interface CreateGameDeps {
  * 这类早于启动的进入战斗，走的是"造"这一段里的显式函数调用。
  */
 export function createGame(o: CreateGameDeps): GameHandle {
-  const { app, stage } = o;
+  const { app, stage, scale } = o;
   const d = o.deps;
   const state = createGameState(d.bindings, d.touchButtons, d.inputMode);
 
@@ -195,7 +200,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
    * （见 `loopWiring.ts`）；设置面板的滑块走 `settingsSetup.ts` 里那条
    * `setUiScale` 路径 —— 两条路都收口到 `state.uiScale`。
    */
-  const observer = observeStage(stage, app.canvas, SCALING_MODE, () => {});
+  const observer = observeStage(stage, app.canvas, SCALING_MODE, scale, () => {});
 
   /* ---------- 一局战斗 ---------- */
   /**

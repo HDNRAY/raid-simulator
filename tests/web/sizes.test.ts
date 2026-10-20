@@ -55,7 +55,7 @@ describe('applyStageSize', () => {
   });
 
   it('只写 CSS 尺寸，不动内部尺寸', () => {
-    applyStageSize(canvas, { width: 1920, height: 1080, scale: 2, padX: 0, padY: 0 });
+    applyStageSize(canvas, { width: 1920, height: 1080, scale: 2, padX: 0, padY: 0 }, 1);
     expect(canvas.style.width).toBe('1920px');
     expect(canvas.style.height).toBe('1080px');
     // 关键断言：内部尺寸不变
@@ -66,15 +66,36 @@ describe('applyStageSize', () => {
   it('内部尺寸被改动过就抛错（防止有人用 renderer.resize 走回老路）', () => {
     canvas.width = 1920;
     expect(() =>
-      applyStageSize(canvas, { width: 1920, height: 1080, scale: 2, padX: 0, padY: 0 }),
+      applyStageSize(canvas, { width: 1920, height: 1080, scale: 2, padX: 0, padY: 0 }, 1),
     ).toThrow(/backing size must stay 960x540/);
+  });
+});
+
+describe('applyStageSize · 2 倍缓冲（2026-10-20）', () => {
+  it('backing = 逻辑 × scale（2 倍时是 1920×1080），CSS 仍只受视口影响', () => {
+    const canvas = makeCanvas();
+    canvas.width = 1920;
+    canvas.height = 1080;
+    applyStageSize(canvas, { width: 1280, height: 720, scale: 1.33, padX: 0, padY: 0 }, 2);
+    expect(canvas.style.width).toBe('1280px');
+    expect(canvas.style.height).toBe('720px');
+    /** ⚠️ 内部尺寸**不再**恒为 960×540：它必须等于逻辑 × 这一台的倍率。 */
+    expect(canvas.width).toBe(1920);
+    expect(canvas.height).toBe(1080);
+  });
+
+  it('2 倍下内部尺寸是 960×540 也照样抛错（防止有人把倍率写死回 1）', () => {
+    const canvas = makeCanvas();
+    expect(() =>
+      applyStageSize(canvas, { width: 1280, height: 720, scale: 1.33, padX: 0, padY: 0 }, 2),
+    ).toThrow(/backing size must stay 1920x1080/);
   });
 });
 
 describe('observeStage', () => {
   it('首次调用立即应用一次尺寸', () => {
     const canvas = makeCanvas();
-    const { dispose } = observeStage(makeStage(1280, 720), canvas, 'fit');
+    const { dispose } = observeStage(makeStage(1280, 720), canvas, 'fit', 1);
     expect(canvas.style.width).toBe('1280px');
     expect(canvas.style.height).toBe('720px');
     dispose();
@@ -82,7 +103,7 @@ describe('observeStage', () => {
 
   it('refresh() 用当前视口重测（面板尺寸变化后可手动触发）', () => {
     const canvas = makeCanvas();
-    const handle = observeStage(makeStage(1280, 720), canvas, 'fit');
+    const handle = observeStage(makeStage(1280, 720), canvas, 'fit', 1);
     expect(canvas.style.width).toBe('1280px');
     handle.refresh();
     expect(canvas.style.width).toBe('1280px');
@@ -92,7 +113,7 @@ describe('observeStage', () => {
   it('回调收到尺寸信息，dispose 之后不再触发', () => {
     const canvas = makeCanvas();
     const onResize = vi.fn();
-    const { dispose } = observeStage(makeStage(960, 540), canvas, 'fit', onResize);
+    const { dispose } = observeStage(makeStage(960, 540), canvas, 'fit', 1, onResize);
     expect(onResize).toHaveBeenCalledTimes(1);
     expect(onResize.mock.calls[0]?.[0]).toMatchObject({ width: 960, height: 540 });
     dispose();

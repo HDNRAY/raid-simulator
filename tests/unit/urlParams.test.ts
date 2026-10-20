@@ -13,6 +13,18 @@ import { readUrlParams } from '../../src/app/urlParams';
  * 与 `?runlen=2` / `?runseed=123` 的实测覆盖。
  */
 
+describe('?scale= 解析（渲染缓冲倍率）', () => {
+  it('`?scale=1` / `?scale=2` 原样读出来（判据在 `render/stageScale`）', () => {
+    expect(readUrlParams('?scale=1').stageScale).toBe('1');
+    expect(readUrlParams('?scale=2').stageScale).toBe('2');
+  });
+
+  it('没传 ⇒ `null`；写错了也留原样（由 `parseStageScale` 当没传）', () => {
+    expect(readUrlParams('').stageScale).toBeNull();
+    expect(readUrlParams('?scale=3').stageScale).toBe('3');
+  });
+});
+
 describe('`?prepare=skip` / `?boss=` / `?noai=1`（既有行为，不许变）', () => {
   it('什么都不传 → 全默认', () => {
     const p = readUrlParams('');

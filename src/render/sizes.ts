@@ -11,6 +11,11 @@ import {
  * **这里只改 canvas 的 CSS 尺寸，绝不改 canvas 的内部尺寸。**
  * 这样 resize 是廉价的（浏览器重排），不触发 Pixi 的 framebuffer / 纹理重建
  * （architecture 规范 §10.2 / §10.4）。
+ *
+ * ⚠️ **2026-10-20 起内部尺寸不再恒等于 960×540**：它是
+ * `960×540 × STAGE_SCALE`（`render/stageScale.ts`，1 或 2 倍）。
+ * 断言随之改成"**必须等于 逻辑尺寸 × 这一次的倍率**" —— 仍然是"缩放只能
+ * 改 CSS、唯一能改内部尺寸的是那个**启动期常数**"，只是它不再恒为 1。
  */
 
 export interface StageSize {
@@ -55,11 +60,14 @@ export function measureStage(stage: HTMLElement, mode: ScalingMode): StageSize {
 export function applyStageSize(
   canvas: HTMLCanvasElement,
   size: StageSize,
+  /** 这一台设备用的缓冲倍率（`render/stageScale.ts` 的 `StageScale`）。 */
+  scale: number,
 ): void {
-  if (canvas.width !== LOGICAL_W || canvas.height !== LOGICAL_H) {
+  if (canvas.width !== LOGICAL_W * scale || canvas.height !== LOGICAL_H * scale) {
     // 开发者错误，不是面向玩家的文案 —— 所以用英文，不进 i18n 表。
     throw new Error(
-      `canvas backing size must stay ${LOGICAL_W}x${LOGICAL_H}, got ` +
+      `canvas backing size must stay ${LOGICAL_W * scale}x${LOGICAL_H * scale} ` +
+        `(logical ${LOGICAL_W}x${LOGICAL_H} × scale ${scale}), got ` +
         `${canvas.width}x${canvas.height}. Scaling must only change CSS size.`,
     );
   }
@@ -74,11 +82,12 @@ export function observeStage(
   stage: HTMLElement,
   canvas: HTMLCanvasElement,
   mode: ScalingMode,
+  scale: number,
   onResize?: (size: StageSize) => void,
 ): { dispose: () => void; refresh: () => void } {
   const update = () => {
     const size = measureStage(stage, mode);
-    applyStageSize(canvas, size);
+    applyStageSize(canvas, size, scale);
     onResize?.(size);
   };
 
