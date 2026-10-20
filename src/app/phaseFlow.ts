@@ -327,6 +327,7 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
     state.runConfirm?.setVisible(show.runConfirm);
     state.qijiSelect?.setVisible(show.qijiSelect);
     state.runOver?.setVisible(show.runOver);
+    state.codex?.setVisible(show.codex);
     d.scene.root.visible = show.battle;
   };
 

@@ -42,8 +42,14 @@
  * 打架的真相源，而且它永远没有第二种取值。
  */
 
-/** 首页的两个入口。 */
-export type HomeAction = 'roguelike' | 'free';
+/**
+ * 首页的三个入口（2026-10-20 加了「图鉴」）。
+ *
+ * ⚠️ 用户原话只说"首页加一个'图鉴'按钮" —— 它**不是模式**（不进战斗、
+ * 不碰 `RunState`），所以它在 `HOME_ACTIONS` 里排最后：前两个是路由到
+ * 两条玩法，它是"看内容"。
+ */
+export type HomeAction = 'roguelike' | 'free' | 'codex';
 
 /**
  * 按钮顺序（= 屏幕上的上下顺序 = 光标的移动顺序）。
@@ -51,7 +57,7 @@ export type HomeAction = 'roguelike' | 'free';
  * ⚠️ 顺序有意义：第一项就是**默认光标**所在（`createHomeState`），
  * 而肉鸽模式是主推的那条路 —— 用户描述的流程里它排在前面。
  */
-export const HOME_ACTIONS: readonly HomeAction[] = ['roguelike', 'free'];
+export const HOME_ACTIONS: readonly HomeAction[] = ['roguelike', 'free', 'codex'];
 
 /** 首页布局（逻辑坐标系 960×540；数字与 `prepareLogic` 的布局表同源）。 */
 export interface HomeLayout {
@@ -81,12 +87,17 @@ export interface HomeLayout {
 export const HOME_LAYOUT: HomeLayout = {
   width: 960,
   height: 540,
-  titleY: 138,
-  firstButtonY: 248,
+  titleY: 130,
+  /**
+   * ⚠️ 三个按钮（2026-10-20 加「图鉴」）之后，这两组数要一起看：
+   * `130 + 210 + 3×56 + 2×18 = 454`，而提示行在 `hintY = 492` ——
+   * **不重叠**。原先两个按钮时是 `firstButtonY: 248 / hintY: 436`。
+   */
+  firstButtonY: 210,
   buttonW: 320,
   buttonH: 56,
-  buttonGap: 20,
-  hintY: 436,
+  buttonGap: 18,
+  hintY: 492,
   noticeY: 522,
 };
 

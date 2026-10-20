@@ -359,6 +359,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
    * `applyPhase` 的定义早于它们，所有访问点都容忍 `undefined`（见 `flow.ts`）。
    */
   const screens = buildScreens({
+      getRun: () => flow.runState(),
     app,
     showKeyHints: showKeyHintsNow,
     f1Label,
@@ -401,6 +402,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
   state.runConfirm = screens.runConfirm;
   state.qijiSelect = screens.qijiSelect;
   state.runOver = screens.runOver;
+  state.codex = screens.codex;
 
   /**
    * **"当前这一屏是谁"的两个查询**（UI 缩放落到谁身上 / 齿轮问谁）——
@@ -547,6 +549,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
     runConfirm: screens.runConfirm,
     qijiSelect: screens.qijiSelect,
     runOver: screens.runOver,
+    codex: screens.codex,
     scene,
     settings,
     touch,

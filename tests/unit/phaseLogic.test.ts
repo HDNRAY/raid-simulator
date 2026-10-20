@@ -49,6 +49,7 @@ const ALL: readonly Phase[] = [
  * | `battle` | 无 | 战斗中没有暂停 / 菜单（见 `phaseFromEscape`） |
  * | `runConfirm` | **无** | 确认屏没有"回上一屏"（紧接在开局 / 选炁机之后） |
  * | `qijiSelect` / `runOver` | `characterSelect` | 放弃 / 再来一局 |
+ * | `codex` | `home` | 图鉴只是"看内容"，回首页 |
  */
 const ESCAPE_TARGET: Readonly<Record<Phase, string | undefined>> = {
   home: undefined,
@@ -58,6 +59,8 @@ const ESCAPE_TARGET: Readonly<Record<Phase, string | undefined>> = {
   runConfirm: undefined,
   qijiSelect: 'characterSelect',
   runOver: 'characterSelect',
+  /** 图鉴（2026-10-20）：回首页。 */
+  codex: 'home',
 };
 
 describe('返回：哪些相位能回首页', () => {

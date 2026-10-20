@@ -21,12 +21,16 @@ import {
  */
 describe('首页入口：顺序与命中区域', () => {
   it('两个入口顺序固定（肉鸽在前 —— 它是主推的那条路）', () => {
-    expect(HOME_ACTIONS).toEqual(['roguelike', 'free']);
+    /**
+   * ⚠️ 2026-10-20 加了第三个入口「图鉴」—— 它排在**最后**（前两个是玩法，
+   * 它只是"看内容"）。
+   */
+  expect(HOME_ACTIONS).toEqual(['roguelike', 'free', 'codex']);
   });
 
   it('命中区域顺序与入口一致，且水平居中', () => {
     const areas = homeHitAreas();
-    expect(areas.map((a) => a.action)).toEqual(['roguelike', 'free']);
+    expect(areas.map((a) => a.action)).toEqual(['roguelike', 'free', 'codex']);
     for (const area of areas) {
       expect(area.x + area.w / 2).toBeCloseTo(HOME_LAYOUT.width / 2, 0);
     }
@@ -72,12 +76,14 @@ describe('首页光标：上下移动（两端停住；Tab 环绕）', () => {
 
   it('两端**停住**（不环绕）—— 环绕会让"按了没反应"被当成按键失效', () => {
     expect(moveHomeCursor({ cursor: 0 }, -1)).toEqual({ cursor: 0 });
-    expect(moveHomeCursor({ cursor: 1 }, 1)).toEqual({ cursor: 1 });
+    const last = HOME_ACTIONS.length - 1;
+    expect(moveHomeCursor({ cursor: last }, 1)).toEqual({ cursor: last });
   });
 
   it('Tab（wrap）在两端**环绕**', () => {
-    expect(moveHomeCursor({ cursor: 1 }, 1, true)).toEqual({ cursor: 0 });
-    expect(moveHomeCursor({ cursor: 0 }, -1, true)).toEqual({ cursor: 1 });
+    expect(moveHomeCursor({ cursor: HOME_ACTIONS.length - 1 }, 1, true)).toEqual({ cursor: 0 });
+    /** ⚠️ 从第一个往回环绕 = 落到**最后一个**（2026-10-20 起是「图鉴」）。 */
+    expect(moveHomeCursor({ cursor: 0 }, -1, true)).toEqual({ cursor: HOME_ACTIONS.length - 1 });
   });
 
   it('delta 只取符号（一步一格）', () => {

@@ -121,6 +121,8 @@ export interface CanvasInputTargets {
   readonly runConfirm: ScrollableScreen;
   /** 一局结束屏（P3；含它自己的齿轮与返回箭头）。 */
   readonly runOver: ScreenHitTarget;
+  /** 图鉴（2026-10-20；只读屏：点哪都回首页，齿轮除外）。 */
+  readonly codex: ScreenHitTarget;
   /**
    * **战斗场景**（含战斗界面自己的齿轮）。
    *

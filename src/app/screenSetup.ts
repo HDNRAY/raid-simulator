@@ -42,6 +42,12 @@ import type { FreeQiji } from '../ui/prepareLogic';
 import { QijiSelectScreen } from '../ui/QijiSelectScreen';
 import { RunConfirmScreen } from '../ui/RunConfirmScreen';
 import { RunOverScreen } from '../ui/RunOverScreen';
+import { CodexScreen } from '../ui/CodexScreen';
+import { codexEntriesOf } from './codexEntries';
+import { ALL_QIJI } from '../data/qiji';
+import { DEV_MODE } from './config';
+import { readUrlParams } from './urlParams';
+
 import { translateSafe } from './translate';
 import { CONTROL_VISIBILITY } from './phaseLogic';
 import { BOSS_ROSTER, PLAYER_ROSTER } from '../data/roster';
@@ -65,13 +71,20 @@ export interface ScreenSetupDeps {
    */
   readonly settingsToggle: () => SettingsToggle;
   /** 首页选了"自由模式 / 肉鸽模式" → 切到哪个界面。 */
-  readonly switchTo: (target: 'home' | 'characterSelect' | 'prepare') => void;
+  readonly switchTo: (target: 'home' | 'characterSelect' | 'prepare' | 'codex') => void;
   /** 选角色屏点了某个角色（肉鸽开局）。 */
   readonly startRun: (playerId: string) => void;
   /** 自由模式点了"开始"（进战斗）。 */
   readonly onPrepareStart: (playerId: string, bossId: string) => void;
   /** 自由模式改了选择（记住它）。 */
   readonly rememberPick: (playerId: string, bossId: string) => void;
+  /**
+   * 当前有没有进行中的一局（**图鉴**用：有 ⇒ 用那一局的统计判解锁）。
+   *
+   * ⚠️ 传取值函数而不是值：一局随时可能开始 / 结束，而图鉴是**每次显示**
+   * 现算的。
+   */
+  readonly getRun?: () => import('../core/run/index').RunState | undefined;
   /** 左上角返回箭头（与键盘 `Esc` 走**同一个**闭包）。 */
   readonly backToHome: () => void;
   /** 选炁机屏的候选（`phaseFlow.qijiCandidates`）。 */
@@ -114,6 +127,8 @@ export interface Screens {
   readonly runConfirm: RunConfirmScreen;
   readonly qijiSelect: QijiSelectScreen;
   readonly runOver: RunOverScreen;
+  /** 图鉴（2026-10-20）。 */
+  readonly codex: CodexScreen;
 }
 
 export function buildScreens(d: ScreenSetupDeps): Screens {
@@ -149,6 +164,7 @@ export function buildScreens(d: ScreenSetupDeps): Screens {
        * 「肉鸽模式」= 先选角色（设计稿 §3.1：**进入肉鸽才是选角色**）。
        */
       if (action === 'free') d.switchTo('prepare');
+      else if (action === 'codex') d.switchTo('codex');
       else d.switchTo('characterSelect');
     },
   });
@@ -267,5 +283,36 @@ export function buildScreens(d: ScreenSetupDeps): Screens {
   });
   d.app.stage.addChild(runOver.root);
 
-  return { home, select, prepare, runConfirm, qijiSelect, runOver };
+  /**
+   * **图鉴**（2026-10-20）：只读清单。
+   *
+   * - 条目**每次现取**：开发模式（`?dev=1` / `config.DEV_MODE`）中途改也能看到
+   * - 解锁判定只有一份（`core/run/unlock.isUnlocked`）；**有进行中的一局**时
+   *   用那一局的统计，否则 `stats: undefined`（只认 `unlock.kind === 'always'`）
+   */
+  const codex = new CodexScreen({
+    pixi,
+    translate: translateSafe,
+    showKeyHints: d.showKeyHints,
+    f1Label: d.f1Label,
+    onGear,
+    onBack: () => d.switchTo('home'),
+    devMode: () => DEV_MODE || readUrlParams(globalThis.location.search).dev,
+    getEntries: () => {
+      const run = d.getRun?.();
+      const stats =
+        run === undefined
+          ? undefined
+          : { battleStats: run.battleStats, runStats: run.battleStats };
+      return codexEntriesOf({
+        pool: ALL_QIJI,
+        stats,
+        devMode: DEV_MODE || readUrlParams(globalThis.location.search).dev,
+      });
+    },
+    hasRun: () => d.getRun?.() !== undefined,
+  });
+  d.app.stage.addChild(codex.root);
+
+  return { home, select, prepare, runConfirm, qijiSelect, runOver, codex };
 }

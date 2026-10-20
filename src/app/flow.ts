@@ -39,6 +39,7 @@ import type { HomeScreen } from '../ui/HomeScreen';
 import type { CharacterSelectScreen } from '../ui/CharacterSelectScreen';
 import type { QijiSelectScreen } from '../ui/QijiSelectScreen';
 import type { RunConfirmScreen } from '../ui/RunConfirmScreen';
+import type { CodexScreen } from '../ui/CodexScreen';
 import type { RunOverScreen } from '../ui/RunOverScreen';
 import type { KeyBinding } from '../input/keyboard';
 import type { OperationMode } from '../render/platform';
@@ -102,6 +103,8 @@ export interface GameState {
 
   /** **一局结束屏**（P3；通关 / 失败之后的摘要）。同样是先声明、后回填。 */
   runOver: RunOverScreen | undefined;
+  /** 图鉴（2026-10-20）。 */
+  codex: CodexScreen | undefined;
 
   /**
    * 键位表是**可变状态**，由设置界面修改。
@@ -216,6 +219,7 @@ export function createGameState(
     runConfirm: undefined,
     qijiSelect: undefined,
     runOver: undefined,
+    codex: undefined,
     bindings,
     touchButtons,
     operationMode,

@@ -92,6 +92,7 @@ export function createScreenAccess(d: ScreenAccessDeps): ScreenAccess {
     screens.runConfirm.setUiScale(scale);
     screens.qijiSelect.setUiScale(scale);
     screens.runOver.setUiScale(scale);
+    screens.codex.setUiScale(scale);
   };
 
   /**
@@ -113,6 +114,7 @@ export function createScreenAccess(d: ScreenAccessDeps): ScreenAccess {
     if (state.phase === 'runConfirm') return screens.runConfirm.chrome;
     if (state.phase === 'qijiSelect') return screens.qijiSelect.chrome;
     if (state.phase === 'runOver') return screens.runOver.chrome;
+    if (state.phase === 'codex') return screens.codex.chrome;
     return scene.chrome;
   };
 

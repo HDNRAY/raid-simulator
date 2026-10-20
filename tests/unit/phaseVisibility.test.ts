@@ -53,6 +53,8 @@ const PHASES: readonly Phase[] = [
   'runConfirm',
   'qijiSelect',
   'runOver',
+  /** 图鉴（2026-10-20）。 */
+  'codex',
 ];
 
 /** 全部整屏界面根（每个相位恰好点亮一个）。 */
@@ -64,6 +66,7 @@ const SCREENS: readonly ScreenKey[] = [
   'runConfirm',
   'qijiSelect',
   'runOver',
+  'codex',
 ];
 
 /**

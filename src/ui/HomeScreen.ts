@@ -51,6 +51,15 @@ import {
 } from './homeLogic';
 import type { TranslateFn } from '../i18n/translator';
 
+/**
+ * 每个入口的文案 key（表而不是三元 —— 加第三个入口时三元已经写不下了）。
+ */
+const HOME_LABEL_KEYS: Readonly<Record<HomeAction, string>> = {
+  roguelike: 'screen.home.roguelike',
+  free: 'screen.home.free',
+  codex: 'screen.home.codex',
+};
+
 export interface HomeScreenOptions {
   readonly pixi: PixiCtor;
   readonly translate: TranslateFn;
@@ -177,7 +186,7 @@ export class HomeScreen {
         action: area.action,
         gfx,
         label,
-        nameKey: area.action === 'roguelike' ? 'screen.home.roguelike' : 'screen.home.free',
+        nameKey: HOME_LABEL_KEYS[area.action],
       };
     });
 

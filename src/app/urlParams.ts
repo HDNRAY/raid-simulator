@@ -119,6 +119,14 @@ export interface UrlParams {
    * 写错了（`?scale=3`）当没传。
    */
   readonly stageScale: string | null;
+  /**
+   * **开发模式**：`?dev=1`（2026-10-20）。
+   *
+   * 与 `app/config.ts` 的 `DEV_MODE` 是**或**的关系（常量开了就一直开；
+   * 常量关着也能用参数临时开）。用途只有一个：图鉴里显示**所有**炁机
+   * （未解锁的也显示名字与说明）—— 方便核对内容，不影响战斗逻辑。
+   */
+  readonly dev: boolean;
 }
 
 export function readUrlParams(search: string): UrlParams {
@@ -131,6 +139,7 @@ export function readUrlParams(search: string): UrlParams {
     runLength: parsePositiveInt(params.get('runlen')),
     runSeed: parsePositiveInt(params.get('runseed')),
     stageScale: params.get('scale'),
+    dev: params.get('dev') === '1',
   };
 }
 

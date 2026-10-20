@@ -90,7 +90,12 @@ export type Phase =
    */
   | 'qijiSelect'
   /** **一局肉鸽结束**（通关 / 失败）的摘要屏（P3）。 */
-  | 'runOver';
+  | 'runOver'
+  /**
+   * **图鉴**（2026-10-20）：从首页进，只读清单（已解锁的炁机显示名字，
+   * 未解锁的画 ？？？）。Esc / 返回箭头回首页。
+   */
+  | 'codex';
 
 /**
  * ⚠️ **类型**导入（编译期擦除，不构成循环依赖）：`ui/settings/tabs.ts`
@@ -138,7 +143,8 @@ export function backVisibleIn(phase: Phase): boolean {
     phase === 'characterSelect' ||
     phase === 'prepare' ||
     phase === 'qijiSelect' ||
-    phase === 'runOver'
+    phase === 'runOver' ||
+    phase === 'codex'
   );
 }
 
@@ -175,7 +181,7 @@ export function backVisibleIn(phase: Phase): boolean {
  * @returns 该去的相位；`undefined` = 这次 `Esc` 不该有反应
  */
 export function phaseFromEscape(phase: Phase): BackTarget | undefined {
-  if (phase === 'characterSelect' || phase === 'prepare') return 'home';
+  if (phase === 'characterSelect' || phase === 'prepare' || phase === 'codex') return 'home';
   if (phase === 'qijiSelect' || phase === 'runOver') return 'characterSelect';
   return undefined;
 }
@@ -211,7 +217,8 @@ export type ScreenKey =
   | 'battle'
   | 'runConfirm'
   | 'qijiSelect'
-  | 'runOver';
+  | 'runOver'
+  | 'codex';
 
 /**
  * **哪个相位点亮哪一屏** —— 这是"谁该可见"的**唯一判据**。
@@ -252,6 +259,7 @@ const STAGE_SCREEN: Readonly<Record<Phase, ScreenKey>> = {
   runConfirm: 'runConfirm',
   qijiSelect: 'qijiSelect',
   runOver: 'runOver',
+  codex: 'codex',
 };
 
 /**
@@ -276,6 +284,7 @@ export function screenVisibilityOf(phase: Phase): Readonly<Record<ScreenKey, boo
     runConfirm: onStage === 'runConfirm',
     qijiSelect: onStage === 'qijiSelect',
     runOver: onStage === 'runOver',
+    codex: onStage === 'codex',
   };
 }
 
@@ -337,7 +346,8 @@ export type ShiftTarget =
   | 'prepare'
   | 'runConfirm'
   | 'qijiSelect'
-  | 'runOver';
+  | 'runOver'
+  | 'codex';
 
 /**
  * **肉鸽：一场战斗之前一律先到确认屏**（用户 2026-10-15 的需求）。
