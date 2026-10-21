@@ -626,6 +626,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
           runConfirm: screens.runConfirm,
           qijiSelect: screens.qijiSelect,
           runOver: screens.runOver,
+          codex: screens.codex,
           /**
            * ⚠️ **边角控件按相位取**（`getChrome()`）：每帧只更新**当前这一屏**
            * 的齿轮 / 返回箭头（键位提示跟着唯一 flag 走）。各屏各自的

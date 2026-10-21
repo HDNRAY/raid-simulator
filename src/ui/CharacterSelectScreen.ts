@@ -70,6 +70,14 @@ import { PALETTE } from '../render/theme';
 import { isDeveloping, type RosterEntry } from '../data/roster';
 import { CARD_RADIUS, CARD_STROKE, CURSOR_RING_GAP, PREPARE_SKIN, cardSkin } from './prepareRender';
 import { detailRect } from './prepareGeometry';
+import {
+  easeOutCubic,
+  initialExpand,
+  lerpRect,
+  retarget,
+  stepExpand,
+  type ExpandState,
+} from './expandTween';
 import { PrepareDetailController } from './prepareDetailController';
 import {
   canStartRun,
@@ -141,6 +149,21 @@ export class CharacterSelectScreen {
    * 传 `() => false` —— 那个人物详情里没有一处读它（读它的是炁机详情）。
    */
   private readonly detailPanel: PrepareDetailController;
+  /**
+   * **展开动画**（2026-10-21，用户："选中的展开（动画）成详情的样子，移开会
+   * 收起…快速展开和收起，动画会被中断并朝反状态运行"）。
+   *
+   * 画的是一个"正在变成详情面板"的卡片：从被选中的那张卡片的矩形，
+   * 插值到右侧详情面板的矩形（`detailRect()`），边变边淡出。
+   * 打断语义全在 `expandTween`（值不动、只换目标 ⇒ 从当前进度往回跑）。
+   */
+  private expandAnim: ExpandState = initialExpand();
+  /** 正在展开的是第几张卡（`undefined` = 没有在展开）。 */
+  private expandCard: number | undefined;
+  private readonly expandGfx: Graphics;
+  private readonly expandTitle: Label;
+  /** 上一帧的时间戳（动画的 `dt`；0 = 还没有上一帧）。 */
+  private lastFrameMs = 0;
   private readonly players: readonly RosterEntry[];
   private readonly options: CharacterSelectScreenOptions;
 
@@ -224,6 +247,20 @@ export class CharacterSelectScreen {
       parent: this.root,
     });
 
+    /**
+     * **展开中的那张卡**：加在详情面板**之后**（= 画在它上面）—— 视觉上是
+     * "卡片**变成**了面板"，所以它得盖住面板，再淡出。
+     */
+    this.expandGfx = new pixi.Graphics();
+    this.expandTitle = new Label(pixi, {
+      x: 0,
+      y: 0,
+      size: FONT.title,
+      color: PALETTE.text,
+      kai: true,
+    });
+    this.root.addChild(this.expandGfx, this.expandTitle.root);
+
     /** 齿轮 + 返回箭头（最后加 = 最上层；见 `HomeScreen` 里同一条说明）。 */
     this.chrome = new ScreenChrome({
       pixi,
@@ -244,6 +281,14 @@ export class CharacterSelectScreen {
   setVisible(visible: boolean): void {
     this.root.visible = visible;
     if (visible) this.redraw();
+  }
+
+  /** 展开动画的进度（调试 / 截图验收读它）。 */
+  expand(): { readonly card: number | null; readonly progress: number } {
+    return {
+      card: this.expandCard === undefined ? null : this.expandCard,
+      progress: Math.round(this.expandAnim.progress * 1000) / 1000,
+    };
   }
 
   /** 当前选择 + 光标（调试入口读它）。 */
@@ -357,6 +402,15 @@ export class CharacterSelectScreen {
   /** 每帧：只在可见时保证画面与选择一致。 */
   frame(): void {
     if (this.root.visible) {
+      /**
+       * ⚠️ 用 `performance.now()` 的**差值**（不是每帧固定 16.67）：帧率抖动
+       * 时动画的时长才不会跟着变。这是渲染层的时间，`core/` 那条"只走
+       * `logicMs()`"的规则只管战斗逻辑。
+       */
+      const now = performance.now();
+      const dt = this.lastFrameMs === 0 ? 0 : now - this.lastFrameMs;
+      this.lastFrameMs = now;
+      this.expandAnim = stepExpand(this.expandAnim, dt);
       this.redraw();
       this.chrome.update();
     }
@@ -458,6 +512,56 @@ export class CharacterSelectScreen {
      * `prepareDetail.focusedTarget`）—— 与备战屏**同一句**，所以"鼠标停在
      * A 上、面板显示 B"这种错位在结构上不可能发生。
      */
+    /**
+     * **展开动画**（2026-10-21）：光标（hover 优先，与面板同源）落在哪张卡上
+     * 就朝哪张展开。`retarget` 只换方向、不动进度 ⇒ 快速来回时**从当前
+     * 进度往反方向跑**（用户要的"中断并朝反状态运行"）。
+     */
+    const focus = characterCursorTarget(this.selection, this.players);
+    const focusIndex = this.players.findIndex((p) => p.id === focus?.id);
+    if (focusIndex !== this.expandCard) this.expandCard = focusIndex;
+    this.expandAnim = retarget(this.expandAnim, focusIndex >= 0 ? 1 : 0);
+    this.drawExpand(focusIndex);
+
     this.detailPanel.update(characterCursorTarget(this.selection, this.players));
+  }
+
+  /**
+   * 画"正在变成详情面板"的那张卡。
+   *
+   * 起止都是**算出来的矩形**（卡片 / 详情面板），中间只做插值 ⇒ 卡片大小
+   * 改了、面板位置改了，动画自动跟着变（不手调）。
+   *
+   * ⚠️ `alpha = 1 - progress`：越接近面板越透明 —— 看起来就是"卡片被
+   * 面板吸收"，而不是"两个东西叠在一起"。
+   */
+  private drawExpand(cardIndex: number): void {
+    this.expandGfx.clear();
+    this.expandTitle.root.visible = false;
+    if (cardIndex < 0 || this.expandAnim.progress <= 0) return;
+
+    const areas = characterSelectHitAreas(this.players);
+    const from = areas[cardIndex];
+    const player = this.players[cardIndex];
+    if (from === undefined || player === undefined) return;
+
+    const to = detailRect();
+    const rect = lerpRect(from, to, easeOutCubic(this.expandAnim.progress));
+    const alpha = Math.max(0, 1 - this.expandAnim.progress);
+    const skin = cardSkin({ developing: false, cursored: true, selected: true });
+
+    this.expandGfx
+      .roundRect(rect.x, rect.y, rect.w, rect.h, CARD_RADIUS)
+      .fill({ color: skin.fillColor, alpha: skin.fillAlpha * alpha });
+    this.expandGfx
+      .roundRect(rect.x, rect.y, rect.w, rect.h, CARD_RADIUS)
+      .stroke({ color: skin.strokeColor, width: skin.strokeWidth, alpha });
+
+    /** 名字跟着卡片走（字号不插值：中文 >= 13 的下限比"大小连贯"更重要）。 */
+    this.expandTitle.root.visible = alpha > 0.15;
+    this.expandTitle.root.alpha = alpha;
+    this.expandTitle.set(this.options.translate(player.nameKey));
+    this.expandTitle.root.x = rect.x + 18;
+    this.expandTitle.root.y = rect.y + Math.min(rect.h / 2, 40);
   }
 }

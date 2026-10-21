@@ -146,6 +146,16 @@ export class CodexScreen {
     if (visible) this.redraw();
   }
 
+  /** 调试读数：这一屏此刻可见吗、画了几条、几条已解锁。 */
+  debugState(): { readonly visible: boolean; readonly total: number; readonly unlocked: number } {
+    const entries = this.options.getEntries();
+    return {
+      visible: this.root.visible,
+      total: entries.length,
+      unlocked: entries.filter((entry) => entry.unlocked).length,
+    };
+  }
+
   /** `Esc` / 返回箭头：回首页。 */
   back(): void {
     this.options.onBack();

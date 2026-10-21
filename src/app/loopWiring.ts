@@ -38,6 +38,11 @@ export interface CanvasHost {
     moveFocus(delta: number, wrap?: boolean): void;
     confirm(): void;
   };
+  /** 图鉴（2026-10-21）：只读屏 —— 只需要 `frame()` 与"回首页"。 */
+  readonly codex: {
+    frame(): void;
+    back(): void;
+  };
   /** 选角色屏（肉鸽模式的第一屏）。 */
   readonly select: {
     frame(): void;
@@ -226,6 +231,13 @@ export function wireLoop(o: WireOptions): void {
       else if (state.phase === 'prepare') host.prepare.frame();
       else if (state.phase === 'runConfirm') host.runConfirm.frame();
       else if (state.phase === 'qijiSelect') host.qijiSelect.frame();
+      /**
+       * ⚠️ **2026-10-21 补**：图鉴这一屏原先落在最后那个 `else`（= 被当成
+       * `runOver`）⇒ 它的 `frame()` 永远不跑（画面靠 `setVisible` 里那次
+       * 重画撑着，看起来"正常"，但任何逐帧效果都不会动）。
+       * 用户报的"图鉴没有清首页的按键"同源：这张分发表**漏了一屏**。
+       */
+      else if (state.phase === 'codex') host.codex.frame();
       else host.runOver.frame();
       /**
        * ⚠️ **非战斗阶段也要调触屏层的 `frame()`（不带快照）**：
@@ -423,6 +435,20 @@ export function wireLoop(o: WireOptions): void {
        */
       if (layer === 'runOver') {
         if (event.key === 'Enter') host.runOver.confirm();
+        return;
+      }
+      /**
+       * **图鉴（2026-10-21）**：只读屏 —— `Enter` / `Space` / `Backspace` 回首页
+       * （与"点屏幕任意处"同一条），**其余键一律吃掉**。
+       *
+       * ⚠️ 关键是最后那个 `return`：不加的话 `←→↑↓` 会漏到下面的战斗分支上，
+       * 而用户在首页按过的那几个键（`↑↓` / `Tab` / `Enter`）就会在**图鉴里
+       * 继续作用在首页状态上** —— 这就是"图鉴没有清首页的按键"。
+       */
+      if (layer === 'codex') {
+        if (event.key === 'Enter' || event.key === ' ' || event.key === 'Backspace') {
+          host.codex.back();
+        }
         return;
       }
       /**

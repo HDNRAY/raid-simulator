@@ -247,6 +247,8 @@ export interface CharacterSelectDebugTarget {
   detail(): { readonly kind: 'player' | 'qiji' | 'boss'; readonly id: string } | undefined;
   /** 悬停那一项（`undefined` = 鼠标不在任何卡上）。 */
   hovered(): { readonly kind: 'player' | 'qiji' | 'boss'; readonly id: string } | undefined;
+  /** 展开动画的进度（2026-10-21）：`card` = 正在展开第几张，`progress` 0..1。 */
+  expand(): { readonly card: number | null; readonly progress: number };
   /**
    * 三张卡的**可点矩形**（只读）。
    *
@@ -281,6 +283,8 @@ export function characterSelectDebugApi(select: CharacterSelectDebugTarget): {
     hover(px: number, py: number): boolean;
     detail(): ReturnType<CharacterSelectDebugTarget['detail']>;
     hovered(): ReturnType<CharacterSelectDebugTarget['hovered']>;
+    /** 展开动画的进度（2026-10-21；截图验收"展开 / 收起 / 中途换向"用）。 */
+    expand(): ReturnType<CharacterSelectDebugTarget['expand']>;
     hitAreas(): ReturnType<CharacterSelectDebugTarget['hitAreas']>;
   };
 } {
@@ -314,6 +318,7 @@ export function characterSelectDebugApi(select: CharacterSelectDebugTarget): {
       /** 详情区此刻显示的是哪一项（"是**谁的**字"只有这个读数能钉死）。 */
       detail: () => select.detail(),
       hovered: () => select.hovered(),
+      expand: () => select.expand(),
       hitAreas: () => select.hitAreas().map((a) => ({ ...a })),
     },
   };
