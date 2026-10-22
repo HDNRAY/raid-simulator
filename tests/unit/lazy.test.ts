@@ -351,12 +351,12 @@ describe('「残血增伤」是**一条被动**（不是塞在技能里的第二
     }
   });
 
-  it('🎯 加成住在**被动**里：`damageMultBoost` 是一个读"已损失血量"的表达式', () => {
+  it('🎯 加成住在**被动**里：增伤是一个读"已损失血量"的表达式', () => {
     /**
      * 用户 2026-10-14："伤害受 已损失血量加成 这个 **能改成单独被动吗**"
      * ⇒ 判据是**机制**（谁提供加成），不是数值：
      *   - 有一条被动技能，它授予那条隐藏 buff
-     *   - 那条 buff 的 `damageMultBoost` 是 **Expr**（不是数字）
+     *   - 那条 buff 的 `damageBoost` 修正值是 **Expr**（不是数字）
      */
     const grants = LAZY_LOW_HP_RAGE_SKILL.abilities.filter((a) => a.kind === 'grant');
     expect(grants.length, '「残血增伤」应当是一条 grant 被动').toBe(1);
@@ -366,7 +366,9 @@ describe('「残血增伤」是**一条被动**（不是塞在技能里的第二
       ),
       '它授予的必须是那条动态增伤 buff',
     ).toBe(true);
-    expect(typeof LAZY_LOW_HP_RAGE.damageMultBoost, '倍率必须是表达式').toBe('object');
+    /** ⚠️ 2026-10-22：`damageMultBoost` 删了 ⇒ 看 `damageBoost` 那条修正的值。 */
+    const boost = LAZY_LOW_HP_RAGE.modifiers?.find((m) => m.stat === 'damageBoost');
+    expect(typeof boost?.value, '增伤必须是表达式').toBe('object');
   });
 
   it('⚠️ **端到端**：它剩一半血 ⇒ 打出来的伤害是满血时的 **1.5 倍**', () => {

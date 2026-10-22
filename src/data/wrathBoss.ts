@@ -79,7 +79,7 @@ export const WRATH_FURY: BuffDef = {
   stacking: { mode: 'refresh' },
   flags: { interruptImmune: true },
   /** 大幅增伤：×1.5（与每层那 ×1.08 相乘）。 */
-  damageMultBoost: 1.5,
+  modifiers: [{ stat: 'damageBoost', op: 'addPercent', value: 50, sourceKey: 'wrath.fury.name' }],
 };
 
 /**
@@ -100,8 +100,11 @@ export const WRATH_RAGE: BuffDef = {
   duration: logicMs(600),
   maxStacks: WRATH_MAX_RAGE,
   stacking: { mode: 'stackRefresh', max: WRATH_MAX_RAGE },
-  modifiers: [{ stat: 'haste', op: 'add', value: 0.05, sourceKey: 'wrath.rage.name' }],
-  damageMultBoost: 1.08,
+  modifiers: [
+    { stat: 'haste', op: 'add', value: 0.05, sourceKey: 'wrath.rage.name' },
+    /** 每层 +8%（2026-10-22 从 `damageMultBoost: 1.08`（逐层相乘）改成加算）。 */
+    { stat: 'damageBoost', op: 'add', value: 8, sourceKey: 'wrath.rage.name' },
+  ],
   triggers: [
     {
       /**

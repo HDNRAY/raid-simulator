@@ -103,9 +103,9 @@ export const GREED_HOARD: BuffDef = {
   duration: logicMs(120),
   maxStacks: 9,
   stacking: { mode: 'stackRefresh', max: 9 },
-  /** 每层：伤害 +10%（乘子，所以 9 层 ≈ ×2.56）。 */
-  damageMultBoost: 1.1,
+  /** 每层：伤害 +10%（加算 —— 2026-10-22 从 `damageMultBoost: 1.1` 改来）。 */
   modifiers: [
+    { stat: 'damageBoost', op: 'add', value: 10, sourceKey: 'greed.hoard.name' },
     { stat: 'hpRegen', op: 'add', value: 1, sourceKey: 'greed.hoard.name' },
     { stat: 'haste', op: 'add', value: 0.1, sourceKey: 'greed.hoard.name' },
   ],

@@ -57,7 +57,11 @@ export function enrageBuff(dmgMult: number): BuffDef {
       duration: Number.POSITIVE_INFINITY,
       maxStacks: 1,
       stacking: { mode: 'refresh' },
-      damageMultBoost: dmgMult,
+      /**
+       * ⚠️ 2026-10-22：`damageMultBoost` 删了（用户要求只留一种表示）⇒
+       * "×N" 换成"+(N−1)×100%"（同义，且与别的增伤**加算**）。
+       */
+      modifiers: [{ stat: 'damageBoost', op: 'addPercent', value: (dmgMult - 1) * 100, sourceKey: 'event.enrage' }],
     };
   }
 
@@ -145,42 +149,6 @@ export function computeStatsFor(
       }
       return total === 0 ? 1 : total;
     };
-
-    /**
-     * `BuffDef.damageMultBoost` → `damageMult` 修正。
-     *
-     * ⚠️ **这个字段声明了很久但没有任何引擎分支读它** —— 也就是说
-     * "狂暴（`dmgMult`）"与「贪婪」的「敛财」（每层 +10%）都**从来没生效过**。
-     * 与 `ccImmune` / `interruptImmune` / `damageTakenMult` 是同一类病
-     * （看起来支持、其实静默无效），这次一起接上。
-     *
-     * ⚠️ `op: 'mult'` 而不是 `add`：`damageMult` 是**乘子**型
-     * （`aggregate` 里乘法型贡献按 ∏ 累积），而"每层 +10%"要的正是
-     * **逐层相乘**（9 层 ≈ ×2.36，不是 ×1.9）。buff 的层数由
-     * `stackCount` 展开（`perStackAdd` 的语义）。
-     */
-    for (const buff of combatant.buffs) {
-      const def = buff.def ?? options.buffs.get(buff.defId);
-      const boost = def?.damageMultBoost;
-      if (def === undefined || boost === undefined) continue;
-      /**
-       * ⚠️ **每层推一条**，而不是"一条带层数"。
-       *
-       * 因为"每层 +10%"要的是**逐层相乘**（1.1^n），而一条
-       * `op:'perStackAdd'` 走的是 `value × stacks` 再**相加**
-       * （`1 + Σ`）—— 9 层会得到 ×10.9 而不是 ×2.36。`mult` 的语义是
-       * ∏，所以"N 条 1.1"正好是 1.1^N。
-       */
-      for (let i = 0; i < Math.max(1, buff.stacks); i += 1) {
-        modifiers.push({
-          stat: 'damageMult',
-          op: 'mult',
-          value: boost,
-          sourceKey: def.nameKey,
-          namespace: buff.defId,
-        });
-      }
-    }
 
     return computeStats({
       base: options.baseStats.get(combatantId) ?? {},

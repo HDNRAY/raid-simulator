@@ -81,7 +81,7 @@ const statsOf = (e: BattleEngine, id: string): Readonly<Record<StatKey, number>>
  * ================================================================== */
 
 describe('「敛财」：每层伤害 / 回血 / 读条一起变强，且卡在 9 层', () => {
-  it(`叠满 ${GREED_HOARD.maxStacks} 层：伤害是基准的 ${GREED_HOARD.damageMultBoost}^n 倍`, () => {
+  it(`叠满 ${GREED_HOARD.maxStacks} 层：伤害按**加算**提升（每层 +10%）`, () => {
     const max = GREED_HOARD.maxStacks;
     const e = engineWith({
       player: {},
@@ -89,14 +89,19 @@ describe('「敛财」：每层伤害 / 回血 / 读条一起变强，且卡在 
       skills: [],
     });
     /**
-     * ⚠️ `damageMultBoost` 现在可以是 `Expr`（"任意逻辑增伤"，2026-10-14）——
-     * 「敛财」用的是**数字**那一档，所以这里收窄一下（这条正是"数字那条路
-     * 的展开规则"的断言，不能因为类型放宽就失去它）。
+     * ⚠️ 2026-10-22：`damageMultBoost`（逐层相乘）删掉了，统一走
+     * `damageBoost`（`perStackAdd`，**加算**）⇒ 9 层 = +90%，即 ×1.9
+     * （旧的乘算是 ×2.36）。数值从**内容**读，不写死。
      */
-    const boost = GREED_HOARD.damageMultBoost;
-    expect(typeof boost, '「敛财」应当用数字倍率').toBe('number');
-    const expected = (typeof boost === 'number' ? boost : 1) ** max;
-    expect(statsOf(e, 'boss').damageMult).toBeCloseTo(expected, 6);
+    const perStack = GREED_HOARD.modifiers?.find((m) => m.stat === 'damageBoost');
+    expect(perStack?.op, '「敛财」的增伤应当是加算').toBe('add');
+    const percent = typeof perStack?.value === 'number' ? perStack.value : 0;
+    /**
+     * ⚠️ 断言的是 **`damageBoost`** 这个统计项（伤害计算里真正的消费者），
+     * 不是 `damageMult` —— 后者是"整体输出倍率"的另一条路（`damageMultBoost`
+     * 删掉之后它不再被这条 buff 影响）。
+     */
+    expect(statsOf(e, 'boss').damageBoost).toBeCloseTo(percent * max, 6);
   });
 
   it('层数**封顶**：叠第 10 次不会再涨', () => {
@@ -176,7 +181,8 @@ describe('「敛财」：每层伤害 / 回血 / 读条一起变强，且卡在 
     });
     const stats = statsOf(e, 'boss');
     expect(stats.haste).toBeLessThanOrEqual(0.5);
-    expect(stats.damageMult).toBeGreaterThan(1.5);
+    /** ⚠️ 同上：看 `damageBoost`（每层 +10% × 9 层 = +90）。 */
+    expect(stats.damageBoost).toBeGreaterThan(50);
   });
 });
 

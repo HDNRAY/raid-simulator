@@ -413,8 +413,18 @@ export const LAZY_LOW_HP_RAGE: BuffDef = {
   duration: Number.POSITIVE_INFINITY,
   maxStacks: 1,
   stacking: { mode: 'refresh' },
-  /** `1 + 已损失血量百分比`（少了 50% 血 ⇒ ×1.5），**没有上限**。 */
-  damageMultBoost: { e: 'add', of: [{ e: 'const', value: 1 }, HP_LOSS] },
+  /**
+   * `已损失血量百分比 × 100`（少了 50% 血 ⇒ 增加 50%），**没有上限**。
+   * ⚠️ 2026-10-22 从 `damageMultBoost`（`1 + 比例`，乘算）改成 `damageBoost` 的加算表达。
+   */
+  modifiers: [
+    {
+      stat: 'damageBoost',
+      op: 'addPercent',
+      value: { e: 'mul', of: [{ e: 'const', value: 100 }, HP_LOSS] },
+      sourceKey: 'lazy.lowHpRage.name',
+    },
+  ],
 };
 
 /** **「残血增伤」被动技能**（整场挂着，见 `LAZY_LOW_HP_RAGE`）。 */

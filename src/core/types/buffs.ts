@@ -2,7 +2,7 @@
 
 import type { BuffId, CombatantId, LocaleKey, SkillId } from './ids';
 import type { Ability } from './abilities';
-import type { Expr, StatModifier } from './stats';
+import type { StatModifier } from './stats';
 import type { SkillTag, TriggerDef } from './triggers';
 
 /* ================================================================== *
@@ -341,22 +341,15 @@ export interface BuffDef {
    * 后者参与修正池聚合，前者是一个整体开关。
    */
   /**
-   * **增伤倍率**：`op: 'mult'` 的语义（`1.5` = 伤害 ×1.5），**逐层相乘**。
+   * ⚠️ **`damageMultBoost` 已删除**（2026-10-22 用户："不要 damageMultBoost，
+   * 实现层面都不要"）—— 统一走 `damageBoost`（`addPercent`，加算）：
+   * `BuffDef.modifiers` 里写
+   * `{ stat: 'damageBoost', op: 'addPercent', value: 100 }` 就是 "+100%"。
    *
-   * ⚠️ **可以是 `Expr`**（2026-10-14 放宽，用户点名："buff 需要一个**按照
-   * 任意逻辑增伤**的机制"）—— 走的是**修正树本来就有**的那条动态路
-   * （`stats/pipeline.ts`：`typeof value === 'number'` 之外一律
-   * `evalExpr(value, ctx)`，注释写着"可为表达式 → 动态重算"）。
-   *
-   * ⇒ 所以引擎**没有为它新开一条路**：`stats.ts` 照旧每层推一条
-   * `op:'mult'` 的 `damageMult` 修正，只是 `value` 现在允许是表达式。
-   * ⚠️ **别在别处再乘一次**（我第一版在命中结算处补乘了一次，结果
-   * 变成 1.5² —— 被测试当场抓住）。
-   *
-   * 典型用法（「懒惰」的残血增伤）：
-   * `{ e: 'add', of: [{ e: 'const', value: 1 }, { e: 'missingResourceRatio', who: 'self', resource: 'hp' }] }`
+   * 为什么只留一种：两种表示（×2 与 +100%）在**叠加**时数值不同
+   * （乘算 1.1^9 ≈ ×2.36，加算 1 + 0.1×9 = ×1.9），同一件事有两套语义
+   * 就是下一次"文案与数值对不上"的温床 ✗。
    */
-  readonly damageMultBoost?: number | Expr;
   /**
    * **挂上时，这层壳有多厚**（写进 `BuffInstance.absorb`；缺省 = 不是壳）。
    *

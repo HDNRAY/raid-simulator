@@ -64,7 +64,7 @@ export const BOSS_ENRAGE: BuffDef = {
   duration: Number.POSITIVE_INFINITY,
   maxStacks: 1,
   stacking: { mode: 'refresh' },
-  damageMultBoost: 2,
+  modifiers: [{ stat: 'damageBoost', op: 'addPercent', value: 100, sourceKey: 'screen.defeatedByEnrage' }],
 };
 
 /**

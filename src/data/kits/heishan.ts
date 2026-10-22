@@ -58,7 +58,8 @@ export const HEISHAN_WINDOW: BuffDef = {
   duration: logicMs(1),
   maxStacks: 1,
   stacking: { mode: 'replace' },
-  damageMultBoost: 2,
+  /** ⚠️ 2026-10-22：`damageMultBoost: 2` → `damageBoost +100%`（同义、加算）。 */
+  modifiers: [{ stat: 'damageBoost', op: 'addPercent', value: 100, sourceKey: 'buff.heishanWindow.name' }],
 };
 
 /**
