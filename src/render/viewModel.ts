@@ -266,6 +266,15 @@ export interface BattleSnapshotView {
   /** 玩家受击闪白强度 0..1 */
   readonly playerFlash: number;
   readonly bossFlash: number;
+  /**
+   * **法术动画的触发计数**（2026-10-22，黛玄的「弹」/「波」）。
+   *
+   * 单调递增：渲染层每看到它变大一次，就播**下一组**圣光弹帧组
+   * （`render/spellFrames.nextSpellGroup`，用户："每次伤害都按顺序"）。
+   * ⚠️ 用"计数"而不是"当前该播哪组"：事件可能在一帧里来两个，
+   * 计数变 2 时渲染层连播两组也不会漏 ✓。
+   */
+  readonly spellSeq: number;
   /** 战斗结束后的结算信息 */
   readonly result?: ResultView;
 }
@@ -304,6 +313,7 @@ export const EMPTY_SNAPSHOT: BattleSnapshotView = {
   floatingText: [],
   playerFlash: 0,
   bossFlash: 0,
+  spellSeq: 0,
 };
 
 /* ------------------------------------------------------------------ *

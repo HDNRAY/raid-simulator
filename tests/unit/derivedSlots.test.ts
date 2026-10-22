@@ -124,6 +124,7 @@ const emptySnapshot: BattleSnapshotView = {
   floatingText: [],
   playerFlash: 0,
   bossFlash: 0,
+  spellSeq: 0,
 };
 
 describe('设置页要能看到「闪避」tag（用户报告）', () => {

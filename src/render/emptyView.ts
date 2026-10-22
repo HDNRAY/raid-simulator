@@ -44,5 +44,6 @@ export function emptyView(tick: number): BattleSnapshotView {
     floatingText: [],
     playerFlash: 0,
     bossFlash: 0,
+    spellSeq: 0,
   };
 }

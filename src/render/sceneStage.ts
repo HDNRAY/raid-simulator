@@ -18,7 +18,7 @@
  * （AGENTS.md §3：抽取时连带注释一起搬）。
  */
 
-import type { Container, Graphics } from 'pixi.js';
+import { Sprite, Texture, type Container, type Graphics } from 'pixi.js';
 import { LOGICAL } from '../ui/layout';
 import type { PixiCtor } from '../ui/primitives';
 import { BossSprite } from './actors/BossSprite';
@@ -27,6 +27,7 @@ import { drawBackground } from './background';
 import { BackdropPart } from './parts/backdrop';
 import { FlashPart } from './parts/flash';
 import { PlayerActorPart } from './parts/playerActor';
+import { SpellBurstPlayer } from './spellBurst';
 import type { FrameRegistry } from './sceneTypes';
 
 /** 战场层（背景 / 角色 / 闪光）。 */
@@ -40,12 +41,15 @@ export class SceneStage {
   /** 玩家图形的外层容器（只用于闪避位移） */
   private readonly playerRoot: Container;
   private readonly flashOverlay: Graphics;
+  /** 场景根容器（法术动画要往里加精灵）。 */
+  private readonly root: Container;
 
   /**
    * @param root 场景根容器 —— 本层的节点按 **背景 → 角色 → 闪光** 的顺序
    *   加进去，这个顺序就是层叠顺序（背景必须在角色之下、闪光在上）。
    */
   constructor(pixi: PixiCtor, root: Container) {
+    this.root = root;
     /* ---------- 背景 ---------- */
     const background = new pixi.Graphics();
     drawBackground(background);
@@ -83,12 +87,38 @@ export class SceneStage {
     root.addChild(this.flashOverlay);
   }
 
+  /** 圣光弹播放器（懒加载素材；缺素材时静默）。 */
+  private spellBurst: SpellBurstPlayer | undefined;
+  /** 上一帧的时间戳（给法术动画算 `dt`）。 */
+  private lastSpellMs = 0;
+
   /** 挂上本层的每帧部件（玩家角色、闪光、Boss 形象）。 */
   register(registry: FrameRegistry): void {
     // 第 3 参 = 加载贴图形象（拿不到就回退到程序化绘制）
     this.playerActor = new PlayerActorPart(this.playerRoot, this.playerAnim, true);
     registry.add(this.playerActor);
     registry.add(new FlashPart(this.flashOverlay));
+    /**
+     * **圣光弹**（2026-10-22，黛玄的弹/波）：每次伤害播下一组帧组。
+     * ⚠️ 素材在 gitignore 的 `public/fd2/` 里 —— 缺了就静默不播（见
+     * `spellBurst.ts` 的降级说明），**不是错误**。
+     */
+    this.spellBurst = new SpellBurstPlayer({
+      container: this.root,
+      textureFor: (url) => Texture.from(url),
+      assetBase: 'fd2/animations/FDOTHER_028/',
+      anchor: { x: ACTOR_POS.boss.x, y: ACTOR_POS.boss.y - 40 },
+      createSprite: (texture) => new Sprite(texture),
+    });
+    registry.add({
+      name: 'spellBurst',
+      render: (ctx) => {
+        const now = performance.now();
+        const dt = this.lastSpellMs === 0 ? 0 : now - this.lastSpellMs;
+        this.lastSpellMs = now;
+        this.spellBurst?.update(ctx.view.spellSeq, dt);
+      },
+    });
     // Boss 形象自己就是帧部件（读哪些字段见 `BossSprite.render`）
     registry.add(this.boss);
   }

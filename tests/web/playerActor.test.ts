@@ -20,6 +20,7 @@ function contextWith(playerBuffs: BattleSnapshotView['player']['buffs']): FrameC
     floatingText: [],
     playerFlash: 0,
     bossFlash: 0,
+    spellSeq: 0,
   };
   return {
     view,

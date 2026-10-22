@@ -62,6 +62,8 @@ export class ViewAdapter {
   private nextFloatingId = 1;
   private playerFlash = 0;
   private bossFlash = 0;
+  /** 法术动画的触发计数（见 `BattleSnapshotView.spellSeq`）。 */
+  private spellSeq = 0;
   /**
    * **受击反馈**（跨帧老化 + 曲线）。
    *
@@ -171,6 +173,12 @@ export class ViewAdapter {
            */
           if (onBoss) {
             this.bossFlash = 1;
+            /**
+             * **黛玄的法术动画**（2026-10-22）：她打到 Boss 的每一发都让
+             * 渲染层"播下一组"圣光弹。判据是**技能 id**（弹 / 波），
+             * 不是"谁打的" —— 同一角色以后加新法术只改这一行。
+             */
+            if (event.skillId === 'dan' || event.skillId === 'bo') this.spellSeq += 1;
             this.damageDealt += event.amount;
           } else {
             this.playerFlash = 1;
@@ -440,6 +448,7 @@ export class ViewAdapter {
       ...(this.statusDetail === '' ? {} : { statusDetail: this.statusDetail }),
       playerFlash: this.playerFlash,
       bossFlash: this.bossFlash,
+      spellSeq: this.spellSeq,
     };
   }
 
