@@ -45,6 +45,7 @@ import { CARD_RADIUS, cardSkin } from './prepareRender';
 import {
   CODEX_LAYOUT,
   clampScrollOffset,
+  cardTextPlan,
   codexCardRects,
   maxScrollOffset,
   wrapByChars,
@@ -378,9 +379,29 @@ export class CodexScreen {
        * ⚠️ 字号下限 `FONT.small`（13，`ui/layout.ts`：中文 >= 13）。
        * ⚠️ **没有"已解锁 / 未解锁"那一行**（用户："？？？就说明了"）。
        */
+      /**
+       * **三行字**（2026-10-22 用户："卡片要显示炁机效果的说明" +
+       * "卡片可以高一点，写不下的可以换行"）：
+       *
+       * ```
+       *   名字        （一行，未解锁 = ？？？）
+       *   效果说明    （小字，行数按卡片高度算 → 最多 3 行）
+       *   解锁条件    （小字，贴底；行数按卡片高度算 → 最多 2 行）
+       * ```
+       *
+       * ⚠️ 行数**不硬编码**：`cardTextPlan(cardH)` 一处算，卡片一改高就跟着变
+       * （单测钉住"三块互不重叠、都在卡内"）。
+       * ⚠️ 字号下限 `FONT.small`（13，`ui/layout.ts`：中文 >= 13）。
+       * ⚠️ **没有"已解锁 / 未解锁"那一行**（用户："？？？就说明了"）。
+       * ⚠️ 条件文案**自带「解锁条件：」前缀**（`app/unlockText` 统一加的）
+       * —— 这里**不许**再拼一次，否则会出现"解锁条件：解锁条件：…" ✗
+       */
+      const plan = cardTextPlan(shifted.h);
       const centerX = shifted.x + shifted.w / 2;
+      const perLine = Math.max(6, Math.floor((shifted.w - 16) / FONT.small));
+
       nameLabel.root.x = centerX;
-      nameLabel.root.y = shifted.y + shifted.h * 0.17;
+      nameLabel.root.y = shifted.y + plan.nameY;
       nameLabel.set(entry.nameKey === undefined ? t('screen.codex.locked') : t(entry.nameKey));
       nameLabel.setColor(entry.nameKey === undefined ? PALETTE.textDim : PALETTE.text);
       nameLabel.root.visible = true;
@@ -389,37 +410,29 @@ export class CodexScreen {
        * 效果说明：**未解锁时没有**（`descKey === undefined` ⇒ 不画）——
        * "？？？"就是"你还不知道它是什么" ✓（开发模式会把它填上）。
        *
-       * ⚠️ 折行按**卡片内宽**算（`colW − 2×8`）：中文等宽 + 13px ⇒
-       * 一行放得下 ~11 个字，所以两行能把一条炁机的说明说清楚。
+       * ⚠️ 先把文案里的**硬换行**压成空格：语言包的说明是给窄卡片写的两行
+       * （`…\n…`），而这里按卡片宽度重折 —— 两套折行叠在一起会出现第 3 行
+       * （实测「游刃有余」就是这样溢到条件行上的 ✗）。
        */
       const desc = entry.descKey === undefined ? undefined : t(entry.descKey);
       if (desc === undefined || desc === '') {
         descLabel.root.visible = false;
       } else {
-        const perLine = Math.max(6, Math.floor((shifted.w - 16) / FONT.small));
-        /**
-         * ⚠️ 先把文案里的**硬换行**压成空格：语言包的说明是**给窄卡片**写的
-         * 两行（`…\n…`），而这里按卡片宽度重折 —— 两套折行叠在一起会出现
-         * 第 3 行（实测「游刃有余」就是这样溢到条件行上的 ✗）。
-         */
         const flat = stripEmphasis(desc).replaceAll('\n', ' ');
-        descLabel.set(wrapByChars(flat, { perLine, maxLines: 2 }).join('\n'));
+        descLabel.set(
+          wrapByChars(flat, { perLine, maxLines: plan.descLines }).join('\n'),
+        );
         descLabel.setColor(PALETTE.textDim);
         descLabel.root.x = centerX;
-        descLabel.root.y = shifted.y + shifted.h * 0.45;
+        descLabel.root.y = shifted.y + plan.descY;
         descLabel.root.visible = true;
       }
 
       if (conditionLabel !== undefined) {
         conditionLabel.root.x = centerX;
-        conditionLabel.root.y = shifted.y + shifted.h * 0.82;
-        /**
-         * 解锁条件：**一行**、超长省略（两行会和效果说明叠在一起 ——
-         * 卡片只有 `CODEX_LAYOUT.cardH` 那么高）。
-         */
-        const perLine = Math.max(6, Math.floor((shifted.w - 16) / FONT.small));
+        conditionLabel.root.y = shifted.y + plan.condY;
         conditionLabel.set(
-          wrapByChars(entry.unlockText, { perLine, maxLines: 1 }).join('\n'),
+          wrapByChars(entry.unlockText, { perLine, maxLines: plan.condLines }).join('\n'),
         );
         conditionLabel.setColor(PALETTE.textDim);
         conditionLabel.root.visible = true;

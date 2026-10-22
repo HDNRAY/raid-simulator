@@ -87,7 +87,14 @@ export const CODEX_LAYOUT: CodexLayout = {
    * 5×180 + 4×8 = 932 宽；3 行（5+5+3）收在 476，提示行下移到 524。
    */
   cardW: 180,
-  cardH: 108,
+  /**
+   * 卡片高 **148**（2026-10-22 用户："卡片可以高一点，写不下的可以换行"）。
+   *
+   * 演进 104 → 108（加解锁条件）→ 132（加说明）→ **148**（说明与条件都折行）。
+   * 148 是"名字 + 最多 3 行说明 + 最多 2 行条件"排得下的最小高度
+   * （算式在 `cardTextPlan` 里，由单测钉住）—— 再矮就得砍行数。
+   */
+  cardH: 148,
   gapX: 8,
   gapY: 10,
   cols: 5,
@@ -192,3 +199,65 @@ export function clampScrollOffset(offset: number, max: number): number {
   return Math.min(Math.max(0, Math.round(offset)), Math.max(0, Math.round(max)));
 }
 
+
+/* ------------------------------------------------------------------ *
+ * 卡片里的三行字（2026-10-22）
+ * ------------------------------------------------------------------ */
+
+/** 卡片里三行字的排版计划（坐标 = **相对卡片上沿的中心线**）。 */
+export interface CardTextPlan {
+  /** 名字那一行的中心。 */
+  readonly nameY: number;
+  /** 效果说明**整块**的中心（多行时以块中心对齐 —— `Label` 的 `anchorY` 是 0.5）。 */
+  readonly descY: number;
+  /** 效果说明最多几行。 */
+  readonly descLines: number;
+  /** 解锁条件**整块**的中心。 */
+  readonly condY: number;
+  /** 解锁条件最多几行。 */
+  readonly condLines: number;
+}
+
+/** 小字行高（`FONT.small` = 13，中文行高约 1.3 倍）。 */
+export const CODEX_LINE_H = 17;
+/** 卡片内边距（上下各留一点，不然描边会贴字）。 */
+const CARD_PAD_TOP = 10;
+const CARD_PAD_BOTTOM = 10;
+/** 名字那一行占的高度（含与下面两块的间距）。 */
+const NAME_BAND = 24;
+
+/**
+ * 按**卡片高度**算出三行字怎么排（行数是溢出的唯一判据）。
+ *
+ * ```
+ *   名字      从顶 + 10 起，占 24
+ *   条件      **贴底**（1~2 行，按卡片够不够高）
+ *   说明      吃掉名字与条件之间的**剩余行数**（最多 4 行）
+ * ```
+ *
+ * ⚠️ 为什么"条件贴底、说明吃剩余"：条件每一行都是"解锁条件：xxx"，玩家
+ * 找它时视线在卡片底部（与图鉴选择屏的卡片一致）；而说明长短差别最大，
+ * 让它吸收剩余空间，卡片就不必为最长的那条说明变得特别高 ✓
+ *
+ * ⚠️ 纯函数：`cardH` 是唯一的输入，所以"卡片多高 ⇒ 每块几行"能在 node 里
+ * 直接测（`tests/unit/codexCardText.test.ts`）。
+ */
+export function cardTextPlan(cardH: number): CardTextPlan {
+  const h = Math.max(CODEX_LINE_H * 3, Math.round(cardH));
+  /** 条件：够高就给两行（"解锁条件：局内累计用「弹」命中 10 次" 常见要两行）。 */
+  const condLines = h >= 140 ? 2 : 1;
+  const condH = condLines * CODEX_LINE_H;
+  const condTop = h - CARD_PAD_BOTTOM - condH;
+  const descTop = CARD_PAD_TOP + NAME_BAND;
+  /** 说明能吃几行（至少 1 行；空出来的高度都给条件让路）。 */
+  const descLines = Math.max(1, Math.min(4, Math.floor((condTop - 4 - descTop) / CODEX_LINE_H)));
+  const descH = descLines * CODEX_LINE_H;
+  return {
+    /** 名字的中心：名字带的正中。 */
+    nameY: CARD_PAD_TOP + NAME_BAND / 2,
+    descY: descTop + descH / 2,
+    descLines,
+    condY: condTop + condH / 2,
+    condLines,
+  };
+}
