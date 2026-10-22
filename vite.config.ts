@@ -26,5 +26,23 @@ export default defineConfig(({ command }) => ({
     port: 5273,
     // 端口被占时直接失败，不静默换端口 —— 否则容易看错页面。
     strictPort: true,
+    /**
+     * **`pnpm run dev` 自动打开浏览器**（用户 2026-10-22："开发环境在 dev
+     * 自动打开···build的时候自动关闭"）。
+     *
+     * ⚠️ 只管 **dev server**：`vite build` 本来就不开浏览器，而 `vite preview`
+     * 是**另一个**开关（下面的 `preview.open: false`），两者互不影响 ——
+     * 所以"build 时不要自动打开"这条是**天然**成立的，这里只是把它写死，
+     * 免得以后有人顺手打开 `preview.open`。
+     */
+    open: true,
+  },
+
+  /**
+   * `vite preview`（本地预览构建产物）**不**自动开浏览器。
+   * 它是"看 build 结果"的工具，不该像 dev 那样抢焦点。
+   */
+  preview: {
+    open: false,
   },
 }));
