@@ -512,6 +512,7 @@ describe('三条新炁机的说明与内容**对得上**', () => {
 
     const boostDesc = QIJI_CATALOG.get('qiji.ningShenRuDao.desc') ?? '';
     const override = qijiById('ningShenRuDao')?.skillTweak?.buffOverrides?.[0]?.modifiers[0]?.value;
-    expect(boostDesc).toContain(`变为 ${String(override)}%`);
+    /** 2026-10-22 用户：数字前后不留空格 ⇒ 文案是 `变为100%`（只认数值）。 */
+    expect(boostDesc).toContain(`${String(override)}%`);
   });
 });
