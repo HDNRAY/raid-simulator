@@ -193,34 +193,23 @@ export function characterCardRect(
   return { x: column.x, y: L.centerY - Math.round(h / 2), w: L.w, h };
 }
 
-/**
- * 某张卡的**命中/悬停区**（= 展开后的整块矩形）。
- *
- * ⚠️ 它**与动画无关**（动画矩形每帧在变，拿它当命中区会让指针忽进忽出 ✗），
- * 而且**包含**收起态 ✓ —— 指针停在收起那张卡的上方（那片"将来会长上来"的
- * 区域）也算选中它，于是"hover 哪张哪张长上来"从第一帧就成立 ✓。
- * ⚠️ 展开矩形的垂直位置同样以 `centerY` 为中心（与 `characterCardRect`
- * 的 progress=1 **逐字相同**），所以"命中区"与"画出来的展开卡"不会错位。
- */
-export function characterCardHotRect(
-  column: CharacterCardColumn,
-  L: typeof CHARACTER_CARD_LAYOUT = CHARACTER_CARD_LAYOUT,
-): CharacterCardRect {
-  return { x: column.x, y: L.centerY - Math.round(L.fullH / 2), w: L.w, h: L.fullH };
-}
 
 /**
- * 三张卡的**命中/悬停区**（顺序 = 角色顺序）。
+ * 三张卡**此刻**的矩形（顺序 = 角色顺序）—— 渲染、命中、滚动视口共用这一份。
  *
- * ⚠️ 名字沿用旧 API（`characterSelectCardRects`）：调试接口
- * `characterSelect.hitAreas()` 与截图脚本都按它取坐标 —— 换实现不换名字，
- * 脚本不用跟着改。
+ * ⚠️ 2026-10-22 用户报的 bug："鼠标 hover 展开的范围比未展开卡片的范围大多了"
+ * ⇒ 命中**必须跟着这一张当前的矩形**（收起时就是那条 96 高的短条），
+ * 而不是"展开后的整块"。
+ *
+ * @param progressOf 第 `index` 张此刻的展开进度（缺省 0 = 全部收起）
  */
 export function characterSelectCardRects(
   count: number,
-  L: typeof CHARACTER_CARD_LAYOUT = CHARACTER_CARD_LAYOUT,
+  progressOf: (index: number) => number = () => 0,
 ): readonly CharacterCardRect[] {
-  return characterSelectColumns(count, L).map((column) => characterCardHotRect(column, L));
+  return characterSelectColumns(count).map((column, index) =>
+    characterCardRect(column, progressOf(index)),
+  );
 }
 
 /**
@@ -241,9 +230,9 @@ export function characterSelectCardRects(
  */
 export function characterSelectHitAreas(
   players: readonly PrepareOption[],
-  _L: PrepareLayout = CHARACTER_SELECT_LAYOUT,
+  progressOf: (index: number) => number = () => 0,
 ): readonly PrepareHitArea[] {
-  return characterSelectCardRects(players.length).map((rect, i) => ({
+  return characterSelectCardRects(players.length, progressOf).map((rect, i) => ({
     kind: 'player' as const,
     id: players[i]!.id,
     ...rect,
@@ -265,9 +254,9 @@ export function characterHoverTarget(
   players: readonly PrepareOption[],
   px: number,
   py: number,
-  L: PrepareLayout = CHARACTER_SELECT_LAYOUT,
+  progressOf: (index: number) => number = () => 0,
 ): { readonly kind: 'player'; readonly id: string } | undefined {
-  for (const area of characterSelectHitAreas(players, L)) {
+  for (const area of characterSelectHitAreas(players, progressOf)) {
     if (px < area.x || px > area.x + area.w) continue;
     if (py < area.y || py > area.y + area.h) continue;
     return { kind: 'player', id: area.id };

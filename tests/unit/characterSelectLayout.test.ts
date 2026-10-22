@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CHARACTER_CARD_LAYOUT,
-  characterCardHotRect,
   characterCardRect,
   characterSelectCardRects,
   characterSelectColumns,
@@ -101,23 +100,45 @@ describe('高度按进度插值：收起 = 短条，展开 = 详情高', () => {
 });
 
 describe('命中区：与动画无关、且包含收起态', () => {
-  it('命中区 = 展开后的整块（底边对齐、高 = 详情高）', () => {
-    const col = characterSelectColumns(3)[1];
-    if (col === undefined) return;
-    const hot = characterCardHotRect(col);
-    expect(hot.h).toBe(CHARACTER_CARD_LAYOUT.fullH);
-    /** 命中区与"画出来的展开卡"逐字相同（不会错位）。 */
-    expect(hot).toEqual(characterCardRect(col, 1));
-    /** 包住收起态（短条居中 ⇒ 在它的范围内）。 */
-    const bar = characterCardRect(col, 0);
-    expect(hot.y).toBeLessThanOrEqual(bar.y);
-    expect(hot.y + hot.h).toBeGreaterThanOrEqual(bar.y + bar.h);
+  /**
+   * ⚠️ 2026-10-22 用户报的 bug："鼠标 hover 展开的范围比未展开卡片的范围
+   * 大多了" ⇒ 命中区**必须跟着这一张当前的矩形**（收起就是那条短条）。
+   */
+  it('命中区 = **当前进度**对应的矩形（p = 0 / 0.5 / 1）', () => {
+    const cols = characterSelectColumns(3);
+    for (const p of [0, 0.5, 1]) {
+      const rects = characterSelectCardRects(3, () => p);
+      rects.forEach((rect, index) => {
+        const col = cols[index];
+        expect(col).toBeDefined();
+        if (col === undefined) return;
+        expect(rect).toEqual(characterCardRect(col, p));
+      });
+    }
   });
 
-  it('`characterSelectCardRects` 与命中区**同一份**（渲染/点选不会漂）', () => {
-    const cols = characterSelectColumns(3);
-    const rects = characterSelectCardRects(3);
-    expect(rects).toEqual(cols.map((col) => characterCardHotRect(col)));
+  it('收起时命中区就是那条 96 高的短条（不会再"远处也能展开"）', () => {
+    const rects = characterSelectCardRects(3, () => 0);
+    for (const rect of rects) {
+      expect(rect.h).toBe(CHARACTER_CARD_LAYOUT.barH);
+      /** 短条上方 100px 处**不在**命中区里。 */
+      const above = rect.y - 100;
+      expect(above >= rect.y && above <= rect.y + rect.h).toBe(false);
+    }
+  });
+
+  it('展开时命中区 = 长大后的卡（整块可滚轮 / 拖拽）', () => {
+    const rects = characterSelectCardRects(3, () => 1);
+    for (const rect of rects) expect(rect.h).toBe(CHARACTER_CARD_LAYOUT.fullH);
+  });
+
+  it('`characterSelectCardRects` 与 `characterSelectHitAreas` **同一份**（渲染/点选不会漂）', () => {
+    const rects = characterSelectCardRects(3, (i) => i / 10);
+    const areas = characterSelectHitAreas(
+      [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+      (i) => i / 10,
+    );
+    expect(areas.map((area) => ({ x: area.x, y: area.y, w: area.w, h: area.h }))).toEqual([...rects]);
   });
 
   it('`hitAreas` 只列三张卡（选角色屏没有「开始」键）', () => {

@@ -67,7 +67,7 @@ import {
 import {
   CHARACTER_CARD_LAYOUT,
   canStartRun,
-  characterCardHotRect,
+  characterCardRect,
   characterCursorTarget,
   characterHoverTarget,
   characterSelectCardRects,
@@ -334,7 +334,7 @@ export class CharacterSelectScreen {
    * @returns 悬停落在某张卡上（供调用方判"要不要重画"）
    */
   hover(px: number, py: number): boolean {
-    const next = characterHoverTarget(this.players, px, py)?.id;
+    const next = characterHoverTarget(this.players, px, py, this.progressLookup)?.id;
     const changed = next !== this.hoveredId
       || !this.pointerInside
       || this.keyboardActive;
@@ -362,7 +362,7 @@ export class CharacterSelectScreen {
    * 抄的那份会静默指到别处，而"点空了"与"功能坏了"长得一模一样。
    */
   hitAreas(): ReturnType<typeof characterSelectHitAreas> {
-    return characterSelectHitAreas(this.players);
+    return characterSelectHitAreas(this.players, this.progressLookup);
   }
 
   /** 选中那一项（hover 优先，见 `focusedTarget`）。 */
@@ -397,8 +397,9 @@ export class CharacterSelectScreen {
     if (index < 0 || this.progressOf(index) < 0.5) return false;
     const card = this.cards[index];
     if (card === undefined) return false;
-    const hot = characterCardHotRect(card.column);
-    return px >= hot.x && px <= hot.x + hot.w && py >= hot.y && py <= hot.y + hot.h;
+    /** ⚠️ 用**这张卡当前的矩形**（与绘制/遮罩同一个函数）。 */
+    const rect = characterCardRect(card.column, easeInOutCubic(this.progressOf(index)));
+    return px >= rect.x && px <= rect.x + rect.w && py >= rect.y && py <= rect.y + rect.h;
   }
 
   /**
@@ -445,7 +446,7 @@ export class CharacterSelectScreen {
     }
 
     /** 点卡片 = **只选中**（看详情），开局交给按钮 / `Enter`。 */
-    const hit = characterHoverTarget(this.players, px, py);
+    const hit = characterHoverTarget(this.players, px, py, this.progressLookup);
     if (hit === undefined) return false;
     this.select(hit.id);
     return true;
@@ -502,6 +503,15 @@ export class CharacterSelectScreen {
     if (id === undefined) return -1;
     return this.cards.findIndex((card) => card.id === id);
   }
+
+  /**
+   * 第 `index` 张卡此刻的**动画进度**（0..1）—— 给命中/悬停/滚动用。
+   *
+   * ⚠️ 绑成箭头函数存成字段：几处几何函数都收"一个 `progressOf` 回调"，
+   * 各处各写一个闭包会让"谁用哪个口径"漂（用户报过的"hover 范围比卡片大"
+   * 就是口径不一致）。
+   */
+  private readonly progressLookup = (index: number): number => this.progressOf(index);
 
   /** 第 `index` 张卡此刻的进度（缺省 0 = 收着）。 */
   private progressOf(index: number): number {
