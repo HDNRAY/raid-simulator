@@ -46,6 +46,17 @@ interface Burst {
 export interface SpellBurstOptions {
   readonly container: Container;
   readonly textureFor: (url: string) => Texture | undefined;
+  /**
+   * **异步加载一张纹理**（真正把 PNG 拉进 `Assets` 缓存的那一步）。
+   *
+   * ⚠️ 2026-10-22 修的 bug：原来只调 `textureFor`（= `Assets.get`）而**从没
+   * `Assets.load` 过** ⇒ 每张都拿不到、控制台刷 `Asset id … was not found in
+   * the Cache`，而且那段圣光弹动画**从来没播出来过** ✗。
+   *
+   * 注入而不是直接 import `Assets`：本文件在 node 单测里也要能跑（不碰 pixi 的
+   * 加载器），而且"加载失败只丢这一帧"的策略可以在这里测 ✓。
+   */
+  readonly loadTexture?: (url: string) => Promise<Texture | undefined>;
   /** 素材根（相对站点根）：`fd2/animations/FDOTHER_028/`。 */
   readonly assetBase: string;
   /** 在哪儿画（逻辑坐标，通常是 Boss 的位置）。 */
@@ -80,10 +91,39 @@ export class SpellBurstPlayer {
   private async load(): Promise<void> {
     const assets = await loadSpellAssets(this.options.assetBase);
     if (this.disposed || assets === undefined) return;
-    this.frames = assets.frames;
-    this.delays = assets.delays;
-    this.textures = assets.urls.map((url) => this.options.textureFor(assets.base + url));
+    /**
+     * **逐帧加载，失败的那一帧单独丢掉**（素材是 gitignore 的、可能缺几张）：
+     * 丢帧之后 `frames` / `delays` / `textures` **必须同步裁掉同一批下标**，
+     * 否则时间轴与画面会错位 ✗。
+     */
+    const loaded: { frame: SpellFrameGeometry; delay: number; texture: Texture | undefined }[] = [];
+    for (const [index, url] of assets.urls.entries()) {
+      const frame = assets.frames[index];
+      if (frame === undefined) continue;
+      const texture = await this.loadOne(assets.base + url);
+      if (texture === undefined) continue;
+      loaded.push({ frame, delay: assets.delays[index] ?? 1, texture });
+    }
+    if (this.disposed || loaded.length === 0) return;
+    this.frames = loaded.map((entry) => entry.frame);
+    this.delays = loaded.map((entry) => entry.delay);
+    this.textures = loaded.map((entry) => entry.texture);
     this.groupStarts = spellFrameGroupStarts(this.frames);
+  }
+
+  /**
+   * 加载一帧。优先走注入的 `loadTexture`（真正 `Assets.load`），没有注入就退回
+   * `textureFor`（单测里就是直接给纹理）。**任何异常都只丢这一帧**。
+   */
+  private async loadOne(url: string): Promise<Texture | undefined> {
+    const { loadTexture, textureFor } = this.options;
+    if (loadTexture === undefined) return textureFor(url);
+    try {
+      return await loadTexture(url);
+    } catch {
+      /** 缺帧 / 只有一半素材 / 网络失败 —— 一律降级成"这一帧不画" ✓ */
+      return undefined;
+    }
   }
 
   /** 素材准备好了吗（调试 / 验收读数）。 */

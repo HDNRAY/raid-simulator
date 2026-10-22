@@ -18,7 +18,7 @@
  * （AGENTS.md §3：抽取时连带注释一起搬）。
  */
 
-import { Sprite, Texture, type Container, type Graphics } from 'pixi.js';
+import { Assets, Sprite, Texture, type Container, type Graphics } from 'pixi.js';
 import { LOGICAL } from '../ui/layout';
 import type { PixiCtor } from '../ui/primitives';
 import { BossSprite } from './actors/BossSprite';
@@ -106,6 +106,12 @@ export class SceneStage {
     this.spellBurst = new SpellBurstPlayer({
       container: this.root,
       textureFor: (url) => Texture.from(url),
+      /**
+       * ⚠️ **必须先 `Assets.load` 再取纹理**（2026-10-22 修的 bug：只 `Texture.from`
+       * 会拿到一张空的 1×1，控制台刷 `Asset id … was not found in the Cache`，
+       * 动画永远不出现 ✗）。失败就抛给 `SpellBurstPlayer`，它只丢那一帧。
+       */
+      loadTexture: async (url) => (await Assets.load<Texture>(url)) ?? undefined,
       assetBase: 'fd2/animations/FDOTHER_028/',
       anchor: { x: ACTOR_POS.boss.x, y: ACTOR_POS.boss.y - 40 },
       createSprite: (texture) => new Sprite(texture),
