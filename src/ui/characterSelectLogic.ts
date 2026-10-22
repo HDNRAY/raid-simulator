@@ -87,39 +87,65 @@ export const CHARACTER_SELECT_LAYOUT: PrepareLayout = {
 };
 
 /**
- * **选角色屏的卡片几何**（2026-10-22 重做，用户原话）：
+ * **选角色屏 = 三张"人物详情卡"**（2026-10-22 第三次重做，用户原话）：
  *
- * > 这个页面应该是3个和**人物详情等宽**的卡片，然后 hover 哪个哪个就展开…
- * > 我要的是人物名字的小卡片**展开成人物详情**。
+ * > 本来就是 **3 张 人物详情卡**，只是**没有选中的时候收起来**，
+ * > 另外**收起来也是要有动画的**！
  *
  * ==================================================================
- * 数是怎么来的（全部推出来，没有手调）
+ * 几何（全部推出来，没有手调）
  * ==================================================================
  *
  * ```
- *   卡宽   = 详情区宽（`detailRect().w` = 296）   ← 用户："与人物详情等宽"
+ *   卡宽   = 详情区宽（`PREPARE_LAYOUT.detailW` = 296）
  *   间距   = 12
  *   左右边 = (960 − 3×296 − 2×12) / 2 = 24
- *   卡高   = 96（只有名字 + 状态行）
- *   行顶   = 卡片行在标题与提示之间**纵向居中**
+ *   收起高 = 96（一条"名字短条"）
+ *   展开高 = 详情区高（`PREPARE_LAYOUT.detailH` = 371）
+ *   底边   = 详情区下缘（`detailY + detailH`）—— **三张共用这一条线**
  * ```
  *
- * ⚠️ **展开的终点就是 `detailRect()`**（x 624 宽 296 通高）—— 所以"卡片
- * 长成详情"这件事是**同一块矩形从 A 插值到 B**，不是两套布局 ✗。
- * 卡片宽 = 详情宽 是这条能成立的前提（宽度不跳变，只有位置/高度在动）。
+ * ⚠️ **底边固定、向上长**（用户："展开是向上长、收起是向下缩（这样切换时
+ * 整排不会上下跳）"）⇒ 卡片矩形 = `y = bottom - h`、`h = lerp(96, 371, 进度)`。
+ * 宽度**全程 296 不变** ⇒ 详情面板的排版可以原样搬进这块矩形（不用缩放）。
+ *
+ * ⚠️ **命中/悬停区 = 展开后的整块矩形**（不是"当前动画矩形"）：
+ * 动画中的矩形每帧都在变，用它当命中区会让指针在边缘"忽进忽出" ✗。
+ * 展开后的整块**包含**收起态 ✓ 且三块互不重叠（间距 12）✓ ⇒ 判据稳定。
  */
+/** 内容区上沿（标题之下）。 */
+const CONTENT_TOP = 96;
+/** 内容区下沿（底部提示之上）—— 提示行固定在 `CONTENT_TOP + CONTENT_H + …`。 */
+const CONTENT_H = 380;
+
 export const CHARACTER_CARD_LAYOUT = {
-  /** ⚠️ 与详情区**同宽**（`PREPARE_LAYOUT.detailW`）：这是"卡片长成详情"的前提。 */
-  cardW: PREPARE_LAYOUT.detailW,
-  cardH: 96,
+  /** ⚠️ 与详情区**同宽**（`PREPARE_LAYOUT.detailW`）：这是"卡片就是详情卡"的前提。 */
+  w: PREPARE_LAYOUT.detailW,
+  /** 收起时的高度（一条名字短条）。 */
+  barH: 96,
+  /** 展开时的高度（= 详情区高）。 */
+  fullH: PREPARE_LAYOUT.detailH,
   gap: 12,
-  /** 左右边距（推导见上）。 */
-  marginX: Math.round((960 - 3 * PREPARE_LAYOUT.detailW - 2 * 12) / 2),
-  /** 卡片行的顶边：在标题区之下、底部提示之上的那一段里居中。 */
-  topY: 236,
+  /**
+   * **三张共用的底边**（= 展开后那条带子的下沿）。
+   *
+   * ⚠️ 2026-10-22 用户："整排卡片要垂直居中，别贴到底部" +
+   * "同一条基准线不动…切换时整排不要上下跳" ⇒ 以**展开高度**（371）为
+   * 基准在内容区里居中，短条（96）挂在这条带子的**底部**：
+   *
+   * ```
+   *   内容区 = [TITLE_BOTTOM, HINT_TOP]，带子高 = fullH
+   *   bandTop = CONTENT_TOP + (CONTENT_H − fullH) / 2
+   *   bottomY = bandTop + fullH
+   * ```
+   * 于是"展开 / 收起"只改高度、不改底边 ⇒ 切换时整排不动 ✓
+   */
+  get bottomY(): number {
+    return CONTENT_TOP + Math.round((CONTENT_H - PREPARE_LAYOUT.detailH) / 2) + PREPARE_LAYOUT.detailH;
+  },
 } as const;
 
-/** 一张小卡片的矩形（渲染与命中测试**共用这一份**）。 */
+/** 一张卡片的矩形（逻辑坐标）。 */
 export interface CharacterCardRect {
   readonly x: number;
   readonly y: number;
@@ -127,54 +153,71 @@ export interface CharacterCardRect {
   readonly h: number;
 }
 
+/** 某张卡所在的**列**（x 由张数摊开，横向居中）。 */
+export interface CharacterCardColumn {
+  readonly x: number;
+  readonly w: number;
+}
+
 /**
- * 三张卡片的矩形（顺序 = 角色顺序；横向等距）。
+ * 三张卡各自的**列**（顺序 = 角色顺序；横向等距、整体居中）。
  *
- * @param count 角色数（今天 3；`CHARACTER_CARD_LAYOUT` 的边距是按 3 张推的，
- *   不是 3 张时**仍然居中**：用实际张数重新摊开）
+ * @param count 角色数（今天 3；不是 3 时仍然居中：按实际张数重新摊开）
+ */
+export function characterSelectColumns(
+  count: number,
+  L: typeof CHARACTER_CARD_LAYOUT = CHARACTER_CARD_LAYOUT,
+): readonly CharacterCardColumn[] {
+  if (count <= 0) return [];
+  const totalW = count * L.w + (count - 1) * L.gap;
+  const left = Math.round((960 - totalW) / 2);
+  return Array.from({ length: count }, (_unused, index) => ({
+    x: left + index * (L.w + L.gap),
+    w: L.w,
+  }));
+}
+
+/**
+ * 某张卡在**当前展开进度**下的矩形（渲染用）。
+ *
+ * @param progress 0 = 收起（96 高）、1 = 展开（371 高）；底边固定、向上长
+ */
+export function characterCardRect(
+  column: CharacterCardColumn,
+  progress: number,
+  L: typeof CHARACTER_CARD_LAYOUT = CHARACTER_CARD_LAYOUT,
+): CharacterCardRect {
+  const k = Math.min(1, Math.max(0, progress));
+  const h = Math.round(L.barH + (L.fullH - L.barH) * k);
+  return { x: column.x, y: L.bottomY - h, w: L.w, h };
+}
+
+/**
+ * 某张卡的**命中/悬停区**（= 展开后的整块矩形）。
+ *
+ * ⚠️ 它**与动画无关**（动画矩形每帧在变，拿它当命中区会让指针忽进忽出 ✗），
+ * 而且**包含**收起态 ✓ —— 指针停在收起那张卡的上方（那片"将来会长上来"的
+ * 区域）也算选中它，于是"hover 哪张哪张长上来"从第一帧就成立 ✓。
+ */
+export function characterCardHotRect(
+  column: CharacterCardColumn,
+  L: typeof CHARACTER_CARD_LAYOUT = CHARACTER_CARD_LAYOUT,
+): CharacterCardRect {
+  return { x: column.x, y: L.bottomY - L.fullH, w: L.w, h: L.fullH };
+}
+
+/**
+ * 三张卡的**命中/悬停区**（顺序 = 角色顺序）。
+ *
+ * ⚠️ 名字沿用旧 API（`characterSelectCardRects`）：调试接口
+ * `characterSelect.hitAreas()` 与截图脚本都按它取坐标 —— 换实现不换名字，
+ * 脚本不用跟着改。
  */
 export function characterSelectCardRects(
   count: number,
   L: typeof CHARACTER_CARD_LAYOUT = CHARACTER_CARD_LAYOUT,
 ): readonly CharacterCardRect[] {
-  if (count <= 0) return [];
-  const totalW = count * L.cardW + (count - 1) * L.gap;
-  const left = Math.round((960 - totalW) / 2);
-  return Array.from({ length: count }, (_unused, index) => ({
-    x: left + index * (L.cardW + L.gap),
-    y: L.topY,
-    w: L.cardW,
-    h: L.cardH,
-  }));
-}
-
-/**
- * **展开后的那张卡**（2026-10-22 第二轮，用户纠正）：
- *
- * > 我说的是 **人物小卡 展开**，**不是在右边有一个单独的模块**。
- *
- * 所以终点是"**这张卡自己在纵向上长高**"，不是右侧那块 `detailRect()`
- * （那是"另一个模块"的矩形 ✗）：
- *
- * ```
- *   起点 = 这张卡自己的槽位  (24|332|640, 236, 296, 96)
- *   终点 = (同一 x, 详情区的 y/宽/高) = (x, 88, 296, 371)
- * ```
- *
- * ⚠️ **宽度不变**（296 == 详情宽）⇒ 详情面板的排版可以直接搬进这块矩形
- * （不用缩放、不用重排），而视觉上是"这一张卡长高了" ✓
- * ⚠️ 终点**包含起点**（同一个 x、y 从 236 往上长到 88、高从 96 变成 371）
- * ⇒ 从左/中/右哪张长出来，看起来都是"这张卡长了" ✓
- * ⚠️ 另外两张卡**留在原槽位**（只是压暗到 30%）—— 于是它们仍然 hover 得到、
- * 点得到（换人靠它）✓ 没有"展开卡覆盖整行"的冲突 ✓
- */
-export function expandedCardRect(card: CharacterCardRect): CharacterCardRect {
-  return {
-    x: card.x,
-    y: PREPARE_LAYOUT.detailY,
-    w: PREPARE_LAYOUT.detailW,
-    h: PREPARE_LAYOUT.detailH,
-  };
+  return characterSelectColumns(count, L).map((column) => characterCardHotRect(column, L));
 }
 
 /**

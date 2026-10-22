@@ -1,65 +1,53 @@
 /**
- * **选角色屏**：从 3 个角色里选 1 个，开始一局肉鸽。
+ * **选角色屏 = 三张"人物详情卡"**（2026-10-22 第三次重做）。
  *
  * ==================================================================
- * 需求（用户 2026-10-12 定的流程）
+ * 用户的三句原话（这一版的规格就是它们）
  * ==================================================================
  *
- * 用户原话："有一个**新的首页**……然后进入肉鸽 才是**选角色**" +
- * "从**现有的 3 个角色**里选（林晚风 / 凯丽 / 黛玄）" +
- * "⚠️ 现在只有**林晚风**能玩，另两个在 `DEVELOPING` 里 →
- * 复用备战界面既有那套「**开发中 → 灰掉**」的做法"。
+ * > 选人 还是有问题，你换一个实现算了，本来就是 **3 张 人物详情卡**，
+ * > 只是**没有选中的时候收起来**，另外**收起来也是要有动画的**！
  *
- * ⚠️ **它不是默认入口**（首页才是）：肉鸽那条路还不完整
- * （炁机选择是 P3、强度曲线是 P4/P5、7 个 Boss 只有 2 个能打）。
+ * > 展开可以快一点 **之前速度就可以**（= `EXPAND_DURATION_MS` 220ms，对称）
  *
- * ==================================================================
- * 交互：**与备战界面共用同一套光标模型**（`prepareLogic`）
- * ==================================================================
+ * > **黄/金边框只出现在"展开"那张卡上**
  *
- *   - ← →：在卡片间**移动光标**（不改选择，到两端停住）
- *   - Enter：**确定光标处的角色并开始一局**（设计稿 §3.1/§3.5：
- *     CharacterSelect --Enter--> Battle）
- *   - 触屏 / 鼠标：**点卡片 = 移光标 + 确定 + 开始**（一步到位）
+ * > **动画速度记得要用曲线**
  *
- * ⚠️ 键盘一次 Enter、触屏一次点击 —— **数量相同**，满足 AGENTS.md §3b
- * 的"功能对等"。这也是为什么这里**没有**独立的「开始」按钮：
- * 多一个按钮就要多一步，而"点卡片开始"与"Enter 开始"仍然是对等的。
- *
- * ⚠️ **选中"开发中"的角色不会开始**（需求："不能开始战斗（选中它们时
- * 点开始应当无效，或给明确反馈）"）。反馈由底部那行文案给出 ——
- * 它与卡片上的"开发中"**共用同一个 i18n key**（不一致的两句话会让人
- * 以为它们在说两件事，备战界面记着这条）。
+ * ⚠️ 所有**画出来的量**（卡片高度 / 详情透明度 / 金边淡入 / 遮罩矩形）
+ * 都过 `easeInOutCubic(progress)` —— 双向动画用 InOut（两端平缓），
+ * 单端 `easeOutCubic` 会让收起"猛缩然后拖尾" ✗。`progress` 本身仍是
+ * 恒速时钟（`stepExpand`），曲线只作用在画的时候（中断才连续）。
  *
  * ==================================================================
- * ⚠️ 2026-10-15：右侧那块**详情区**（用户："显示当前 hover 角色的详情"）
+ * 这一版"不一样"在哪（前两版被否的原因）
  * ==================================================================
  *
- * 与备战屏**同一块面板、同一个驱动**：`PrepareDetailController` 把
- * "鼠标划过的那一项"与"光标所在的那一项"合成一个 `PrepareTarget`
- * （`focusedTarget`：**hover 优先**），再交给 `PrepareDetailPanel` 画。
+ * | 版本 | 做法 | 用户为什么否 |
+ * |---|---|---|
+ * | 第一版 | 卡片 + **右边一块独立详情** | "不是在右边有一个单独的模块" |
+ * | 第二版 | 卡片矩形插值到 `detailRect()` | 终点在右边 ⇒ 看起来**还是**右侧模块 |
+ * | **这一版** | **每张卡自己就是详情卡**：三张并排、底边对齐，选中那张**向上长高**成完整详情，其余收起成短条 | —— |
  *
- * ```
- *   鼠标  → pointermove 问一次命中（`characterHoverTarget`）→ 详情跟着切
- *   键盘  → ← → 移动光标 → 详情跟着走（没有 hover 时的**同一条**代码）
- *   触屏  → 没有 hover → 自动退化成"跟着光标 / 选择走"
- * ```
- *
- * ⚠️ **矩形就是备战屏那一块**（`prepareGeometry.detailRect`，x624 宽296
- * 通高）：卡片只铺到 x≈616，右边正好是空的 —— "共用右侧详情"是用户
- * 2026-10-15 的原话（"老规矩"）。所以这里**不新写**任何几何。
- *
- * ⚠️ 底部那行提示**必须落在详情区下缘之下**（居中的提示会压在面板左边
- * 那条边上）—— 它的 y 因此由 `detailRect()` 反推，不是手调的。
+ * 关键差别：**没有"另一块详情区"**。三个角色的详情内容各住**各自的卡片容器**
+ * 里（每张卡一个 `PrepareDetailController`），所以"展开"只是那张卡的高度
+ * 从 96 变成 371 —— 内容不搬家、不淡出成另一块面板。
  *
  * ==================================================================
- * ⚠️ 临时桩（P2 只跑**一场**）
+ * 交互（键盘与指针对等，AGENTS §3b）
  * ==================================================================
  *
- * 本屏"开始"之后只打**一场战斗**，结算完回到本屏（而不是推进一局肉鸽）。
- * 这是**刻意的桩**：炁机选择是 P3，所以 P3 才会把它接成
- * "N 场 + 炁机选择"。**不要**为了"看起来完整"而在这里假装有炁机选择。
- * 具体的一次性行为在 `app/runSession.ts`（那里也标了同一个桩）。
+ *   - `← →`：移光标（= 换选中；到两端停住）
+ *   - 指针划到某张卡上：选中它（hover 优先于光标）
+ *   - 指针离开所有卡：选中回落到**光标**那一张
+ *   - `Enter` / 点卡片：以选中的角色开局（点"已确定"的那张 = 一步开局，
+ *     点别的 = 先选中它，见 `tapCharacterIntent`）
+ *   - `Shift + ↑ ↓`：滚展开那张卡的详情正文（`app/loopWiring.ts` 已接好）
+ *   - 滚轮 / 拖拽 / 触屏拖动：同上（`canvasInput` 的"可滚屏"那条流水）
+ *
+ * ⚠️ **"没有选中"是一个真实状态**：刚进屏时三张**全收起**（谁都没选中），
+ * 指针划到某张、或按过一次 `← →` 之后才有选中。用户原话就是
+ * "没有选中的时候**收起来**" ✓
  */
 
 import type { Container, Graphics } from 'pixi.js';
@@ -68,32 +56,36 @@ import { Label, type PixiCtor } from './primitives';
 import { ScreenChrome } from './ScreenChrome';
 import { PALETTE } from '../render/theme';
 import { isDeveloping, type RosterEntry } from '../data/roster';
-import { CARD_RADIUS, PREPARE_SKIN, cardSkin } from './prepareRender';
+import { CARD_RADIUS } from './prepareRender';
+import { PORTRAIT_PIXELS } from '../render/portraitAssets';
+import { PortraitSprite } from '../render/portraitSprite';
+import { portraitFor } from '../render/portraitAssets';
 import { detailRect } from './prepareGeometry';
-import { placeExpandedPanel } from './selectExpandView';
-import { attachViewportMask } from './viewportMask';
+import { drawViewportClip } from './viewportMask';
 import {
-  easeOutCubic,
+  easeInOutCubic,
   initialExpand,
-  lerpRect,
   retarget,
   stepExpand,
   type ExpandState,
 } from './expandTween';
 import { PrepareDetailController } from './prepareDetailController';
 import {
+  CHARACTER_CARD_LAYOUT,
   canStartRun,
+  characterCardRect,
+  characterCardHotRect,
   characterCursorTarget,
   characterHoverTarget,
   characterSelectCardRects,
+  characterSelectColumns,
   characterSelectHitAreas,
-  expandedCardRect,
-  type CharacterCardRect,
   characterSelection,
   confirmCharacter,
   cycleCharacter,
   pickCharacter,
   tapCharacterIntent,
+  type CharacterCardColumn,
 } from './characterSelectLogic';
 import type { DetailContext } from './prepareDetail';
 import type { PrepareSelection, PrepareTarget } from './prepareLogic';
@@ -107,17 +99,19 @@ export interface CharacterSelectScreenOptions {
   /** 初始已确定的角色（上次出战的那个）。 */
   readonly initialPlayerId: string;
   /**
-   * **右侧详情区的数据装配**（`app/prepareDetailContext.prepareDetailContext`）。
+   * **详情内容的数据装配**（`app/prepareDetailContext.prepareDetailContext`）。
    *
    * ⚠️ 与备战屏**同一个工厂**：人物详情的取值函数（名字 / 生命上限 /
    * 技能表）都由它接上内容表 —— 这一屏不该有自己的第二份装配。
+   * 三张卡各用一个 `PrepareDetailController`，但**共用同一个 `DetailContext`**
+   * （内容只有一份来源，只是被画在三块矩形里）。
    */
   readonly detailContext: (free: { readonly on: (id: string) => boolean }) => DetailContext;
-  /** 是否显示键位提示（触屏为假）。见 `HomeScreenOptions.showKeyHints`。 */
+  /** 是否显示键位提示（触屏为假）。 */
   readonly showKeyHints: () => boolean;
-  /** 点右上角的齿轮（打开设置）。见 `HomeScreenOptions.onGear`。 */
+  /** 点右上角的齿轮（打开设置）。 */
   readonly onGear: () => void;
-  /** 点左上角的返回箭头（回首页）—— 触屏对等靠它（AGENTS.md §3b）。 */
+  /** 点左上角的返回箭头（回首页）—— 触屏对等靠它（AGENTS §3b）。 */
   readonly onBack?: (() => void) | undefined;
   /** `F1` 的显示名（齿轮的键位提示）。 */
   readonly f1Label: () => string;
@@ -125,11 +119,36 @@ export interface CharacterSelectScreenOptions {
   readonly onStart: (playerId: string) => void;
 }
 
-/**
- * 选角色屏要拼上去的**键名**（键名不进 i18n，见 AGENTS.md §3b 与
- * `HomeScreen` 里同名常量的说明）。
- */
+/** 键名提示（键名不进 i18n，见 AGENTS §3b）。 */
 const SELECT_KEY_HINT = '← → · Enter';
+
+/**
+ * 一张卡的**视图部件**（每张卡一套；没有"共享的详情面板"）。
+ *
+ * ⚠️ 为什么中间多一层 `detailHolder`：`PrepareDetailController` 按**备战的
+ * 绝对坐标**（`detailRect()` = x624,y88）画内容，而卡片容器的局部原点在
+ * 卡片左上角。这一层只做**坐标平移**（每帧按当前高度算，见 `redraw`），
+ * 于是详情渲染仍然只有一份实现，三张卡只是把它摆到三个位置。
+ */
+interface CardView {
+  readonly id: string;
+  readonly column: CharacterCardColumn;
+  /** 卡片容器（局部原点 = 卡片左上角）。 */
+  readonly holder: Container;
+  /** 卡片底色 + 边框。 */
+  readonly skin: Graphics;
+  /** 收起时那个短条上的名字。 */
+  readonly name: Label;
+  /** 收起时短条上的**小头像**（与详情面板同一个 `PortraitSprite`）。 */
+  readonly portrait: PortraitSprite | undefined;
+  /** 详情内容的平移层。 */
+  readonly detailHolder: Container;
+  readonly panel: PrepareDetailController;
+  /** 详情内容的遮罩（每帧重画成"这张卡现在的矩形"）。 */
+  readonly mask: Graphics;
+  /** 这张卡自己的展开进度。 */
+  state: ExpandState;
+}
 
 export class CharacterSelectScreen {
   readonly root: Container;
@@ -137,46 +156,37 @@ export class CharacterSelectScreen {
   private readonly bg: Graphics;
   private readonly title: Label;
   private readonly hint: Label;
-  private readonly cardGfx: Graphics;
-  private readonly cards: { readonly name: Label; readonly status: Label }[] = [];
+  /** 三张卡的视图（顺序 = `players` 顺序）。 */
+  private readonly cards: readonly CardView[];
   /**
-   * **本屏自己的边角控件**：右上角的齿轮 + 左上角的返回箭头。
+   * **本屏自己的边角控件**：右上角齿轮 + 左上角返回箭头。
    *
    * ⚠️ 用户 2026-10-12："多个页面的齿轮，应该分别定义"、"stage 上理论上
-   * 不挂任何小组件" —— 所以两个按钮都在本屏的 root 里，显隐与缩放都跟着
-   * 本屏走（不再是挂在 stage 上、靠 `setScreen` 挪位置的那一个）。
+   * 不挂任何小组件" ⇒ 它们住在屏里，显隐与缩放都跟着本屏走。
    */
   readonly chrome: ScreenChrome;
-  /**
-   * 右侧那块详情区（**与备战屏同一个驱动器**：hover 优先 + 光标兜底）。
-   *
-   * ⚠️ 这一屏的详情只可能显示人物，所以"某条炁机开着没有"（`qijiOn`）
-   * 传 `() => false` —— 那个人物详情里没有一处读它（读它的是炁机详情）。
-   */
-  private readonly detailPanel: PrepareDetailController;
-  /**
-   * **展开动画**（2026-10-21，用户："选中的展开（动画）成详情的样子，移开会
-   * 收起…快速展开和收起，动画会被中断并朝反状态运行"）。
-   *
-   * 画的是一个"正在变成详情面板"的卡片：从被选中的那张卡片的矩形，
-   * 插值到右侧详情面板的矩形（`detailRect()`），边变边淡出。
-   * 打断语义全在 `expandTween`（值不动、只换目标 ⇒ 从当前进度往回跑）。
-   */
-  /**
-   * **每张卡各自一份进度**（2026-10-22）：换人时 A 的 target 变 0、B 的变 1，
-   * **两张同时跑**（上一版只有一份状态 ⇒ "旧卡瞬间收、新卡瞬间开" ✗）。
-   */
-  private expandStates: ExpandState[] = [];
-  /** 指针停在空白处 / 离开画布（用户："hover 哪个哪个就展开，移开就收起"）。 */
-  private hoverAway = false;
-  /** 指针停在谁身上（屏幕自己记：控制器的 hover 是它内部状态，读不到）。 */
+
+  /** 指针此刻**停在卡上**的那个 id（`undefined` = 没停在卡上）。 */
   private hoveredId: string | undefined;
-  /** 正在展开的是第几张卡（`undefined` = 没有在展开）。 */
-  private expandCard: number | undefined;
-  private readonly expandGfx: Graphics;
-  /** 正文遮罩（动画中把正文裁在"正在长大的那张卡"里，见 `selectExpandView`）。 */
-  private readonly detailMask: Graphics;
-  private readonly expandTitle: Label;
+  /**
+   * 指针**在画布内**吗（无论是否停在卡上）。
+   *
+   * ⚠️ 它与 `hoveredId` 是**两个事实**（用户 2026-10-22 报的 bug：
+   * "鼠标在空白处也会展开"）：指针在画布内、但没落在卡上 ⇒ 选中为
+   * `undefined` ⇒ **三张全收起** ✓；指针**离开画布**（或压根没动过鼠标）
+   * 才回落到"键盘光标那张"。
+   *
+   * 进屏初值 `true` = "当作指针在画布内但不在任何卡上" ⇒ **三张全收起**
+   * （用户："没有选中的时候收起来"）✓
+   */
+  private pointerInside = true;
+  /**
+   * 键盘有没有**接管**（按过 `← →` / Tab 之后为真，鼠标一动就交还）。
+   * 键盘接管时选中**跟着光标**，与指针停在哪无关（父规格里那条
+   * "指针还停在空白处？也以键盘动作为准"）。
+   */
+  private keyboardActive = false;
+
   /** 上一帧的时间戳（动画的 `dt`；0 = 还没有上一帧）。 */
   private lastFrameMs = 0;
   private readonly players: readonly RosterEntry[];
@@ -200,47 +210,19 @@ export class CharacterSelectScreen {
 
     this.title = new Label(pixi, {
       x: LOGICAL.width / 2,
-      y: 54,
-      size: 32,
+      y: 52,
+      size: FONT.title,
       color: PALETTE.text,
       anchorX: 0.5,
       anchorY: 0.5,
       kai: true,
     });
-    this.cardGfx = new pixi.Graphics();
-    this.root.addChild(this.cardGfx, this.title.root);
+    this.root.addChild(this.title.root);
 
-    /**
-     * 每张卡两行：名字 + **状态行**（开发中）。状态行**常驻存在**、
-     * 只在需要时填字 —— 每帧新建 / 销毁 Label 会让 Pixi 反复重建纹理
-     * （`PrepareScreen` 记着这条）。
-     */
-    for (let i = 0; i < this.players.length; i += 1) {
-      const name = new Label(pixi, {
-        x: 0,
-        y: 0,
-        size: FONT.title,
-        color: PALETTE.text,
-        kai: true,
-      });
-      const status = new Label(pixi, {
-        x: 0,
-        y: 0,
-        size: FONT.small,
-        color: PALETTE.textDim,
-      });
-      this.cards.push({ name, status });
-      this.root.addChild(name.root, status.root);
-    }
-
+    /** 底部提示：**落在卡片区下方**（卡片底边 = 详情区下缘，提示要更下）。 */
     this.hint = new Label(pixi, {
       x: LOGICAL.width / 2,
-      /**
-       * ⚠️ **必须落在右侧详情区的下缘之下**（提示是居中的，而面板从
-       * x 624 起 —— 两者在纵向上重叠时，提示的尾巴会压到面板边上）。
-       * 所以它的 y 由**面板矩形**反推，不是手调的 `height - 100`。
-       */
-      y: detailRect().y + detailRect().h + 24,
+      y: CHARACTER_CARD_LAYOUT.bottomY + 40,
       size: FONT.small,
       color: PALETTE.textDim,
       anchorX: 0.5,
@@ -249,37 +231,77 @@ export class CharacterSelectScreen {
     this.root.addChild(this.hint.root);
 
     /**
-     * **右侧详情区**（2026-10-15）：与备战屏同一块面板、同一个驱动器，
-     * 矩形用备战屏那一块（`PrepareDetailPanel` 的缺省）。
+     * **三张详情卡**（每张一套部件 + 一个详情驱动器）。
      *
-     * ⚠️ 挂在本屏 root 里（不放 stage）：显隐跟着这一屏走 —— 那是
-     * `phaseVisibility` 那条不变量的一部分（边角控件 / 面板都住在屏里）。
+     * ⚠️ 遮罩挂在 `detailHolder` 上：**只裁详情内容**，不裁卡片底色与
+     * 短条名字（它们本来就在卡片矩形内）。
      */
-    this.detailPanel = new PrepareDetailController({
-      pixi,
-      translate: options.translate,
-      context: options.detailContext({ on: () => false }),
-      parent: this.root,
+    const context = options.detailContext({ on: () => false });
+    const columns = characterSelectColumns(this.players.length);
+    this.cards = this.players.map((player, index) => {
+      const column = columns[index] ?? { x: 0, w: CHARACTER_CARD_LAYOUT.w };
+      const holder = new pixi.Container();
+      holder.x = column.x;
+      this.root.addChild(holder);
+
+      const skin = new pixi.Graphics();
+      holder.addChild(skin);
+
+      /**
+       * **收起态的小头像**（2026-10-22 用户："收起时也要显示头像"）。
+       * ⚠️ 复用详情面板那颗 `PortraitSprite`（**唯一**的头像渲染），
+       * 只是 box 小一些 —— 不另找一份素材表/自己画图片。
+       */
+      const asset = portraitFor(player.id);
+      const portrait = asset === undefined
+        ? undefined
+        : new PortraitSprite(pixi, holder, asset, Math.round(PORTRAIT_PIXELS * 0.6));
+
+      const name = new Label(pixi, {
+        x: 0,
+        y: 0,
+        size: FONT.title,
+        color: PALETTE.text,
+        anchorX: 0,
+        anchorY: 0.5,
+        kai: true,
+      });
+      holder.addChild(name.root);
+
+      const detailHolder = new pixi.Container();
+      holder.addChild(detailHolder);
+      const panel = new PrepareDetailController({
+        pixi,
+        translate: options.translate,
+        context,
+        parent: detailHolder,
+      });
+      const mask = new pixi.Graphics();
+      /**
+       * ⚠️ 遮罩**住在卡片容器里**、而不是 `detailHolder` 自己身上：
+       * `detailHolder` 被平移了 (-624, -88) 去对齐详情内容，把遮罩挂进去
+       * 等于让它跟着平移 ⇒ 遮罩落到画布外、把内容整块裁掉（实测：展开后
+       * 一片空白 ✗）。遮罩矩形是**卡片局部坐标**（0,0,w,h），所以它的
+       * 父节点必须是"卡片容器"。
+       */
+      holder.addChild(mask);
+      detailHolder.mask = mask;
+
+      return {
+        id: player.id,
+        column,
+        holder,
+        skin,
+        name,
+        portrait,
+        detailHolder,
+        panel,
+        mask,
+        state: initialExpand(),
+      };
     });
 
-    /** 正文遮罩：挂在面板自己身上（面板局部坐标 ⇒ 面板平移时遮罩跟着走）。 */
-    this.detailMask = attachViewportMask(new pixi.Graphics(), this.detailPanel.root);
-
-    /**
-     * **展开中的那张卡**：加在详情面板**之后**（= 画在它上面）—— 视觉上是
-     * "卡片**变成**了面板"，所以它得盖住面板，再淡出。
-     */
-    this.expandGfx = new pixi.Graphics();
-    this.expandTitle = new Label(pixi, {
-      x: 0,
-      y: 0,
-      size: FONT.title,
-      color: PALETTE.text,
-      kai: true,
-    });
-    this.root.addChild(this.expandGfx, this.expandTitle.root);
-
-    /** 齿轮 + 返回箭头（最后加 = 最上层；见 `HomeScreen` 里同一条说明）。 */
+    /** 齿轮 + 返回箭头（最后加 = 最上层）。 */
     this.chrome = new ScreenChrome({
       pixi,
       showKeyHints: options.showKeyHints,
@@ -301,32 +323,36 @@ export class CharacterSelectScreen {
     if (visible) this.redraw();
   }
 
-  /** 展开动画的进度（调试 / 截图验收读它）。 */
-  expand(): { readonly card: number | null; readonly progress: number } {
-    return {
-      card: this.expandCard === undefined ? null : this.expandCard,
-      progress: Math.round(this.progressOf(this.expandCard ?? 0) * 1000) / 1000,
-    };
-  }
-
   /** 当前选择 + 光标（调试入口读它）。 */
   get current(): PrepareSelection {
     return this.selection;
   }
 
-  /** ← →：**只移动光标**（不改已确定的角色）。 */
+  /**
+   * 展开动画的读数（调试 / 截图验收）：`card` = 展开的是第几张，
+   * `progress` = 那张卡此刻的进度（0 收起 / 1 展开）。
+   */
+  expand(): { readonly card: number | null; readonly progress: number } {
+    const index = this.focusIndex();
+    return {
+      card: index < 0 ? null : index,
+      progress: Math.round(this.progressOf(index) * 1000) / 1000,
+    };
+  }
+
+  /** `← →`：**只移动光标**（不改已确定的角色）。 */
   cycle(delta: number): void {
     const next = cycleCharacter(this.selection, this.players, delta);
     if (next === this.selection) return;
     this.selection = next;
-    /** 键盘一动 ⇒ 重新跟着光标展开（指针不在卡片上也算"看这一张"）。 */
-    this.hoverAway = false;
+    /** 键盘一动 ⇒ 选中交给光标（指针的"划过"让位）。 */
     this.hoveredId = undefined;
+    this.keyboardActive = true;
     this.redraw();
   }
 
   /**
-   * Enter：确定光标处的角色；能开始就开始一局。
+   * `Enter`：确定光标处的角色；能开始就开始一局。
    *
    * ⚠️ 光标**已经**在已确定的角色上时，`confirmCharacter` 返回同一个对象
    * （它有意的"没变化就别重画"），这里仍然要 `begin()` —— 否则
@@ -351,126 +377,121 @@ export class CharacterSelectScreen {
     this.begin();
   }
 
-  /**
-   * **只选中**某个角色（移光标 + 确定，**不开局**）。
-   *
-   * ⚠️ 它是触屏 / 鼠标"先看详情"那一步的落点（见 `tapCharacterIntent`）：
-   * 与键盘 ← → + Enter 中的"← →"完全等价。
-   */
+  /** **只选中**某个角色（移光标 + 确定，**不开局**）—— 点别人的第一步。 */
   select(id: string): void {
     const next = pickCharacter(this.selection, this.players, id);
     if (next === this.selection) return;
     this.selection = next;
+    this.keyboardActive = true;
     this.redraw();
   }
 
   /**
-   * **悬停**（鼠标划过）：只影响右侧详情，**不动光标**（与备战屏同一条）。
+   * **悬停**（鼠标划过）：选中指针所在的卡。
    *
-   * ⚠️ 触屏永远走不到这里（没有 `pointermove`）——那时详情自动退化成
-   * "跟着光标 / 选择走"，同一段代码服务两种输入（`focusedTarget`）。
+   * ⚠️ 触屏永远走不到这里（没有 `pointermove`）—— 那时选中就退化成
+   * "跟着光标 / 点选走"，同一段代码服务两种输入。
    *
    * @returns 悬停落在某张卡上（供调用方判"要不要重画"）
    */
   hover(px: number, py: number): boolean {
-    const next = characterHoverTarget(this.players, px, py);
-    /** ⚠️ 指针落空 ⇒ 收起全部（"移开就收起"）。 */
-    this.hoverAway = next === undefined;
-    this.hoveredId = next?.id;
-    if (this.detailPanel.hoverAt(next)) this.redraw();
+    const next = characterHoverTarget(this.players, px, py)?.id;
+    const changed = next !== this.hoveredId
+      || !this.pointerInside
+      || this.keyboardActive;
+    /** 指针一动 ⇒ 选中重新归指针（键盘接管结束）。 */
+    this.pointerInside = true;
+    this.keyboardActive = false;
+    this.hoveredId = next;
+    if (changed) this.redraw();
     return next !== undefined;
   }
 
-  /** 指针离开画布：清掉悬停（否则详情会一直停在最后划过的那一项）。 */
+  /** 指针离开画布：清掉悬停（选中回落到光标那一张）。 */
   clearHover(): void {
-    this.hoverAway = true;
+    /** 指针离开画布 ⇒ 选中回落到键盘光标那张。 */
+    const changed = this.pointerInside || this.hoveredId !== undefined;
+    this.pointerInside = false;
     this.hoveredId = undefined;
-    if (this.detailPanel.clearHover()) this.redraw();
+    if (changed) this.redraw();
   }
 
   /**
    * 当前**可点区域**（只读；调试 / 截图脚本按它换算坐标）。
    *
-   * ⚠️ 与备战屏 `hitAreas()` 同一条纪律：脚本**不许自己复制一份布局数字**
-   * —— 布局一调，抄的那份会静默指到别处（"点空了"与"功能坏了"长得一样）。
+   * ⚠️ 脚本**不许自己复制一份布局数字**（备战屏同一条纪律）：布局一调，
+   * 抄的那份会静默指到别处，而"点空了"与"功能坏了"长得一模一样。
    */
   hitAreas(): ReturnType<typeof characterSelectHitAreas> {
     return characterSelectHitAreas(this.players);
   }
 
-  /** 详情区此刻显示的是哪一项（hover 优先，见 `prepareDetail`）。 */
+  /** 选中那一项（hover 优先，见 `focusedTarget`）。 */
   detail(): PrepareTarget | undefined {
-    return this.detailPanel.target(characterCursorTarget(this.selection, this.players));
+    const id = this.focusId();
+    return id === undefined ? undefined : { kind: 'player', id };
   }
 
   /** 悬停那一项（调试探针用；`undefined` = 鼠标不在任何卡上）。 */
   hovered(): PrepareTarget | undefined {
-    return this.detailPanel.hovered;
+    return this.hoveredId === undefined ? undefined : { kind: 'player', id: this.hoveredId };
+  }
+
+  /** 三张卡的**命中区**（= 展开后的整块；与动画无关，见逻辑层注释）。 */
+  cardRects(): readonly { readonly x: number; readonly y: number; readonly w: number; readonly h: number }[] {
+    return characterSelectCardRects(this.players.length);
   }
 
   /* ---------------------------------------------------------------- *
-   * 滚动（2026-10-22，用户："人物详情 有滚动条 但是滚动不了"）
+   * 滚动（2026-10-22：展开那张卡的正文可滚，键盘 Shift+↑↓ 也走这里）
    * ---------------------------------------------------------------- */
 
   /**
-   * 这个点是不是落在**展开后的详情区**里（拖拽 / 滚轮的判据）。
+   * 这个点是不是落在**展开那张卡**的正文区里（拖拽 / 滚轮的判据）。
    *
-   * ⚠️ 判据用**详情面板自己的矩形**（`PrepareDetailController.isOnDetail`），
-   * 不在这里再算一份 —— 面板的位置一改，这里自动跟上。
-   * ⚠️ 收起状态下（`progress` 还没到位）**不吃滚动**：那时卡片还没长成详情，
-   * 在卡片上滚轮不该动详情（会让人以为"卡片自己能滚"）。
+   * ⚠️ 判据用**命中区**（`characterCardHotRect`，与动画无关）而不是动画
+   * 矩形：后者每帧在变，指针停在边缘会"忽进忽出"。
+   * ⚠️ 收起状态（progress < 0.5）**不吃滚动** —— 那时卡片还没长成详情。
    */
   isOnScrollable(px: number, py: number): boolean {
-    if (this.progressOf(this.expandCard ?? -1) < 0.5) return false;
-    const card = this.expandedSlot();
+    const index = this.focusIndex();
+    if (index < 0 || this.progressOf(index) < 0.5) return false;
+    const card = this.cards[index];
     if (card === undefined) return false;
-    /** ⚠️ 判据用**长大的那张卡**的矩形（面板已被平移，它的命中仍用固定矩形）。 */
-    const grown = expandedCardRect(card);
-    return px >= grown.x && px <= grown.x + grown.w
-      && py >= grown.y && py <= grown.y + grown.h;
-  }
-
-  /** 第 `index` 张卡此刻的进度（缺省 0 = 收着）。 */
-  private progressOf(index: number): number {
-    return this.expandStates[index]?.progress ?? 0;
-  }
-
-  /** 当前正在展开的那张卡的**槽位**（没有在展开 ⇒ `undefined`）。 */
-  private expandedSlot(): CharacterCardRect | undefined {
-    if (this.expandCard === undefined || this.expandCard < 0) return undefined;
-    return characterSelectCardRects(this.players.length)[this.expandCard];
+    const hot = characterCardHotRect(card.column);
+    return px >= hot.x && px <= hot.x + hot.w && py >= hot.y && py <= hot.y + hot.h;
   }
 
   /**
-   * **键盘滚动**：`Shift + ↑ / ↓`（`loopWiring` 已按同一约定接好）。
-   * ⚠️ **只在展开到位时才滚**（收起时那张还是小卡，滚它没有意义）。
+   * **键盘滚动**：`Shift + ↑ / ↓`（`loopWiring` 按同一约定接好）。
+   * ⚠️ 只在展开到位时才滚：收起时那张还是短条，滚它没有意义。
    */
   scrollDetail(dir: 'up' | 'down'): void {
-    if (this.progressOf(this.expandCard ?? -1) < 0.5) return;
-    this.detailPanel.scrollStep(dir);
+    const index = this.focusIndex();
+    if (index < 0 || this.progressOf(index) < 0.5) return;
+    this.cards[index]?.panel.scrollStep(dir);
   }
 
-  /** **滚轮**：滚详情正文。@returns 有没有真的滚 */
+  /** **滚轮**：滚展开那张卡的正文。@returns 有没有真的滚 */
   wheelDetail(px: number, py: number, deltaY: number): boolean {
     if (!this.isOnScrollable(px, py)) return false;
-    return this.detailPanel.scrollBy(deltaY * 3);
+    return this.cards[this.focusIndex()]?.panel.scrollBy(deltaY * 3) ?? false;
   }
 
   /** **拖拽**（触屏没有滚轮，这条路必须存在）。@param deltaY 向上为负 */
   dragDetail(px: number, py: number, deltaY: number): boolean {
     if (!this.isOnScrollable(px, py)) return false;
-    return this.detailPanel.scrollBy(-deltaY);
+    return this.cards[this.focusIndex()]?.panel.scrollBy(-deltaY) ?? false;
   }
 
   /**
    * 点一下（逻辑坐标）。@returns 是否消费了这次点击
    *
    * ⚠️ **先选中、再点同一张才开局**（`tapCharacterIntent`）：触屏没有
-   * hover，不这么分就"点谁开谁、永远看不到别人的详情"（§3b）。默认选中的
-   * 是上次出战的那个 —— 点它仍然是**一步**开局，与改之前一样。
+   * hover，不这么分就"点谁开谁、永远看不到别人的详情"（§3b）。
    */
   hitTest(px: number, py: number): boolean {
-    /** ⚠️ 齿轮 / 返回箭头先于卡片（顺序即优先级，见 `HomeScreen.hitTest`）。 */
+    /** ⚠️ 齿轮 / 返回箭头先于卡片（顺序即优先级）。 */
     if (this.chrome.hitTest(px, py)) return true;
     const hit = characterHoverTarget(this.players, px, py);
     if (hit === undefined) return false;
@@ -479,214 +500,171 @@ export class CharacterSelectScreen {
     return true;
   }
 
-  /** 每帧：只在可见时保证画面与选择一致。 */
+  /** 每帧：推进三张卡各自的动画，然后按当前进度重画。 */
   frame(): void {
-    if (this.root.visible) {
-      /**
-       * ⚠️ 用 `performance.now()` 的**差值**（不是每帧固定 16.67）：帧率抖动
-       * 时动画的时长才不会跟着变。这是渲染层的时间，`core/` 那条"只走
-       * `logicMs()`"的规则只管战斗逻辑。
-       */
-      const now = performance.now();
-      const dt = this.lastFrameMs === 0 ? 0 : now - this.lastFrameMs;
-      this.lastFrameMs = now;
-      /** ⚠️ **每一张**都要推进（换人时 A 收、B 开是同时跑的）。 */
-      this.expandStates = this.expandStates.map((state) => stepExpand(state, dt));
-      this.redraw();
-      this.chrome.update();
-    }
+    if (!this.root.visible) return;
+    /**
+     * ⚠️ 用 `performance.now()` 的**差值**（不是每帧固定 16.67）：帧率抖动
+     * 时时长才不会跟着变。这是渲染层的时间，`core/` 那条"只走 `logicMs()`"
+     * 的规则只管战斗逻辑。
+     */
+    const now = performance.now();
+    const dt = this.lastFrameMs === 0 ? 0 : now - this.lastFrameMs;
+    this.lastFrameMs = now;
+    /** ⚠️ **每一张**都推进：换选中时旧卡缩、新卡长，两张同时跑。 */
+    for (const card of this.cards) card.state = stepExpand(card.state, dt);
+    this.redraw();
+    this.chrome.update();
   }
 
   /**
-   * **UI 缩放**：本屏只转发给**它自己的**边角控件（与 `HomeScreen` 同一条）。
+   * **UI 缩放**：本屏只转发给它自己的边角控件（与 `HomeScreen` 同一条）。
    *
-   * ⚠️ 卡片与标题**不随缩放**（现状如此）：这一屏是满屏布局，卡片位置由
-   * `CHARACTER_SELECT_LAYOUT` 定死；只有浮在界面之上的齿轮 / 返回箭头要
-   * 跟别的界面保持一致的大小。
+   * ⚠️ 卡片**不随缩放**：这一屏是满屏布局，卡片几何由
+   * `CHARACTER_CARD_LAYOUT` 定死（详情区宽高是备战屏共用常数）。
    */
   setUiScale(scale: number): void {
     this.chrome.setUiScale(scale);
   }
 
+  /* ---------------------------------------------------------------- *
+   * 内部
+   * ---------------------------------------------------------------- */
+
+  /**
+   * 此刻"选中"的是谁（**hover 优先、其次光标**）。
+   *
+   * ⚠️ **谁都没 hover、键盘也还没动过 ⇒ `undefined`**（三张全收起）——
+   * 那就是用户说的"没有选中的时候收起来" ✓
+   */
+  private focusId(): string | undefined {
+    /** 键盘接管 ⇒ 跟光标（指针停在哪都不影响）。 */
+    if (this.keyboardActive) return characterCursorTarget(this.selection, this.players)?.id;
+    /** 指针在画布内 ⇒ **只看它有没有落在卡上**（落在空白则全收起）。 */
+    if (this.pointerInside) return this.hoveredId;
+    return characterCursorTarget(this.selection, this.players)?.id;
+  }
+
+  /** 选中那张卡的下标（没有 ⇒ -1）。 */
+  private focusIndex(): number {
+    const id = this.focusId();
+    if (id === undefined) return -1;
+    return this.cards.findIndex((card) => card.id === id);
+  }
+
+  /** 第 `index` 张卡此刻的进度（缺省 0 = 收着）。 */
+  private progressOf(index: number): number {
+    if (index < 0) return 0;
+    return this.cards[index]?.state.progress ?? 0;
+  }
+
   /**
    * 真正开始一局。
    *
-   * ⚠️ **开发中的角色不开局**（需求）。反馈由 `redraw` 里那行常驻提示给出 ——
-   * 玩家点之前就看得见，不是"点了没反应"。
+   * ⚠️ **开发中的角色不开局**（需求）。反馈由底部提示给出 —— 玩家点之前
+   * 就看得见，不是"点了没反应"。
    */
   private begin(): void {
     if (!canStartRun(this.selection, isDeveloping)) return;
     this.options.onStart(this.selection.playerId);
   }
 
+  /**
+   * 画一帧：目标 → 进度 → 三张卡的几何 / 底色 / 名字 / 详情 / 遮罩。
+   *
+   * ⚠️ 这里是**唯一**写几何的地方：渲染矩形（`characterCardRect`）与命中
+   * 矩形（`characterCardHotRect`）都从 `characterSelectLogic` 来，不会漂。
+   */
   private redraw(): void {
     const t = this.options.translate;
-    /** 已确定的角色是不是开发中 —— 决定底部提示写操作说明还是"开发中"。 */
     const developing = !canStartRun(this.selection, isDeveloping);
+    const focusIndex = this.focusIndex();
 
     this.title.set(t('screen.characterSelect.title'));
     /**
      * 提示 = 标签 + （键名）；**选中开发中的角色时换成"开发中"**
-     * （需求："不能开始战斗……或给明确反馈"），与卡片上的状态行同一个 key。
+     * （需求："不能开始战斗……或给明确反馈"）。
      */
-    const keys = this.options.showKeyHints() ? t('screen.keyHint', { keys: SELECT_KEY_HINT }) : '';
-    this.hint.set(developing ? t('roster.ui.developing') : `${t('screen.characterSelect.hint')}${keys}`);
-    this.hint.setColor(developing ? PREPARE_SKIN.selectionText : PALETTE.textDim);
+    const label = developing ? t('roster.ui.developingHint') : t('screen.characterSelect.hint');
+    const keys = !developing && this.options.showKeyHints()
+      ? t('screen.keyHint', { keys: SELECT_KEY_HINT })
+      : '';
+    this.hint.set(`${label}${keys}`);
 
-    const areas = characterSelectHitAreas(this.players);
-
-    this.cardGfx.clear();
-    this.expandGfx.clear();
-    this.cards.forEach((card, i) => {
-      const area = areas[i];
-      const entry = this.players[i];
-      if (area === undefined || entry === undefined) return;
-      /**
-       * ⚠️ 三态与备战界面**完全同源**（这是"复用同一套"的落点）：
-       * `selected` 只认已确定的角色，`cursored` 只认光标 —— 两者可以分离。
-       * 皮肤来自 `prepareRender.cardSkin()`（纯函数、有单测）。
-       */
-      const selected = entry.id === this.selection.playerId;
-      const soon = isDeveloping(entry.id);
-      /** ⚠️ 不传 `cursored`：用户"不需要白色光标了"（焦点只由展开态表达）。 */
-      const skin = cardSkin({ developing: soon, cursored: false, selected });
-      /** ⚠️ 没被展开的那两张压暗到 30%（仍可见、仍 hover 得到）。 */
-      const dimmed = this.expandCard !== undefined && i !== this.expandCard;
-      const cardAlpha = dimmed ? Math.max(0.3, 1 - 0.7 * easeOutCubic(this.progressOf(this.expandCard ?? 0))) : 1;
-      card.name.root.alpha = cardAlpha;
-      card.status.root.alpha = cardAlpha;
-      /** ⚠️ 被展开的那张不画自己的名字（详情里已有；否则会透出重影）。 */
-      const selfLabel = !dimmed && this.progressOf(i) > 0.15;
-      card.name.root.visible = !selfLabel;
-      card.status.root.visible = !selfLabel;
-
-      card.name.set(t(entry.nameKey));
-      card.name.setColor(skin.nameColor);
-      card.status.set(soon ? t('roster.ui.developing') : '');
-      card.name.root.x = area.x + 18;
-      card.status.root.x = area.x + 18;
-      if (soon) {
-        card.name.root.y = area.y + area.h / 2 - 22;
-        card.status.root.y = area.y + area.h / 2 + 4;
-      } else {
-        card.name.root.y = area.y + area.h / 2 - 10;
-        card.status.root.y = area.y + area.h / 2 + 16;
-      }
-
-      /**
-       * ⚠️ **被展开的那张，描边画在 `expandGfx` 里**（它比详情面板**更上层**，
-       * 而 `cardGfx` 在下层）：否则那两张压暗的卡会盖在长大卡的内容上
-       * （实测"凯丽/黛玄"两块压在详情正文上 ✗）。底色仍留在 `cardGfx`
-       * （内容要压在底色之上）。
-       */
-      /** ⚠️ 被展开的那张只画底色；描边由 `drawExpand` 画在长大后的矩形上。 */
-      this.cardGfx
-        .roundRect(area.x, area.y, area.w, area.h, CARD_RADIUS)
-        .fill({ color: skin.fillColor, alpha: skin.fillAlpha * cardAlpha });
-      if (dimmed) {
-        this.cardGfx
-          .roundRect(area.x, area.y, area.w, area.h, CARD_RADIUS)
-          .stroke({ color: skin.strokeColor, width: skin.strokeWidth, alpha: cardAlpha });
-      }
-    });
-
-    /**
-     * 右侧详情：**hover 优先、其次光标**（`PrepareDetailController` 内部就是
-     * `prepareDetail.focusedTarget`）—— 与备战屏**同一句**，所以"鼠标停在
-     * A 上、面板显示 B"这种错位在结构上不可能发生。
-     */
-    /**
-     * **展开动画**（2026-10-21）：光标（hover 优先，与面板同源）落在哪张卡上
-     * 就朝哪张展开。`retarget` 只换方向、不动进度 ⇒ 快速来回时**从当前
-     * 进度往反方向跑**（用户要的"中断并朝反状态运行"）。
-     */
-    /**
-     * 展开哪张 = **hover 优先、其次光标**（用户："hover 哪个哪个就展开"）。
-     * 指针停在空白处（`hoverAway`）⇒ 全部收起。
-     */
-    const cursorTarget = characterCursorTarget(this.selection, this.players);
-    const focusId = this.hoveredId ?? (this.hoverAway ? undefined : cursorTarget?.id);
-    const focus = focusId === undefined ? undefined : { kind: 'player' as const, id: focusId };
-    const focusIndex = this.players.findIndex((p) => p.id === focus?.id);
-    if (focusIndex !== this.expandCard) this.expandCard = focusIndex;
-    /** **每张卡各自的目标**：焦点那张 1、其余 0（于是换人时两张同时跑）。 */
-    this.expandStates = this.players.map((_entry, index) =>
-      retarget(this.expandStates[index] ?? initialExpand(), index === focusIndex ? 1 : 0),
-    );
-    this.drawExpand(focusIndex);
-    /**
-     * **详情内容 = 展开后的那张卡的内容**（2026-10-22）：面板的透明度跟着
-     * `progress` 走 —— 展开到 1 时它完全是详情、收起时它一点都看不见。
-     * 于是"卡片长成详情"是**同一块区域**在变，不是左右两块各画一份 ✗。
-     */
-    const panelAlpha = easeOutCubic(this.progressOf(focusIndex));
-    this.detailPanel.root.alpha = panelAlpha;
-    /** 详情面板**平移到那张长大的卡上**（不缩放：宽度恒等 296）。 */
-    const slot = focusIndex >= 0 ? characterSelectCardRects(this.players.length)[focusIndex] : undefined;
-    if (slot !== undefined) {
-      /** ⚠️ 位置与遮罩都跟着这一帧的**进度**走（用终态会让正文画到卡外 ✗）。 */
-      placeExpandedPanel({
-        panel: this.detailPanel.root,
-        mask: this.detailMask,
-        slot,
-        progress: this.progressOf(focusIndex),
-      });
+    /** 每张卡各自的目标：选中那张 1、其余 0 ⇒ 换选中时两张同时跑。 */
+    for (const [index, card] of this.cards.entries()) {
+      card.state = retarget(card.state, index === focusIndex ? 1 : 0);
     }
 
-    this.detailPanel.update(focus);
-  }
+    const detail = detailRect();
+    for (const [index, card] of this.cards.entries()) {
+      const eased = easeInOutCubic(this.progressOf(index));
+      const rect = characterCardRect(card.column, eased);
 
-  /**
-   * 画"正在变成详情面板"的那张卡。
-   *
-   * 起止都是**算出来的矩形**（卡片 / 详情面板），中间只做插值 ⇒ 卡片大小
-   * 改了、面板位置改了，动画自动跟着变（不手调）。
-   *
-   * ⚠️ `alpha = 1 - progress`：越接近面板越透明 —— 看起来就是"卡片被
-   * 面板吸收"，而不是"两个东西叠在一起"。
-   */
-  private drawExpand(cardIndex: number): void {
-    /**
-     * ⚠️ **不再 `clear()`**：`redraw` 的卡片循环已经把"被展开那张的描边"
-     * 画进同一个 Graphics 了（见那里的说明），这里只负责名字标签。
-     */
-    this.expandTitle.root.visible = false;
-    if (cardIndex < 0 || this.progressOf(cardIndex) <= 0) return;
+      /** 卡片容器：x 固定（列），y 由"底边固定、向上长"给出。 */
+      card.holder.x = card.column.x;
+      card.holder.y = rect.y;
 
-    const areas = characterSelectHitAreas(this.players);
-    const from = areas[cardIndex];
-    const player = this.players[cardIndex];
-    if (from === undefined || player === undefined) return;
+      /**
+       * 底色 + 边框。
+       * ⚠️ **金边只属于"展开"那张**（用户 2026-10-22："黄/金边框只出现在
+       * 展开那张卡上"）：按 `eased` 插值透明度，收起态必须是 0。
+       */
+      const focused = index === focusIndex;
+      card.skin.clear();
+      card.skin
+        .roundRect(0, 0, rect.w, rect.h, CARD_RADIUS)
+        .fill({
+          color: focused ? PALETTE.panel : PALETTE.panelLine,
+          alpha: focused ? 0.55 : 0.35,
+        });
+      if (eased > 0.02) {
+        card.skin
+          .roundRect(0, 0, rect.w, rect.h, CARD_RADIUS)
+          .stroke({ color: PALETTE.douqi.base, width: 2, alpha: eased });
+      } else {
+        /** 收起的两张：中性细边（不是金色，也不是"光标框"）。 */
+        card.skin
+          .roundRect(0, 0, rect.w, rect.h, CARD_RADIUS)
+          .stroke({ color: PALETTE.panelLine, width: 1 });
+      }
 
-    /**
-     * ⚠️ 终点是**这张卡自己长高**（`expandedCardRect`），不是右侧那块
-     * `detailRect()` —— 用户 2026-10-22 纠正："不是在右边有一个单独的模块"。
-     */
-    const to = expandedCardRect(from);
-    const rect = lerpRect(from, to, easeOutCubic(this.progressOf(cardIndex)));
-    /**
-     * ⚠️ **不淡出**（2026-10-22）：这张卡是"正在长成详情"的那一块 —— 它
-     * 一直实心，到 progress=1 时正好与详情面板重合，看起来就是"卡片变成了
-     * 详情" ✓（上一版让它淡出 ⇒ 像"卡片消失、详情凭空出现"✗）。
-     */
-    const alpha = 1;
-    const skin = cardSkin({ developing: false, cursored: true, selected: true });
+      /**
+       * 短条上的名字：展开时淡出（详情自带标题，不能叠字）。
+       * y 放在**卡片底部那条短条的中心**（底边固定 ⇒ 它不跟着长高跑）。
+       */
+      const barCenterY = rect.h - CHARACTER_CARD_LAYOUT.barH / 2;
+      /** 短条排版：头像在左（12 起）、名字在它右边（12 + 头像 48 + 12）。 */
+      const portraitBox = card.portrait === undefined ? 0 : Math.round(PORTRAIT_PIXELS * 0.6);
+      const barLeft = 14;
+      if (card.portrait !== undefined) {
+        card.portrait.root.x = barLeft + portraitBox / 2;
+        card.portrait.root.y = barCenterY;
+        card.portrait.root.alpha = 1 - eased;
+        card.portrait.root.visible = eased < 0.98;
+      }
+      card.name.root.x = barLeft + (portraitBox === 0 ? 0 : portraitBox + 14);
+      card.name.root.y = barCenterY;
+      card.name.root.alpha = 1 - eased;
+      card.name.root.visible = eased < 0.98;
+      const player = this.players[index];
+      if (player !== undefined) card.name.set(t(player.nameKey));
 
-    /** 长大的那张的**底色**画在 `cardGfx` 下层（内容要压在上面）。 */
-    this.cardGfx
-      .roundRect(rect.x, rect.y, rect.w, rect.h, CARD_RADIUS)
-      .fill({ color: skin.fillColor, alpha: skin.fillAlpha * alpha });
-    /** **描边画在 `expandGfx`**（它在详情面板之上）⇒ 卡片自己那圈金边 ✓ */
-    this.expandGfx
-      .roundRect(rect.x, rect.y, rect.w, rect.h, CARD_RADIUS)
-      .stroke({ color: skin.strokeColor, width: skin.strokeWidth });
+      /**
+       * 详情内容：底部对齐到卡片底边（`h - fullH`），再减掉它自己的绝对
+       * 原点 `detailRect()` ⇒ 内容在卡片局部坐标里正好铺满整张卡。
+       */
+      card.detailHolder.x = -detail.x;
+      card.detailHolder.y = rect.h - detail.h - detail.y;
+      card.detailHolder.alpha = eased;
 
-    /** 名字跟着卡片走（字号不插值：中文 >= 13 的下限比"大小连贯"更重要）。 */
-    /** ⚠️ 一直不显示：详情面板**自带**标题，这张临时名字会和它叠字（实测）。 */
-    this.expandTitle.root.visible = false;
-    this.expandTitle.root.alpha = alpha;
-    this.expandTitle.set(this.options.translate(player.nameKey));
-    this.expandTitle.root.x = rect.x + 18;
-    this.expandTitle.root.y = rect.y + Math.min(rect.h / 2, 40);
+      /** 遮罩 = 这张卡**现在**的矩形（局部坐标；每帧重画）。 */
+      drawViewportClip(card.mask, { x: 0, y: 0, w: rect.w, h: rect.h });
+
+      /** 每张卡固定显示**自己**那个人（不跟 hover / 光标）。 */
+      if (player !== undefined) {
+        card.panel.update({ kind: 'player', id: player.id });
+      }
+    }
   }
 }
