@@ -222,6 +222,14 @@ export interface FloatingTextView {
 /** 战斗结算信息（战斗结束后才有）。 */
 export interface ResultView {
   readonly victory: boolean;
+  /**
+   * 这一场是不是**肉鸽里的一场**（2026-10-22）。
+   *
+   * 判据只有它：结算那句提示在两种模式下必须不同 ——
+   * 自由模式是"再来一次"（单场反复打 ✓），肉鸽是"继续"（往下走：下一场 /
+   * 选炁机 / 结算这一局 ✓）。**不许**让两个模式共用一句 ✗。
+   */
+  readonly roguelike?: boolean;
   /** 结果主文案的本地化 key */
   readonly titleKey: string;
   /** 副文案（说明为什么赢/输）的本地化 key */

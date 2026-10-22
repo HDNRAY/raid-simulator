@@ -1483,6 +1483,12 @@ export const zhCN = {
      * 要写"点击屏幕"而不是"点这个按钮"。
      */
     hintRestartTap: '点击屏幕再来一次',
+    /**
+     * **肉鸽里的一场**打完（2026-10-22 用户报："肉鸽战斗胜利后，写的还是
+     * enter 再来一次"）—— 肉鸽要往下走，不是重打这一场。
+     */
+    hintContinue: '按 Enter 继续',
+    hintContinueTap: '点击屏幕继续',
     settings: '设置',
     quit: '退出',
     rebind: '按键设置',

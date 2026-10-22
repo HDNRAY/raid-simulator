@@ -249,6 +249,8 @@ export function createStartBattle(d: StartBattleDeps): () => BattleLoop {
     const tweaked = applySkillTweaks({ skills: registry.skills, buffs: registry.buffs }, kit.skillTweaks);
 
     return new BattleLoop({
+      /** 有没有一局 —— 结算那句提示按它分流（"继续" vs "再来一次"）。 */
+      roguelike: run !== undefined,
       // 飘字要"闪躲"这种本地化文案 —— 注入取词函数，而不是让
       // ViewAdapter 去 import i18n 单例
       /**

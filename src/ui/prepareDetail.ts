@@ -254,6 +254,11 @@ export function runConfirmDetailTarget(input: {
   readonly boss: DetailUnit;
   readonly qiji: readonly DetailUnit[];
   /**
+   * 炁机块内选中的第几条（2026-10-22：`← →` 在块内移动，右侧跟着换）。
+   * 缺省 0；越界自动夹到合法范围。
+   */
+  readonly qijiIndex?: number;
+  /**
    * 这一层的「恶魔低语」；**第 1 层是 `undefined`**（那一行写「本层纯净」）。
    *
    * ⚠️ 用**一个**可选参数而不是"两个分支"：判据只有一条 —— **焦点在哪一行
@@ -265,9 +270,14 @@ export function runConfirmDetailTarget(input: {
   if (input.expanded === 'whisper') {
     return { kind: 'whisper', id: input.whisper?.id ?? '' };
   }
-  const latest = input.qiji[input.qiji.length - 1];
-  if (input.expanded === 'qiji' && latest !== undefined) {
-    return { kind: 'qiji', id: latest.id };
+  if (input.expanded === 'qiji' && input.qiji.length > 0) {
+    /**
+     * ⚠️ 2026-10-22：不再固定画**最后一条** —— 玩家能用 `← →` 在块内翻，
+     * 右侧跟着换（用户："可以用方向键切换，并且查看详情"）。越界夹到合法值。
+     */
+    const index = Math.min(input.qiji.length - 1, Math.max(0, input.qijiIndex ?? 0));
+    const picked = input.qiji[index];
+    if (picked !== undefined) return { kind: 'qiji', id: picked.id };
   }
   return { kind: 'boss', id: input.boss.id };
 }
@@ -327,6 +337,14 @@ export interface DetailQiji {
   readonly id: string;
   readonly nameKey: string;
   readonly descKey?: string;
+  /**
+   * 说明模板的参数（`qiji.desc` 里可能有 `{amount}` 这类占位符）。
+   *
+   * ⚠️ 2026-10-22 修的 bug：这里原来是**空对象** ⇒ 面板上直接显示
+   * `qiji.breath.desc` / `{amount}` ✗ —— 值来自 `app/qijiDescParams`
+   * （从炁机定义读），由 `app/prepareDetailContext` 填进来。
+   */
+  readonly descParams?: Readonly<Record<string, string>>;
 }
 
 /** 一个出战单位在详情区需要的最小形状。 */
@@ -487,7 +505,12 @@ function qijiDetail(id: string, ctx: DetailContext): DetailModel | undefined {
      * **不同**时才画名下那行。放同一个 key 是为了让"这一条说的是哪台
      * 炁机"在数据里可见（而不是靠"标题在上面"这种位置约定）。
      */
-    rows.push({ kind: 'skill', nameKey: qiji.nameKey, descKey: qiji.descKey, descParams: {} });
+    rows.push({
+      kind: 'skill',
+      nameKey: qiji.nameKey,
+      descKey: qiji.descKey,
+      descParams: qiji.descParams ?? {},
+    });
   }
   return {
     kind: 'qiji',

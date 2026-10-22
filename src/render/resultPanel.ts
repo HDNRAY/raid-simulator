@@ -29,6 +29,22 @@ export interface ResultRefs {
  *
  * @param showKeyHints 是否显示键名（触屏传 `false`）—— 决定重开提示用哪句
  */
+/**
+ * 结算提示该用哪一句（**纯函数**，2026-10-22）。
+ *
+ * 用户报："肉鸽战斗胜利后，写的还是 **enter 再来一次**" —— "再来一次"是
+ * **自由模式**的说法；肉鸽里要往下走（下一场 / 选炁机 / 结算这一局）。
+ *
+ * | 模式 | 键位提示开着 | 触屏（不显示键名） |
+ * |---|---|---|
+ * | 自由 | `screen.hintRestart`（按 Enter 再来一次） | `screen.hintRestartTap` |
+ * | 肉鸽 | `screen.hintContinue`（按 Enter 继续） | `screen.hintContinueTap` |
+ */
+export function resultHintKey(showKeyHints: boolean, roguelike: boolean): string {
+  if (roguelike) return showKeyHints ? 'screen.hintContinue' : 'screen.hintContinueTap';
+  return showKeyHints ? 'screen.hintRestart' : 'screen.hintRestartTap';
+}
+
 export function renderResultPanel(
   refs: ResultRefs,
   view: BattleSnapshotView,
@@ -61,8 +77,8 @@ export function renderResultPanel(
         ),
   );
 
-  /** 重开提示按模式分流。⚠️ 两条文案都走 i18n（规范 I1）。 */
-  refs.resultHint.set(translate(showKeyHints ? 'screen.hintRestart' : 'screen.hintRestartTap'));
+  /** 重开提示按模式分流。⚠️ 所有文案都走 i18n（规范 I1）。 */
+  refs.resultHint.set(translate(resultHintKey(showKeyHints, result.roguelike === true)));
 
   /** 统计用等宽对齐的"标签  值"，比堆一串数字好读。 */
   const rows: Array<[string, string]> = [

@@ -45,6 +45,7 @@ import { bossHpFor } from '../data/bossDefs';
 import { playerHpFor, playerSkillsFor } from '../data/units';
 import { qijiById } from '../data/qiji';
 import { descParamsOf } from './descParams';
+import { qijiDescParamsOf } from './qijiDescParams';
 import { descTemplateOf } from './keyRows';
 import type { DetailContext, DetailQiji, DetailSkillRow, DetailUnit } from '../ui/prepareDetail';
 import type { QijiEntity } from '../core/types/qiji';
@@ -157,6 +158,11 @@ function qijiShape(id: string): DetailQiji | undefined {
     /** ⚠️ 与 `skillRow` 同一条兜底：`LocaleKey` 就是 `string`，内容漏了 key 时别显示 `undefined`。 */
     nameKey: qiji.nameKey ?? qiji.id,
     ...(qiji.descKey === undefined ? {} : { descKey: qiji.descKey }),
+    /**
+     * ⚠️ 说明模板的参数**从定义读**（`app/qijiDescParams`）—— 不填的话
+     * 面板上会显示 `{amount}` 甚至整个 key ✗（2026-10-22 实测）。
+     */
+    ...(qijiDescParamsOf(qiji) === undefined ? {} : { descParams: qijiDescParamsOf(qiji) }),
   };
 }
 

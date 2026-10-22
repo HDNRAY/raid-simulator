@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { qijiDescParamsOf } from '../../src/app/qijiDescParams';
+import { descTextOf } from '../../src/ui/descText';
 import { ALL_QIJI } from '../../src/data/qiji';
 import { zhCN } from '../../src/i18n/locales/zh-CN';
 import type { QijiEntity } from '../../src/core/types/qiji';
@@ -87,5 +88,37 @@ describe('炁机说明的数值来自定义', () => {
     expect(before).toContain(String(Math.abs(delta)));
     expect(after).toContain(String(Math.abs(delta - 7)));
     expect(after).not.toBe(before);
+  });
+});
+
+describe('渲染兜底：界面上绝不出现 `{…}`（2026-10-22 用户实测："我看到了 {amount}"）', () => {
+  it('每条炁机的说明用 `descTextOf` 渲染后都不含花括号', () => {
+    for (const qiji of ALL_QIJI) {
+      const template = templateOf(qiji);
+      if (template === '') continue;
+      const params = qijiDescParamsOf(qiji);
+      /** 与渲染层同一个函数（`ui/descText.descTextOf` 的语义：少参就抹掉占位符）。 */
+      const rendered = descTextOf(
+        (key, p) => {
+          const withParams = template.replace(/\{(\w+)\}/g, (whole, k: string) => String(p?.[k] ?? whole));
+          return key === '' ? withParams : withParams;
+        },
+        '',
+        params,
+      );
+      expect(rendered).not.toContain('{');
+      expect(rendered).not.toContain('}');
+    }
+  });
+
+  it('缺参数时整段降级 / 抹掉，不会把 `{x}` 画到界面上', () => {
+    /** 假的 `t`：把 `{x}` 按参数替换（与真实翻译层同一语义；缺参就留着）。 */
+    const translate = (key: string, p?: Readonly<Record<string, string | number>>): string =>
+      key.replace(/\{(\w+)\}/g, (whole, k: string) => String(p?.[k] ?? whole));
+    expect(descTextOf(translate, '造成{damage}点伤害', {})).toBe('造成点伤害');
+    expect(descTextOf(translate, '{amount}', {})).toBe('');
+    expect(descTextOf(translate, '生命上限增加{amount}。', { amount: '30' })).toBe(
+      '生命上限增加30。',
+    );
   });
 });

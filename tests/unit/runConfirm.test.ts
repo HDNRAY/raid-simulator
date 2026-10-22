@@ -239,17 +239,39 @@ describe('确认屏：初始焦点与"右侧显示谁"（纯判定）', () => {
     ).toEqual({ kind: 'whisper', id: 'blunt' });
   });
 
-  it('⚠️ 一局选了不止一条时：右侧画**最后一条**（刚选的那条）', () => {
+  it('一局选了多条时：右侧画**光标那一条**（`qijiIndex`，缺省 0）', () => {
     /**
-     * 块头照实写「已激活 2 条：…」（`prepareFold` 那条判据），而面板一次
-     * 只画得出**一条** —— 画刚选的那条（整局清单在一局结束屏）。
+     * ⚠️ 2026-10-22 变了：不再固定画"最后一条" —— 玩家可以用 `← →` 在
+     * 炁机块内翻（用户："可以用方向键切换，并且查看详情"）⇒ 画 `qijiIndex` 那条。
      */
     const sel = runConfirmSelection({ boss: BOSS, qiji: [QIJI, QIJI2] });
+    expect(sel.qijiIndex).toBe(0);
     expect(
       runConfirmDetailTarget({
         expanded: sel.expanded,
         boss: BOSS,
         qiji: [QIJI, QIJI2],
+        qijiIndex: sel.qijiIndex,
+        whisper: WHISPER,
+      }),
+    ).toEqual({ kind: 'qiji', id: 'vitality' });
+    /** 移到第 2 条 ⇒ 右侧跟着换 ✓ */
+    expect(
+      runConfirmDetailTarget({
+        expanded: 'qiji',
+        boss: BOSS,
+        qiji: [QIJI, QIJI2],
+        qijiIndex: 1,
+        whisper: WHISPER,
+      }),
+    ).toEqual({ kind: 'qiji', id: 'jieShengJi' });
+    /** 越界夹到合法范围（不画空白面板） */
+    expect(
+      runConfirmDetailTarget({
+        expanded: 'qiji',
+        boss: BOSS,
+        qiji: [QIJI, QIJI2],
+        qijiIndex: 99,
         whisper: WHISPER,
       }),
     ).toEqual({ kind: 'qiji', id: 'jieShengJi' });

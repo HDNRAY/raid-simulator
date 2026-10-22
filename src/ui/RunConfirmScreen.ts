@@ -90,6 +90,7 @@ import {
   type DetailWhisper,
 } from './prepareDetail';
 import {
+  cycleRunConfirmQiji,
   focusRunConfirmBlock,
   moveRunConfirmFocus,
   runConfirmSelection,
@@ -351,6 +352,21 @@ export class RunConfirmScreen {
     this.redraw();
   }
 
+  /**
+   * **`← →`：在炁机块内切换**（这一局选了多条时）。
+   *
+   * 用户："炁机和低语，都独立展示，可以用方向键切换，并且查看详情"。
+   * ⚠️ 焦点不在炁机块上时**什么都不做** —— `← →` 不是全局翻页键。
+   */
+  cycleQiji(delta: number): void {
+    if (this.selection.focus !== 'qiji') return;
+    const count = this.lastInfo?.qiji.length ?? 0;
+    const next = cycleRunConfirmQiji(this.selection, delta, count);
+    if (next === this.selection) return;
+    this.selection = next;
+    this.redraw();
+  }
+
   /** 把焦点**直接**放到某一行（点块头；与 Tab 同一个状态机）。 */
   focusBlock(block: RunConfirmBlock): void {
     const next = focusRunConfirmBlock({
@@ -456,6 +472,24 @@ export class RunConfirmScreen {
     return label;
   }
 
+  /**
+   * 炁机块头那一行字：**逐条列名字**，焦点那条前面加 `▸`。
+   *
+   * 用户 2026-10-22："不要'暂时已选择几个炁机'；炁机和低语，都独立展示"
+   * ⇒ 不再用「已激活 N 条：…」那种汇总式说法 ✗，名字之间用 `common.listSeparator`。
+   * 超过宽度时收口（`joinWithin` 那套在 `prepareFold` 里，这里保持简单：
+   * 由调用方给的 `maxChars` 已经算过块头宽度，名字多时**截断加省略**）。
+   */
+  private qijiBlockText(): string {
+    const t = this.options.translate;
+    const list = this.lastInfo?.qiji ?? [];
+    const separator = t('common.listSeparator');
+    const names = list.map((q, index) =>
+      index === this.selection.qijiIndex ? `▸${t(q.nameKey)}` : t(q.nameKey),
+    );
+    return names.join(separator);
+  }
+
   private redraw(): void {
     const t = this.options.translate;
     const info = this.options.getInfo();
@@ -494,18 +528,11 @@ export class RunConfirmScreen {
       readonly qiji: FoldSummary | undefined;
       readonly boss: FoldSummary | undefined;
     } = {
-      qiji: hasQiji
-        ? foldSummaryOf({
-            kind: 'qiji',
-            selection: chosen,
-            players: [],
-            bosses: [],
-            qiji: info.qiji,
-            on: (id) => this.currentQijiIds.includes(id),
-            translate: t,
-            maxChars,
-          })
-        : undefined,
+      /**
+       * ⚠️ 2026-10-22 用户："**不要'暂时已选择几个炁机'**；炁机和低语，都独立
+       * 展示" ⇒ 块头**逐条列出名字**（焦点那条前面加 `▸`），不再有"已激活 N 条"。
+       */
+      qiji: hasQiji ? { text: this.qijiBlockText() } : undefined,
       boss: foldSummaryOf({
         kind: 'boss',
         selection: chosen,
@@ -564,6 +591,7 @@ export class RunConfirmScreen {
       expanded: this.selection.expanded,
       boss: info.boss,
       qiji: info.qiji,
+      qijiIndex: this.selection.qijiIndex,
       whisper: info.whisper,
     });
     /**

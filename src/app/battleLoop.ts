@@ -34,6 +34,13 @@ export interface BattleLoopOptions {
     | ((engine: BattleEngine) => readonly SlotBinding[]);
   readonly timeLimitMs?: number;
   readonly onRestart?: () => void;
+  /**
+   * 这一场是不是**肉鸽里的一场**（2026-10-22）。
+   *
+   * 只影响结算那句提示（"继续" vs "再来一次"）—— 由开局时按"有没有一局"
+   * 决定一次（`battleSetup` 里 `run !== undefined`）。
+   */
+  readonly roguelike?: boolean;
   /** 注入输入源（测试用）；不给则绑定到 window。 */
   readonly input?: InputSource;
   /**
@@ -120,7 +127,11 @@ export class BattleLoop {
     this.options = options;
     this.bindings = options.bindings;
     this.engine = new BattleEngine(options.engineOptions);
-    this.adapter = new ViewAdapter(options.engineOptions.skills, options.translate);
+    this.adapter = new ViewAdapter(
+      options.engineOptions.skills,
+      options.translate,
+      options.roguelike === true,
+    );
     /**
      * 日志格式化器。
      *

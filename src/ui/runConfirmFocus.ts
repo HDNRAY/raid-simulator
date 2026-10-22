@@ -55,6 +55,15 @@ export const RUN_CONFIRM_FOCUS_ORDER: readonly RunConfirmFocus[] = [
 export interface RunConfirmSelection {
   readonly focus: RunConfirmFocus;
   /**
+   * **炁机块内的光标**（2026-10-22，用户："炁机和低语，都独立展示，可以用
+   * 方向键切换，并且查看详情"）。
+   *
+   * 一局可能选了多条炁机，而详情面板一次只画一条 ⇒ `← →` 在**这一块里**
+   * 移动它，右侧跟着换。⚠️ 它**只在 `focus === 'qiji'` 时有意义**，但状态
+   * 一直保留（切走再切回来还停在原来那一条，不跳回第一条 ✓）。
+   */
+  readonly qijiIndex: number;
+  /**
    * **右侧详情画哪一块**（焦点在「开始战斗」上时保持上一块，不忽隐忽现）。
    *
    * ⚠️ 它是 `RunConfirmBlock`（`'qiji' | 'boss' | 'whisper'`）—— 没有
@@ -76,7 +85,7 @@ export function runConfirmSelection(info: {
   readonly qiji: readonly DetailUnit[];
 }): RunConfirmSelection {
   const focus: RunConfirmFocus = info.qiji.length === 0 ? 'boss' : 'qiji';
-  return { focus, expanded: focus };
+  return { focus, qijiIndex: 0, expanded: focus };
 }
 
 /** 焦点在某一站时，右侧详情该画哪一块（`'start'` 保持上一块）。 */
@@ -103,7 +112,26 @@ export function moveRunConfirmFocus(args: {
     canFocus: (candidate) => candidate !== 'qiji' || args.hasQiji,
   });
   if (focus === args.selection.focus) return args.selection;
-  return { focus, expanded: expandedOf(args.selection, focus) };
+  return { ...args.selection, focus, expanded: expandedOf(args.selection, focus) };
+}
+
+/**
+ * **炁机块内的光标移动**（`← →`，2026-10-22）。
+ *
+ * 只在 `focus === 'qiji'` 且这一局选了**不止一条**时有用；两端**不环绕**
+ * （与列表翻页的习惯一致 —— 停在第一条 / 最后一条，玩家能感到边界）。
+ *
+ * @param count 这一局选了几条炁机（0 / 1 时直接原样返回）
+ */
+export function cycleRunConfirmQiji(
+  selection: RunConfirmSelection,
+  delta: number,
+  count: number,
+): RunConfirmSelection {
+  if (count <= 1) return selection;
+  const next = Math.min(count - 1, Math.max(0, selection.qijiIndex + (delta >= 0 ? 1 : -1)));
+  if (next === selection.qijiIndex) return selection;
+  return { ...selection, qijiIndex: next };
 }
 
 /**
@@ -118,5 +146,5 @@ export function focusRunConfirmBlock(args: {
 }): RunConfirmSelection {
   if (args.block === 'qiji' && !args.hasQiji) return args.selection;
   if (args.block === args.selection.focus) return args.selection;
-  return { focus: args.block, expanded: args.block };
+  return { ...args.selection, focus: args.block, expanded: args.block };
 }

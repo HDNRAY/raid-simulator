@@ -17,6 +17,7 @@ import type { SettingsPanel } from '../ui/settings/SettingsPanel';
 import type { SettingsToggle } from './settingsToggle';
 import type { TouchControls } from './touchControls';
 import { activeInputLayer, type InputLayer } from './inputRouter';
+import { routeRunConfirmKey } from './runConfirmKeys';
 
 /**
  * 一个界面的**边角控件**在主循环里要满足的最小面。
@@ -116,6 +117,11 @@ export interface CanvasHost {
     moveFocus(delta: number): void;
     /** **Shift + ↑ ↓**：滚右侧详情正文（不切焦点）。 */
     scrollDetail(dir: 'up' | 'down'): void;
+    /**
+     * **← →**：在炁机块内切换（2026-10-22，用户："可以用方向键切换，并且查看详情"）。
+     * 焦点不在炁机块上时无作用。
+     */
+    cycleQiji(delta: number): void;
   };
   /** 一局结束屏（P3；Enter / 点屏幕 = 回选角色）。 */
   readonly runOver: {
@@ -543,25 +549,15 @@ export function wireLoop(o: WireOptions): void {
        * 两者不同**是有意的**。
        */
       if (layer === 'runConfirm') {
-        switch (event.key) {
-          case 'Tab':
-            host.runConfirm.moveFocus(event.shiftKey ? -1 : 1);
-            event.preventDefault();
-            return;
-          case 'ArrowUp':
-          case 'ArrowDown': {
-            const dir = event.key === 'ArrowUp' ? 'up' : 'down';
-            if (event.shiftKey) host.runConfirm.scrollDetail(dir);
-            else host.runConfirm.moveFocus(dir === 'up' ? -1 : 1);
-            return;
-          }
-          case 'Enter':
-          case ' ':
-            host.runConfirm.confirm();
-            return;
-          default:
-            return;
+        /**
+         * ⚠️ 键路由搬到了 `app/runConfirmKeys`（本文件贴着 700 行上限，
+         * 而那一屏的键是自成一体的状态机 —— 见那个文件的文件头）。
+         */
+        if (routeRunConfirmKey({ key: event.key, shiftKey: event.shiftKey, host: host.runConfirm })) {
+          if (event.key === 'Tab') event.preventDefault();
+          return;
         }
+        return;
       }
       if (layer === 'characterSelect') {
         /**

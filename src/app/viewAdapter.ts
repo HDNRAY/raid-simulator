@@ -97,6 +97,11 @@ export class ViewAdapter {
   constructor(
     private readonly skills: ReadonlyMap<string, SkillDef>,
     private readonly translate: TranslateFn | undefined = undefined,
+    /**
+     * 这一局是不是**肉鸽**（2026-10-22）：只决定结算那句提示（"继续" vs
+     * "再来一次"）。**由开局时传一次**，不在渲染层猜 ✗。
+     */
+    private readonly roguelike = false,
   ) {
     for (const [id, skill] of skills) this.skillNameKeys.set(id, skill.nameKey);
   }
@@ -483,6 +488,7 @@ export class ViewAdapter {
 
     return {
       victory,
+      ...(this.roguelike ? { roguelike: true } : {}),
       titleKey: victory ? 'screen.victory' : 'screen.defeat',
       reasonKey,
       ...(reasonKey === 'screen.wonByKill' && bossNameKey !== undefined
