@@ -27,6 +27,8 @@ import { IconStrip } from '../IconStrip';
 import { BossTopBarPart } from '../parts/bossTopBar';
 import { PALETTE } from '../theme';
 import type { FrameRegistry, TranslateFn } from '../sceneTypes';
+import { BOSS_PORTRAITS, portraitFor } from '../portraitAssets';
+import { PortraitSprite } from '../portraitSprite';
 
 /** Boss 顶栏区域。 */
 export class BossHeader {
@@ -41,6 +43,14 @@ export class BossHeader {
   private readonly timerLabel: Label;
   private readonly enrageBadge: Label;
 
+  /**
+   * **Boss 的头像**（2026-10-22，用户："boss的头像 也从 fd2 里拿过来显示一下吧"）。
+   *
+   * ⚠️ 与详情区那颗**同一套机制**（`PortraitSprite` + `portraitAssets`）：
+   * 素材缺了就不画（`ready === false` 时它自己不显示），占位交给顶栏的布局。
+   */
+  private portrait: PortraitSprite | undefined;
+
   /* 图标条 */
   private readonly bossBuffs: IconStrip;
   /** Boss 的减益条（右上）—— 与增益条分开，位置本身就是分类。 */
@@ -50,7 +60,16 @@ export class BossHeader {
     this.root = new pixi.Container();
 
     const bb = LAYOUT.bossBar;
-    this.bossName = new Label(pixi, { x: bb.x + 2, y: bb.y, size: FONT.title, color: PALETTE.text });
+        /**
+     * ⚠️ 名字从**头像右边**开始（头像 2026-10-22 加的）：没有头像的 Boss 也会
+     * 从这里开始 —— 顶栏因此**不随"有没有脸"而左右跳**。
+     */
+    this.bossName = new Label(pixi, {
+      x: bb.x + FONT.title + 13,
+      y: bb.y,
+      size: FONT.title,
+      color: PALETTE.text,
+    });
     this.bossPhase = new Label(pixi, { x: bb.x + 2, y: bb.y + 1, size: FONT.small, color: PALETTE.textDim });
     this.timerLabel = new Label(pixi, {
       x: LOGICAL.width - 8,
@@ -98,6 +117,46 @@ export class BossHeader {
     this.root.addChild(this.bossBuffs.root);
     this.bossDebuffs = new IconStrip(pixi, LAYOUT.bossDebuffs, translate);
     this.root.addChild(this.bossDebuffs.root);
+
+    /**
+     * 头像摆在名字**左边**：`bb.x` 起、边长 = 名字字号左右。
+     * ⚠️ 先用第一张 Boss 素材占位（`setBoss` 会在进战斗时换掉）——
+     * `PortraitSprite` 的构造需要一个 asset，与详情区那颗同一个做法。
+     */
+    const firstBoss = BOSS_PORTRAITS[0];
+    if (firstBoss !== undefined) {
+      this.portrait = new PortraitSprite(pixi, this.root, firstBoss, this.portraitBox());
+      this.portrait.setVisible(false);
+    }
+  }
+
+  /**
+   * 头像边长（逻辑像素）= 名字字号 + 一点余量。
+   *
+   * ⚠️ 由**顶栏自己的字号**推出来（不写死）：`setUiScale` 会改字号，
+   * 头像跟着同一套比例走，两者不会一大一小。
+   */
+  private portraitBox(): number {
+    return FONT.title + 9;
+  }
+
+  /**
+   * **换 Boss**（进战斗 / 重开时由 `SceneStage.setAppearance` 调）。
+   *
+   * 没配头像的 Boss ⇒ 整颗藏掉（顶栏布局里那一格就空着，名字仍然从
+   * 固定位置开始 —— 与之前没有头像时**逐字相同**）。
+   */
+  setBoss(bossId: string): void {
+    const asset = portraitFor(bossId);
+    if (asset === undefined) {
+      this.portrait?.setVisible(false);
+      return;
+    }
+    this.portrait?.setAsset(asset);
+    this.portrait?.setVisible(true);
+    const bb = LAYOUT.bossBar;
+    const box = this.portraitBox();
+    this.portrait?.root.position.set(bb.x + box / 2, bb.y + FONT.title / 2 + 1);
   }
 
   /** 挂上本区域的每帧部件（顶栏文本 / 血条 / 两条图标条）。 */
@@ -137,7 +196,9 @@ export class BossHeader {
      * "两份真相"是同一类；修法就是把基准收成一处：**都取 `FONT.title`**。
      */
     this.bossName.setSize(ui.len(FONT.title));
-    this.bossName.root.x = bb.x + ui.len(2);
+    this.bossName.root.x = bb.x + ui.len(FONT.title + 13);
+    /** 头像跟着同一套比例走（见 `portraitBox` 的说明）。 */
+    this.portrait?.root.position.set(bb.x + ui.len(FONT.title + 9) / 2, bb.y + ui.len(FONT.title) / 2 + 1);
     this.bossName.root.y = bb.y;
     this.bossPhase.setSize(ui.len(FONT.small));
     this.timerLabel.setSize(ui.len(FONT.small));

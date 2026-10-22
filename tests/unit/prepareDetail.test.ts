@@ -107,8 +107,12 @@ describe('内容按类切换，且只取真数据', () => {
       /** ⚠️ `descParams` 必须带上（漏了就会把 `{cast}` 原样显示）。 */
       expect(skill.descParams).toEqual({ cast: 1, damage: 20 });
     }
-    /** ⚠️ Boss **没有**配对的对话头像（需求只给了 3 个角色）。 */
-    expect(m?.portraitId).toBeUndefined();
+    /**
+     * ⚠️ 2026-10-22：Boss **也有**头像了（用户："boss的头像 也从 fd2 里拿过来
+     * 显示一下吧"）⇒ 模型里带的是**它自己的 id**（素材配对在
+     * `render/portraitAssets.BOSS_PORTRAITS`；没有配对时渲染层自己隐藏）。
+     */
+    expect(m?.portraitId).toBe('meiichiro');
   });
 
   it('⚠️ 招式与被动**合成一列**，而且被动**也有说明**（用户报"被动都没有说明"）', () => {

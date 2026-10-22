@@ -254,6 +254,12 @@ export class BattleScene {
    */
   setAppearance(playerId: string, bossId: string): void {
     this.stage.setAppearance(playerId, bossId);
+    /**
+     * **Boss 的头像**（2026-10-22）：顶栏那颗跟着换人。
+     * ⚠️ 顶栏挂在 **HUD 层**（`BossHeader`），不在 `SceneStage` 里 ——
+     * 所以它只能从这里转过去（`SceneStage` 拿不到它）。
+     */
+    this.bossHeader.setBoss(bossId);
   }
 
   /**
