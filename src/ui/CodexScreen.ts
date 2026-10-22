@@ -63,6 +63,7 @@ import {
 } from './viewportMask';
 import { paintScrollBar } from './scrollBarPaint';
 import { stripEmphasis } from './emphasis';
+import { RichLine } from './richLine';
 import type { TranslateFn } from '../i18n/translator';
 
 export interface CodexScreenOptions {
@@ -109,7 +110,12 @@ export class CodexScreen {
    * 说明了"）：未解锁的卡片名字已经是「？？？」，再写一行「未解锁」是冗余。
    */
   private readonly nameLabels: Label[] = [];
-  private readonly descLabels: Label[] = [];
+  /**
+   * **效果说明**：走 `RichLine`（`**…**` 里的数字用强调色）——
+   * 2026-10-22 用户："数字有颜色"；Pixi 一个 Text 不能行内变色，
+   * 所以每张卡的说明是一组按行切好的 Label（见 `ui/richLine`）。
+   */
+  private readonly descLines: RichLine[] = [];
   /** 解锁条件那一行（小字、暗色；**未解锁的也照写** —— 那正是玩家要知道的）。 */
   private readonly conditionLabels: Label[] = [];
   readonly chrome: ScreenChrome;
@@ -348,9 +354,9 @@ export class CodexScreen {
     entries.forEach((entry, index) => {
       const card = rects[index];
       const nameLabel = this.nameLabels[index];
-      const descLabel = this.descLabels[index];
+      const descLine = this.descLines[index];
       const conditionLabel = this.conditionLabels[index];
-      if (card === undefined || nameLabel === undefined || descLabel === undefined) return;
+      if (card === undefined || nameLabel === undefined || descLine === undefined) return;
 
       /**
        * **滚动 = 整层位移**（2026-10-22 用户："我要的是类似 html 那种滚动效果"）。
@@ -369,7 +375,7 @@ export class CodexScreen {
        */
       if (fullyOutside(shifted, view)) {
         nameLabel.root.visible = false;
-        descLabel.root.visible = false;
+        descLine.setVisible(false);
         if (conditionLabel !== undefined) conditionLabel.root.visible = false;
         return;
       }
@@ -446,17 +452,23 @@ export class CodexScreen {
        */
       const desc = entry.descKey === undefined ? undefined : t(entry.descKey);
       if (desc === undefined || desc === '') {
-        descLabel.root.visible = false;
+        descLine.setVisible(false);
       } else {
+        /**
+         * ⚠️ 折行按**纯文本**算（`wrapByChars`；它保证不把 `100%` 拆开），
+         * 颜色只在这一行**画**的时候按 run 切 —— 折行结果不受颜色影响 ✓。
+         */
         const flat = stripEmphasis(desc).replaceAll('\n', ' ');
         if (plan.descLines <= 0) {
-          descLabel.root.visible = false;
+          descLine.setVisible(false);
         } else {
-          descLabel.set(wrapByChars(flat, { perLine, maxLines: plan.descLines }).join('\n'));
-          descLabel.setColor(PALETTE.textDim);
-          descLabel.root.x = textX;
-          descLabel.root.y = shifted.y + plan.descTop;
-          descLabel.root.visible = true;
+          descLine.layout(
+            wrapByChars(flat, { perLine, maxLines: plan.descLines }),
+            textX,
+            shifted.y + plan.descTop,
+            CODEX_LINE_H,
+          );
+          descLine.setVisible(true);
         }
       }
 
@@ -489,7 +501,7 @@ export class CodexScreen {
     /** 多余的 Label（池子变小）藏起来。 */
     for (let i = entries.length; i < this.nameLabels.length; i += 1) {
       this.nameLabels[i]?.root && (this.nameLabels[i]!.root.visible = false);
-      this.descLabels[i]?.root && (this.descLabels[i]!.root.visible = false);
+      this.descLines[i]?.setVisible(false);
       this.conditionLabels[i]?.root && (this.conditionLabels[i]!.root.visible = false);
     }
 
@@ -542,7 +554,7 @@ export class CodexScreen {
       });
       this.cardsLayer.addChild(name.root, desc.root, condition.root);
       this.nameLabels.push(name);
-      this.descLabels.push(desc);
+      this.descLines.push(desc);
       this.conditionLabels.push(condition);
     }
   }
