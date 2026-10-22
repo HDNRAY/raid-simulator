@@ -227,6 +227,21 @@ export function battleGearBoxAt(scale: number): ChromeBox {
   };
 }
 
+/**
+ * **"一键过关"按钮的落点**：齿轮的**正右方**，同一行、同一尺寸。
+ *
+ * ⚠️ 为什么在右边：战斗里齿轮锚在**玩家面板右缘**（`battleGearBoxAt`），
+ * 右边那块是空的；放左边会压到玩家面板 ✗（那张表在 `battleGearBoxAt`
+ * 的注释里，六档缩放都算过）。
+ *
+ * ⚠️ 间距取 `MARGIN` 的一半：两个按钮属于**同一组**，比"贴边距"更近，
+ * 但又不会挤成一块（读得出是两个可点目标）。
+ */
+export function devClearBoxOf(gear: ChromeBox): ChromeBox {
+  const gap = Math.max(4, Math.round(gear.size / 4));
+  return { x: gear.x + gear.size + gap, y: gear.y, size: gear.size };
+}
+
 export interface ScreenChromeOptions {
   readonly pixi: PixiCtor;
   /** 点齿轮（打开设置）—— 全屏界面统一接到 `settingsToggle.toggle()`。 */
@@ -245,6 +260,26 @@ export interface ScreenChromeOptions {
    * ⚠️ 传的是**取值函数**而不是常量：它随 UI 缩放变，而缩放是运行期的事。
    */
   readonly gearAt?: (scale: number) => ChromeBox;
+  /**
+   * **开发模式的那颗"一键过关"**（2026-10-22，用户："开发模式，再加一个功能，
+   * 一键过关，放在设置旁边，快捷键f2"）。
+   *
+   * ⚠️ **不给就不画** —— 这是"只在开发模式存在"的**唯一**判据：生产里
+   * 没人传它，于是按钮不构建、`hitTest` 也不会命中（不是"画了再藏"，
+   * 那种一不留神就会露出来 ✗）。`F2` 那条在 `app/loopWiring` 里另有一道
+   * `devMode()` 守卫。
+   *
+   * ⚠️ 它会在**齿轮右边**（见 `devClearBoxOf`）：齿轮在战斗里锚在玩家面板
+   * 右缘，右边那块是空的；放在左边会压到面板 ✗。
+   */
+  readonly onDevClear?: (() => void) | undefined;
+  /**
+   * `F2` 的显示名（那颗按钮的键位提示）。
+   *
+   * ⚠️ 与 `f1Label` 同一条纪律：键名由调用方从键位表反查后拼，本组件
+   * 不碰 i18n（AGENTS.md §3b）。只有给了 `onDevClear` 才会被读。
+   */
+  readonly f2Label?: (() => string) | undefined;
   /**
    * `F1` 的显示名（齿轮的键位提示）。
    *
@@ -278,6 +313,8 @@ export class ScreenChrome {
   private gearFocused = false;
 
   private gear: IconButton | undefined;
+  /** 开发模式的"一键过关"（生产里根本不构建 —— 见 `onDevClear`）。 */
+  private devClear: IconButton | undefined;
   private back: IconButton | undefined;
 
   constructor(options: ScreenChromeOptions) {
@@ -368,6 +405,14 @@ export class ScreenChrome {
       this.options.onGear();
       return true;
     }
+    /**
+     * **"一键过关"**：只在开发模式存在（`devClear` 没构建就没有这一支）。
+     * 排在齿轮之后、返回之前 —— 顺序即优先级（`canvasInput` 同一条纪律）。
+     */
+    if (this.devClear !== undefined && this.devClear.contains(px, py)) {
+      this.options.onDevClear?.();
+      return true;
+    }
     if (this.back !== undefined && this.back.contains(px, py)) {
       this.options.onBack?.();
       return true;
@@ -378,6 +423,16 @@ export class ScreenChrome {
   /** 齿轮的可点区域（探针 / 触屏层用它决定"点设置"的落点）。 */
   get gearBounds(): { readonly x: number; readonly y: number; readonly w: number; readonly h: number } | undefined {
     return this.gear?.bounds;
+  }
+
+  /**
+   * **"一键过关"的可点区域**（探针用）。
+   *
+   * ⚠️ 生产里是 `undefined`（没构建）—— 这正是"开发模式才有它"的可读证据，
+   * 比"看它有没有画出来"可靠（画了但被别的节点盖住也会像没有）。
+   */
+  get devClearBounds(): { readonly x: number; readonly y: number; readonly w: number; readonly h: number } | undefined {
+    return this.devClear?.bounds;
   }
 
   /** 返回箭头的可点区域（探针用）。 */
@@ -435,12 +490,14 @@ export class ScreenChrome {
   update(): void {
     const show = this.options.showKeyHints();
     this.gear?.setShowShortcut(show);
+    this.devClear?.setShowShortcut(show);
     this.back?.setShowShortcut(show);
     /**
      * ⚠️ `update()` 也要转发：焦点环与图标颜色的切换收在那里面
      * （`IconButton.update` 只在 `lit` / 环的可见性真的变了才动节点）。
      */
     this.gear?.update();
+    this.devClear?.update();
     this.back?.update();
   }
 
@@ -457,8 +514,10 @@ export class ScreenChrome {
   /** 按当前系数重建两个按钮（旧节点整棵销毁，避免缩放后两层重叠）。 */
   private build(): void {
     this.gear?.root.destroy({ children: true });
+    this.devClear?.root.destroy({ children: true });
     this.back?.root.destroy({ children: true });
     this.gear = undefined;
+    this.devClear = undefined;
     this.back = undefined;
 
     const f1 = this.options.f1Label();
@@ -514,6 +573,30 @@ export class ScreenChrome {
      * ⚠️ 用户 2026-10-13："今天我让你把返回改得跟设置一样之后，就都不对了"
      * —— 现在"跟设置一样"就是"同一个组件 + 同一个角标"，唯一差别是贴哪条边。
      */
+    /**
+     * **开发模式的"一键过关"**：齿轮右边、同尺寸、同组件（`IconButton`），
+     * 所以视觉上与齿轮是一组的 ✓。`onDevClear` 没给就**不构建** ✓。
+     */
+    if (this.options.onDevClear !== undefined) {
+      const box = devClearBoxOf(gearBox);
+      const f2 = this.options.f2Label?.() ?? '';
+      const clear = new IconButton({
+        pixi: this.pixi,
+        icon: 'skip',
+        size: box.size,
+        color: PALETTE.textDim,
+        brightColor: PALETTE.focus,
+        /**
+         * ⚠️ **不给 `focusRing`**：它不参与键盘焦点环（`↑` 只在齿轮 / 界面
+         * 之间走），画一个永远不亮的环只会让人以为"它能被 Tab 到"。
+         */
+        shortcut: f2,
+        anchor: { x: box.x + box.size / 2, y: box.y + box.size / 2 },
+        onClick: () => this.options.onDevClear?.(),
+      });
+      this.devClear = place(clear, box);
+    }
+
     if (this.options.onBack !== undefined) {
       const box = chromeBoxAt({ right: false, bottom: false }, ARROW_SIZE, this.uiScale);
       const arrow = new IconButton({
@@ -532,6 +615,7 @@ export class ScreenChrome {
 
     const nodes: Container[] = [];
     if (this.gear !== undefined) nodes.push(this.gear.root);
+    if (this.devClear !== undefined) nodes.push(this.devClear.root);
     if (this.back !== undefined) nodes.push(this.back.root);
     this.root.addChild(...nodes);
     /**

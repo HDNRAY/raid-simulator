@@ -26,6 +26,13 @@ declare global {
        */
       act(skillId: string, actorId?: string): void;
       /**
+       * **开发模式专用：一键过关**（2026-10-22）。
+       *
+       * 只转 `BattleLoop.devClear` —— 引擎把 Boss 打死，结算走**真实**那条路
+       * （与真打赢逐字一致）。没有战斗 / 不是开发模式时返回 `false`。
+       */
+      devClear(): boolean;
+      /**
        * 当前键位表（顶层探针）。
        *
        * 端到端脚本用它来"按某个技能"，而不是把键位写死在脚本里。

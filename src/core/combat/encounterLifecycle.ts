@@ -109,3 +109,43 @@ export function checkDeaths(ctx: UpkeepContext): boolean {
   ctx.end(event.result, 'hpZero');
   return true;
 }
+
+/**
+ * **开发模式专用：把某一侧直接打死** —— 让"一键过关"走**真实的**结算路径。
+ *
+ * ==================================================================
+ * 为什么是"打死"而不是"直接写 victory"
+ * ==================================================================
+ *
+ * 用户要的是"一键过关"，但**结算必须与真打赢一模一样**：`encounterEnd`
+ * 事件、胜负、满血判定、肉鸽推进、复盘日志，全都由既有的那条路算出来。
+ *
+ * 所以这里**只做一件事**：把那个战斗者的 `alive` 置假（`hp` 同时归零，
+ * 免得出现"死了但血量还在"的自相矛盾快照），然后**原样调用 `checkDeaths`**
+ * —— 判胜负、发事件、写 `status` 全是它的活（与真被打死**同一条**代码）。
+ *
+ * ⚠️ **不要**在这里自己写 `ctx.end('victory', …)`：那就成了第二个"判胜负"
+ * 的地方，而两份判据漂移的样子是"一键过关的结算和真打赢不一样" ✗。
+ *
+ * ⚠️ 不走 `ctx.mutableAll()`：那是**工作副本**，只在 tick 内存在；这个入口
+ * 从按键 / 点击进来，不在 tick 里（会是空数组 ⇒ 静默无效 ✗）。所以从
+ * `ctx.combatants` 取、用 `ctx.replaceCombatant` 写回（它对"有没有工作副本"
+ * 两种情况都处理了）。
+ *
+ * @returns 真的打死了吗（已经死了 / 没这一侧 ⇒ false，调用方不必管）
+ */
+export function killSide(ctx: UpkeepContext, side: Combatant['side']): boolean {
+  const victim = ctx.combatants.find((c) => c.side === side);
+  if (victim === undefined || !victim.alive) return false;
+  const dead: Combatant = {
+    ...victim,
+    alive: false,
+    resources: { ...victim.resources, hp: 0 },
+  };
+  ctx.replaceCombatant(dead);
+  /** ⚠️ `checkDeaths` 读的是**传进去的**数组，所以这里必须给替换后的那份。 */
+  return checkDeaths({
+    ...ctx,
+    combatants: ctx.combatants.map((c) => (c.id === dead.id ? dead : c)),
+  });
+}

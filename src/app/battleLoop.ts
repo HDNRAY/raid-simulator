@@ -324,6 +324,27 @@ export class BattleLoop {
    * "推到某个状态再拍"）。所以它仍然是一条**合法的 `Action[]` 注入**，
    * 不改变确定性：同一串注入动作 + 同一串输入 → 同一个结果。
    */
+  /**
+   * **开发模式专用：一键过关**（`?dev=1` / `config.DEV_MODE`）。
+   *
+   * 只做一件事：让引擎把 Boss 打死（`engineState.devKill('enemy')`）——
+   * 判胜负、`encounterEnd` 事件、`status` 全部由 `./encounterLifecycle.killSide`
+   * → `checkDeaths` 走**真实**那条路算出来，所以"一键过关"与"真打赢"的
+   * 结算（含满血判定 / 肉鸽推进 / 复盘）**逐字一致** ✓。
+   *
+   * ⚠️ 它**不是**"直接写一个 victory"：那会绕开事件与推进，留下一个
+   * "状态说赢、日志说没打"的中间态 ✗。
+   * ⚠️ 也不走"改成 1 血再等动画"：那是另一条路径，且界面会先动画再结算 ✗。
+   *
+   * @returns 真的打死了吗（已经结束 / 已经没有 Boss ⇒ false）
+   */
+  devClear(): boolean {
+    const killed = this.engineState.devKill('enemy');
+    /** 与 `injectActions` 同理由：丢掉缓存的渲染快照。 */
+    this.view = undefined;
+    return killed;
+  }
+
   injectActions(actions: readonly Action[], actorId?: string): void {
     if (actions.length === 0) return;
     this.step(actions, actorId);

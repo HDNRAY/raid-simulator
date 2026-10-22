@@ -42,6 +42,11 @@ export interface CanvasHost {
    * **二次确认弹窗**（2026-10-22）：模态 —— 开着时**吃光**键盘与指针。
    * 只有三个动作：←→ 换焦点 / Enter 执行 / Esc 取消。
    */
+  /**
+   * **开发模式专用：一键过关**（`F2` / 齿轮旁那颗）。生产模式下注入的实现是
+   * 空操作（见 `app/battleChrome`），所以这里不重复判开发模式 —— 一处判据。
+   */
+  devClear(): boolean;
   readonly confirm: {
     frame(): void;
     readonly visible: boolean;
@@ -663,6 +668,11 @@ export function wireLoop(o: WireOptions): void {
         default:
           return;
       }
+    }
+    /** **`F2` = 开发模式的一键过关**（生产模式下 `devClear` 是空操作）。 */
+    if (layer === 'battle' && event.key === 'F2') {
+      if (host.devClear()) event.preventDefault();
+      return;
     }
     if (
       layer === 'battle' &&

@@ -72,7 +72,7 @@ import { runTriggers } from './triggers';
 import { settleComboWindows } from './comboWindowHandler';
 import { settleConsumableBuffs } from './consumeHandler';
 import { BuffHookDispatch } from './buffHookDispatch';
-import { checkDeaths, checkTimeLimit } from './encounterLifecycle';
+import { checkDeaths, checkTimeLimit, killSide } from './encounterLifecycle';
 import { runUpkeep, type RunUpkeepContext } from './upkeep';
 import type {
   Action,
@@ -540,13 +540,20 @@ export class BattleEngine {
     runUpkeep(this.upkeepContext(), this.events);
 
     // 6. 时间限制
-    this.checkTimeLimit();
+    checkTimeLimit(this.upkeepContext());
 
     // 7. 提交 + 推进 tick + 死亡判定
     this.commitWork();
     this.state = { ...this.state, tick: this.state.tick + 1 };
-    this.checkDeaths();
+    checkDeaths(this.upkeepContext());
   }
+
+  /**
+   * ⚠️ **开发模式专用**（`?dev=1` / `config.DEV_MODE` 才有按钮与 `F2`）：
+   * 把某一侧打死，走**真实的**结算（判胜负 / 发事件 / 写 status 全在
+   * `./encounterLifecycle.killSide` → `checkDeaths`，不另开分支）。
+   */
+  devKill(side: Combatant['side']): boolean { return killSide(this.upkeepContext(), side); }
 
   /* ---------------------------------------------------------------- *
    * 技能施放
@@ -604,13 +611,6 @@ export class BattleEngine {
     };
   }
 
-  private checkTimeLimit(): void {
-    checkTimeLimit(this.upkeepContext());
-  }
-
-  private checkDeaths(): void {
-    checkDeaths(this.upkeepContext());
-  }
 
   /* ---------------------------------------------------------------- *
    * 状态更新辅助

@@ -81,7 +81,7 @@ import { readUrlParams } from './urlParams';
 import { switchOperationMode } from './operationMode';
 import { translateSafe } from './translate';
 import { createExitConfirm } from './exitConfirm';
-import { battleGearBoxAt, ScreenChrome } from '../ui/ScreenChrome';
+import { createBattleChrome } from './battleChrome';
 import { capsOf, type OperationMode } from '../render/platform';
 import type { BattleLoop } from './battleLoop';
 import type { GameDeps } from './deps';
@@ -141,7 +141,6 @@ export function createGame(o: CreateGameDeps): GameHandle {
    * 键位表一改，四处一起改，没有第二份。
    */
   const f1Label = (): string => translateSafe('settings.openKey');
-
   /* ---------- 场景 ---------- */
   const scene = new BattleScene({
     app,
@@ -177,13 +176,8 @@ export function createGame(o: CreateGameDeps): GameHandle {
      * 那会把场景与设置面板的构造顺序绑死。
      */
     createChrome: (pixi) =>
-      new ScreenChrome({
-        pixi,
-        gearAt: battleGearBoxAt,
-        f1Label,
-        showKeyHints: showKeyHintsNow,
-        onGear: () => settingsToggle.toggle(),
-      }),
+      createBattleChrome({ pixi, translate: translateSafe, f1Label, showKeyHints: showKeyHintsNow,
+        onGear: () => settingsToggle.toggle(), battle }),
   });
 
   /* ---------- UI 缩放 ---------- */
@@ -636,6 +630,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
           runOver: screens.runOver,
           codex: screens.codex,
           confirm: confirmDialog,
+          devClear: () => state.loop?.devClear() ?? false,
           /**
            * ⚠️ **边角控件按相位取**（`getChrome()`）：每帧只更新**当前这一屏**
            * 的齿轮 / 返回箭头（键位提示跟着唯一 flag 走）。各屏各自的

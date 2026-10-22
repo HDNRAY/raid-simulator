@@ -60,6 +60,7 @@ import * as infoSvg from './icons/info.svg?raw';
 import * as pauseSvg from './icons/pause.svg?raw';
 import * as playSvg from './icons/play.svg?raw';
 import * as restartSvg from './icons/restart.svg?raw';
+import * as skipSvg from './icons/skip.svg?raw';
 import type { Container, Texture } from 'pixi.js';
 import type { PixiCtor } from '../ui/primitives';
 
@@ -93,6 +94,13 @@ const SOURCES: Readonly<Record<string, unknown>> = {
    * （见文件头"颜色"那段）。
    */
   'arrow-left': arrowLeftSvg,
+  /**
+   * **快进 / 跳过**（2026-10-22）：开发模式那颗"一键过关"按钮的图标。
+   *
+   * ⚠️ 它只在开发模式出现（见 `ui/ScreenChrome` 的 `onDevClear`）——
+   * 但图标本身没有"开发专用"这回事，照常登记。
+   */
+  skip: skipSvg,
 };
 
 /**

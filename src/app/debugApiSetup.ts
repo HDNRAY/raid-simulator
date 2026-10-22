@@ -196,6 +196,12 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
       );
     },
     /**
+     * **开发模式的一键过关**（2026-10-22）：与 `F2` / 齿轮旁那颗按钮
+     * **同一条**实现（`BattleLoop.devClear`），所以截图脚本验证的就是
+     * 玩家点它时发生的事 —— 不是另一套"脚本专用"的作弊路径。
+     */
+    devClear: () => state.loop?.devClear() ?? false,
+    /**
      * 当前键位表（顶层探针）。
      *
      * 端到端脚本用它来"按某个技能" —— 而不是把键位写死在脚本里。

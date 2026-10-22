@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { battleGearBoxAt, chromeBoxAt } from '../../src/ui/ScreenChrome';
+import { battleGearBoxAt, chromeBoxAt, devClearBoxOf } from '../../src/ui/ScreenChrome';
 import { iconHintBoxSize, iconHintPlacement } from '../../src/ui/iconHint';
 import { LAYOUT, LOGICAL, scaleUiRect } from '../../src/ui/layout';
 
@@ -290,5 +290,38 @@ describe('战斗界面的齿轮：**玩家面板右缘 + 间距**', () => {
     expect(b.box.size).toBeGreaterThan(a.box.size);
     expect(b.hint.w).toBeGreaterThan(a.hint.w);
     expect(b.hint.h).toBeGreaterThan(a.hint.h);
+  });
+});
+
+/**
+ * ==================================================================
+ * **开发模式的「一键过关」按钮落点**（2026-10-22）
+ * ==================================================================
+ *
+ * 用户："一键过关，**放在设置旁边**"。所以钉两件事：
+ *
+ *   1. 它在齿轮**正右方**、同一行、同尺寸（"旁边"的字面意思）
+ *   2. 两个矩形**不相交**（六档缩放都不相交 —— 与齿轮那组循环同一个口径）
+ */
+describe('一键过关按钮：贴在齿轮右边且不重叠', () => {
+  const scales = [0.5, 0.8, 1, 1.4, 1.5, 2];
+
+  it('同一行、同尺寸、紧接在齿轮右侧', () => {
+    const gear = chromeBoxAt({ right: true, bottom: false }, 20, 1);
+    const dev = devClearBoxOf(gear);
+    expect(dev.y).toBe(gear.y);
+    expect(dev.size).toBe(gear.size);
+    expect(dev.x).toBeGreaterThanOrEqual(gear.x + gear.size);
+  });
+
+  it('六档缩放下都不与齿轮重叠、且不出画布右缘', () => {
+    for (const scale of scales) {
+      const gear = battleGearBoxAt(scale);
+      const dev = devClearBoxOf(gear);
+      /** 不相交（同一行 ⇒ 只看 x 区间）。 */
+      expect(dev.x).toBeGreaterThanOrEqual(gear.x + gear.size);
+      /** 在画布内。 */
+      expect(dev.x + dev.size).toBeLessThanOrEqual(LOGICAL.width);
+    }
   });
 });
