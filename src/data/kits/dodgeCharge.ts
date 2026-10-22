@@ -35,7 +35,7 @@
  * 伤害再乘一次 2。这与本作"增伤百分比层相加"是同一条规则（两个 +10%
  * 是 +20%，见 `stats/aggregate.ts` 文件头）。
  *
- * ⚠️ 不用 `damageMult`：那是"整体输出 ×N"（`BuffDef.damageMultBoost`，
+ * ⚠️ 不用 `damageMult`：那是"整体输出 ×N"（原先的 `BuffDef.damageMultBoost`，已删；
  * Boss 狂暴那条路），语义是**一个整体开关**；这里要的是"这一击多
  * 100%"，与「凝」同层才符合玩家的心算。
  *

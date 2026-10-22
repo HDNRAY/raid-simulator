@@ -92,7 +92,7 @@ const POLARITY_COLORS = {
  * ⚠️ **`ALL_BUFFS` 不是"全部 buff id"**：有两条是引擎**现造**的
  * （它们带着运行期参数，塞不进静态注册表）——
  *   - `boss-enrage-active`（`core/combat/stats.ts` 的 `enrageBuff()`，
- *     带 `damageMultBoost` 参数）
+ *     带运行时参数）
  *   - `douqi-full`（`core/combat/castPipeline.ts` 的 `syncDouqiFull()`，
  *     "缠满"的门槛标记）
  * 所以它们必须在下面**显式登记** —— 覆盖率测试看不见它们（那条测试的

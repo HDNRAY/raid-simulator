@@ -21,7 +21,7 @@ import { zhCN } from '../../src/i18n/locales/zh-CN';
  *
  * ⚠️ **输入是 `ALL_BUFFS`，不是"全仓所有 buff id"** —— 引擎还会**现造**
  * 一些（`boss-enrage-active`，见 `core/combat/stats.ts`：它带
- * `damageMultBoost` 参数，塞不进静态注册表）。那些靠
+ * 运行时参数，塞不进静态注册表）。那些靠
  * `shortLabelKeyOf` 里的**开发期告警**兜（`warnUnknownShortLabel`）。
  * 两者合起来才是"没有静默缺项"的闭环，所以下面单列一条把这句话钉住。
  */

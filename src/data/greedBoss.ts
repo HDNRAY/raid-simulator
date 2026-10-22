@@ -23,7 +23,7 @@
  *
  * | 每层 | 落点 |
  * |---|---|
- * | 伤害 +10% | `damageMultBoost`（buff 的修正字段，**对 Boss 的技能伤害生效**） |
+ * | 伤害 +10% | `damageBoost` 的 `addPercent`（**对 Boss 的技能伤害生效**） |
  * | 回血 +1/秒 | `hpRegen`（每秒口径，引擎按逻辑步换算） |
  * | 读条 −10% | `haste`（`castPipeline` 里 `hastedCastTime` / `hastedCooldown` 的唯一来源） |
  *

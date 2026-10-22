@@ -22,7 +22,7 @@ import { makeCombatant, makeSkillDef } from './helpers';
  *
  * ⚠️ 这里**不钉具体数值**（AGENTS.md §4 的判据：数值会经常调、且黄金
  * 基线已经覆盖）：层数上限、每层 +10% 这些一律**从内容里取**
- * （`GREED_HOARD.maxStacks` / `damageMultBoost`），所以调平衡不会让这些
+ * （`GREED_HOARD.maxStacks` / `modifiers` 里的增伤值），所以调平衡不会让这些
  * 用例变红。
  */
 
@@ -98,8 +98,8 @@ describe('「敛财」：每层伤害 / 回血 / 读条一起变强，且卡在 
     const percent = typeof perStack?.value === 'number' ? perStack.value : 0;
     /**
      * ⚠️ 断言的是 **`damageBoost`** 这个统计项（伤害计算里真正的消费者），
-     * 不是 `damageMult` —— 后者是"整体输出倍率"的另一条路（`damageMultBoost`
-     * 删掉之后它不再被这条 buff 影响）。
+     * 不是 `damageMult` —— 后者是"整体输出倍率"的另一条路（已删的旧字段
+     * 曾经驱动它，现在这条 buff 不再影响它）。
      */
     expect(statsOf(e, 'boss').damageBoost).toBeCloseTo(percent * max, 6);
   });

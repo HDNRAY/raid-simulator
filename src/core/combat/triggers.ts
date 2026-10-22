@@ -381,7 +381,7 @@ export function runAbilities(
  * **`TriggerDef.filter` 真的会被求值吗** —— 2026-10-14 之前**不会**。
  *
  * ⚠️ 这个字段**类型里有、全仓没有一处读它**（与 `interruptImmune` /
- * `ccImmune` / `damageTakenMult` / `onTick` / `damageMultBoost` 是同一类病：
+ * `ccImmune` / `damageTakenMult` / `onTick` 是同一类病：
  * 写上去不报错、引擎当没看见）。「黑闪」需要"**只认拳**"，才把它接上。
  *
  * 四条判据（`HookFilter` 的四支）：

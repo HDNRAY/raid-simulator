@@ -88,7 +88,7 @@ export const WRATH_FURY: BuffDef = {
  *
  * ⚠️ `modifiers` 里的 `haste +0.05` **按层展开**（2026-10-14 接的那条：
  * `core/combat/stats.ts`），所以 8 层真的给 +0.40 —— 而不是"只给一份"。
- * ⚠️ 伤害走 `damageMultBoost: 1.08`：那个字段是**逐层相乘**（1.08^8 ≈ ×1.85）。
+ * ⚠️ 伤害走 `damageBoost`：每层 +8%，**加算**（8 层 = +64%）。
  */
 export const WRATH_RAGE: BuffDef = {
   id: 'wrath-rage',
