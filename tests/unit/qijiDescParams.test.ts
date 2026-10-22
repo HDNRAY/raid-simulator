@@ -76,12 +76,11 @@ describe('炁机说明的数值来自定义', () => {
     const delta = original.skillTweak?.costDeltas?.[0]?.delta;
     if (delta === undefined) throw new Error('聚气凝神没有 costDeltas');
     /** 造一份"改过数值"的定义（只动那一个数）——不写回内容池 */
+    const tweak = original.skillTweak;
+    if (tweak === undefined) throw new Error('聚气凝神没有 skillTweak');
     const mutated: QijiEntity = {
       ...original,
-      skillTweak: {
-        ...original.skillTweak,
-        costDeltas: [{ resource: 'douqi', delta: delta - 7 }],
-      } as QijiEntity['skillTweak'],
+      skillTweak: { ...tweak, costDeltas: [{ resource: 'douqi', delta: delta - 7 }] },
     };
     const before = render(templateOf(original), qijiDescParamsOf(original));
     const after = render(templateOf(mutated), qijiDescParamsOf(mutated));

@@ -528,7 +528,9 @@ describe('三条新炁机的说明与内容**对得上**', () => {
     expect(costDesc).toContain('{delta}');
     expect(Math.abs(reduction ?? 0)).toBeGreaterThan(0);
 
+    /** ⚠️ 先取出模板：渲染前要断言它是**模板**（不再写死数值）。 */
     const boostDesc = QIJI_CATALOG.get('qiji.ningShenRuDao.desc') ?? '';
+    expect(boostDesc).toContain('{override}');
     const override = qijiById('ningShenRuDao')?.skillTweak?.buffOverrides?.[0]?.modifiers[0]?.value;
     /** 2026-10-22 用户：数字前后不留空格 ⇒ 文案是 `变为100%`（只认数值）。 */
     /**
