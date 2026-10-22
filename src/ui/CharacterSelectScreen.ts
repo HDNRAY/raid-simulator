@@ -579,14 +579,19 @@ export class CharacterSelectScreen {
        * （实测"凯丽/黛玄"两块压在详情正文上 ✗）。底色仍留在 `cardGfx`
        * （内容要压在底色之上）。
        */
-      const fillTarget = this.cardGfx;
-      const strokeTarget = dimmed ? this.cardGfx : this.expandGfx;
-      fillTarget
+      /**
+       * ⚠️ 被展开的那张**只画底色**：它的**描边要跟着"长大后的矩形"**
+       * （由 `drawExpand` 画进 `expandGfx`）—— 在这里画槽位的框会留下一个
+       * 旧位置的小框（实测"卡片下面还有个小框"✗）。
+       */
+      this.cardGfx
         .roundRect(area.x, area.y, area.w, area.h, CARD_RADIUS)
         .fill({ color: skin.fillColor, alpha: skin.fillAlpha * cardAlpha });
-      strokeTarget
-        .roundRect(area.x, area.y, area.w, area.h, CARD_RADIUS)
-        .stroke({ color: skin.strokeColor, width: skin.strokeWidth, alpha: cardAlpha });
+      if (dimmed) {
+        this.cardGfx
+          .roundRect(area.x, area.y, area.w, area.h, CARD_RADIUS)
+          .stroke({ color: skin.strokeColor, width: skin.strokeWidth, alpha: cardAlpha });
+      }
       /**
        * 外环：光标 + 选择同一张卡（卡片本身是金的，环标出光标）、
        * 或光标落在开发中的卡上（那张卡整体压暗，没有环看不出来）——
@@ -690,6 +695,10 @@ export class CharacterSelectScreen {
     this.cardGfx
       .roundRect(rect.x, rect.y, rect.w, rect.h, CARD_RADIUS)
       .fill({ color: skin.fillColor, alpha: skin.fillAlpha * alpha });
+    /** **描边画在 `expandGfx`**（它在详情面板之上）⇒ 卡片自己那圈金边 ✓ */
+    this.expandGfx
+      .roundRect(rect.x, rect.y, rect.w, rect.h, CARD_RADIUS)
+      .stroke({ color: skin.strokeColor, width: skin.strokeWidth });
 
     /** 名字跟着卡片走（字号不插值：中文 >= 13 的下限比"大小连贯"更重要）。 */
     this.expandTitle.root.visible = this.expandAnim.progress < 0.5;
