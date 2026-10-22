@@ -55,7 +55,12 @@ interface TabButton {
  */
 export function exitButtonRect(): { readonly x: number; readonly y: number; readonly w: number; readonly h: number } {
   const m = currentSettingsMetrics();
-  return { x: m.panelX + 16, y: m.panelY + SETTINGS_PANEL.h - 38, w: 128, h: 26 };
+    /**
+   * ⚠️ **右下角、与提示同一行**（不额外占高度：从详情区挖一行会让
+   * "一屏 6 行"掉到 4 行，见 `settingsGeometry.HINT_BLOCK_TOP` 的注释）。
+   * 提示文字是左对齐的，所以右侧这一块是空的 ✓。
+   */
+  return { x: m.panelX + SETTINGS_PANEL.w - 158, y: m.panelY + SETTINGS_PANEL.h - 46, w: 140, h: 26 };
 }
 
 export class SettingsFrame {
@@ -211,9 +216,20 @@ export class SettingsFrame {
     this.exitGfx.clear();
     this.exitGfx
       .roundRect(exit.x, exit.y, exit.w, exit.h, 6)
-      .stroke({ color: PALETTE.panelLine, width: 1 });
-    this.exitLabel.set(this.translate('settings.backToMenu'));
-    this.exitLabel.setColor(PALETTE.textDim);
+      .fill({ color: PALETTE.panelLine, alpha: 0.35 })
+      .stroke({ color: PALETTE.textDim, width: 1 });
+    /**
+     * ⚠️ 用**正常文字色**（用户 2026-10-22："目前一直是灰色的"）——
+     * `textDim` 在这个仓库里是"禁用 / 次要"的含义，放主操作上会被读成不可点 ✗。
+     * 快捷键从 `MNEMONIC_KEYS` 反查后拼上（键位不进 i18n，AGENTS §3b）。
+     */
+    const exitMnemonic = mnemonicKeyOf('exitToHome');
+    this.exitLabel.set(
+      exitMnemonic === undefined
+        ? this.translate('settings.backToMenu')
+        : `${this.translate('settings.backToMenu')} (${exitMnemonic})`,
+    );
+    this.exitLabel.setColor(PALETTE.text);
     this.exitLabel.root.x = exit.x + exit.w / 2;
     this.exitLabel.root.y = exit.y + exit.h / 2;
 

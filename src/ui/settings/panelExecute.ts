@@ -169,6 +169,8 @@ export function executePanelDispatch(
 /** `executeKeyPanelAction` 要碰的那些外部世界（与 `PanelActionBindings` 分开定义）。 */
 export interface KeyActionBindings {
   readonly close: () => void;
+  /** **底部「回主菜单」**（2026-10-22）。 */
+  readonly exitToHome: () => void;
   readonly switchTab: (tab: SettingsTab) => void;
   /** 「通用」页切操作方式（唯一 flag 的写入点）。 */
   readonly switchOperationMode: (mode: OperationMode) => void;
@@ -300,6 +302,13 @@ export function executeKeyPanelAction(
            */
           do_.switchTab('general');
           return { consumed: true, focus: { zone: 'slider' } };
+        case 'exitToHome':
+          /**
+           * **`M` = 回主菜单**（2026-10-22）。只**发起**这次询问 ——
+           * 真正确认之后"关面板 + 回首页"由装配方（`app/exitConfirm`）做。
+           */
+          do_.exitToHome();
+          return { consumed: true };
       }
     }
     case 'move': {

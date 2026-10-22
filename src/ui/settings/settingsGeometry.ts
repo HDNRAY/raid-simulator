@@ -301,6 +301,13 @@ export const RESET_BUTTON_H = 26;
  * （那是"命中区与画出来的位置对不上"的经典来源）。空着的那一行只是
  * 不写字。
  */
+/**
+ * ⚠️ **不为「回主菜单」额外挖一行**（2026-10-22 试过一次，撤回了）：
+ * 面板高度固定 520，从详情区扣 34px 会让"一屏 6 行"掉到 **4 行** ✗
+ * （`MIN_DETAIL_ROWS` 是用户明确划的下限）。
+ * 所以那颗按钮放在**提示行右侧**（同一行、不占新高度）——
+ * 见 `SettingsFrame.exitButtonRect`。
+ */
 export const HINT_BLOCK_TOP =
   SETTINGS_PANEL.h - RESET_BUTTON_BOTTOM - RESET_BUTTON_H - HINT_LINE.gap - HINT_BLOCK_H;
 

@@ -31,6 +31,8 @@ import type { KeyRow } from './rows';
 export interface PanelActionDeps {
   /** 关闭弹窗。 */
   readonly close: () => void;
+  /** **底部「回主菜单」**（2026-10-22）：面板只发起询问。 */
+  readonly exitToHome: () => void;
   readonly switchTab: (tab: Parameters<PanelActions['switchTab']>[0]) => void;
   /** 「通用」页切操作方式（唯一 flag 的写入点）。 */
   readonly switchOperationMode: (mode: OperationMode) => void;
@@ -74,6 +76,8 @@ export interface PanelActionDeps {
 export function buildPanelActions(d: PanelActionDeps): PanelActions {
   return {
     close: () => d.close(),
+    /** 底部「回主菜单」：只发起询问（确认后由装配方执行）。 */
+    exitToHome: () => d.exitToHome(),
     switchTab: (tab) => d.switchTab(tab),
     switchOperationMode: (mode) => d.switchOperationMode(mode),
     /**

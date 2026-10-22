@@ -397,7 +397,7 @@ export type KeyAction =
        * 而是「按键」页右下角的一块 —— 它有自己的焦点区（`focus.slots`），
        * 从网格按下方向键就到，不需要助记键。
        */
-      readonly target: 'tabGeneral' | 'tabKeys' | 'resetKeys' | 'slider';
+      readonly target: 'tabGeneral' | 'tabKeys' | 'resetKeys' | 'slider' | 'exitToHome';
     }
   | { readonly kind: 'move'; readonly direction: 'up' | 'down' | 'left' | 'right' }
   | { readonly kind: 'cycle'; readonly back: boolean }

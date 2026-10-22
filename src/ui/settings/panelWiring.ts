@@ -43,6 +43,8 @@ import type { OperationMode } from '../../render/platform';
  */
 export interface PanelActions {
   readonly close: () => void;
+  /** **底部「回主菜单」**（2026-10-22）：只发起询问，确认后由装配方执行。 */
+  readonly exitToHome: () => void;
   readonly switchTab: (tab: SettingsTab) => void;
   /** 「通用」页切操作方式（唯一 flag 的写入点）。 */
   readonly switchOperationMode: (mode: OperationMode) => void;
@@ -101,6 +103,7 @@ export function runPanelKey(
 ): KeyExecutionResult {
   return executeKeyPanelAction(input, {
     close: a.close,
+    exitToHome: a.exitToHome,
     switchTab: a.switchTab,
     switchOperationMode: a.switchOperationMode,
     resetKeys: a.resetKeys,

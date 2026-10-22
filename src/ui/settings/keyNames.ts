@@ -53,6 +53,11 @@ export const MNEMONIC_KEYS: Readonly<Record<string, KeyAction>> = {
   r: { kind: 'mnemonic', target: 'resetKeys' },
   // UI 缩放：需求要求它也能用键盘直达，而不只是 Tab 遍历
   s: { kind: 'mnemonic', target: 'slider' },
+  /**
+   * **`M` = 回主菜单**（2026-10-22，用户："回主菜单需要一个快捷键"）。
+   * 与其它助记键同一条：键位表是唯一真相，按钮上的 `(M)` 是反查出来的。
+   */
+  m: { kind: 'mnemonic', target: 'exitToHome' },
 };
 
 /**
@@ -63,7 +68,7 @@ export const MNEMONIC_KEYS: Readonly<Record<string, KeyAction>> = {
  * 需求："改快捷键 害得改 i18n吗？" —— 所以键名**不进 i18n**。
  */
 export function mnemonicKeyOf(
-  target: 'tabGeneral' | 'tabKeys' | 'resetKeys' | 'slider',
+  target: 'tabGeneral' | 'tabKeys' | 'resetKeys' | 'slider' | 'exitToHome',
 ): string | undefined {
   for (const [key, action] of Object.entries(MNEMONIC_KEYS)) {
     if (action.kind === 'mnemonic' && action.target === target) return key.toUpperCase();

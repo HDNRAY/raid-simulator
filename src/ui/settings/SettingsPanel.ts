@@ -27,6 +27,7 @@ import { TouchSlotPreview } from './TouchSlotPreview';
 import { SkillDetail } from './SkillDetail';
 import { SettingsFrame } from './SettingsFrame';
 import { KeysFooter } from './KeysFooter';
+import { mnemonicKeyOf } from './keyNames';
 import { exitButtonRect } from './SettingsFrame';
 import { ScaleSlider } from './ScaleSlider';
 import {
@@ -451,6 +452,8 @@ export class SettingsPanel {
   private panelActions(): PanelActions {
     return buildPanelActions({
       close: () => this.options.onClose(),
+      /** **底部「回主菜单」**（2026-10-22）：只发起询问，确认后由装配方执行。 */
+      exitToHome: () => this.options.onExitToHome(),
       switchTab: (tab) => this.setTab(tab),
       switchOperationMode: (mode) => this.options.onOperationMode(mode),
       resetKeys: () => this.options.onResetKeys(),
@@ -569,6 +572,17 @@ export class SettingsPanel {
    * 切割：那是"一次按键怎么走完"这一个关注点）。面板只把状态接进去。
    */
   handleKey(key: string): boolean {
+    /**
+     * **`M` = 回主菜单**（2026-10-22，用户："回主菜单需要一个快捷键"）。
+     * 键位在 `MNEMONIC_KEYS` 里（唯一真相，按钮上的 `(M)` 是反查出来的）；
+     * 这里只把"按下它要做什么"接到 `onExitToHome`（弹二次确认）。
+     * ⚠️ 判据用**反查**，不写死 `'m'` —— 改键位只动那张表。
+     */
+    const exitKey = mnemonicKeyOf('exitToHome');
+    if (exitKey !== undefined && key.toLowerCase() === exitKey.toLowerCase()) {
+      this.options.onExitToHome();
+      return true;
+    }
     return routePanelKey({
       key,
       visible: () => this.visible,

@@ -238,7 +238,18 @@ export function wireLoop(o: WireOptions): void {
        * 少一个分支的表现是"那一屏停住不动"（选择变了画面不跟）。
        */
       /** ⚠️ 模态优先：开着就先画它（也不让下面那些屏继续吃帧）。 */
-      if (host.confirm.visible) {
+      /**
+     * ⚠️ **这次按键已经归设置弹窗了**（`settingsKeys.ts` 的 window 监听先跑，
+     * 并把 `state.handlingKeyDown` 立起来）⇒ 主循环这一份**必须直接返回**。
+     *
+     * 用户 2026-10-22 报的就是这个 bug："在选人界面 F1 打开设置再按 Esc，
+     * 会同时退回到主菜单**且**关闭设置" —— 两个监听都看到了那次 Esc：
+     * 设置先关掉面板，主循环随后看到"面板已关"，于是放过守卫、把界面也切走了 ✗。
+     * 任何时候在设置里按 `Esc`，都只该**关设置**。
+     */
+    if (state.handlingKeyDown) return;
+
+    if (host.confirm.visible) {
         host.confirm.frame();
         host.settings.update();
         return;
