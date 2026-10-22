@@ -170,6 +170,14 @@ export class CharacterSelectScreen {
    * 详情 —— 那正是"hover 优先、其次光标"那条老规矩）。
    */
   private hoverAway = false;
+  /**
+   * **指针停在谁身上**（`undefined` = 没停在任何卡上）。
+   *
+   * ⚠️ 屏幕必须自己记这一份：`PrepareDetailController` 的 hover 是它**内部**
+   * 的状态（`characterCursorTarget` 只读光标），而"哪张卡在展开"要跟着
+   * **hover** 走 —— 拿光标当判据就成了"永远展开光标那张"✗（实测过）。
+   */
+  private hoveredId: string | undefined;
   /** 正在展开的是第几张卡（`undefined` = 没有在展开）。 */
   private expandCard: number | undefined;
   private readonly expandGfx: Graphics;
@@ -315,6 +323,7 @@ export class CharacterSelectScreen {
     this.selection = next;
     /** 键盘一动 ⇒ 重新跟着光标展开（指针不在卡片上也算"看这一张"）。 */
     this.hoverAway = false;
+    this.hoveredId = undefined;
     this.redraw();
   }
 
@@ -369,6 +378,7 @@ export class CharacterSelectScreen {
     const next = characterHoverTarget(this.players, px, py);
     /** ⚠️ 指针落空 ⇒ 收起全部（"移开就收起"）。 */
     this.hoverAway = next === undefined;
+    this.hoveredId = next?.id;
     if (this.detailPanel.hoverAt(next)) this.redraw();
     return next !== undefined;
   }
@@ -376,6 +386,7 @@ export class CharacterSelectScreen {
   /** 指针离开画布：清掉悬停（否则详情会一直停在最后划过的那一项）。 */
   clearHover(): void {
     this.hoverAway = true;
+    this.hoveredId = undefined;
     if (this.detailPanel.clearHover()) this.redraw();
   }
 
@@ -539,6 +550,14 @@ export class CharacterSelectScreen {
       const cardAlpha = dimmed ? Math.max(0.3, 1 - 0.7 * easeOutCubic(this.expandAnim.progress)) : 1;
       card.name.root.alpha = cardAlpha;
       card.status.root.alpha = cardAlpha;
+      /**
+       * ⚠️ **被展开的那张不再画自己的名字/状态**：详情里已经有名字了，
+       * 而它的槽位会被长大的卡片盖住 —— 留着会从面板半透明底色下透出来
+       * （实测"凯丽"两处重影 ✗）。
+       */
+      const selfLabel = !dimmed && this.expandAnim.progress > 0.15;
+      card.name.root.visible = !selfLabel;
+      card.status.root.visible = !selfLabel;
 
       card.name.set(t(entry.nameKey));
       card.name.setColor(skin.nameColor);
@@ -587,7 +606,13 @@ export class CharacterSelectScreen {
      * 就朝哪张展开。`retarget` 只换方向、不动进度 ⇒ 快速来回时**从当前
      * 进度往反方向跑**（用户要的"中断并朝反状态运行"）。
      */
-    const focus = this.hoverAway ? undefined : characterCursorTarget(this.selection, this.players);
+    /**
+     * 展开哪张 = **hover 优先、其次光标**（用户："hover 哪个哪个就展开"）。
+     * 指针停在空白处（`hoverAway`）⇒ 全部收起。
+     */
+    const cursorTarget = characterCursorTarget(this.selection, this.players);
+    const focusId = this.hoveredId ?? (this.hoverAway ? undefined : cursorTarget?.id);
+    const focus = focusId === undefined ? undefined : { kind: 'player' as const, id: focusId };
     const focusIndex = this.players.findIndex((p) => p.id === focus?.id);
     if (focusIndex !== this.expandCard) this.expandCard = focusIndex;
     this.expandAnim = retarget(this.expandAnim, focusIndex >= 0 ? 1 : 0);
@@ -613,7 +638,7 @@ export class CharacterSelectScreen {
       }
     }
 
-    this.detailPanel.update(characterCursorTarget(this.selection, this.players));
+    this.detailPanel.update(focus);
   }
 
   /**
