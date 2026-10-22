@@ -14,7 +14,7 @@
 | 子目录 | 内容 | 数量 | 谁在读 |
 |---|---|---|---|
 | `frames/<slot>/<anim>/fNN.png` | 3 个人物 + 7 个 Boss 的 idle / attack 帧 | 166 | `render/spriteAssets.ts` |
-| `portraits/DATO_<n>_m0.png` | 三位可玩角色的对话头像 | 3 | `render/portraitAssets.ts` |
+| `portraits/DATO_<n>_m0.png` | 三位可玩角色 + **七个 Boss** 的对话头像 | 10 | `render/portraitAssets.ts` |
 | `backdrops/BG_BG_*.png` | 七个 Boss 的战斗背景 | 7 | `render/bossBackdrops.ts` |
 
 ## ⚠️ 为什么它必须进仓库（2026-10-14 的教训）
