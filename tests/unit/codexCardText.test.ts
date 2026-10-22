@@ -31,7 +31,7 @@ describe('cardTextPlan：按卡片高度算行数', () => {
     const plan = cardTextPlan({ cardH: 148, condLines: 5 });
     expect(plan.descLines).toBe(0);
     /** 条件块仍然贴底：它的下沿 = 卡片底 − 内边距。 */
-    const condBottom = plan.condY + (plan.condLines * CODEX_LINE_H) / 2;
+    const condBottom = plan.condTop + (plan.condLines * CODEX_LINE_H) / 2;
     expect(condBottom).toBeLessThanOrEqual(148);
   });
 
@@ -42,10 +42,11 @@ describe('cardTextPlan：按卡片高度算行数', () => {
   it('三块**互不重叠**（名字底 ≤ 说明顶、说明底 ≤ 条件顶）', () => {
     for (const h of [120, 148, 180, 260]) {
       const plan = cardTextPlan({ cardH: h, condLines: 2 });
-      const nameBottom = plan.nameY + 12;
-      const descTop = plan.descY - (plan.descLines * CODEX_LINE_H) / 2;
-      const descBottom = plan.descY + (plan.descLines * CODEX_LINE_H) / 2;
-      const condTop = plan.condY - (plan.condLines * CODEX_LINE_H) / 2;
+      /** 三块现在都给**顶部**（见 `CardTextPlan` 的注释），直接累加即可。 */
+      const nameBottom = plan.nameTop + 12;
+      const descTop = plan.descTop;
+      const descBottom = plan.descTop + plan.descLines * CODEX_LINE_H;
+      const condTop = plan.condTop;
       expect(nameBottom, `h=${h}`).toBeLessThanOrEqual(descTop);
       expect(descBottom, `h=${h}`).toBeLessThanOrEqual(condTop);
     }
@@ -54,7 +55,7 @@ describe('cardTextPlan：按卡片高度算行数', () => {
   it('三块都在卡片之内（条件不越过下沿）', () => {
     const h = 148;
     const plan = cardTextPlan({ cardH: h, condLines: 2 });
-    expect(plan.condY + (plan.condLines * CODEX_LINE_H) / 2).toBeLessThanOrEqual(h);
+    expect(plan.condTop + (plan.condLines * CODEX_LINE_H) / 2).toBeLessThanOrEqual(h);
   });
 });
 
@@ -69,5 +70,24 @@ describe('wrapHardLines：先按硬换行分段，再按宽度折（不限行）
 
   it('空段被跳过（文案里有多余空行时不会画出空行）', () => {
     expect([...wrapHardLines('a\n\nb', 10)]).toEqual(['a', 'b']);
+  });
+});
+
+describe('跨卡一致（用户 2026-10-22："不同炁机卡 左上坐标不统一"）', () => {
+  it('名字顶 / 说明顶 只由常量决定 —— 与卡片高度、条件行数无关', () => {
+    /**
+     * ⚠️ 这条钉的是**机制**（不是数值）：只要三行都按"顶"摆位、并且顶来自
+     * 同一组常量，那么"名字长短 / 说明行数 / 条件行数"都不会让某张卡的
+     * 文字起点比别人高或低 ✗ —— 那正是用户报的那个现象。
+     */
+    const plans = [
+      { cardH: 120, condLines: 1 },
+      { cardH: 176, condLines: 2 },
+      { cardH: 260, condLines: 4 },
+    ].map((args) => cardTextPlan(args));
+    const nameTops = new Set(plans.map((p) => p.nameTop));
+    const descTops = new Set(plans.map((p) => p.descTop));
+    expect(nameTops.size).toBe(1);
+    expect(descTops.size).toBe(1);
   });
 });

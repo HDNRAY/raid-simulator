@@ -8,6 +8,7 @@ import { makeBoss, makePlayer } from '../../src/data/units';
 import { ALL_QIJI } from '../../src/data/qiji';
 import type { Combatant, StatKey } from '../../src/core/types';
 import type { EventDef } from '../../src/core/events';
+import { interruptCasts } from '../../src/core/combat/interrupt';
 
 /**
  * **派生技的两条炁机**（2026-10-22）—— 真引擎实测，只测**接线与效果**。
@@ -194,6 +195,51 @@ describe('「一击破势」：「击」命中打断读条', () => {
     expect(events.some((e) => e.kind === 'interruptSuccess')).toBe(true);
     const boss = engine.snapshot.combatants.find((c) => c.side === 'enemy');
     expect(boss?.casts).toHaveLength(0);
+  });
+
+  /**
+   * ⚠️ **霸体读条不该被「击」打断**（用户 2026-10-22："击的打断为什么要能
+   * 打断霸体？？？"）—— `force: true` 已经去掉，所以这条是**反向**守卫：
+   * 「击」只买得到"打断普通读条"这一档，破霸体是「破」的特权。
+   */
+  /**
+   * ⚠️ **霸体挡得住「击」**（用户 2026-10-22："击的打断为什么要能打断霸体？？？"）。
+   *
+   * 直接测 `interruptCasts` 这条**唯一实现**：目标身上有 `interruptImmune`
+   * （霸体）时，打断**一定失败** —— 与 `force` 无关（引擎刻意不看它，见
+   * `core/combat/interrupt.ts` 的注释）。所以「一击破势」买到的只是
+   * "打断普通读条"这一档。
+   */
+  it('霸体目标：interruptCasts 一定失败', () => {
+    const armor = ALL_BUFFS.find((b) => b.id === 'boss-heavy-armor');
+    if (armor === undefined) throw new Error('没有霸体 buff');
+    const boss = makePlayer('linwanfeng');
+    const armored = { ...boss, buffs: applyBuff(boss, armor, boss.id, 0).buffs };
+    /** 给它一条读条，好让"打断"有对象（否则测不出是不是被霸体挡住的）。 */
+    const casting = {
+      ...armored,
+      casts: [
+        {
+          skillId: 'wrath-smash',
+          startedAtTick: 0,
+          castTimeMs: 800,
+          resolvedHits: 0,
+          interruptible: true,
+        },
+      ],
+    };
+    const events: EventDef[] = [];
+    const hit = interruptCasts({
+      tick: 1,
+      target: casting,
+      actorId: 'player',
+      skillId: 'strike',
+      force: true,
+      replace: () => {},
+      push: (e) => events.push(e),
+    });
+    expect(hit, '霸体时打断必须失败（连 force 也不行）').toBe(false);
+    expect(events.some((e) => e.kind === 'interruptImmune')).toBe(true);
   });
 
   it('不带炁机：击命中不会打断（对照）', () => {

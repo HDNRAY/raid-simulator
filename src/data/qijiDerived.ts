@@ -70,8 +70,12 @@ export const QIJI_CHONG_STACK: QijiEntity = {
  * 用户 2026-10-22："击 的炁机改成 **击 可以打断**，也是 **5次击解锁**"。
  *
  * 实现复用现成两块：`onHitDealt` + `filter: { by:'skill', skillId:'strike' }`
- * （触发器只认"击打中"），然后 `deal` 一条**只含 `interrupt` 效果的命中** ——
- * 与「破」的打断同一条效果通路（`force: true` = 不区分可打断性）。
+ * （触发器只认"击打中"），然后 `deal` 一条**只含 `interrupt` 效果的命中**。
+ *
+ * ⚠️ **不带 `force`**（用户 2026-10-22 质疑："击的打断为什么要能打断霸体？？？"）
+ * —— `force: true` 的语义是"连霸体也打断"，那是**「破」那条线的特权**
+ * （「破」10 炁 + 30 秒冷却，代价买的就是"破霸体"）。「击」是连招的收尾，
+ * 拿的只是"打断普通读条"这一档 ⇒ 去掉 `force`，走普通打断 ✓。
  *
  * ⚠️ 它不消耗 combo 窗口（窗口本来就由「击」自己被用掉）；也不改 `STRIKE`
  * 的定义 —— 否则"带不带这条炁机"会变成两个技能 ✗。
@@ -110,7 +114,8 @@ export const QIJI_STRIKE_INTERRUPT: QijiEntity = {
               /** 只有打断、没有伤害 —— 伤害仍由「击」自己那一下给。 */
               hit: {
                 at: 0,
-                effects: [{ kind: 'interrupt', target: { mode: 'primaryEnemy' }, force: true }],
+                /** ⚠️ 不带 `force`：只打断**非霸体**读条（见上面的说明）。 */
+                effects: [{ kind: 'interrupt', target: { mode: 'primaryEnemy' } }],
               },
             },
           ],

@@ -219,13 +219,21 @@ export function clampScrollOffset(offset: number, max: number): number {
 /** 卡片里三行字的排版计划（坐标 = **相对卡片上沿的中心线**）。 */
 export interface CardTextPlan {
   /** 名字那一行的中心。 */
-  readonly nameY: number;
+  /**
+   * 名字那一行**顶部**（相对卡片）。
+   *
+   * ⚠️ 2026-10-22 用户："不是 左 = 上，是**左和上 的坐标** 不同炁机卡 不统一"
+   * —— 所以这里给的是**顶**而不是**中心**：`Label` 用 `anchorY: 0` 摆位，
+   * 于是**每张卡**的名字顶边都等于 `CARD_TEXT_INSET`，与名字长短无关 ✓。
+   */
+  readonly nameTop: number;
   /** 效果说明**整块**的中心（多行时以块中心对齐 —— `Label` 的 `anchorY` 是 0.5）。 */
-  readonly descY: number;
+  /** 说明第一行的**顶部**（相对卡片；同样是"顶"，跨卡一致）。 */
+  readonly descTop: number;
   /** 效果说明最多几行。 */
   readonly descLines: number;
-  /** 解锁条件**整块**的中心。 */
-  readonly condY: number;
+  /** 解锁条件**整块**的顶部（贴底：`h - inset - condH`）。 */
+  readonly condTop: number;
   /** 解锁条件最多几行。 */
   readonly condLines: number;
 }
@@ -258,9 +266,15 @@ export function codexGridWidth(L: CodexLayout = CODEX_LAYOUT): number {
 export function codexGridLeft(L: CodexLayout = CODEX_LAYOUT): number {
   return Math.round((L.width - codexGridWidth(L)) / 2);
 }
-/** 卡片内边距（上下各留一点，不然描边会贴字）。 */
-const CARD_PAD_TOP = 10;
-const CARD_PAD_BOTTOM = 10;
+/**
+ * ⚠️ 2026-10-22 用户："左上角 **左和上的 padding 不统一**" —— 上下内边距改成
+ * 与左内边距**同一个常量**（`CARD_TEXT_INSET`），于是卡片里三行字到边框的
+ * 距离四边都是 12。
+ *
+ * 之前是左 12 / 上 10 / 下 10：差 2px 肉眼在"名字贴着上边框"时看得出来 ✗。
+ */
+const CARD_PAD_TOP = CARD_TEXT_INSET;
+const CARD_PAD_BOTTOM = CARD_TEXT_INSET;
 /** 名字那一行占的高度（含与下面两块的间距）。 */
 const NAME_BAND = 24;
 
@@ -302,13 +316,16 @@ export function cardTextPlan(args: {
    */
   const room = Math.floor((condTop - 4 - descTop) / CODEX_LINE_H);
   const descLines = Math.max(0, Math.min(4, room));
-  const descH = descLines * CODEX_LINE_H;
   return {
-    /** 名字的中心：名字带的正中。 */
-    nameY: CARD_PAD_TOP + NAME_BAND / 2,
-    descY: descTop + descH / 2,
+    /**
+     * ⚠️ 全部返回**顶部**（不是中心）：`Label` 用 `anchorY: 0` 摆位 ⇒
+     * "不同卡片的文字起点"只由这三个常量决定，与名字字数 / 说明行数无关 ✓
+     * （用户 2026-10-22 报的就是"不同炁机卡 左上坐标不统一"）。
+     */
+    nameTop: CARD_PAD_TOP,
+    descTop,
     descLines,
-    condY: condTop + condH / 2,
+    condTop,
     condLines,
   };
 }

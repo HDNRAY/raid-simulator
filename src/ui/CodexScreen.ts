@@ -431,7 +431,7 @@ export class CodexScreen {
       const plan = cardTextPlan({ cardH: shifted.h, condLines: condLines.length });
 
       nameLabel.root.x = textX;
-      nameLabel.root.y = shifted.y + plan.nameY;
+      nameLabel.root.y = shifted.y + plan.nameTop;
       nameLabel.set(entry.nameKey === undefined ? t('screen.codex.locked') : t(entry.nameKey));
       nameLabel.setColor(entry.nameKey === undefined ? PALETTE.textDim : PALETTE.text);
       nameLabel.root.visible = true;
@@ -455,14 +455,14 @@ export class CodexScreen {
           descLabel.set(wrapByChars(flat, { perLine, maxLines: plan.descLines }).join('\n'));
           descLabel.setColor(PALETTE.textDim);
           descLabel.root.x = textX;
-          descLabel.root.y = shifted.y + plan.descY;
+          descLabel.root.y = shifted.y + plan.descTop;
           descLabel.root.visible = true;
         }
       }
 
       if (conditionLabel !== undefined) {
         conditionLabel.root.x = textX;
-        conditionLabel.root.y = shifted.y + plan.condY;
+        conditionLabel.root.y = shifted.y + plan.condTop;
         conditionLabel.set(condLines.join('\n'));
         conditionLabel.setColor(PALETTE.textDim);
         conditionLabel.root.visible = true;
@@ -512,9 +512,13 @@ export class CodexScreen {
         y: 0,
         size: FONT.body,
         color: PALETTE.text,
-        /** ⚠️ **左对齐**（三行同一条基线，见 `CARD_TEXT_INSET`）。 */
+        /**
+         * ⚠️ **左对齐 + 顶部锚**（用户 2026-10-22："不同炁机卡左上坐标不统一"）
+         * —— 三行都用 `anchorY: 0`，按"顶"摆位，于是每张卡的起点只由
+         * `CARD_TEXT_INSET` 决定，与名字字数 / 说明行数无关 ✓。
+         */
         anchorX: 0,
-        anchorY: 0.5,
+        anchorY: 0,
         kai: true,
       });
       const desc = new Label(pixi, {
@@ -523,8 +527,9 @@ export class CodexScreen {
         /** 中文下限 13（`FONT.small`）—— 效果说明不能更小。 */
         size: FONT.small,
         color: PALETTE.textDim,
+        /** 顶部锚：与名字同一套摆位（见名字那段注释）。 */
         anchorX: 0,
-        anchorY: 0.5,
+        anchorY: 0,
       });
       const condition = new Label(pixi, {
         x: 0,
@@ -533,7 +538,7 @@ export class CodexScreen {
         size: FONT.small,
         color: PALETTE.textDim,
         anchorX: 0,
-        anchorY: 0.5,
+        anchorY: 0,
       });
       this.cardsLayer.addChild(name.root, desc.root, condition.root);
       this.nameLabels.push(name);
