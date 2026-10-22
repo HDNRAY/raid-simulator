@@ -13,6 +13,7 @@ import { logicMs } from '../core/loopConstants';
 import { ATTACK, PI } from './kits/linwanfeng';
 import { FOCUS_BUFF } from './kits/shared';
 import { S } from './scale';
+import { CHONG_WINDOW } from './kits/daixuan';
 
 /**
  * **全部炁机**（顺序 = `QijiSelect` 的候选顺序 / 光标默认位置）。
@@ -472,6 +473,89 @@ export const QIJI_EXPLOSIVE_SHIELD: QijiEntity = {
                 ],
               },
             },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+/** 「弹中生波」：按住「弹」满 4 秒 ⇒ 开一次「冲」的窗口。 */
+export const QIJI_HOLD_WAVE: QijiEntity = {
+  id: 'danZhongShengBo',
+  kind: 'qiji',
+  nameKey: 'qiji.danZhongShengBo.name',
+  descKey: 'qiji.danZhongShengBo.desc',
+  icon: 'char_attack',
+  category: 'offense',
+  rarity: 'epic',
+  unlock: {
+    /** ⚠️ "发 10 次弹" = **命中 10 次**（按住只算 1 次 `skillUses` ✗）。 */
+    kind: 'statAtLeast',
+    stat: { s: 'skillHits', skillId: 'dan', scope: 'run' },
+    value: 10,
+  },
+  abilities: [],
+  passiveBuffs: [
+    {
+      id: 'qiji-hold-wave',
+      nameKey: 'qiji.danZhongShengBo.name',
+      icon: 'char_attack',
+      polarity: 'buff',
+      duration: Number.POSITIVE_INFINITY,
+      maxStacks: 1,
+      stacking: { mode: 'refresh' },
+      triggers: [
+        {
+          on: 'onTick',
+          /** 每按住满 4 秒开一次窗口（`when` 保证"只在你按着弹的时候"）。 */
+          cooldownMs: 4000,
+          when: { kind: 'hasBuff', who: 'self', buffId: 'daixuan-tan-rhythm' },
+          then: [
+            { kind: 'grant', target: { mode: 'self' }, buff: CHONG_WINDOW },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+/** 「缠尽还生」：缠见底时自己回一点。 */
+export const QIJI_CHAN_REGEN: QijiEntity = {
+  id: 'chanJinHuanSheng',
+  kind: 'qiji',
+  nameKey: 'qiji.chanJinHuanSheng.name',
+  descKey: 'qiji.chanJinHuanSheng.desc',
+  icon: 'char_focus',
+  category: 'utility',
+  rarity: 'rare',
+  /**
+   * ⚠️ 用户要求的是"**累计消耗 500 缠**"，而今天 `BattleStatQuery` **没有**
+   * "资源累计消耗"这个维度 ⇒ 先用"放 15 次波"（≈600 缠）当代理条件，
+   * 并在这里写明：加 `{ s: 'resourceSpent', resource, scope }` 之后改成它。
+   */
+  unlock: {
+    kind: 'statAtLeast',
+    stat: { s: 'skillUses', skillId: 'bo', scope: 'run' },
+    value: 15,
+  },
+  abilities: [],
+  passiveBuffs: [
+    {
+      id: 'qiji-chan-regen',
+      nameKey: 'qiji.chanJinHuanSheng.name',
+      icon: 'char_focus',
+      polarity: 'buff',
+      duration: Number.POSITIVE_INFINITY,
+      maxStacks: 1,
+      stacking: { mode: 'refresh' },
+      triggers: [
+        {
+          on: 'onTick',
+          cooldownMs: 5000,
+          when: { kind: 'resourceBelow', who: 'self', resource: 'douqi', value: 20 },
+          then: [
+            { kind: 'resource', target: { mode: 'self' }, resource: 'douqi', delta: 10 },
           ],
         },
       ],

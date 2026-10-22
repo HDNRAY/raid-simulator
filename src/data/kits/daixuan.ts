@@ -269,8 +269,71 @@ export const BREAK: ActiveSkillDef = {
   interruptible: false,
 };
 
+/**
+ * **派生窗口**：按住「弹」满 4 秒后出现的那扇门（2026-10-22）。
+ *
+ * ⚠️ 它由**炁机「弹中生波」**的触发器授予（不是技能自己给的）—— 所以
+ * 没有那条炁机时，`CHONG` 的 `requires` 永远不满足 ⇒ 不出现在技能栏 ✓
+ * （与「击」同一条：`requires` 不满足的派生技不占栏位）。
+ */
+export const CHONG_WINDOW: BuffDef = {
+  id: 'daixuan-chong-window',
+  nameKey: 'skill.chong.name',
+  icon: 'char_magic2',
+  polarity: 'buff',
+  hidden: true,
+  /** 3 秒内可用 —— 够按一下，不够攒两发。 */
+  duration: logicMs(30),
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+  /**
+   * ⚠️ **不挂 `flags.comboWindow`**：那个旗标是"渲染层把派生技画在源技能上方"
+   * 的提示，而它会被内容校验器当作"引用了一个技能"来检查（`MISSING_SKILL`）。
+   * 黛玄的这套是**按 buff 门禁**（`CHONG.requires`），不经过 combo-window
+   * 通路 ⇒ 不需要那个旗标，也就不需要在**每个角色**的注册表里都有 `chong`
+   * （实测：没有它时 runLoop 的 scoped 注册表会报错）。
+   */
+};
+
+/**
+ * **冲**：按住「弹」满 4 秒后的**派生技** —— 瞬发、无消耗、**20 伤**。
+ *
+ * 用户 2026-10-22："弹 按住超过4或者5秒，派生一个 瞬发 无消耗 伤害只有20 的波…
+ * 就叫 冲"。
+ *
+ * ⚠️ 名字是「冲」不是「波」：**波** 是攒满的那一发（40 缠 / 55 伤 / 1.4 秒），
+ * **冲** 是"弹打久了顺出来的小光束"（0 缠 / 20 伤 / 0 读条）。
+ * ⚠️ 用完就收（`removeBuff` 吃掉窗口）—— 一次窗口只换一发。
+ */
+export const CHONG: ActiveSkillDef = {
+  id: 'chong',
+  kind: 'activeSkill',
+  nameKey: 'skill.chong.name',
+  descKey: 'skill.chong.desc',
+  icon: 'char_magic2',
+  abilities: [
+    { kind: 'removeBuff', target: { mode: 'self' }, buffId: CHONG_WINDOW.id },
+  ],
+  castTime: 0,
+  cooldown: 0,
+  cost: [],
+  targeting: { mode: 'primaryEnemy' },
+  hits: [
+    {
+      at: 0,
+      effects: [
+        { kind: 'damage', damage: { base: S(20), canCrit: false, countsAsHit: true } },
+      ],
+    },
+  ],
+  /** ⚠️ 只有当窗口开着时才有这个技能（`requires` 不满足 ⇒ 不进技能栏）。 */
+  requires: [{ kind: 'hasBuff', who: 'self', buffId: CHONG_WINDOW.id }],
+  tags: [],
+  interruptible: false,
+};
+
 /** 黛玄的那一套（顺序 = 技能栏顺序 = 默认键位顺序）。 */
-export const DAIXUAN_SKILLS: readonly SkillDef[] = [DAN, BO, BREAK, DUN, YU];
+export const DAIXUAN_SKILLS: readonly SkillDef[] = [DAN, BO, BREAK, DUN, YU, CHONG];
 
 /** 她带的两条常驻 buff（`negateHits` 那条由技能授予，不在这里）。 */
-export const DAIXUAN_BUFFS: readonly BuffDef[] = [TAN_RHYTHM, DUN_SHIELD];
+export const DAIXUAN_BUFFS: readonly BuffDef[] = [TAN_RHYTHM, DUN_SHIELD, CHONG_WINDOW];

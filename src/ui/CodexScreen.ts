@@ -236,7 +236,12 @@ export class CodexScreen {
       stateLabel.set(
         entry.unlocked ? t('screen.codex.unlocked') : t('screen.codex.notUnlocked'),
       );
-      stateLabel.root.visible = true;
+      /**
+       * ⚠️ 卡片很矮时（池子 21 条 = 5 行，`codexCardRects` 会把卡片压到 ~66）
+       * **不画状态行** —— 否则它和下面那行条件会叠在一起（实测叠了 ✗）。
+       * "已解锁 / 未解锁"的信息仍然在：名字是否 ？？？ 就说清了。
+       */
+      stateLabel.root.visible = rect.h >= 84;
 
       const conditionLabel = this.conditionLabels[index];
       if (conditionLabel !== undefined) {
