@@ -436,11 +436,15 @@ export const QIJI_ZHAN: QijiEntity = {
 };
 
 import {
+  QIJI_BREAK_MIGHT,
   QIJI_CHONGJI,
   QIJI_DODGE_DOUQI,
+  QIJI_EXPLOSIVE_SHIELD,
   QIJI_FOCUS_SLASH,
   QIJI_QI_RECYCLE,
   QIJI_QI_RESONANCE,
+  QIJI_THICK_SHIELD,
+  QIJI_YU_ENERGY,
 } from './qijiExtra';
 
 export const ALL_QIJI: readonly QijiEntity[] = [
@@ -459,6 +463,10 @@ export const ALL_QIJI: readonly QijiEntity[] = [
   QIJI_DODGE_DOUQI,
   QIJI_QI_RESONANCE,
   QIJI_QI_RECYCLE,
+  QIJI_YU_ENERGY,
+  QIJI_BREAK_MIGHT,
+  QIJI_THICK_SHIELD,
+  QIJI_EXPLOSIVE_SHIELD,
 ];
 
 /** 按 id 取一个炁机（`chosen` 里存的是 id，记录 / UI 要还原定义）。 */

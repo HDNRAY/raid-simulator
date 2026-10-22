@@ -226,13 +226,13 @@ export class CodexScreen {
         .stroke({ color: skin.strokeColor, width: skin.strokeWidth });
 
       nameLabel.root.x = rect.x + rect.w / 2;
-      nameLabel.root.y = rect.y + 28;
+      nameLabel.root.y = rect.y + rect.h * 0.24;
       nameLabel.set(entry.nameKey === undefined ? t('screen.codex.locked') : t(entry.nameKey));
       nameLabel.setColor(entry.nameKey === undefined ? PALETTE.textDim : PALETTE.text);
       nameLabel.root.visible = true;
 
       stateLabel.root.x = rect.x + rect.w / 2;
-      stateLabel.root.y = rect.y + 52;
+      stateLabel.root.y = rect.y + rect.h * 0.5;
       stateLabel.set(
         entry.unlocked ? t('screen.codex.unlocked') : t('screen.codex.notUnlocked'),
       );
@@ -246,7 +246,14 @@ export class CodexScreen {
          * ⚠️ 中文按 `FONT.small`（13，`ui/layout.ts` 的下限）画，一行约 15 字；
          * 长条件（"同时满足：…"）折两行，再长就省略 —— 不许压到邻卡上。
          */
-        conditionLabel.set(wrapByChars(entry.unlockText, { perLine: 12, maxLines: 2 }).join('\n'));
+        /**
+         * ⚠️ 卡片矮的时候（池子长了，`codexCardRects` 会按行数压矮）只给**一行**
+         * 条件 —— 两行会压到状态行上（实测 19 条时就是这样叠在一起的 ✗）。
+         */
+        const lines = rect.h >= 92 ? 2 : 1;
+        conditionLabel.set(
+          wrapByChars(entry.unlockText, { perLine: 12, maxLines: lines }).join('\n'),
+        );
         conditionLabel.setColor(PALETTE.textDim);
         conditionLabel.root.visible = true;
       }

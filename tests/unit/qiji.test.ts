@@ -43,7 +43,7 @@ const TWEAKED = ALL_QIJI.filter((q) => q.skillTweak !== undefined);
 const PASSIVE = ALL_QIJI.filter((q) => q.passiveBuffs !== undefined);
 
 describe('炁机池：数量与形状', () => {
-  it('一共 **15** 条：2 条兜底 + 3 条派生 + 6 条改技能 + 4 条装 buff', () => {
+  it('一共 **19** 条：2 条兜底 + 3 条派生 + 7 条改技能 + 8 条装 buff', () => {
     /**
      * ⚠️ 2026-10-14 加了**两条**「用 30 次」的（拳 → 黑闪、斩 → 斩法）：
      *   - 「黑闪」**不改技能**，它靠 `passiveBuffs` 装一条常驻 buff
@@ -57,11 +57,11 @@ describe('炁机池：数量与形状', () => {
      *   - 「重击回缠」：`skillTweak`（劈回缠）**加** `passiveBuffs`
      *     （`onAvoided` 回缠）⇒ **两类都算**（它是"改技能 + 装 buff"的合体）
      */
-    expect(ALL_QIJI).toHaveLength(15);
+    expect(ALL_QIJI).toHaveLength(19);
     expect(DERIVED).toHaveLength(3);
-    expect(TWEAKED).toHaveLength(6);
+    expect(TWEAKED).toHaveLength(7);
     expect(ALL_QIJI.filter((q) => q.unlock.kind === 'always')).toHaveLength(2);
-    expect(PASSIVE).toHaveLength(4);
+    expect(PASSIVE).toHaveLength(8);
   });
 
   it('每条都是 `kind: "qiji"`（W8 的类型那一半：不再是假 kind）', () => {
@@ -368,10 +368,11 @@ describe('三条 `skillTweak`：解锁条件 + 效果形状', () => {
   const cost = qijiById('ningShenJuQi') as QijiEntity;
   const boost = qijiById('ningShenRuDao') as QijiEntity;
 
-  it('恰好六条，且都**不带** `comboWindow`（两类炁机不混）', () => {
+  it('恰好七条，且都**不带** `comboWindow`（两类炁机不混）', () => {
     expect(TWEAKED.map((q) => q.id).sort()).toEqual([
       'biShiJiXu',
       'chongJiHuiChan',
+      'dunBiSenYan',
       'ningShenJuQi',
       'ningShenRuDao',
       'qiNengHuiShou',

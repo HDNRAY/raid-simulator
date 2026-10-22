@@ -269,3 +269,212 @@ export const QIJI_DODGE_DOUQI: QijiEntity = {
     },
   ],
 };
+
+/* ================================================================== *
+ * 2026-10-22 第二轮（用户："就叫 冲，开工吧" + 已确认的四条）
+ * ================================================================== */
+
+/** 「回炁生息」的窗口：4 秒内炁回复 ×1.5。 */
+const QIJI_YU_ENERGY_BUFF: BuffDef = {
+  id: 'qiji-yu-energy',
+  nameKey: 'qiji.huiQiShengXi.name',
+  icon: 'char_focus',
+  polarity: 'buff',
+  color: 0x8ac06a,
+  duration: logicMs(40),
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+  modifiers: [
+    {
+      stat: 'energyRegenScale',
+      op: 'add',
+      value: 0.5,
+      sourceKey: 'qiji.huiQiShengXi.name',
+    },
+  ],
+};
+
+/**
+ * **回炁生息**：用完「愈」之后 4 秒内炁回复 **+50%**。
+ *
+ * 用途：黛玄的「弹」是炁换伤害，所以"回炁加速"直接等于"多打几发"。
+ */
+export const QIJI_YU_ENERGY: QijiEntity = {
+  id: 'huiQiShengXi',
+  kind: 'qiji',
+  nameKey: 'qiji.huiQiShengXi.name',
+  descKey: 'qiji.huiQiShengXi.desc',
+  icon: 'char_focus',
+  category: 'utility',
+  rarity: 'rare',
+  unlock: {
+    kind: 'statAtLeast',
+    stat: { s: 'skillUses', skillId: 'yu', scope: 'run' },
+    value: 3,
+  },
+  abilities: [],
+  passiveBuffs: [
+    {
+      ...QIJI_YU_ENERGY_BUFF,
+      triggers: [
+        {
+          on: 'onCastFinish',
+          filter: { by: 'skill', skillId: 'yu' },
+          then: [{ kind: 'grant', target: { mode: 'self' }, buff: QIJI_YU_ENERGY_BUFF }],
+        },
+      ],
+    },
+  ],
+};
+
+/** 「破军之势」的窗口：10 秒内伤害 +15%。 */
+const QIJI_BREAK_MIGHT_BUFF: BuffDef = {
+  id: 'qiji-break-might',
+  nameKey: 'qiji.poJunZhiShi.name',
+  icon: 'char_break',
+  polarity: 'buff',
+  color: 0xc8a13a,
+  duration: logicMs(100),
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+  modifiers: [
+    { stat: 'damageBoost', op: 'add', value: 0.15, sourceKey: 'qiji.poJunZhiShi.name' },
+  ],
+};
+
+/** **破军之势**：用「破」**成功打断**之后 10 秒，伤害 +15%。 */
+export const QIJI_BREAK_MIGHT: QijiEntity = {
+  id: 'poJunZhiShi',
+  kind: 'qiji',
+  nameKey: 'qiji.poJunZhiShi.name',
+  descKey: 'qiji.poJunZhiShi.desc',
+  icon: 'char_break',
+  category: 'offense',
+  rarity: 'rare',
+  unlock: {
+    kind: 'statAtLeast',
+    stat: { s: 'skillInterrupts', skillId: 'break', scope: 'run' },
+    value: 3,
+  },
+  abilities: [],
+  passiveBuffs: [
+    {
+      ...QIJI_BREAK_MIGHT_BUFF,
+      triggers: [
+        {
+          on: 'onInterruptSuccess',
+          filter: { by: 'skill', skillId: 'break' },
+          then: [{ kind: 'grant', target: { mode: 'self' }, buff: QIJI_BREAK_MIGHT_BUFF }],
+        },
+      ],
+    },
+  ],
+};
+
+/**
+ * 「盾壁森严」额外送的那一层盾。
+ *
+ * ⚠️ 与 `daixuan-shield` **同一个 id 前缀但不同 id**：`applyBuff` 按 id 复用
+ * 实例，同 id 会把它和技能自带的两层叠成"同一条 buff 的 3 层"—— 那其实也行，
+ * 但**消耗顺序**会变成"先扣技能的那一层"（不符直觉）。这里单独一条，
+ * 语义是"额外的一层，先扣它"。
+ */
+const QIJI_EXTRA_SHIELD_BUFF: BuffDef = {
+  id: 'qiji-thick-shield',
+  nameKey: 'skill.dun.name',
+  icon: 'char_guard',
+  polarity: 'buff',
+  duration: logicMs(80),
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+  flags: { negateHits: 1 },
+};
+
+/** **盾壁森严**：盾的层数 **2 → 3**（缠消耗 30 → 45，CD 不变）。 */
+export const QIJI_THICK_SHIELD: QijiEntity = {
+  id: 'dunBiSenYan',
+  kind: 'qiji',
+  nameKey: 'qiji.dunBiSenYan.name',
+  descKey: 'qiji.dunBiSenYan.desc',
+  icon: 'char_guard',
+  category: 'defense',
+  rarity: 'rare',
+  unlock: {
+    kind: 'statAtLeast',
+    stat: { s: 'skillUses', skillId: 'dun', scope: 'run' },
+    value: 10,
+  },
+  abilities: [],
+  skillTweak: {
+    skillId: 'dun',
+    /** 30 → **45**（用户："消耗也等比增加"）。 */
+    costDeltas: [{ resource: 'douqi', delta: 15 }],
+  },
+  passiveBuffs: [
+    {
+      ...QIJI_EXTRA_SHIELD_BUFF,
+      triggers: [
+        {
+          on: 'onCastFinish',
+          filter: { by: 'skill', skillId: 'dun' },
+          then: [{ kind: 'grant', target: { mode: 'self' }, buff: QIJI_EXTRA_SHIELD_BUFF }],
+        },
+      ],
+    },
+  ],
+};
+
+/**
+ * **爆裂护盾**：盾的**每一层被消耗**时，对 Boss 造成 10 点伤害（不触发反伤）。
+ *
+ * 判据用 `onBuffStackChanged`（`by: 'buff', buffId: 'daixuan-shield'`）——
+ * 那正是"层数 −1"的那一刻 ✓，比"整段盾过期时触发一次"精确。
+ *
+ * ⚠️ `deal` 走的是普通伤害通路，所以**会不会触发反伤**取决于伤害来源 ——
+ * 用户要求"不触发反伤"，而 `deal` 的伤害来源是**玩家**（不是"反射伤害"），
+ * 因此不会走 `reflect` 分支 ✓（反射只在挨打时产生，见 `damage.ts`）。
+ */
+export const QIJI_EXPLOSIVE_SHIELD: QijiEntity = {
+  id: 'baoLieHuDun',
+  kind: 'qiji',
+  nameKey: 'qiji.baoLieHuDun.name',
+  descKey: 'qiji.baoLieHuDun.desc',
+  icon: 'char_guard',
+  category: 'offense',
+  rarity: 'epic',
+  unlock: {
+    kind: 'statAtLeast',
+    stat: { s: 'skillUses', skillId: 'dun', scope: 'run' },
+    value: 20,
+  },
+  abilities: [],
+  passiveBuffs: [
+    {
+      id: 'qiji-explosive-shield',
+      nameKey: 'qiji.baoLieHuDun.name',
+      icon: 'char_guard',
+      polarity: 'buff',
+      duration: Number.POSITIVE_INFINITY,
+      maxStacks: 1,
+      stacking: { mode: 'refresh' },
+      triggers: [
+        {
+          on: 'onBuffStackChanged',
+          filter: { by: 'buff', buffId: 'daixuan-shield' },
+          then: [
+            {
+              kind: 'deal',
+              target: { mode: 'primaryEnemy' },
+              hit: {
+                at: 0,
+                effects: [
+                  { kind: 'damage', damage: { base: S(10), canCrit: false, countsAsHit: true } },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};

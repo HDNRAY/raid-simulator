@@ -114,7 +114,14 @@ export function codexCardRects(
 ): readonly CodexRect[] {
   if (count <= 0) return [];
   const rows = Math.ceil(count / L.cols);
-  const totalH = rows * L.cardH + (rows - 1) * L.gapY;
+  /**
+   * ⚠️ 池子会长（2026-10-22 已 19 条 = 4 行）⇒ **卡片高度按行数自适应**：
+   * 行数多了就把每张压矮，而不是让它压到提示行 / 越出画布。
+   * 可用高度 = 提示行之上（`firstCardY` 起，到 `hintY - 16`）。
+   */
+  const availH = Math.max(1, L.hintY - 16 - L.firstCardY);
+  const cardH = Math.max(64, Math.min(L.cardH, Math.floor((availH - (rows - 1) * L.gapY) / rows)));
+  const totalH = rows * cardH + (rows - 1) * L.gapY;
   /** 整块网格在标题与提示之间**纵向**居中（`firstCardY` 是它的下限）。 */
   const top = Math.max(L.firstCardY, Math.round((L.height - totalH) / 2));
 
@@ -126,9 +133,9 @@ export function codexCardRects(
     for (let col = 0; col < inRow; col += 1) {
       out.push({
         x: left + col * (L.cardW + L.gapX),
-        y: top + row * (L.cardH + L.gapY),
+        y: top + row * (cardH + L.gapY),
         w: L.cardW,
-        h: L.cardH,
+        h: cardH,
       });
     }
   }
