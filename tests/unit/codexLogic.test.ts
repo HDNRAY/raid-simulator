@@ -59,9 +59,9 @@ describe('图鉴几何：卡片网格', () => {
     expect(rects).toHaveLength(ALL_QIJI.length);
     for (const rect of rects) {
       expect(rect.x).toBeGreaterThanOrEqual(0);
-      expect(rect.y).toBeGreaterThanOrEqual(0);
+      expect(rect.y).toBeGreaterThanOrEqual(CODEX_LAYOUT.firstCardY);
+      /** ⚠️ **横向**必须在画布内；纵向**允许超出**（超出的部分靠滚动看）。 */
       expect(rect.x + rect.w).toBeLessThanOrEqual(CODEX_LAYOUT.width);
-      expect(rect.y + rect.h).toBeLessThanOrEqual(CODEX_LAYOUT.height);
     }
     for (let i = 0; i < rects.length; i += 1) {
       for (let j = i + 1; j < rects.length; j += 1) {

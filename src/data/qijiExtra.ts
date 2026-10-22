@@ -558,3 +558,56 @@ export const QIJI_CHAN_REGEN: QijiEntity = {
     },
   ],
 };
+
+/** 「轰雷贯耳」的窗口：3 秒内「拳」伤害 +50%。 */
+const QIJI_BLAST_ECHO_BUFF: BuffDef = {
+  id: 'qiji-blast-echo',
+  nameKey: 'qiji.hongLeiGuanEr.name',
+  icon: 'char_attack',
+  polarity: 'buff',
+  color: 0xd05a2a,
+  duration: logicMs(30),
+  maxStacks: 1,
+  stacking: { mode: 'refresh' },
+  modifiers: [
+    { stat: 'damageBoost', op: 'add', value: 0.5, sourceKey: 'qiji.hongLeiGuanEr.name' },
+  ],
+};
+
+/**
+ * **轰雷贯耳**（2026-10-22，补凯丽「轰」的缺口）：**「轰」命中后 3 秒内
+ * 伤害 +50%**。
+ *
+ * ⚠️ 为什么是"全局 damageBoost"而不是"只对拳"：引擎**没有"只对某个技能
+ * 生效的伤害倍率"**（`damageBoost` / `damageMult` 都是整局属性；`skillTweak`
+ * 只能改代价 / 用出时挂 buff / 覆盖某条 buff 的数值）。所以这条写成了
+ * "轰之后的三秒里，任何招都更疼" —— 而凯丽的循环本来就是 轰 → 拳，
+ * 手感上等价于"拳头更重" ✓（同一条理由见「凝神斩意」用 `deal` 追加伤害）。
+ */
+export const QIJI_BLAST_ECHO: QijiEntity = {
+  id: 'hongLeiGuanEr',
+  kind: 'qiji',
+  nameKey: 'qiji.hongLeiGuanEr.name',
+  descKey: 'qiji.hongLeiGuanEr.desc',
+  icon: 'char_attack',
+  category: 'offense',
+  rarity: 'rare',
+  unlock: {
+    kind: 'statAtLeast',
+    stat: { s: 'skillHits', skillId: 'blast', scope: 'run' },
+    value: 10,
+  },
+  abilities: [],
+  passiveBuffs: [
+    {
+      ...QIJI_BLAST_ECHO_BUFF,
+      triggers: [
+        {
+          on: 'onHitDealt',
+          filter: { by: 'skill', skillId: 'blast' },
+          then: [{ kind: 'grant', target: { mode: 'self' }, buff: QIJI_BLAST_ECHO_BUFF }],
+        },
+      ],
+    },
+  ],
+};

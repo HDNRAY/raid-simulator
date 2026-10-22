@@ -115,15 +115,19 @@ export function codexCardRects(
   if (count <= 0) return [];
   const rows = Math.ceil(count / L.cols);
   /**
-   * ⚠️ 池子会长（2026-10-22 已 19 条 = 4 行）⇒ **卡片高度按行数自适应**：
-   * 行数多了就把每张压矮，而不是让它压到提示行 / 越出画布。
-   * 可用高度 = 提示行之上（`firstCardY` 起，到 `hintY - 16`）。
+   * ⚠️ **卡片高度固定、内容允许超出视口**（2026-10-22 用户："图鉴应该支持
+   * 滚动"）。第一版是"按行数把卡片压矮到刚好一屏" —— 那样**永远不用滚** ✗，
+   * 一旦池子再长就变成 5 行挤在 356 像素里（字全糊）。
+   * 现在：卡片保持 `L.cardH`，超出的行靠**滚动**看（`CodexScreen.scrollBy` +
+   * `visiblePartOf` 的几何求交，边缘那一行就是"半张卡"✓）。
    */
-  const availH = Math.max(1, L.hintY - 16 - L.firstCardY);
-  const cardH = Math.max(64, Math.min(L.cardH, Math.floor((availH - (rows - 1) * L.gapY) / rows)));
-  const totalH = rows * cardH + (rows - 1) * L.gapY;
+  const cardH = L.cardH;
   /** 整块网格在标题与提示之间**纵向**居中（`firstCardY` 是它的下限）。 */
-  const top = Math.max(L.firstCardY, Math.round((L.height - totalH) / 2));
+  /**
+   * 内容从 `firstCardY` 起、**不再纵向居中** —— 居中会让"内容比视口高"时
+   * 顶部出现负偏移（滚不动 / 首行被切）✗。滚动坐标必须有一个**固定的原点**。
+   */
+  const top = L.firstCardY;
 
   const out: CodexRect[] = [];
   for (let row = 0; row < rows; row += 1) {
@@ -165,4 +169,43 @@ export function wrapByChars(text: string, args: { readonly perLine: number; read
     lines[maxLines - 1] = `${[...last].slice(0, Math.max(1, perLine - 1)).join('')}…`;
   }
   return lines;
+}
+
+/* ------------------------------------------------------------------ *
+ * 滚动（2026-10-22，用户："图鉴应该支持 滚动"）
+ * ------------------------------------------------------------------ */
+
+/**
+ * 滚动的**上界**（内容比视口高多少）。内容比视口矮 ⇒ 0（不滚）。
+ *
+ * ⚠️ 这是一个**纯函数**，因为"能滚多大"是布局的性质，不是状态的性质 ——
+ * 状态（`offset`）只该被夹在这个范围内（`clampScrollOffset`）。
+ */
+export function maxScrollOffset(contentHeight: number, viewportHeight: number): number {
+  return Math.max(0, Math.round(contentHeight - viewportHeight));
+}
+
+/** 把偏移夹进 `[0, max]`（滚轮 / 拖拽 / 键盘都走它，判据只有一处）。 */
+export function clampScrollOffset(offset: number, max: number): number {
+  if (!Number.isFinite(offset)) return 0;
+  return Math.min(Math.max(0, Math.round(offset)), Math.max(0, Math.round(max)));
+}
+
+/**
+ * 卡片的**可见部分**（与视口求交）。
+ *
+ * ⚠️ 为什么不是"整张可见 / 整张不可见"：用户要的是"**能显示行的一半**"。
+ * Pixi 的 `mask` 在 headless 里不生效（AGENTS §3e），所以这里用**几何求交**
+ * —— 只把可见的那一段画出来，边缘那一行就是"半张卡"✓。
+ *
+ * @returns `undefined` = 完全在视口外
+ */
+export function visiblePartOf(
+  rect: CodexRect,
+  viewport: { readonly top: number; readonly height: number },
+): CodexRect | undefined {
+  const top = Math.max(rect.y, viewport.top);
+  const bottom = Math.min(rect.y + rect.h, viewport.top + viewport.height);
+  if (bottom <= top) return undefined;
+  return { x: rect.x, y: top, w: rect.w, h: bottom - top };
 }

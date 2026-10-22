@@ -41,8 +41,17 @@ import { FONT, LOGICAL } from './layout';
 import { Label, type PixiCtor } from './primitives';
 import { ScreenChrome } from './ScreenChrome';
 import { PALETTE } from '../render/theme';
-import { cardSkin } from './prepareRender';
-import { CODEX_LAYOUT, codexCardRects, wrapByChars, type CodexEntry } from './codexLogic';
+import { CARD_RADIUS, cardSkin } from './prepareRender';
+import {
+  CODEX_LAYOUT,
+  clampScrollOffset,
+  codexCardRects,
+  maxScrollOffset,
+  visiblePartOf,
+  wrapByChars,
+  type CodexEntry,
+} from './codexLogic';
+import { scrollBarGeometry } from './scrollWindow';
 import type { TranslateFn } from '../i18n/translator';
 
 export interface CodexScreenOptions {
@@ -76,6 +85,14 @@ export class CodexScreen {
   /** 解锁条件那一行（小字、暗色；**未解锁的也照写** —— 那正是玩家要知道的）。 */
   private readonly conditionLabels: Label[] = [];
   readonly chrome: ScreenChrome;
+  /**
+   * **滚动偏移**（2026-10-22，用户："图鉴应该支持 滚动"）。
+   *
+   * ⚠️ 卡片本身**不移动**再画一遍 —— 每次 `redraw` 都按**新的偏移**算"哪一段
+   * 落在视口里"（`visiblePartOf`），所以边缘那一行自然是**半张卡** ✓
+   * （Pixi 的 `mask` 在 headless 里不生效，AGENTS §3e —— 所以用几何求交）。
+   */
+  private scrollOffset = 0;
 
   constructor(options: CodexScreenOptions) {
     this.options = options;
@@ -160,6 +177,53 @@ export class CodexScreen {
   back(): void {
     this.options.onBack();
   }
+  /** 卡片视口：`firstCardY` 到提示行之上。 */
+  private viewport(): { readonly top: number; readonly height: number } {
+    return {
+      top: CODEX_LAYOUT.firstCardY,
+      height: Math.max(1, CODEX_LAYOUT.hintY - 16 - CODEX_LAYOUT.firstCardY),
+    };
+  }
+
+  /** 内容总高（所有行的卡片）。 */
+  private contentHeight(): number {
+    const rects = codexCardRects(this.options.getEntries().length);
+    const last = rects[rects.length - 1];
+    const first = rects[0];
+    if (last === undefined || first === undefined) return 0;
+    return last.y + last.h - first.y;
+  }
+
+  /** 滚一段（滚轮 / 拖拽 / 键盘都走它）。@returns 有没有真的滚 */
+  scrollBy(deltaY: number): boolean {
+    const max = maxScrollOffset(this.contentHeight(), this.viewport().height);
+    const next = clampScrollOffset(this.scrollOffset + deltaY, max);
+    if (next === this.scrollOffset) return false;
+    this.scrollOffset = next;
+    this.redraw();
+    return true;
+  }
+
+  /** 这个点是不是落在卡片视口里（拖拽 / 滚轮的判据）。 */
+  isOnScrollable(_px: number, py: number): boolean {
+    if (!this.root.visible) return false;
+    const view = this.viewport();
+    return py >= view.top && py <= view.top + view.height;
+  }
+
+  /** 滚轮：滚卡片区。 */
+  wheelDetail(px: number, py: number, deltaY: number): boolean {
+    if (!this.isOnScrollable(px, py)) return false;
+    return this.scrollBy(deltaY * 3);
+  }
+
+  /** 拖拽（触屏没有滚轮）：@param deltaY 向上为负 */
+  dragDetail(px: number, py: number, deltaY: number): boolean {
+    if (!this.isOnScrollable(px, py)) return false;
+    return this.scrollBy(-deltaY);
+  }
+
+
 
   /**
    * 点一下：齿轮 / 返回箭头优先；其余位置 = 回首页（只读屏，"点哪都走"）。
@@ -187,6 +251,9 @@ export class CodexScreen {
     const t = this.options.translate;
     const entries = this.options.getEntries();
     const rects = codexCardRects(entries.length);
+    const view = this.viewport();
+    const maxScroll = maxScrollOffset(this.contentHeight(), view.height);
+    this.scrollOffset = clampScrollOffset(this.scrollOffset, maxScroll);
 
     this.title.set(t('screen.codex.title'));
     const unlocked = entries.filter((entry) => entry.unlocked).length;
@@ -204,10 +271,27 @@ export class CodexScreen {
     this.ensureLabels(entries.length);
 
     entries.forEach((entry, index) => {
-      const rect = rects[index];
+      const card = rects[index];
       const nameLabel = this.nameLabels[index];
       const stateLabel = this.stateLabels[index];
-      if (rect === undefined || nameLabel === undefined || stateLabel === undefined) return;
+      if (card === undefined || nameLabel === undefined || stateLabel === undefined) return;
+
+      /**
+       * **滚动**：卡片按偏移整体上移，然后只画**落在视口里的那一段**
+       * （`visiblePartOf`）—— 边缘那一行因此是**半张卡** ✓
+       * （Pixi 的 `mask` 在 headless 里不生效，AGENTS §3e ⇒ 几何求交）。
+       */
+      const shifted = { ...card, y: card.y - this.scrollOffset };
+      const rect = visiblePartOf(shifted, view);
+      if (rect === undefined) {
+        nameLabel.root.visible = false;
+        stateLabel.root.visible = false;
+        this.conditionLabels[index]!.root.visible = false;
+        return;
+      }
+      /** 被切过的那几张画**平边**（否则切口处会是圆角，看起来像浮在空中）。 */
+      const cut = rect.h !== shifted.h;
+      const radius = cut ? 0 : CARD_RADIUS;
 
       /**
        * 卡片皮肤：**所有卡片同一种**（2026-10-20 用户："黄色的是初始就能
@@ -219,20 +303,19 @@ export class CodexScreen {
        */
       const skin = cardSkin({ developing: false, cursored: false, selected: false });
       this.gfx
-        .roundRect(rect.x, rect.y, rect.w, rect.h, 8)
+        .roundRect(rect.x, rect.y, rect.w, rect.h, radius)
         .fill({ color: skin.fillColor, alpha: skin.fillAlpha });
       this.gfx
-        .roundRect(rect.x, rect.y, rect.w, rect.h, 8)
+        .roundRect(rect.x, rect.y, rect.w, rect.h, radius)
         .stroke({ color: skin.strokeColor, width: skin.strokeWidth });
 
       nameLabel.root.x = rect.x + rect.w / 2;
-      nameLabel.root.y = rect.y + rect.h * 0.24;
+      nameLabel.root.y = shifted.y + shifted.h * 0.24;
       nameLabel.set(entry.nameKey === undefined ? t('screen.codex.locked') : t(entry.nameKey));
       nameLabel.setColor(entry.nameKey === undefined ? PALETTE.textDim : PALETTE.text);
-      nameLabel.root.visible = true;
 
       stateLabel.root.x = rect.x + rect.w / 2;
-      stateLabel.root.y = rect.y + rect.h * 0.5;
+      stateLabel.root.y = shifted.y + shifted.h * 0.5;
       stateLabel.set(
         entry.unlocked ? t('screen.codex.unlocked') : t('screen.codex.notUnlocked'),
       );
@@ -241,7 +324,14 @@ export class CodexScreen {
        * **不画状态行** —— 否则它和下面那行条件会叠在一起（实测叠了 ✗）。
        * "已解锁 / 未解锁"的信息仍然在：名字是否 ？？？ 就说清了。
        */
-      stateLabel.root.visible = rect.h >= 84;
+      /**
+       * ⚠️ 文字只在**整张卡的中心**落在视口里时显示 —— 半张卡的边缘不写半行字
+       * （那会看起来像"字被吃掉"）。卡片本身仍然画出来（半张卡）✓
+       */
+      const centerVisible = shifted.y + shifted.h / 2 >= view.top
+        && shifted.y + shifted.h / 2 <= view.top + view.height;
+      nameLabel.root.visible = centerVisible;
+      stateLabel.root.visible = centerVisible && shifted.h >= 84;
 
       const conditionLabel = this.conditionLabels[index];
       if (conditionLabel !== undefined) {
@@ -263,6 +353,20 @@ export class CodexScreen {
         conditionLabel.root.visible = true;
       }
     });
+
+    /** 滚动条（内容比视口高时才画）。 */
+    if (maxScroll > 0) {
+      const thumb = scrollBarGeometry({
+        viewportPx: view.height,
+        maxScrollPx: maxScroll,
+        scrollPx: this.scrollOffset,
+        trackLenPx: view.height,
+      });
+      const trackX = CODEX_LAYOUT.width / 2 + 5 * CODEX_LAYOUT.cardW / 2 + 40;
+      this.gfx
+        .roundRect(trackX, view.top + thumb.offset, 4, Math.max(8, thumb.length), 2)
+        .fill({ color: PALETTE.textDim, alpha: 0.35 });
+    }
 
     /** 多余的 Label（池子变小）藏起来。 */
     for (let i = entries.length; i < this.nameLabels.length; i += 1) {

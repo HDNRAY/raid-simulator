@@ -121,8 +121,8 @@ export interface CanvasInputTargets {
   readonly runConfirm: ScrollableScreen;
   /** 一局结束屏（P3；含它自己的齿轮与返回箭头）。 */
   readonly runOver: ScreenHitTarget;
-  /** 图鉴（2026-10-20；只读屏：点哪都回首页，齿轮除外）。 */
-  readonly codex: ScreenHitTarget;
+  /** 图鉴（2026-10-20；只读屏 + 可滚：点哪都回首页，齿轮除外）。 */
+  readonly codex: ScrollableScreen;
   /**
    * **战斗场景**（含战斗界面自己的齿轮）。
    *
@@ -273,6 +273,11 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
   const scrollableScreen = (): ScrollableScreen | undefined => {
     if (t.phase() === 'prepare') return t.prepare;
     if (t.phase() === 'runConfirm') return t.runConfirm;
+    /**
+     * **图鉴**（2026-10-22，用户："图鉴应该支持 滚动"）—— 池子 21 条装不下
+     * 一屏，卡片区可滚（滚轮 / 拖拽 / 触屏都走这一条）。
+     */
+    if (t.phase() === 'codex') return t.codex;
     return undefined;
   };
 
