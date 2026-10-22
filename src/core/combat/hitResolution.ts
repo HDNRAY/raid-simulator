@@ -28,7 +28,7 @@
 import type {
   BuffDef,
 
-  CastInstance,
+
   Combatant,
   CombatantId,
   EventDef,
@@ -44,6 +44,7 @@ import { aggregateFlags, applyBuff } from '../buffs';
 import { runAbilities, runTriggers } from './triggers';
 import { absorbedByOf, withAbsorbedByBuffId } from './avoidedSource';
 import { consumeNegateCharge } from './negateCharge';
+import { interruptCasts } from './interrupt';
 import { casterGainsDouqiFromDamage, gainsDouqiOnHitTaken } from './holds';
 import {
   actsOnVictim, absorbShieldDamage, firePostHitHooks, applyStunEffect,
@@ -600,79 +601,23 @@ export function applyHitEffects(
 
     if (effect.kind === 'interrupt') {
       /**
-       * **霸体（`interruptImmune`）拦截一切打断，包括「破」的强制打断。**
+       * 算法在 `combat/interrupt.ts`（**唯一一份**：触发器那条 `deal` 也调它）。
+       * 这里只多做一件命中管线才有的事：真打断到了就结算 `onSuccess`。
        *
-       * 需求：所有 Boss 招式默认都能被打断 / 闪避 / 卸力，
-       * 除非 Boss 处于霸体状态 —— 霸体由一个有 CD 的招式给自己挂上。
-       *
-       * 这里刻意**不看 `effect.force`**：`force` 的语义是"无视技能的
-       * 可打断标记"，但霸体是**更上层的状态**，它必须连强制打断也挡住，
-       * 否则霸体招式就没有意义了。
-       *
-       * 踩过的坑：`BuffFlags.interruptImmune` 早就定义了、`aggregateFlags`
-       * 也一直在算它，但**没有任何地方读它** —— 一个"看起来支持但实际
-       * 不生效"的字段。接上它比新造一个 flag 好：语义更准，
-       * 而且不用动数据模型。
+       * 需求（「截」）："瞬发，打断 boss 技能，**如果成功**，不进入 cd"。
+       * 失败（霸体 / 没在读条 / 读条不可打断）就不结算 —— 正好对应
+       * "失败则 cd 10 秒"（CD 是施放时就扣的，不退还就自然留着）。
        */
-      if (aggregateFlags(target).interruptImmune) {
-        ctx.events.push({
-          kind: 'interruptImmune',
-          tick: ctx.state.tick,
-          targetId: target.id,
-          // 记录"本来会被打断的那个读条"，供 UI 提示用
-          skillId: target.casts[0]?.skillId ?? '',
-        });
-        return;
-      }
-
-      if (target.casts.length > 0) {
-        /**
-         * `force: true` 时**不看可打断性** —— 这是「破」的语义
-         * （需求：可以打断任何技能）。默认仍尊重目标技能的可打断性。
-         */
-        const interrupted = effect.force
-          ? [...target.casts]
-          : target.casts.filter((c: CastInstance) => c.interruptible);
-        if (interrupted.length > 0) {
-          const interruptedIds = new Set(interrupted.map((c: CastInstance) => c.skillId));
-          ctx.replaceCombatant({
-            ...ctx.current(target.id),
-            casts: ctx.current(target.id).casts.filter(
-              (c: CastInstance) => !interruptedIds.has(c.skillId),
-            ),
-          });
-          for (const cast of interrupted) {
-            ctx.events.push({
-              kind: 'castInterrupted',
-              tick: ctx.state.tick,
-              sourceId: target.id,
-              skillId: cast.skillId,
-              reason: 'interrupted',
-            });
-            ctx.events.push({
-              kind: 'interruptSuccess',
-              tick: ctx.state.tick,
-              sourceId: actor.id,
-              targetId: target.id,
-              skillId: cast.skillId,
-              // 同上面的眩晕分支：打断者用的招式，只在有值时写键
-              ...(skillId === undefined ? {} : { sourceSkillId: skillId }),
-            });
-          }
-          /**
-           * **真打断到了** → 结算 `onSuccess`。
-           *
-           * 需求（「截」）："瞬发，打断 boss 技能，**如果成功**，不进入 cd"。
-           *
-           * ⚠️ 只有走到这里才算成功。上面两条早返回都是失败：
-           *   - `interruptImmune`（霸体）→ return
-           *   - 目标没在读条 / 读条不可打断 → 不进这个分支
-           * 正好对应需求里的"失败则 cd 10 秒"（CD 是施放时就扣的，
-           * 不退还就自然留着）。
-           */
-          applyEffects(ctx, actor, target, effect.onSuccess, skillId);
-        }
-      }
+      const ok = interruptCasts({
+        tick: ctx.state.tick,
+        target,
+        actorId: actor.id,
+        ...(skillId === undefined ? {} : { skillId }),
+        force: effect.force === true,
+        replace: (next) => ctx.replaceCombatant(next),
+        push: (event) => ctx.events.push(event),
+      });
+      if (ok) applyEffects(ctx, actor, target, effect.onSuccess, skillId);
     }
   }
 

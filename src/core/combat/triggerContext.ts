@@ -22,6 +22,7 @@
 import type { BuffDef, Combatant, EventDef, SkillDef } from '../types';
 import { aggregateFlags, applyBuff } from '../buffs';
 import { applyDamage, changeResource, computeDamage } from './index';
+import { interruptCasts } from './interrupt';
 import type { HitPayload } from '../types/triggers';
 
 /**
@@ -170,6 +171,22 @@ export function triggerContextFor(host: TriggerHost, roll: () => number): Trigge
      */
     dealDamageFromTrigger: (actorId, targetId, hit) => {
       for (const effect of hit.effects) {
+        /**
+         * **`interrupt` 也走这里**（2026-10-22）：原先只处理 `damage`，
+         * 于是写在触发器 `deal` 里的打断会**静默无效** ✗（炁机「一击破势」
+         * 就是撞上这个）。算法仍是 `combat/interrupt.ts` 那唯一一份。
+         */
+        if (effect.kind === 'interrupt') {
+          interruptCasts({
+            tick: host.combat.currentTick(),
+            target: host.current(targetId),
+            actorId,
+            force: effect.force === true,
+            replace: (next: Combatant) => host.replaceCombatant(next),
+            push: (event: EventDef) => host.events.push(event),
+          });
+          continue;
+        }
         if (effect.kind !== 'damage' || !effect.damage) continue;
         const target = host.current(targetId);
         const result = computeDamage(

@@ -42,6 +42,7 @@ import type {
 import { aggregateFlags, applyBuff } from '../buffs';
 import type { MutableCombatant } from './battleStateTypes';
 import { resolveHit } from './hitResolution';
+import { castFinishRemoveBuff } from './castFinishRemoveBuff';
 import {
   changeResource,
   checkGate,
@@ -400,6 +401,17 @@ export function fireCastFinishTriggers(
         const delta = typeof ability.delta === 'number' ? ability.delta : 0;
         grantResource(ability.resource, delta, targetIdOf(ability.target.mode));
         syncDouqiFull();
+        continue;
+      }
+
+      /** **移除 buff**（可按层数减），实现见 `./castFinishRemoveBuff`。 */
+      if (ability.kind === 'removeBuff') {
+        castFinishRemoveBuff({
+          tick: ctx.tick, target: ctx.current(targetIdOf(ability.target.mode)),
+          buffId: ability.buffId, stacks: ability.stacks, actorId: actor.id,
+          replace: (next: Combatant) => ctx.replaceCombatant(next),
+          push: (event: EventDef) => ctx.events.push(event),
+        });
         continue;
       }
 
