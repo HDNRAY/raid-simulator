@@ -294,3 +294,25 @@ export function resolveLogParams(
     ]),
   );
 }
+
+/**
+ * **日志条目 → 屏幕上那几行文本**（与面板**同一个**格式化路径）。
+ *
+ * 2026-10-23 加：给开发模式的 `__raidBattle.logLines()` 用。
+ *
+ * ⚠️ 为什么必须共用：如果调试口自己拼一遍字符串，"调试看到的"与
+ * "玩家看到的"就会漂 —— 而这类漂移**恰恰是**最难发现的那种（两边都"看起来对"）。
+ * 面板那侧（`LogPanel.paintFeed`）用的就是本函数里的同两步：
+ * `majorEntries()` 过滤 + `resolveLogParams()` 递归翻名字 + `translate()`。
+ *
+ * @param n 只取**最近 n 条**（缺省 50；`<= 0` 视作"全部"）
+ */
+export function logLineTexts(
+  entries: readonly LogEntry[],
+  translate: (key: string, params?: Readonly<Record<string, string | number>>) => string,
+  n = 50,
+): readonly string[] {
+  const major = majorEntries(entries);
+  const take = n <= 0 ? major : major.slice(-n);
+  return take.map((entry) => translate(entry.key, resolveLogParams(entry.params, translate)));
+}

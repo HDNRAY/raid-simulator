@@ -81,6 +81,7 @@ import { readUrlParams } from './urlParams';
 import { DEV_MODE } from './config';
 import { switchOperationMode } from './operationMode';
 import { translateSafe } from './translate';
+import { devOnlyApi } from './debugDevApi';
 import { createExitConfirm } from './exitConfirm';
 import { createBattleChrome } from './battleChrome';
 import { capsOf, type OperationMode } from '../render/platform';
@@ -659,8 +660,8 @@ export function createGame(o: CreateGameDeps): GameHandle {
 
       installDebugApi({
         state,
-        /** 只在开发模式挂（同 `devClear` 的门）；见 `DebugApiDeps.gotoPrepare`。 */
-        ...(DEV_MODE || url.dev ? { gotoPrepare: () => switchTo('prepare') } : {}),
+        /** 只在开发模式挂（同 `devClear` 的门）：见 `DebugApiDeps.gotoPrepare`。 */
+        ...(DEV_MODE || url.dev ? devOnlyApi({ switchTo, loopOf: () => state.loop }) : {}),
         scene,
         app,
         /** ⚠️ 与设置滑块**同一个**落点（见 `applyUiScale` 的说明）。 */

@@ -46,7 +46,7 @@ import { Label, PANEL_STYLE, Panel, type PixiCtor } from './primitives';
 import { PALETTE } from '../render/theme';
 import type { BattleSnapshotView } from '../render/viewModel';
 import { LogReviewPanel } from './LogReviewPanel';
-import { CATEGORY_COLORS, majorEntries, resolveLogParams } from './logReview';
+import { CATEGORY_COLORS, logLineTexts, majorEntries } from './logReview';
 import { FEED_PAD_X, layoutFeed, type FeedBlock } from './logFeed';
 
 export interface LogPanelOptions {
@@ -198,7 +198,7 @@ export class LogPanel {
 
     const translate = this.options.translate;
     /** ⚠️ 取词只在"真的变了"之后做：`translate` 是热路径（见 `primitives`）。 */
-    const texts = visible.map((entry) => translate(entry.key, resolveLogParams(entry.params, translate)));
+    const texts = logLineTexts(visible, translate, 0);
     this.paint(layoutFeed(texts, this.feedOptions()), visible);
   }
 

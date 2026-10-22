@@ -55,6 +55,13 @@ declare global {
        */
       gotoPrepare(): boolean;
       /**
+       * **最近 n 条战斗日志的文本**（dev-only；缺省 50 条）。
+       *
+       * 与日志面板**同一份**格式化逻辑（`ui/logReview.logLineTexts`）——
+       * 用来验收"这句话玩家到底看到什么"，而不是靠读引擎事件猜。
+       */
+      logLines(n?: number): readonly string[];
+      /**
        * 当前键位表（顶层探针）。
        *
        * 端到端脚本用它来"按某个技能"，而不是把键位写死在脚本里。

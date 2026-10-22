@@ -70,6 +70,17 @@ export interface DebugApiDeps {
    * ⚠️ 只走既有相位切换（`switchTo('prepare')`），不是第二套流程。
    */
   readonly gotoPrepare?: () => void;
+  /**
+   * **按"面板上显示的样子"读最近 n 条战斗日志**（2026-10-23，dev-only）。
+   *
+   * 用途：这一轮修的"「弹」的伤害没有 log / 反伤显示未知来源"只能靠**文本**
+   * 验收 —— 而日志文本原先没有任何读取口 ✗（`logReview` 只有
+   * `layer/isOpen/pointerRatio`）。
+   *
+   * ⚠️ 文本必须由**面板同一份**格式化逻辑产出（`ui/logReview.logLineTexts`），
+   * 否则"调试读到的"与"玩家看到的"会漂。
+   */
+  readonly logLines?: (n?: number) => readonly string[];
   /** 场景（复盘那一层要读它）。 */
   readonly scene: {
     /**
@@ -214,6 +225,12 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
      * 玩家点它时发生的事 —— 不是另一套"脚本专用"的作弊路径。
      */
     devClear: () => state.loop?.devClear() ?? false,
+    /**
+     * **最近 n 条日志的文本**（未挂载时返回空数组 —— 生产里不该有人调它）。
+     *
+     * 见 `DebugApiDeps.logLines`：返回的就是面板上那几行的**渲染结果**。
+     */
+    logLines: (n?: number) => (d.logLines === undefined ? [] : d.logLines(n)),
     /** 切到备战屏并停住（见 `DebugApiDeps.gotoPrepare`）；没挂就是 `false`。 */
     gotoPrepare: () => {
       if (d.gotoPrepare === undefined) return false;
