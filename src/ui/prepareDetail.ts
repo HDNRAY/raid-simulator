@@ -100,6 +100,24 @@ export interface DetailSkillRow {
    * `i18n/translator.ts`）。
    */
   readonly descParams: Readonly<Record<string, string | number>>;
+  /**
+   * **结构化数值**（前摇 / 冷却 / 代价）：画在名字下面、说明上面，
+   * 每一种一个颜色（2026-10-22）。空数组 / 缺省 ⇒ 这一行不画。
+   */
+  readonly stats?: readonly DetailStat[];
+}
+
+/** 详情区里的一行**结构化数值**（前摇 / 冷却 / 代价）。 */
+export type DetailStatKind = 'cast' | 'cooldown' | 'cost';
+
+export interface DetailStat {
+  readonly kind: DetailStatKind;
+  /** `cast` / `cooldown` 用：秒数。 */
+  readonly seconds?: number;
+  /** `cost` 用：资源名（`energy` / `douqi`）。 */
+  readonly resourceKey?: string;
+  /** `cost` 用：数量。 */
+  readonly amount?: number;
 }
 
 /** 详情区里的一行**文字**。 */

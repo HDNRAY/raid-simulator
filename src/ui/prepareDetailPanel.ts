@@ -89,6 +89,7 @@
  * 纹理还没量出来时 `height` 可能是 0）。
  */
 
+import { DetailStatsLine } from './detailStatsLine';
 import type { Container, Graphics } from 'pixi.js';
 import { FONT } from './layout';
 import { Label, type PixiCtor } from './primitives';
@@ -123,6 +124,8 @@ import type { TranslateFn } from '../i18n/translator';
 interface RowLabels {
   readonly name: Label;
   readonly body: Label;
+  /** 结构化数值那一行（前摇 / 冷却 / 代价；2026-10-22）。 */
+  readonly stats: DetailStatsLine;
 }
 
 /**
@@ -138,6 +141,8 @@ interface PlacedRow {
   readonly nameTop: number;
   /** 说明 / 值那一行的顶边（没有第二行时 = `nameTop`）。 */
   readonly bodyTop: number;
+  /** **结构化数值那一行**的顶边（⚠️ 不能拿 `bodyTop` 顶替：差一行，会糊成一团）。 */
+  readonly statsTop: number;
   /** 这一行的**底边**（不含 `rowGap`）—— 裁剪判据读它。 */
   readonly endTop: number;
 }
@@ -273,7 +278,9 @@ export class PrepareDetailPanel {
         color: PALETTE.textDim,
         wrap: { width: innerW },
       });
-      this.rows.push({ name, body });
+      const stats = new DetailStatsLine(pixi);
+      stats.attach((child) => this.rowsLayer.addChild(child));
+      this.rows.push({ name, body, stats });
       this.rowsLayer.addChild(name.root, body.root);
     }
 
@@ -509,11 +516,13 @@ export class PrepareDetailPanel {
       if (row === undefined) {
         slot.name.root.visible = false;
         slot.body.root.visible = false;
+        slot.stats.clear();
         return;
       }
       /** ⚠️ 这一行**在内容坐标里**的 y（`placeRows` 之后就不能再读了）。 */
       const nameTop = y;
       let bodyContentTop = y;
+      let statsTop = y;
       if (row.kind === 'skill') {
         /**
          * ⚠️ **名字与面板标题重复时不画名字**（炁机的说明就是这种情况：
@@ -534,6 +543,12 @@ export class PrepareDetailPanel {
          * `{cast}` / `{damage}` 这些占位符，漏了就会把它们原样显示
          * （本仓库为这个形状专门收窄过 `TranslateFn`）。
          */
+        /**
+         * **结构化数值那一行**（2026-10-22）：名字下面、说明上面；三种槽位
+         * 各自一个颜色（见 `ui/detailStats` 的文件头）。
+         */
+        statsTop = y;
+        y = slot.stats.render(y, span.x, row.stats ?? [], this.translate);
         if (row.descKey === undefined) {
           slot.body.root.visible = false;
         } else {
@@ -571,7 +586,7 @@ export class PrepareDetailPanel {
       /** ⚠️ 这一行的**内容底边**（不含 `rowGap`）—— 裁剪判据读它。 */
       const endTop = y;
       y += METRICS.rowGap;
-      placed.push({ slot, nameTop, endTop, bodyTop: bodyContentTop });
+      placed.push({ slot, nameTop, endTop, bodyTop: bodyContentTop, statsTop });
     });
     this.placed = placed;
     return y - METRICS.rowGap;
@@ -633,10 +648,12 @@ export class PrepareDetailPanel {
       if (outside) {
         line.slot.name.root.visible = false;
         line.slot.body.root.visible = false;
+        line.slot.stats.setVisible(false);
         continue;
       }
       if (line.slot.name.root.visible) line.slot.name.root.y = line.nameTop + dy;
       if (line.slot.body.root.visible) line.slot.body.root.y = line.bodyTop + dy;
+      line.slot.stats.setY(line.statsTop + dy);
     }
   }
 

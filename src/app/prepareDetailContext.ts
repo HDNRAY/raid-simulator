@@ -49,6 +49,7 @@ import { descTemplateOf } from './keyRows';
 import type { DetailContext, DetailQiji, DetailSkillRow, DetailUnit } from '../ui/prepareDetail';
 import type { QijiEntity } from '../core/types/qiji';
 import type { SkillDef } from '../core/types';
+import { skillStatsOf } from './skillStats';
 
 /** 一个技能 → 详情区要的那一行（名字 + 说明 + 模板参数）。 */
 function skillRow(skill: SkillDef, /** 那个技能**属于谁**的血上限（`{percent}` 的分母）。 */ maxHp: number): DetailSkillRow {
@@ -86,6 +87,11 @@ function skillRow(skill: SkillDef, /** 那个技能**属于谁**的血上限（`
     nameKey: skill.nameKey ?? skill.id,
     ...(descKey === undefined ? {} : { descKey }),
     descParams: params,
+    /**
+     * **结构化数值**（2026-10-22）：前摇 / 冷却 / 代价从内容字段直接算，
+     * 与说明文案无关（说明仍留着数字，但唯一真相是这一行）。
+     */
+    stats: skillStatsOf(skill),
   };
 }
 

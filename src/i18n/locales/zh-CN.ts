@@ -627,6 +627,18 @@ export const zhCN = {
          */
         qijiOn: '已激活',
         qijiOff: '未激活',
+        /**
+         * **技能的结构化数值行**（2026-10-22，用户："boss详情里，技能有显示
+         * cd和读条时间吗，我希望显示，结构化显示，可以有不同颜色"）。
+         *
+         * 三个标签 + 两个值模板；数字由 `app/skillStats` 从内容字段算，
+         * **不手写**（改平衡时这一行自动跟着变）。
+         */
+        statCast: '前摇',
+        statCooldown: '冷却',
+        statCost: '代价',
+        statSeconds: '{seconds} 秒',
+        statCostValue: '{resource} {amount}',
       },
       /**
        * **收起的那两块「块头」上的字**（2026-10-13 第二轮，手风琴）。
