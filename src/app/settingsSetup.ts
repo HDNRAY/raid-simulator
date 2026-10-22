@@ -70,6 +70,11 @@ export interface SettingsSetupDeps {
    * 看起来正常（它的缩放本来就在场景里）。
    */
   readonly applyUiScale: (scale: number) => void;
+  /**
+   * **设置弹窗底部「回主菜单」**（2026-10-22）：装配方（`game.ts`）在这里
+   * 弹二次确认，确认后才关面板 + 切回首页。
+   */
+  readonly exitToHome: () => void;
   /** 当前相位对应的那个齿轮（`game.ts` 的 `getChrome()`）—— 面板开合时藏它。 */
   readonly activeChrome: () => SettingsGearTarget | undefined;
   /**
@@ -181,6 +186,11 @@ export function createSettingsSetup(d: SettingsSetupDeps): SettingsSetup {
       onOperationMode: (mode) => d.onOperationModeChanged(mode),
       pixi: { Container, Graphics, Sprite, Text },
       close: () => settingsToggle.close(),
+      /**
+       * **底部「回主菜单」**（2026-10-22）：装配方注入的那条（`game.ts` 里
+       * 接到"弹二次确认 → 确认后关面板 + 回首页"）。
+       */
+      exitToHome: () => d.exitToHome(),
       capture: (handler) => d.battle()?.inputSource?.capture(handler),
       isHandlingKeyDown: () => d.state.handlingKeyDown,
     }),

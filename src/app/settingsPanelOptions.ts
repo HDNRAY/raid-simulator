@@ -70,6 +70,11 @@ export interface SettingsOptionsDeps {
   readonly pixi: SettingsPanelOptions['pixi'];
   /** 关闭面板（由 `settingsToggle` 处理"恢复暂停"）。 */
   readonly close: () => void;
+  /**
+   * **底部「回主菜单」**（2026-10-22）：面板点它时调用；装配方在这里弹
+   * **二次确认**（`ui/ConfirmDialog`），确认之后才真的回主菜单。
+   */
+  readonly exitToHome: () => void;
   /** 键盘捕获转发（输入层独占键盘）。 */
   readonly capture: (handler: ((key: string) => void) | undefined) => void;
   /** 是否正由主监听器处理这次按键（是则跳过捕获，避免重复投递）。 */
@@ -152,6 +157,8 @@ export function buildSettingsOptions(d: SettingsOptionsDeps): SettingsPanelOptio
             },
       ),
     onClose: () => d.close(),
+    /** 只转发 —— "要不要确认、确认之后去哪"在 `game.ts`。 */
+    onExitToHome: () => d.exitToHome(),
     getUiScale: () => d.getUiScale(),
     onUiScale: (value) => d.setUiScale(value),
   };

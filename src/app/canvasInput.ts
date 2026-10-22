@@ -124,6 +124,14 @@ export interface CanvasInputTargets {
   /** 图鉴（2026-10-20；只读屏 + 可滚：点哪都回首页，齿轮除外）。 */
   readonly codex: ScrollableScreen;
   /**
+   * **二次确认弹窗**（2026-10-22）：模态 —— 开着时**任何点击都先给它**
+   * （返回 `true` = 这次点击被吃掉，下面那层收不到）。
+   */
+  readonly confirm: {
+    readonly visible: boolean;
+    hitTest(px: number, py: number): boolean;
+  };
+  /**
    * **战斗场景**（含战斗界面自己的齿轮）。
    *
    * ⚠️ 它的 `hitTestChrome` 只问那个齿轮 —— 战斗界面没有返回箭头
@@ -386,6 +394,11 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
        * ⚠️ 命中即 `return`（各屏内部也一样）：一次点击只能做一件事 ——
        * 继续往下走会同时点中底下的卡片。
        */
+      /** ⚠️ **模态优先**：确认框开着时，点哪儿都只归它。 */
+      if (t.confirm.visible) {
+        t.confirm.hitTest(px, py);
+        return;
+      }
       const scrollable = scrollableScreen();
       if (t.phase() === 'home') t.home.hitTest(px, py);
       else if (t.phase() === 'characterSelect') t.select.hitTest(px, py);

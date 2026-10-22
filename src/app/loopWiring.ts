@@ -38,6 +38,17 @@ export interface CanvasHost {
     moveFocus(delta: number, wrap?: boolean): void;
     confirm(): void;
   };
+  /**
+   * **二次确认弹窗**（2026-10-22）：模态 —— 开着时**吃光**键盘与指针。
+   * 只有三个动作：←→ 换焦点 / Enter 执行 / Esc 取消。
+   */
+  readonly confirm: {
+    frame(): void;
+    readonly visible: boolean;
+    moveFocus(delta: number): void;
+    press(): void;
+    cancel(): void;
+  };
   /** 图鉴（2026-10-21）：只读屏 —— 只需要 `frame()` 与"回首页"。 */
   readonly codex: {
     frame(): void;
@@ -226,6 +237,12 @@ export function wireLoop(o: WireOptions): void {
        * "让当前那一屏重画"。所以这里的分发**必须**覆盖全部非战斗 phase：
        * 少一个分支的表现是"那一屏停住不动"（选择变了画面不跟）。
        */
+      /** ⚠️ 模态优先：开着就先画它（也不让下面那些屏继续吃帧）。 */
+      if (host.confirm.visible) {
+        host.confirm.frame();
+        host.settings.update();
+        return;
+      }
       if (state.phase === 'home') host.home.frame();
       else if (state.phase === 'characterSelect') host.select.frame();
       else if (state.phase === 'prepare') host.prepare.frame();
@@ -372,6 +389,32 @@ export function wireLoop(o: WireOptions): void {
      * ⚠️ 判 `layer !== 'battle'` 仍然对：复盘开着时上面那段已经 return 了，
      * 所以走到这里只可能是"三个整屏界面之一"或"设置面板"。
      */
+    /**
+     * **模态确认框开着时吃光键盘**（2026-10-22）：
+     * ←→ / Tab 换焦点、Enter 执行、Esc 取消；其余键无视。
+     */
+    if (host.confirm.visible) {
+      switch (event.key) {
+        case 'ArrowLeft':
+          host.confirm.moveFocus(-1);
+          return;
+        case 'ArrowRight':
+        case 'Tab':
+          host.confirm.moveFocus(1);
+          event.preventDefault();
+          return;
+        case 'Enter':
+        case ' ':
+          host.confirm.press();
+          return;
+        case 'Escape':
+          host.confirm.cancel();
+          return;
+        default:
+          return;
+      }
+    }
+
     if (
       !host.settingsToggle.isOpen() &&
       !state.settingsButtonFocused() &&

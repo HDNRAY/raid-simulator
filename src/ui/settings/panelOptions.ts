@@ -53,6 +53,11 @@ export interface SettingsPanelOptions {
   /** 关闭弹窗 */
   readonly onClose: () => void;
   /**
+   * **底部「回主菜单」**（2026-10-22）：面板只负责"用户点了它"，
+   * 要不要二次确认、确认之后去哪，由 `app/` 装配时决定。
+   */
+  readonly onExitToHome: () => void;
+  /**
    * **当前操作方式**（键盘 / 触屏）—— 全应用**唯一**的那个 flag。
    *
    * ⚠️ 面板用它回答三件事（都从这一个值派生，没有第二个来源）：

@@ -27,6 +27,7 @@ import { TouchSlotPreview } from './TouchSlotPreview';
 import { SkillDetail } from './SkillDetail';
 import { SettingsFrame } from './SettingsFrame';
 import { KeysFooter } from './KeysFooter';
+import { exitButtonRect } from './SettingsFrame';
 import { ScaleSlider } from './ScaleSlider';
 import {
   INITIAL_FOCUS,
@@ -416,6 +417,16 @@ export class SettingsPanel {
    */
   hitTest(px: number, py: number): boolean {
     if (!this.visible) return false;
+
+    /**
+     * **底部「回主菜单」**（2026-10-22）：只打开**二次确认**，不直接走 ——
+     * 真正的"丢弃这一局并回主菜单"由 `onExitToHome` 决定（面板不碰相位）。
+     */
+    const exit = exitButtonRect();
+    if (px >= exit.x && px <= exit.x + exit.w && py >= exit.y && py <= exit.y + exit.h) {
+      this.options.onExitToHome();
+      return true;
+    }
 
     const action = resolvePanelDispatch({
       visible: this.visible,

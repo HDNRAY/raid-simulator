@@ -1242,6 +1242,12 @@ export const zhCN = {
     keysReserved: '{key} 是系统保留键，不能绑定',
     keysReservedHint: 'Esc / Tab / Enter / F1–F12 / 单独的 Shift、Ctrl、Alt 不能绑定',
     keysReset: '恢复默认',
+    /** 设置弹窗底部那一颗（2026-10-22）：回主菜单要二次确认。 */
+    backToMenu: '回主菜单',
+    backToMenuConfirmTitle: '回主菜单？',
+    backToMenuConfirmMessage: '当前这一局会被丢下（中途不会保存）。',
+    backToMenuConfirmYes: '回主菜单',
+    backToMenuConfirmNo: '继续游戏',
     keysResetDone: '已恢复默认键位',
     /**
      * 右下角**模拟键位**的标题与"已选"指示。
@@ -1497,6 +1503,13 @@ export const zhCN = {
      * 这类**键名**作为参数传进来。
      */
     keyHint: '（{keys}）',
+    /**
+     * **二次确认弹窗**（2026-10-22）：组件在 `ui/ConfirmDialog.ts`，
+     * 文案在这里 —— 组件自己不写中文（I1）。
+     */
+    confirm: {
+      hint: '← → 选择 · Enter 确认 · Esc 取消',
+    },
     /**
      * ================================================================
      * 图鉴（2026-10-20）

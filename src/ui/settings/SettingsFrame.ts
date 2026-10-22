@@ -47,6 +47,17 @@ interface TabButton {
   readonly rect: { x: number; y: number; w: number; h: number };
 }
 
+/**
+ * **底部「回主菜单」按钮**的矩形（2026-10-22）。
+ *
+ * 渲染与命中测试**共用这一份几何**（与首页/备战同一条纪律：两处各算一遍
+ * 必然在改布局时错位，而错位的表现是"点不到 / 点错"）。
+ */
+export function exitButtonRect(): { readonly x: number; readonly y: number; readonly w: number; readonly h: number } {
+  const m = currentSettingsMetrics();
+  return { x: m.panelX + 16, y: m.panelY + SETTINGS_PANEL.h - 38, w: 128, h: 26 };
+}
+
 export class SettingsFrame {
   readonly root: Container;
   /** 「关闭」的标签 —— 面板要按焦点给它换色 */
@@ -99,6 +110,21 @@ export class SettingsFrame {
       anchorX: 1,
     });
     this.root.addChild(this.panel.root, this.title.root, this.closeHint.root);
+
+    /**
+     * **底部「回主菜单」**（2026-10-22）：一颗描边小按钮。点了**不直接走**
+     * —— 由面板转手给 `ui/ConfirmDialog`（二次确认）。
+     */
+    this.exitGfx = new pixi.Graphics();
+    this.exitLabel = new Label(pixi, {
+      x: 0,
+      y: 0,
+      size: FONT.small,
+      color: PALETTE.textDim,
+      anchorX: 0.5,
+      anchorY: 0.5,
+    });
+    this.root.addChild(this.exitGfx, this.exitLabel.root);
 
     /* ---- tab 按钮 ---- */
     /**
@@ -157,6 +183,10 @@ export class SettingsFrame {
    *   焦点 = 回车会作用在谁身上（一圈描边）
    * 两者可能同时在同一个 tab 上，也可能分开（焦点移走了但 tab 没切）。
    */
+  /** 底部「回主菜单」那颗（2026-10-22）：画一个描边小按钮。 */
+  private readonly exitGfx: Graphics;
+  private readonly exitLabel: Label;
+
   update(
     /** **可见的 tab 表**（首页只有「通用」）—— 由调用方从 `visibleTabs` 取。 */
     tabs: readonly SettingsTab[],
@@ -176,6 +206,17 @@ export class SettingsFrame {
      */
     showKeyHints = true,
   ): void {
+    /** 底部那颗（不参与焦点环 —— 它只靠点击 / 触屏；键盘走 `Esc` 关面板）。 */
+    const exit = exitButtonRect();
+    this.exitGfx.clear();
+    this.exitGfx
+      .roundRect(exit.x, exit.y, exit.w, exit.h, 6)
+      .stroke({ color: PALETTE.panelLine, width: 1 });
+    this.exitLabel.set(this.translate('settings.backToMenu'));
+    this.exitLabel.setColor(PALETTE.textDim);
+    this.exitLabel.root.x = exit.x + exit.w / 2;
+    this.exitLabel.root.y = exit.y + exit.h / 2;
+
     for (const [i, button] of this.tabButtons.entries()) {
       /** ⚠️ 不可见的 tab **整个不画**（也不可点 —— 命中测试同样按可见表来）。 */
       const visible = tabs.includes(button.tab);

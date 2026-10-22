@@ -80,6 +80,7 @@ import { createFpsOverlay } from './fpsOverlay';
 import { readUrlParams } from './urlParams';
 import { switchOperationMode } from './operationMode';
 import { translateSafe } from './translate';
+import { createExitConfirm } from './exitConfirm';
 import { battleGearBoxAt, ScreenChrome } from '../ui/ScreenChrome';
 import { capsOf, type OperationMode } from '../render/platform';
 import type { BattleLoop } from './battleLoop';
@@ -351,7 +352,6 @@ export function createGame(o: CreateGameDeps): GameHandle {
     phaseHistory,
   } = flow;
 
-
   /* ---------- 整屏界面（首页 / 选角色 / 自由模式 / 返回箭头） ---------- */
   /**
    * ⚠️ 四个界面怎么建整块在 `./screenSetup`（`game.ts` 顶到 700 行，
@@ -447,6 +447,12 @@ export function createGame(o: CreateGameDeps): GameHandle {
   };
 
   /* ---------- 设置面板 / 开关 ---------- */
+  /** 「回主菜单」的二次确认（组件与装配都在 `./exitConfirm`；须早于设置面板）。 */
+  const confirmDialog = createExitConfirm({
+    app, translate: translateSafe,
+    closeSettings: () => settingsSetup.settingsToggle.close(),
+    goHome: () => switchTo('home'),
+  });
   const settingsSetup = createSettingsSetup({
     app,
     /** ⚠️ 按**当前选的人**取注册表（「按键」页只列他真能按出来的技能）。 */
@@ -457,6 +463,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
     scene,
     applyUiScale,
     activeChrome: getChrome,
+    exitToHome: () => confirmDialog.open(),
     onOperationModeChanged: (mode) => applyOperationMode(mode),
     /**
      * ⚠️ **改键的同步**（loop 由 `settingsSetup` 自己做）：画面技能格的
@@ -550,6 +557,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
     qijiSelect: screens.qijiSelect,
     runOver: screens.runOver,
     codex: screens.codex,
+    confirm: confirmDialog,
     scene,
     settings,
     touch,
@@ -627,6 +635,7 @@ export function createGame(o: CreateGameDeps): GameHandle {
           qijiSelect: screens.qijiSelect,
           runOver: screens.runOver,
           codex: screens.codex,
+          confirm: confirmDialog,
           /**
            * ⚠️ **边角控件按相位取**（`getChrome()`）：每帧只更新**当前这一屏**
            * 的齿轮 / 返回箭头（键位提示跟着唯一 flag 走）。各屏各自的
