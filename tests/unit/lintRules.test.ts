@@ -672,9 +672,16 @@ describe('AGENTS.md §2：滑块几何只有 scrollWindow 一份', () => {
      * `view.viewPx / view.countPx`（不经过那个函数名）也照样是第二份几何。
      * 这里钉住"调用点确实在调它"，于是"把唯一那份删掉"这条路也会红。
      */
+    /**
+     * ⚠️ 2026-10-22：**"画"也收成了共用的一份**（`ui/scrollBarPaint.paintScrollBar`）——
+     * 图鉴 / 备战详情 / 设置页技能详情都走它，所以"像素调用点"从
+     * "各处自己画"变成了这两处：卡片区（`prepareCardGrid`，它算轨道位置）+
+     * 那个共用画笔（`scrollBarPaint`，它调 `scrollBarGeometry`）。
+     * `prepareDetailViewport` 已改成调 `paintScrollBar`，不再自己算 ✓。
+     */
     const PIXEL_CALLERS: readonly string[] = [
       'src/ui/prepareCardGrid.ts',
-      'src/ui/prepareDetailViewport.ts',
+      'src/ui/scrollBarPaint.ts',
     ];
     const missing = PIXEL_CALLERS.filter(
       (file) => !readFileSync(file, 'utf8').includes('scrollBarGeometry('),
