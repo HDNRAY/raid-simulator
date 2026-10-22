@@ -282,8 +282,16 @@ export class CodexScreen {
        * （Pixi 的 `mask` 在 headless 里不生效，AGENTS §3e ⇒ 几何求交）。
        */
       const shifted = { ...card, y: card.y - this.scrollOffset };
+      /**
+       * ⚠️ **整张卡要么完整画、要么不画**（2026-10-22 用户："滚动时，第一行
+       * 看着像卡片变小了…一段话 要么完全显示 要么完全不显示"）。
+       *
+       * 上一版把卡片按视口求交（只画交集）—— 于是边缘那一行变成**矮一截的
+       * 卡片**，看起来像"卡片被压扁了" ✗。现在改成**整项可见性**：
+       * 只有整张卡都在视口里才画；被切到的一行**完全不画**。
+       */
       const rect = visiblePartOf(shifted, view);
-      if (rect === undefined) {
+      if (rect === undefined || rect.h !== shifted.h) {
         nameLabel.root.visible = false;
         stateLabel.root.visible = false;
         this.conditionLabels[index]!.root.visible = false;
