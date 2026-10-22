@@ -208,7 +208,29 @@ export function inlineSpan(innerX: number, innerW: number): TextSpan {
  * ⚠️ 它是"顶栏钉住、只让正文滚"这条规则里**两个区域的分界**：
  * 上面的部分不参与滚动，下面的部分在 `[它, 面板底 − 内边距]` 里滚。
  */
+/**
+ * 顶栏与正文之间的空隙（`rowGap` 的倍数）。
+ *
+ * ⚠️ 2026-10-22 从 `2`（12px）加到 **`3`（18px）**：12px 时，分隔线不管放哪
+ * 都会贴着正文第一行的**升部**（中文 15px 字的实际墨迹比行框高一截）——
+ * 看起来就是"横线从字里穿过去"（用户报的"低语的内容重叠了"）。
+ */
+const BODY_GAP_UNITS = 3;
+
+/** 正文第一行的顶边（= 顶栏下缘 + 空隙）。 */
 export function bodyTopOf(kind: DetailKind, rect: DetailRect): number {
   const band = headerBandOf(kind, rect);
-  return band.top + band.h + METRICS.rowGap * 2;
+  return band.top + band.h + METRICS.rowGap * BODY_GAP_UNITS;
+}
+
+/**
+ * 顶栏与正文之间那道**分隔线**的 y。
+ *
+ * ⚠️ 位置与 `bodyTopOf` **同源**（同一份几何）：它落在空隙的**上三分之一**，
+ * 于是离顶栏 `~rowGap`、离正文 `~(BODY_GAP_UNITS−1)·rowGap`（12px）——
+ * 那条线不会再碰到正文的墨迹 ✓。
+ */
+export function separatorYOf(kind: DetailKind, rect: DetailRect): number {
+  const band = headerBandOf(kind, rect);
+  return band.top + band.h + METRICS.rowGap;
 }

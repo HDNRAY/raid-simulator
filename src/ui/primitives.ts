@@ -220,6 +220,18 @@ export interface LabelProps {
    * 这个开关打开。
    */
   readonly wrap?: { readonly width: number };
+  /**
+   * **行高**（多行文字的行间距）。
+   *
+   * ⚠️ 2026-10-22 修的 bug（用户："确认出站里，低语的内容重叠了"）：
+   * Pixi 的 `TextStyle.lineHeight` 缺省是 `0`，含义是"按字体度量自己算"——
+   * 而这个项目的 mono 字体在 headless / 无字体环境下算出来的行高**远小于
+   * 字号**，于是多行正文会**叠在一起**（实测 15px 字、行距约 7px）。
+   * 仓库里 `LogPanel` 早就显式设了 `lineHeight`，详情面板这边漏了。
+   *
+   * 所以**凡是多行文字都必须显式给行高**，别依赖字体度量。
+   */
+  readonly lineHeight?: number;
 }
 
 export class Label {
@@ -237,6 +249,7 @@ export class Label {
         ...(props.wrap === undefined
           ? {}
           : { wordWrap: true, breakWords: true, wordWrapWidth: props.wrap.width }),
+        ...(props.lineHeight === undefined ? {} : { lineHeight: props.lineHeight }),
         ...(props.stroke === undefined
           ? {}
           : { stroke: { color: css(props.stroke), width: props.strokeWidth ?? 3 } }),
