@@ -308,16 +308,29 @@ export function browserStorage(): StorageLike | undefined {
 export function parseBindings(
   raw: string | null,
   validSkillIds: ReadonlySet<string>,
+  /**
+   * **这个角色自己的默认键位**（按 `QWERASDF` 排，见 `input/keyboard` 的
+   * `defaultBindingsOf`）。它**覆盖**并集表里同名技能的键位，于是：
+   *
+   *   设置页仍然列全集（并集表提供"别的角色的招也有一行"）
+   *   而**本角色的招**默认落在 `Q W E R A S D F` 上 ✓（用户 2026-10-22：
+   *   "3个人默认应该都是 qwerasdf"）
+   *
+   * 不传 ⇒ 退回并集表（老行为，测试与迁移脚本用得上）。
+   */
+  ownDefaults: readonly KeyBinding[] = [],
 ): readonly KeyBinding[] {
-  if (raw === null || raw === '') return DEFAULT_BINDINGS;
+  /** 合并基准：并集表 + 本角色自己的覆盖。 */
+  const base = mergeDefaults(ownDefaults);
+  if (raw === null || raw === '') return base;
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return DEFAULT_BINDINGS;
+    return base;
   }
-  if (!Array.isArray(parsed)) return DEFAULT_BINDINGS;
+  if (!Array.isArray(parsed)) return base;
 
   /** 存储里有效的 `skillId → key`。 */
   const saved = new Map<string, string>();
@@ -339,7 +352,18 @@ export function parseBindings(
    * 顺序很重要：触屏按钮的顺序 = 这张表的顺序。直接用存储里的顺序会让
    * "按钮顺序"随存储内容漂移，而合并默认值则保证新技能有确定位置。
    */
-  return DEFAULT_BINDINGS.map((d) => ({ skillId: d.skillId, key: saved.get(d.skillId) ?? d.key }));
+  return base.map((d) => ({ skillId: d.skillId, key: saved.get(d.skillId) ?? d.key }));
+}
+
+/**
+ * 合并基准：并集表（`DEFAULT_BINDINGS`）在前，**本角色自己的默认**覆盖同名技能。
+ *
+ * ⚠️ 顺序按并集表 —— 触屏按钮与技能栏的顺序都跟它走（见下面那段注释）。
+ */
+function mergeDefaults(ownDefaults: readonly KeyBinding[]): readonly KeyBinding[] {
+  if (ownDefaults.length === 0) return DEFAULT_BINDINGS;
+  const own = new Map(ownDefaults.map((b) => [b.skillId, b.key]));
+  return DEFAULT_BINDINGS.map((d) => ({ skillId: d.skillId, key: own.get(d.skillId) ?? d.key }));
 }
 
 /** 序列化键位表（只存 `skillId` + `key`，不带别的字段）。 */

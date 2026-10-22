@@ -133,6 +133,47 @@ export const DEFAULT_BINDINGS: readonly KeyBinding[] = [
    */
 ];
 
+/**
+ * **每个角色自己的默认键位 = 同一条物理键序 `Q W E R A S D F`**
+ * （2026-10-22 用户："3个人默认应该都是 qwerasdf"）。
+ *
+ * ==================================================================
+ * 为什么是"每人一张"，而上面那张 `DEFAULT_BINDINGS` 是"并集"
+ * ==================================================================
+ *
+ * 两件事，别混：
+ *
+ * | 表 | 用途 |
+ * |---|---|
+ * | `DEFAULT_BINDINGS`（并集） | **设置页列什么**（整场游戏可绑哪些技能）+ 老存档迁移。它必须"一个技能一个键、键不重复"，所以只好把三个人的招摊在不同的键上 |
+ * | `defaultBindingsFor(id)`（本函数） | **某一局真正按什么** —— 每个角色的技能按**同一顺序**落在 `Q W E R A S D F` 上，所以换个角色不用重学手位 |
+ *
+ * ⚠️ 用户的原话就是判据："3个人默认应该都是 qwerasdf" —— 也就是说
+ * **位置固定、技能跟着角色换**（Q = 这个角色的第一招，W = 第二招……）。
+ *
+ * ⚠️ 只在**没有存档**时生效（`settingsStore` 里那个人的键位表优先）：
+ * 玩家改过键就听玩家的。
+ */
+export const KEY_LAYOUT = ['q', 'w', 'e', 'r', 'a', 's', 'd', 'f'] as const;
+
+/** 某一套技能按 `KEY_LAYOUT` 顺序配上默认键（技能多于 8 个时，多出来的不给键）。 */
+export function bindingsInLayout(skillIds: readonly string[]): readonly KeyBinding[] {
+  return skillIds
+    .slice(0, KEY_LAYOUT.length)
+    .map((skillId, index) => ({ key: KEY_LAYOUT[index] ?? '', skillId }));
+}
+
+/**
+ * 某个角色**没有存档时**的默认键位（= 他的技能按 `QWERASDF` 排）。
+ *
+ * ⚠️ 传进来的是"这个角色的技能 id（按技能表顺序）"，而不是让它自己去
+ * import `data/content` —— 那样 `input/` 会反过来依赖内容层的装配，
+ * 而"某人带哪一套"的唯一真相在 `data/content.PLAYER_KITS`。
+ */
+export function defaultBindingsOf(skillIds: readonly string[]): readonly KeyBinding[] {
+  return bindingsInLayout(skillIds);
+}
+
 /** 需要拦掉默认行为的键（浏览器会用它们做别的）。 */
 const PREVENT_DEFAULT = new Set(['tab', ' ', 'f1', 'f2', 'f3', 'f4', 'f5']);
 

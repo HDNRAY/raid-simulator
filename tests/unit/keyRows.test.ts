@@ -18,6 +18,7 @@
  * 所以判据换成结构性的 `PLAYER_SKILL_IDS`。这个文件把那条坑钉住 ——
  * 这类 bug 不会自己暴露，只会静默多出几行 UI。
  */
+import { skillsForPlayer } from '../../src/data/content';
 import { describe, expect, it } from 'vitest';
 import {
   ALL_BUFFS,
@@ -43,7 +44,7 @@ import { WRATH_SKILLS } from '../../src/data/wrathBoss';
 import { buildKeyRows, isBindablePlayerSkill, messageKeysMatching } from '../../src/app/keyRows';
 import { createRegistry } from '../../src/core/content/registry';
 import { translator } from '../../src/i18n/translator';
-import { DEFAULT_BINDINGS } from '../../src/input/keyboard';
+import { DEFAULT_BINDINGS, KEY_LAYOUT, defaultBindingsOf } from '../../src/input/keyboard';
 import { GUARD_HOLD_DRAIN_PER_SECOND } from '../../src/data/balance';
 import { FLASH, FLASH_IFRAME } from '../../src/data/kits/kaili';
 import { DODGE_IFRAME } from '../../src/data/kits/linwanfeng';
@@ -483,5 +484,34 @@ describe('说明里的秒数 = buff 的真实时长（不再写死）', () => {
     expect(row?.descParams?.seconds, '「避」说明里的秒数来自内容').toBe(
       secondsNumber(DODGE_IFRAME.duration),
     );
+  });
+});
+
+/**
+ * **每个角色默认都用 `Q W E R A S D F`**（2026-10-22 用户："3个人默认应该
+ * 都是 qwerasdf"）。
+ *
+ * 判据是**推导**的：把他的技能按技能表顺序排到 `KEY_LAYOUT` 上 ——
+ * 所以技能表顺序变了、或者加了第 6 招，这里照样成立（不钉具体技能名）。
+ */
+describe('每人一套默认键位：QWERASDF（位置固定，技能跟着角色换）', () => {
+  it('`KEY_LAYOUT` 就是 qwerasdf', () => {
+    expect([...KEY_LAYOUT]).toEqual(['q', 'w', 'e', 'r', 'a', 's', 'd', 'f']);
+  });
+
+  it('每个已完成角色的默认键位 = 他的技能按顺序落在 QWERASDF 上', () => {
+    for (const id of ['player', 'kaili', 'daixuan']) {
+      const skillIds = skillsForPlayer(id).map((skill) => skill.id);
+      const defaults = defaultBindingsOf(skillIds);
+      expect(defaults.map((b) => b.skillId), id).toEqual(skillIds.slice(0, KEY_LAYOUT.length));
+      expect(defaults.map((b) => b.key), id).toEqual([...KEY_LAYOUT].slice(0, skillIds.length));
+    }
+  });
+
+  it('⚠️ 黛玄的「弹」在 Q 上（不是 Z）—— 这一条是用户那次纠正的原话', () => {
+    const skillIds = skillsForPlayer('daixuan').map((skill) => skill.id);
+    const first = defaultBindingsOf(skillIds)[0];
+    expect(first?.key).toBe('q');
+    expect(first?.skillId).toBe('dan');
   });
 });

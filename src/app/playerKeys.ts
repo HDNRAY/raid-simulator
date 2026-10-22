@@ -43,6 +43,8 @@
 import { TOUCH_BUTTON_CAPACITY } from '../render/touchGeometry';
 import { touchButtonIdsFromBindings } from '../input/touchLayout';
 import { bindableSkillIdsOf } from './keyRows';
+import { defaultBindingsOf } from '../input/keyboard';
+import { skillsForPlayer } from '../data/content';
 import { loadTouchButtons, parseBindings, type SettingsStore } from './settingsStore';
 import type { ContentRegistry } from '../core/content/registry';
 import type { GameState } from './flow';
@@ -87,7 +89,11 @@ export function switchPlayerProfile(deps: PlayerProfileDeps, playerId: string): 
    * 同一份判据。用**这个角色**的注册表会把别的角色的技能当"失效"丢掉 ——
    * 而设置页列的是整场游戏可绑的技能（见 `deps.ts` 的 `registryFor` 说明）。
    */
-  const bindings = parseBindings(deps.store.bindings, new Set(deps.registry.skills.keys()));
+  const bindings = parseBindings(
+    deps.store.bindings,
+    new Set(deps.registry.skills.keys()),
+    defaultBindingsOf(skillsForPlayer(playerId).map((skill) => skill.id)),
+  );
   deps.state.bindings = bindings;
   deps.state.loop?.setBindings(bindings);
 

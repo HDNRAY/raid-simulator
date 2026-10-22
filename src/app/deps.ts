@@ -41,7 +41,10 @@ import { touchButtonIdsFromBindings } from '../input/touchLayout';
 import { bindableSkillIdsOf } from './keyRows';
 import { TOUCH_BUTTON_CAPACITY } from '../render/touchGeometry';
 import type { ContentRegistry } from '../core/content/registry';
-import type { KeyBinding } from '../input/keyboard';
+import {
+  defaultBindingsOf,
+  type KeyBinding,
+} from '../input/keyboard';
 import type { ContentBundle } from '../core/content/validate';
 
 /** `createGameDeps()` 的产物。 */
@@ -226,7 +229,15 @@ export function createGameDeps(): GameDeps {
    * ——「通用」页切一次才写。
    */
   const validSkillIds = new Set(registry.skills.keys());
-  const bindings: readonly KeyBinding[] = parseBindings(settingsStore.bindings, validSkillIds);
+  /**
+   * ⚠️ 第三个参数 = **这个角色自己的默认键位**（`QWERASDF`，2026-10-22
+   * 用户："3个人默认应该都是 qwerasdf"）。玩家改过键就听存档的。
+   */
+  const bindings: readonly KeyBinding[] = parseBindings(
+    settingsStore.bindings,
+    validSkillIds,
+    defaultBindingsOf(skillsForPlayer(playerId).map((skill) => skill.id)),
+  );
 
   /**
    * ================================================================
