@@ -54,6 +54,7 @@ import {
   wrapByChars,
   wrapHardLines,
   type CodexEntry,
+  CODEX_LINE_H,
 } from './codexLogic';
 import {
   attachViewportMask,
@@ -533,15 +534,17 @@ export class CodexScreen {
         anchorY: 0,
         kai: true,
       });
-      const desc = new Label(pixi, {
-        x: 0,
-        y: 0,
-        /** 中文下限 13（`FONT.small`）—— 效果说明不能更小。 */
+      /**
+       * **效果说明**（`RichLine`）：普通段用 `textDim`（与以前一致），
+       * `**…**` 里的数字用 **`PALETTE.douqi`（金）** —— 选它的理由：
+       * ① 与暗灰正文对比明显 ② 语义是"资源/数值"，不是"危险"（`danger`）
+       * 也不抢"前摇/冷却"那三色的语义 ③ 是既有色，不发明新值。
+       */
+      const desc = new RichLine({
+        pixi,
         size: FONT.small,
-        color: PALETTE.textDim,
-        /** 顶部锚：与名字同一套摆位（见名字那段注释）。 */
-        anchorX: 0,
-        anchorY: 0,
+        baseColor: PALETTE.textDim,
+        emphasisColor: PALETTE.douqi.base,
       });
       const condition = new Label(pixi, {
         x: 0,
