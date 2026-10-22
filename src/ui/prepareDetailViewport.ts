@@ -84,9 +84,9 @@
  */
 
 import type { Graphics } from 'pixi.js';
-import { PALETTE } from '../render/theme';
 import { PREPARE_LAYOUT } from './prepareLayout';
-import { pixelViewport, scrollBarGeometry } from './scrollWindow';
+import { pixelViewport } from './scrollWindow';
+import { paintScrollBar } from './scrollBarPaint';
 
 /** 一行在**内容坐标**里的区间（`endTop` 不含 `rowGap`）。 */
 export interface DetailRowExtent {
@@ -302,20 +302,22 @@ export class DetailViewport {
   ): void {
     gfx.clear();
     if (this.maxScrollPx <= 0) return;
-    const trackX = rect.x + rect.w - 5;
-    const trackTop = this.bodyTopPx;
-    const trackH = Math.max(0, rect.y + rect.h - PREPARE_LAYOUT.detailPad - this.bodyTopPx);
-    const thumb = scrollBarGeometry({
+    /**
+     * ⚠️ 2026-10-22：**画**也收进 `ui/scrollBarPaint.paintScrollBar`（与图鉴
+     * 同一份）。这里只剩"轨道画在哪"这一条几何 ——
+     * 两份"画"不会算错，却会**长得不一样**（粗细 / 颜色 / 圆角各写一遍），
+     * 而那正是用户问"图鉴的滚动条与详情区是不是同一个组件"的原因。
+     */
+    paintScrollBar({
+      gfx,
+      track: {
+        x: rect.x + rect.w - 5,
+        top: this.bodyTopPx,
+        len: Math.max(0, rect.y + rect.h - PREPARE_LAYOUT.detailPad - this.bodyTopPx),
+      },
       viewportPx: this.viewHPx,
       maxScrollPx: this.maxScrollPx,
       scrollPx: this.scrollPx,
-      trackLenPx: trackH,
     });
-    gfx
-      .roundRect(trackX, trackTop, 3, trackH, 1.5)
-      .fill({ color: PALETTE.panelLine, alpha: 0.35 });
-    gfx
-      .roundRect(trackX, trackTop + thumb.offset, 3, thumb.length, 1.5)
-      .fill({ color: PALETTE.textDim, alpha: 0.9 });
   }
 }

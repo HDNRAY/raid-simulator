@@ -43,12 +43,14 @@ import { ScreenChrome } from './ScreenChrome';
 import { PALETTE } from '../render/theme';
 import { CARD_RADIUS, cardSkin } from './prepareRender';
 import {
+  CARD_TEXT_INSET,
   CODEX_LAYOUT,
   clampScrollOffset,
   cardTextPlan,
   codexCardRects,
   maxScrollOffset,
   wrapByChars,
+  wrapHardLines,
   type CodexEntry,
 } from './codexLogic';
 import {
@@ -396,11 +398,22 @@ export class CodexScreen {
        * ⚠️ 条件文案**自带「解锁条件：」前缀**（`app/unlockText` 统一加的）
        * —— 这里**不许**再拼一次，否则会出现"解锁条件：解锁条件：…" ✗
        */
-      const plan = cardTextPlan(shifted.h);
-      const centerX = shifted.x + shifted.w / 2;
-      const perLine = Math.max(6, Math.floor((shifted.w - 16) / FONT.small));
+      /** ⚠️ **三行同一条左基线**（`CARD_TEXT_INSET`，唯一一处数字）。 */
+      const textX = shifted.x + CARD_TEXT_INSET;
+      const perLine = Math.max(6, Math.floor((shifted.w - CARD_TEXT_INSET * 2) / FONT.small));
+      /**
+       * **解锁条件**（用户 2026-10-22："解锁条件 后面换一行 不需要 冒号了…
+       * 写不下换行 不要省略…锚点设在底部"）：
+       *
+       * - 文案已经是 `"解锁条件\n<条件正文>"`（前缀在 `app/unlockText` 统一加）
+       *   ⇒ 这里按硬换行切段再折行，**不拼前缀、不加冒号** ✓
+       * - **不限行数、不省略**（`wrapHardLines` 不传 `maxLines`）✓
+       * - 行数算出来之后交给 `cardTextPlan`：条件**贴底**，说明吃剩下的高度 ✓
+       */
+      const condLines = wrapHardLines(entry.unlockText, perLine);
+      const plan = cardTextPlan({ cardH: shifted.h, condLines: condLines.length });
 
-      nameLabel.root.x = centerX;
+      nameLabel.root.x = textX;
       nameLabel.root.y = shifted.y + plan.nameY;
       nameLabel.set(entry.nameKey === undefined ? t('screen.codex.locked') : t(entry.nameKey));
       nameLabel.setColor(entry.nameKey === undefined ? PALETTE.textDim : PALETTE.text);
@@ -419,21 +432,21 @@ export class CodexScreen {
         descLabel.root.visible = false;
       } else {
         const flat = stripEmphasis(desc).replaceAll('\n', ' ');
-        descLabel.set(
-          wrapByChars(flat, { perLine, maxLines: plan.descLines }).join('\n'),
-        );
-        descLabel.setColor(PALETTE.textDim);
-        descLabel.root.x = centerX;
-        descLabel.root.y = shifted.y + plan.descY;
-        descLabel.root.visible = true;
+        if (plan.descLines <= 0) {
+          descLabel.root.visible = false;
+        } else {
+          descLabel.set(wrapByChars(flat, { perLine, maxLines: plan.descLines }).join('\n'));
+          descLabel.setColor(PALETTE.textDim);
+          descLabel.root.x = textX;
+          descLabel.root.y = shifted.y + plan.descY;
+          descLabel.root.visible = true;
+        }
       }
 
       if (conditionLabel !== undefined) {
-        conditionLabel.root.x = centerX;
+        conditionLabel.root.x = textX;
         conditionLabel.root.y = shifted.y + plan.condY;
-        conditionLabel.set(
-          wrapByChars(entry.unlockText, { perLine, maxLines: plan.condLines }).join('\n'),
-        );
+        conditionLabel.set(condLines.join('\n'));
         conditionLabel.setColor(PALETTE.textDim);
         conditionLabel.root.visible = true;
       }
@@ -482,7 +495,8 @@ export class CodexScreen {
         y: 0,
         size: FONT.body,
         color: PALETTE.text,
-        anchorX: 0.5,
+        /** ⚠️ **左对齐**（三行同一条基线，见 `CARD_TEXT_INSET`）。 */
+        anchorX: 0,
         anchorY: 0.5,
         kai: true,
       });
@@ -492,7 +506,7 @@ export class CodexScreen {
         /** 中文下限 13（`FONT.small`）—— 效果说明不能更小。 */
         size: FONT.small,
         color: PALETTE.textDim,
-        anchorX: 0.5,
+        anchorX: 0,
         anchorY: 0.5,
       });
       const condition = new Label(pixi, {
@@ -501,7 +515,7 @@ export class CodexScreen {
         /** 中文下限 13（`FONT.small`）—— 条件那行不能更小。 */
         size: FONT.small,
         color: PALETTE.textDim,
-        anchorX: 0.5,
+        anchorX: 0,
         anchorY: 0.5,
       });
       this.cardsLayer.addChild(name.root, desc.root, condition.root);

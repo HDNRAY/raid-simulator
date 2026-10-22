@@ -528,6 +528,7 @@ export class CharacterSelectScreen {
     const cursorAt = characterCursorTarget(this.selection, this.players);
 
     this.cardGfx.clear();
+    this.expandGfx.clear();
     this.cards.forEach((card, i) => {
       const area = areas[i];
       const entry = this.players[i];
@@ -572,10 +573,18 @@ export class CharacterSelectScreen {
         card.status.root.y = area.y + area.h / 2 + 16;
       }
 
-      this.cardGfx
+      /**
+       * ⚠️ **被展开的那张，描边画在 `expandGfx` 里**（它比详情面板**更上层**，
+       * 而 `cardGfx` 在下层）：否则那两张压暗的卡会盖在长大卡的内容上
+       * （实测"凯丽/黛玄"两块压在详情正文上 ✗）。底色仍留在 `cardGfx`
+       * （内容要压在底色之上）。
+       */
+      const fillTarget = this.cardGfx;
+      const strokeTarget = dimmed ? this.cardGfx : this.expandGfx;
+      fillTarget
         .roundRect(area.x, area.y, area.w, area.h, CARD_RADIUS)
         .fill({ color: skin.fillColor, alpha: skin.fillAlpha * cardAlpha });
-      this.cardGfx
+      strokeTarget
         .roundRect(area.x, area.y, area.w, area.h, CARD_RADIUS)
         .stroke({ color: skin.strokeColor, width: skin.strokeWidth, alpha: cardAlpha });
       /**
@@ -651,7 +660,10 @@ export class CharacterSelectScreen {
    * 面板吸收"，而不是"两个东西叠在一起"。
    */
   private drawExpand(cardIndex: number): void {
-    this.expandGfx.clear();
+    /**
+     * ⚠️ **不再 `clear()`**：`redraw` 的卡片循环已经把"被展开那张的描边"
+     * 画进同一个 Graphics 了（见那里的说明），这里只负责名字标签。
+     */
     this.expandTitle.root.visible = false;
     if (cardIndex < 0 || this.expandAnim.progress <= 0) return;
 
@@ -674,12 +686,10 @@ export class CharacterSelectScreen {
     const alpha = 1;
     const skin = cardSkin({ developing: false, cursored: true, selected: true });
 
-    this.expandGfx
+    /** 长大的那张的**底色**画在 `cardGfx` 下层（内容要压在上面）。 */
+    this.cardGfx
       .roundRect(rect.x, rect.y, rect.w, rect.h, CARD_RADIUS)
       .fill({ color: skin.fillColor, alpha: skin.fillAlpha * alpha });
-    this.expandGfx
-      .roundRect(rect.x, rect.y, rect.w, rect.h, CARD_RADIUS)
-      .stroke({ color: skin.strokeColor, width: skin.strokeWidth, alpha });
 
     /** 名字跟着卡片走（字号不插值：中文 >= 13 的下限比"大小连贯"更重要）。 */
     this.expandTitle.root.visible = this.expandAnim.progress < 0.5;

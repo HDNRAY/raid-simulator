@@ -81,8 +81,9 @@ describe('解锁条件的文案（从结构推导）', () => {
 
   it('组合条件：`all` / `any` / `not` 都能翻译（递归）', () => {
     const leaf = { kind: 'statAtLeast', stat: { s: 'dodges', scope: 'run' }, value: 2 } as const;
-    /** ⚠️ 2026-10-22：文案从「同时满足」改成「全部达成」。 */
-    expect(unlockTextOf({ kind: 'all', of: [leaf, leaf] }, deps)).toContain('全部达成');
+    /** ⚠️ 2026-10-22：不再加前缀（用户："删除'全部达成'"），子句直接用「、」罗列。 */
+    const all = unlockTextOf({ kind: 'all', of: [leaf, leaf] }, deps);
+    expect(all).toBe('解锁条件\n局内闪避 2 次、局内闪避 2 次');
     expect(unlockTextOf({ kind: 'any', of: [leaf, leaf] }, deps)).toContain('任意一条');
     expect(unlockTextOf({ kind: 'not', of: leaf }, deps)).toContain('不满足');
   });

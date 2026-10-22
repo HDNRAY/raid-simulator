@@ -163,9 +163,13 @@ export function codexCardRects(
  *
  * ⚠️ 超过 `maxLines` 就**截断加省略号**：条件再长也不许压到下一张卡上。
  */
-export function wrapByChars(text: string, args: { readonly perLine: number; readonly maxLines: number }): readonly string[] {
+export function wrapByChars(text: string, args: {
+  readonly perLine: number;
+  /** 最多几行；**省略 = 不限行**（解锁条件那类"必须写完"的文本用）。 */
+  readonly maxLines?: number;
+}): readonly string[] {
   const perLine = Math.max(1, Math.trunc(args.perLine));
-  const maxLines = Math.max(1, Math.trunc(args.maxLines));
+  const maxLines = Math.max(1, Math.trunc(args.maxLines ?? Number.MAX_SAFE_INTEGER));
   const chars = [...text];
   const lines: string[] = [];
   for (let i = 0; i < chars.length; i += perLine) {
@@ -220,6 +224,16 @@ export interface CardTextPlan {
 
 /** 小字行高（`FONT.small` = 13，中文行高约 1.3 倍）。 */
 export const CODEX_LINE_H = 17;
+
+/**
+ * **卡片内三行文字的左内边距**（唯一一处；用户 2026-10-22：
+ * "解锁条件左侧为什么有padding…三行必须同一条左基线"）。
+ *
+ * ⚠️ 之前名字是 `rect.x + 18`、说明与条件**居中** —— 两种对齐混着，
+ * 一眼就能看出"这一行左边多了一块空" ✗。现在三行**统一左对齐 + 同一个
+ * inset**，数字只有这一个。
+ */
+export const CARD_TEXT_INSET = 12;
 /** 卡片内边距（上下各留一点，不然描边会贴字）。 */
 const CARD_PAD_TOP = 10;
 const CARD_PAD_BOTTOM = 10;
@@ -242,15 +256,28 @@ const NAME_BAND = 24;
  * ⚠️ 纯函数：`cardH` 是唯一的输入，所以"卡片多高 ⇒ 每块几行"能在 node 里
  * 直接测（`tests/unit/codexCardText.test.ts`）。
  */
-export function cardTextPlan(cardH: number): CardTextPlan {
-  const h = Math.max(CODEX_LINE_H * 3, Math.round(cardH));
-  /** 条件：够高就给两行（"解锁条件：局内累计用「弹」命中 10 次" 常见要两行）。 */
-  const condLines = h >= 140 ? 2 : 1;
+export function cardTextPlan(args: {
+  readonly cardH: number;
+  /**
+   * 解锁条件**实际**几行（由内容折行算出来，不是预估）。
+   *
+   * ⚠️ 用户 2026-10-22："解锁条件 写不下换行 **不要省略**…锚点设在底部，
+   * 内容多可以被挤上来" ⇒ 条件**不定上限**，行数由内容说了算；被挤的是
+   * 上面的说明（`descLines` 跟着变少，甚至 0 行）。
+   */
+  readonly condLines: number;
+}): CardTextPlan {
+  const h = Math.max(CODEX_LINE_H * 3, Math.round(args.cardH));
+  const condLines = Math.max(1, Math.trunc(args.condLines));
   const condH = condLines * CODEX_LINE_H;
   const condTop = h - CARD_PAD_BOTTOM - condH;
   const descTop = CARD_PAD_TOP + NAME_BAND;
-  /** 说明能吃几行（至少 1 行；空出来的高度都给条件让路）。 */
-  const descLines = Math.max(1, Math.min(4, Math.floor((condTop - 4 - descTop) / CODEX_LINE_H)));
+  /**
+   * 说明能吃几行：**条件占剩下的高度先扣掉**（条件优先），说明拿剩下的。
+   * 可以是 **0**（条件太占地方 ⇒ 说明整块不画，而不是压到条件上）。
+   */
+  const room = Math.floor((condTop - 4 - descTop) / CODEX_LINE_H);
+  const descLines = Math.max(0, Math.min(4, room));
   const descH = descLines * CODEX_LINE_H;
   return {
     /** 名字的中心：名字带的正中。 */
@@ -260,4 +287,24 @@ export function cardTextPlan(cardH: number): CardTextPlan {
     condY: condTop + condH / 2,
     condLines,
   };
+}
+
+/**
+ * **按硬换行分段折行**（2026-10-22）。
+ *
+ * 解锁条件那串文案是 `"解锁条件\n<条件正文>"`（前缀由 `app/unlockText` 统一
+ * 加，见那里）—— 前缀自己一行，正文再按宽度折。
+ *
+ * ⚠️ 不能整串直接 `wrapByChars`：那会把 `\n` 当成一个普通字符计数，折出来的
+ * 行会把两段黏在一起（"解锁条件局内用「斩」…"）✗。
+ * ⚠️ **不限行数、不省略**（用户："写不下换行 不要省略"）。
+ */
+export function wrapHardLines(text: string, perLine: number): readonly string[] {
+  const out: string[] = [];
+  for (const segment of text.split('\n')) {
+    const trimmed = segment.trim();
+    if (trimmed === '') continue;
+    out.push(...wrapByChars(trimmed, { perLine }));
+  }
+  return out;
 }
