@@ -325,13 +325,20 @@ export class CodexScreen {
        * "已解锁 / 未解锁"的信息仍然在：名字是否 ？？？ 就说清了。
        */
       /**
-       * ⚠️ 文字只在**整张卡的中心**落在视口里时显示 —— 半张卡的边缘不写半行字
-       * （那会看起来像"字被吃掉"）。卡片本身仍然画出来（半张卡）✓
+       * ⚠️ **文字只在卡片"完整可见"时画**（2026-10-22 用户："文字还是出了
+       * 他们该待的框框"）—— 被切过的那几张只画卡片本身（半张卡），不写字。
+       *
+       * 为什么不用 `mask` 裁：Pixi 的 `mask` 在 headless 里不生效
+       * （AGENTS §3e），所以"文字别出框"这件事**只能靠逐项判可见性**。
+       * 判据用 `rect.h === shifted.h`（= 这张卡没被切）+ 行带在视口内。
        */
-      const centerVisible = shifted.y + shifted.h / 2 >= view.top
-        && shifted.y + shifted.h / 2 <= view.top + view.height;
-      nameLabel.root.visible = centerVisible;
-      stateLabel.root.visible = centerVisible && shifted.h >= 84;
+      const wholeCard = rect.h === shifted.h;
+      const lineInside = (ratio: number): boolean => {
+        const centerY = shifted.y + shifted.h * ratio;
+        return centerY >= view.top + 4 && centerY <= view.top + view.height - 4;
+      };
+      nameLabel.root.visible = wholeCard && lineInside(0.24);
+      stateLabel.root.visible = wholeCard && shifted.h >= 84 && lineInside(0.5);
 
       const conditionLabel = this.conditionLabels[index];
       if (conditionLabel !== undefined) {
@@ -345,12 +352,16 @@ export class CodexScreen {
          * ⚠️ 卡片矮的时候（池子长了，`codexCardRects` 会按行数压矮）只给**一行**
          * 条件 —— 两行会压到状态行上（实测 19 条时就是这样叠在一起的 ✗）。
          */
-        const lines = rect.h >= 92 ? 2 : 1;
+        /**
+         * ⚠️ 两行条件要求卡片**够高**（今天 `cardH = 108` ⇒ 一律一行）——
+         * 否则第二行会掉到卡片外面（实测「弹中生波」就是这样出框的 ✗）。
+         */
+        const lines = shifted.h >= 120 ? 2 : 1;
         conditionLabel.set(
           wrapByChars(entry.unlockText, { perLine: 12, maxLines: lines }).join('\n'),
         );
         conditionLabel.setColor(PALETTE.textDim);
-        conditionLabel.root.visible = true;
+        conditionLabel.root.visible = wholeCard && lineInside(0.78);
       }
     });
 
