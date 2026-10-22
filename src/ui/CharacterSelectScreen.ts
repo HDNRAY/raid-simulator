@@ -158,6 +158,15 @@ export class CharacterSelectScreen {
    * 打断语义全在 `expandTween`（值不动、只换目标 ⇒ 从当前进度往回跑）。
    */
   private expandAnim: ExpandState = initialExpand();
+  /**
+   * **指针停在空白处**（或离开画布）—— 2026-10-22 用户："hover 哪个哪个就
+   * 展开，**移开就收起**"。
+   *
+   * 判据只在两个地方改：`hover()` 命中/落空、以及**键盘移光标**（`cycle`）。
+   * 指针落空 ⇒ 全部收起；键盘一动 ⇒ 重新跟着光标展开（键盘用户也要看得到
+   * 详情 —— 那正是"hover 优先、其次光标"那条老规矩）。
+   */
+  private hoverAway = false;
   /** 正在展开的是第几张卡（`undefined` = 没有在展开）。 */
   private expandCard: number | undefined;
   private readonly expandGfx: Graphics;
@@ -301,6 +310,8 @@ export class CharacterSelectScreen {
     const next = cycleCharacter(this.selection, this.players, delta);
     if (next === this.selection) return;
     this.selection = next;
+    /** 键盘一动 ⇒ 重新跟着光标展开（指针不在卡片上也算"看这一张"）。 */
+    this.hoverAway = false;
     this.redraw();
   }
 
@@ -353,12 +364,15 @@ export class CharacterSelectScreen {
    */
   hover(px: number, py: number): boolean {
     const next = characterHoverTarget(this.players, px, py);
+    /** ⚠️ 指针落空 ⇒ 收起全部（"移开就收起"）。 */
+    this.hoverAway = next === undefined;
     if (this.detailPanel.hoverAt(next)) this.redraw();
     return next !== undefined;
   }
 
   /** 指针离开画布：清掉悬停（否则详情会一直停在最后划过的那一项）。 */
   clearHover(): void {
+    this.hoverAway = true;
     if (this.detailPanel.clearHover()) this.redraw();
   }
 
@@ -380,6 +394,35 @@ export class CharacterSelectScreen {
   /** 悬停那一项（调试探针用；`undefined` = 鼠标不在任何卡上）。 */
   hovered(): PrepareTarget | undefined {
     return this.detailPanel.hovered;
+  }
+
+  /* ---------------------------------------------------------------- *
+   * 滚动（2026-10-22，用户："人物详情 有滚动条 但是滚动不了"）
+   * ---------------------------------------------------------------- */
+
+  /**
+   * 这个点是不是落在**展开后的详情区**里（拖拽 / 滚轮的判据）。
+   *
+   * ⚠️ 判据用**详情面板自己的矩形**（`PrepareDetailController.isOnDetail`），
+   * 不在这里再算一份 —— 面板的位置一改，这里自动跟上。
+   * ⚠️ 收起状态下（`progress` 还没到位）**不吃滚动**：那时卡片还没长成详情，
+   * 在卡片上滚轮不该动详情（会让人以为"卡片自己能滚"）。
+   */
+  isOnScrollable(px: number, py: number): boolean {
+    if (this.expandAnim.progress < 0.5) return false;
+    return this.detailPanel.isOnDetail(px, py);
+  }
+
+  /** **滚轮**：滚详情正文。@returns 有没有真的滚 */
+  wheelDetail(px: number, py: number, deltaY: number): boolean {
+    if (!this.isOnScrollable(px, py)) return false;
+    return this.detailPanel.scrollBy(deltaY * 3);
+  }
+
+  /** **拖拽**（触屏没有滚轮，这条路必须存在）。@param deltaY 向上为负 */
+  dragDetail(px: number, py: number, deltaY: number): boolean {
+    if (!this.isOnScrollable(px, py)) return false;
+    return this.detailPanel.scrollBy(-deltaY);
   }
 
   /**
@@ -469,6 +512,15 @@ export class CharacterSelectScreen {
       const cursored = cursorAt !== undefined && cursorAt.id === entry.id;
       const soon = isDeveloping(entry.id);
       const skin = cardSkin({ developing: soon, cursored, selected });
+      /**
+       * ⚠️ **没被展开的那两张随进度淡出**（2026-10-22）：长大的那张会盖住
+       * 右边的邻居，不淡出看起来像"两张卡叠在一起"✗。淡出之后读起来是
+       * "这一张长成了详情、其余退到后面"✓
+       */
+      const dimmed = this.expandCard !== undefined && i !== this.expandCard;
+      const cardAlpha = dimmed ? Math.max(0.15, 1 - 0.85 * easeOutCubic(this.expandAnim.progress)) : 1;
+      card.name.root.alpha = cardAlpha;
+      card.status.root.alpha = cardAlpha;
 
       card.name.set(t(entry.nameKey));
       card.name.setColor(skin.nameColor);
@@ -485,10 +537,10 @@ export class CharacterSelectScreen {
 
       this.cardGfx
         .roundRect(area.x, area.y, area.w, area.h, CARD_RADIUS)
-        .fill({ color: skin.fillColor, alpha: skin.fillAlpha });
+        .fill({ color: skin.fillColor, alpha: skin.fillAlpha * cardAlpha });
       this.cardGfx
         .roundRect(area.x, area.y, area.w, area.h, CARD_RADIUS)
-        .stroke({ color: skin.strokeColor, width: skin.strokeWidth });
+        .stroke({ color: skin.strokeColor, width: skin.strokeWidth, alpha: cardAlpha });
       /**
        * 外环：光标 + 选择同一张卡（卡片本身是金的，环标出光标）、
        * 或光标落在开发中的卡上（那张卡整体压暗，没有环看不出来）——
@@ -517,11 +569,17 @@ export class CharacterSelectScreen {
      * 就朝哪张展开。`retarget` 只换方向、不动进度 ⇒ 快速来回时**从当前
      * 进度往反方向跑**（用户要的"中断并朝反状态运行"）。
      */
-    const focus = characterCursorTarget(this.selection, this.players);
+    const focus = this.hoverAway ? undefined : characterCursorTarget(this.selection, this.players);
     const focusIndex = this.players.findIndex((p) => p.id === focus?.id);
     if (focusIndex !== this.expandCard) this.expandCard = focusIndex;
     this.expandAnim = retarget(this.expandAnim, focusIndex >= 0 ? 1 : 0);
     this.drawExpand(focusIndex);
+    /**
+     * **详情内容 = 展开后的那张卡的内容**（2026-10-22）：面板的透明度跟着
+     * `progress` 走 —— 展开到 1 时它完全是详情、收起时它一点都看不见。
+     * 于是"卡片长成详情"是**同一块区域**在变，不是左右两块各画一份 ✗。
+     */
+    this.detailPanel.root.alpha = easeOutCubic(this.expandAnim.progress);
 
     this.detailPanel.update(characterCursorTarget(this.selection, this.players));
   }
@@ -547,7 +605,12 @@ export class CharacterSelectScreen {
 
     const to = detailRect();
     const rect = lerpRect(from, to, easeOutCubic(this.expandAnim.progress));
-    const alpha = Math.max(0, 1 - this.expandAnim.progress);
+    /**
+     * ⚠️ **不淡出**（2026-10-22）：这张卡是"正在长成详情"的那一块 —— 它
+     * 一直实心，到 progress=1 时正好与详情面板重合，看起来就是"卡片变成了
+     * 详情" ✓（上一版让它淡出 ⇒ 像"卡片消失、详情凭空出现"✗）。
+     */
+    const alpha = 1;
     const skin = cardSkin({ developing: false, cursored: true, selected: true });
 
     this.expandGfx
@@ -558,7 +621,7 @@ export class CharacterSelectScreen {
       .stroke({ color: skin.strokeColor, width: skin.strokeWidth, alpha });
 
     /** 名字跟着卡片走（字号不插值：中文 >= 13 的下限比"大小连贯"更重要）。 */
-    this.expandTitle.root.visible = alpha > 0.15;
+    this.expandTitle.root.visible = this.expandAnim.progress < 0.5;
     this.expandTitle.root.alpha = alpha;
     this.expandTitle.set(this.options.translate(player.nameKey));
     this.expandTitle.root.x = rect.x + 18;

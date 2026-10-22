@@ -58,23 +58,30 @@
  * 下面自然就伸出去了。
  *
  * ==================================================================
- * 修法：**按每一行自己的内容区间判**（照 `settings/SkillDetail.clipToWindow`）
+ * 修法（2026-10-22 第二轮）：**遮罩按像素裁**，不再"整行可见"
  * ==================================================================
  *
- * ⚠️ 不用 Pixi 的 `mask`：本仓库实测**遮罩在 headless 里不生效**
- * （见 `ui/settings/wrapText.ts`），拿它修等于"截图看上去还是坏的"。
+ * 第一轮修的是"内容画到面板外"，做法是**整行落在视口里才画**；它确实
+ * 不再溢出，但用户 2026-10-22 明确否掉了那种观感：
  *
- *   行的内容区间 = `[nameTop, endTop)`，视口 = `[scroll, scroll + bodyViewH)`
- *   只有**整行落在视口里**才画（`inside`）
+ * > "一段话要么完全显示、要么完全不显示" 这不是我要的，是现在的情况，
+ * > 我要的是类似 html 那种滚动效果，如果 pixi 做不到咱们就换引擎！
  *
- * ⚠️ **为什么是"整行"而不是"相交就画"**：Pixi 的一段 `Text` 不能裁一半
- * —— "相交就画"必然让跨在面板下缘的那一行有半截露在外面，而露出多少
- * 取决于那一行折了几行（Boss 的说明 2~3 行 ⇒ 最多露 ~50px）。
+ * 所以现在：
  *
- * ⚠️ 为了让"整行"这条判据不产生**奇怪的空白**，画出来的偏移**吸附到行顶**
- * （`snapScroll`）：拖拽 / 滚轮仍然按像素累加，但落笔时停在某一行的顶边，
- * 于是顶上那一行不会半截压在**钉住的顶栏**上。滚到底那一档是例外
- * （`scroll >= maxScroll` 时直接用 `maxScroll`，否则最后一行永远露不全）。
+ * ```
+ *   正文层（`rowsLayer`）  整层被一块矩形 `mask` 裁到 [bodyTop, 面板底 − 内边距)
+ *   每一行                 按**内容坐标 + 像素偏移**摆（跨边界的照画）
+ *   完全在视口外的行       不画（**性能**判据，省掉文字重建）
+ * ```
+ *
+ * ⚠️ 那条"遮罩在 headless 里不生效"的旧结论（见 `ui/settings/wrapText.ts`
+ * 与 AGENTS §3e）**仍然记着**，但它的前提是"截图验收"；用户已经接受
+ * "截图里可能看不到裁切"这个代价，并要求以真机行为为准 ⇒ 这是**按用户
+ * 的明确要求改的口径**，不是忘掉了那条教训。详细取舍见 `ui/viewportMask`。
+ *
+ * ⚠️ 因此**不再吸附行顶**（`snapScroll` 已删）：吸附会让滚动一格一格跳，
+ * 那正是 HTML 式滚动要避免的东西。
  *
  * ⚠️ 行高改成**实测**（`Label.root.height`）而不是估算的行数：`maxScroll`
  * 与"整行是否放得下"都依赖内容底边，估算偏一行就会让最后一行**永远**
@@ -93,6 +100,7 @@ import type { DetailModel, DetailRow } from './prepareDetail';
 import { PORTRAITS, portraitFor } from '../render/portraitAssets';
 import { PortraitSprite } from '../render/portraitSprite';
 import { DetailViewport, measuredHeight } from './prepareDetailViewport';
+import { attachViewportMask, drawViewportClip, fullyOutside } from './viewportMask';
 import {
   DETAIL_ROW_POOL,
   METRICS,
@@ -156,6 +164,11 @@ export class PrepareDetailPanel {
    * 只让正文滚（见 `update` 里那段说明）。
    */
   private readonly rowsLayer: Container;
+  /**
+   * **正文层的遮罩**（2026-10-22）：把正文按像素裁在 `[bodyTop, 面板底)` 里。
+   * `attachViewportMask` 把它加进 `rowsLayer` 并赋给 `mask`；每帧只重画几何。
+   */
+  private readonly maskGfx: Graphics;
 
   private readonly title: Label;
   private readonly subtitle: Label;
@@ -197,6 +210,8 @@ export class PrepareDetailPanel {
 
     this.gfx = new pixi.Graphics();
     this.rowsLayer = new pixi.Container();
+    this.maskGfx = new pixi.Graphics();
+    attachViewportMask(this.maskGfx, this.rowsLayer);
     this.scrollBar = new pixi.Graphics();
     this.root.addChild(this.gfx, this.rowsLayer, this.scrollBar);
 
@@ -246,7 +261,12 @@ export class PrepareDetailPanel {
     this.portrait =
       firstPlayer === undefined
         ? undefined
-        : new PortraitSprite(pixi, this.rowsLayer, firstPlayer, portraitBoxOf(innerW));
+        : /**
+           * ⚠️ 头像挂在 **root** 上（2026-10-22）：它在**钉住的顶栏**里，
+           * 而 `rowsLayer` 现在被正文遮罩裁着 —— 挂进去会被一起裁掉
+           * （表现是"头像只在正文视口那一段里出现"）。
+           */
+          new PortraitSprite(pixi, this.root, firstPlayer, portraitBoxOf(innerW));
 
     for (let i = 0; i < DETAIL_ROW_POOL; i += 1) {
       const name = new Label(pixi, {
@@ -584,17 +604,49 @@ export class PrepareDetailPanel {
    * （`rows` 数组短于槽位数）会带着上一帧的字重新出现。
    */
   private placeRows(): void {
-    const viewTop = this.view.drawnViewTop(this.placed, this.view.bodyTop);
-    const dy = -this.view.offsetOf(viewTop, this.view.bodyTop);
+    const rect = detailRect();
+    /**
+     * **正文视口**（逻辑坐标）：从钉住的顶栏下缘，到面板底减内边距。
+     *
+     * ⚠️ 它是**遮罩的矩形**，也是"完全在外就不画"的判据 —— 两件事共用
+     * 这一份几何，所以不会出现"画的地方不是裁的地方"。
+     */
+    const viewport = {
+      x: rect.x,
+      y: this.view.bodyTop,
+      w: rect.w,
+      h: Math.max(1, rect.y + rect.h - PREPARE_LAYOUT.detailPad - this.view.bodyTop),
+    };
+    drawViewportClip(this.maskGfx, viewport);
+
+    /**
+     * 画出来的偏移 = **像素**（不再吸附行顶，见文件头）：正文层整体上移
+     * `scroll` 像素，越界的像素由遮罩切掉 ⇒ 与 HTML 的滚动一致 ✓
+     */
+    const dy = -this.view.scrollOffset();
+
     for (const line of this.placed) {
-      const inside = this.view.shows(line, viewTop);
-      /** ⚠️ 两个条件**一起**成立才画：内容说该画 + 这一行在视口里。 */
-      line.slot.name.root.visible = inside && line.slot.name.root.visible;
-      line.slot.body.root.visible = inside && line.slot.body.root.visible;
-      if (inside) {
-        line.slot.name.root.y = line.nameTop + dy;
-        line.slot.body.root.y = line.bodyTop + dy;
+      /** 这一行在**画布坐标**里的区间（内容坐标 + 偏移）。 */
+      const band = {
+        x: viewport.x,
+        y: line.nameTop + dy,
+        w: viewport.w,
+        h: Math.max(0, line.endTop - line.nameTop),
+      };
+      /**
+       * ⚠️ **两个条件一起**成立才画：
+       *   ① 内容说它该出现在这一段（`layoutRows` 里写的 `visible`）
+       *   ② 它没有**完全**滑出视口（`fullyOutside` = 性能判据）
+       * 部分露出的行**照画** —— 遮罩会把越界的那半截切掉（HTML 式）✓
+       */
+      const outside = fullyOutside(band, viewport);
+      if (outside) {
+        line.slot.name.root.visible = false;
+        line.slot.body.root.visible = false;
+        continue;
       }
+      if (line.slot.name.root.visible) line.slot.name.root.y = line.nameTop + dy;
+      if (line.slot.body.root.visible) line.slot.body.root.y = line.bodyTop + dy;
     }
   }
 

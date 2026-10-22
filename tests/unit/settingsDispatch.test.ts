@@ -407,6 +407,12 @@ describe('executePanelDispatch：把点击执行掉', () => {
 function keyBindings(over: Partial<KeyActionBindings> = {}) {
   const mocks = {
     close: vi.fn<() => void>(),
+    /**
+     * ⚠️ 2026-10-22 补：`KeyActionBindings` 多了这一条（设置底部的
+     * 「回主菜单」）—— 这个 mock 没跟上，`pnpm run typecheck` 在 HEAD 上
+     * 就是红的。测试本身不驱动它（那是弹窗的事），给一个空实现即可。
+     */
+    exitToHome: vi.fn<() => void>(),
     switchTab: vi.fn<(tab: SettingsTab) => void>(),
     resetKeys: vi.fn<() => void>(),
     resetTouch: vi.fn<() => void>(),

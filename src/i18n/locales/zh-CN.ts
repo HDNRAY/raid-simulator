@@ -1540,7 +1540,11 @@ export const zhCN = {
        */
       unlock: {
         always: '开局即可选',
-        scopeRun: '本局',
+        /**
+         * ⚠️ 用户 2026-10-22："解锁条件里不应该出现'本局'，换成'局内'或者
+         * '同一局内'之类的" —— 说成"局内"更自然（"本局"听起来像"这一场"）。
+         */
+        scopeRun: '局内',
         scopeBattle: '这一场',
         skillUses: '{scope}用「{skill}」{value} 次',
         skillDamage: '{scope}用「{skill}」累计造成 {value} 点伤害',

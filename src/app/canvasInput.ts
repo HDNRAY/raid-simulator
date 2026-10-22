@@ -97,7 +97,12 @@ export interface CanvasInputTargets {
    *
    * ⚠️ 它带**右侧详情区**（2026-10-15）：hover 划过卡片时详情跟着切。
    */
-  readonly select: ScreenHitTarget & HoverScreen;
+  /**
+   * 选角色屏（可滚：卡片展开成详情之后，详情正文能吃滚轮 / 拖拽）。
+   * ⚠️ 2026-10-22：它以前只是 `ScreenHitTarget & HoverScreen` —— 这正是
+   * 用户报"详情有滚动条但滚不动"的根因（没登记成可滚屏）。
+   */
+  readonly select: ScrollableScreen & HoverScreen;
   /**
    * 自由模式（原备战界面；含它自己的齿轮与返回箭头）。
    *
@@ -286,6 +291,12 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
      * 一屏，卡片区可滚（滚轮 / 拖拽 / 触屏都走这一条）。
      */
     if (t.phase() === 'codex') return t.codex;
+    /**
+     * **选角色屏的详情区**（2026-10-22）：用户报"有滚动条但滚不动" ——
+     * 根因就是它没登记在这里（`scrollableScreen()` 原先只认 prepare／
+     * runConfirm／codex）。
+     */
+    if (t.phase() === 'characterSelect') return t.select;
     return undefined;
   };
 

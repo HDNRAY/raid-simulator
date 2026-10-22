@@ -28,7 +28,27 @@
  * ⚠️ 注释与代码一起搬（§3：不留"见 xxx"的摘要）。
  *
  * ==================================================================
- * ⚠️⚠️ 裁剪：一行**整行**落在视口里才画
+ * ⚠️⚠️ 裁剪：2026-10-22 起是**按像素**的（遮罩），不再是"整行"
+ * ==================================================================
+ *
+ * 下面那段"整行可见"的来历**保留**（它修的是一个真 bug：内容画到面板外），
+ * 但用户 2026-10-22 明确否掉了那种观感："一段话要么完全显示、要么完全
+ * 不显示" 这不是我要的…**我要的是类似 html 那种滚动效果**。
+ *
+ * 现在的分工：
+ *
+ * ```
+ *   遮罩（`ui/viewportMask`）  → 真正把正文按像素裁在视口里 ✓（本文件不再判"整行"）
+ *   `drawnViewTop`            → 不再吸附行顶，直接用像素偏移（吸附 = 一格一格跳）
+ *   `shows`                   → 改为"这一行**露出来了吗**"（完全在外才 false）
+ * ```
+ *
+ * ⚠️ 因此**"滚到底最后一行完整"仍然成立**：`maxScroll` 是
+ * `内容底边 − 视口底边`，滚到底时内容底边正好贴视口底 ✓（那条是既有测试
+ * 在盯的，不受裁切方式影响）。
+ *
+ * ==================================================================
+ * 历史（2026-10-13）：一行**整行**落在视口里才画
  * ==================================================================
  *
  * 用户原话："**boss 详情的内容 出了区域 还是能显示···· 虽然可以滚动**"。
@@ -91,23 +111,12 @@ export function measuredHeight(measured: number, fallback: number): number {
 }
 
 /**
- * 把"内容坐标里的视口顶边"吸附到**某一行的顶边**。
- *
- * ⚠️ 没有行顶 ≤ 它时就吸附到第一行的顶边（`firstTop`）—— 那正是
- * `scroll = 0` 的情形，也是"顶部不留半行"的兜底。
+ * ⚠️ **`snapToRowTop` 已删**（2026-10-22）：它服务的是"整行可见"时代的
+ * 补丁（落笔停在行顶，免得半行压在钉住的顶栏上）。有了遮罩之后那条不再
+ * 需要，而吸附会让滚动一格一格跳 —— 与"HTML 式滚动"相反 ✗。
+ * 历史与判据记在文件头"裁剪"那一节。
  */
-export function snapToRowTop(
-  rows: readonly DetailRowExtent[],
-  viewTop: number,
-  firstTop: number,
-): number {
-  let snapped = firstTop;
-  for (const row of rows) {
-    if (row.nameTop > viewTop) break;
-    snapped = row.nameTop;
-  }
-  return snapped;
-}
+
 
 /**
  * ⚠️ **滑块几何搬去了 `scrollWindow.scrollBarGeometry`**（2026-10-13 第六轮：
@@ -244,19 +253,34 @@ export class DetailViewport {
    * —— 那是唯一能让最后一行整行露出来的位置。
    */
   drawnViewTop(rows: readonly DetailRowExtent[], bodyTop: number): number {
-    const rawTop = bodyTop + this.scrollPx;
-    if (this.scrollPx >= this.maxScrollPx) return rawTop;
-    return snapToRowTop(rows, rawTop, bodyTop);
+    /**
+     * ⚠️ 2026-10-22：**不再吸附行顶**（参数保留是为了不动调用点与测试的
+     * 形状；语义上"画出来的顶边 = 正文顶 + 像素偏移"）。
+     *
+     * 吸附是"整行可见"时代的补丁：那时半行会压在钉住的顶栏上，所以落笔
+     * 要停在行顶。现在有遮罩，跨边界的行被**按像素切掉**，吸附只会让
+     * 滚动一格一格跳 —— 那正是用户要避免的观感 ✗。
+     */
+    void rows;
+    return bodyTop + this.scrollPx;
   }
 
   /** 这一行**整行**落在视口里吗（配合 `drawnViewTop` 用）。 */
   shows(row: DetailRowExtent, viewTop: number): boolean {
     /**
+     * **这一行有没有露出来一点**（2026-10-22 语义变更：从"整行可见"
+     * 改成"与视口相交"）—— 越界的那部分由遮罩切掉，所以"露一点就画"。
+     *
      * ⚠️ 半个像素的宽容：`maxScroll + viewH` 与内容底边在浮点上可能差一个
-     * ulp，而"滚到底最后一行**恰好**贴边"差 1e-13 就整行不画了（表现为
-     * "滚到底少最后一行"）。
+     * ulp，"恰好贴边"的那一行不该因为 1e-13 整行消失。
      */
-    return row.nameTop >= viewTop && row.endTop <= viewTop + this.viewHPx + 0.5;
+    const bottom = viewTop + this.viewHPx;
+    return row.nameTop < bottom + 0.5 && row.endTop > viewTop - 0.5;
+  }
+
+  /** 画出来的**像素偏移**（正文层整体上移多少）—— 与 `drawnViewTop` 同源。 */
+  scrollOffset(): number {
+    return this.scrollPx;
   }
 
   /** 画出来的**滚动量**（= 视口顶边 − 面板顶栏下缘）：行 y 减它。 */

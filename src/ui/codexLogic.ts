@@ -118,8 +118,9 @@ export function codexCardRects(
    * ⚠️ **卡片高度固定、内容允许超出视口**（2026-10-22 用户："图鉴应该支持
    * 滚动"）。第一版是"按行数把卡片压矮到刚好一屏" —— 那样**永远不用滚** ✗，
    * 一旦池子再长就变成 5 行挤在 356 像素里（字全糊）。
-   * 现在：卡片保持 `L.cardH`，超出的行靠**滚动**看（`CodexScreen.scrollBy` +
-   * `visiblePartOf` 的几何求交，边缘那一行就是"半张卡"✓）。
+   * 现在：卡片保持 `L.cardH`，超出的行靠**滚动**看（`CodexScreen.scrollBy`）。
+   * 边缘那一行被 `mask` **按像素切**（见 `ui/viewportMask`）—— 这里只算几何，
+   * 不负责裁剪 ✓。
    */
   const cardH = L.cardH;
   /** 整块网格在标题与提示之间**纵向**居中（`firstCardY` 是它的下限）。 */
@@ -191,21 +192,3 @@ export function clampScrollOffset(offset: number, max: number): number {
   return Math.min(Math.max(0, Math.round(offset)), Math.max(0, Math.round(max)));
 }
 
-/**
- * 卡片的**可见部分**（与视口求交）。
- *
- * ⚠️ 为什么不是"整张可见 / 整张不可见"：用户要的是"**能显示行的一半**"。
- * Pixi 的 `mask` 在 headless 里不生效（AGENTS §3e），所以这里用**几何求交**
- * —— 只把可见的那一段画出来，边缘那一行就是"半张卡"✓。
- *
- * @returns `undefined` = 完全在视口外
- */
-export function visiblePartOf(
-  rect: CodexRect,
-  viewport: { readonly top: number; readonly height: number },
-): CodexRect | undefined {
-  const top = Math.max(rect.y, viewport.top);
-  const bottom = Math.min(rect.y + rect.h, viewport.top + viewport.height);
-  if (bottom <= top) return undefined;
-  return { x: rect.x, y: top, w: rect.w, h: bottom - top };
-}

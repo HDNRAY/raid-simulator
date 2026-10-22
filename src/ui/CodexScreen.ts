@@ -47,10 +47,15 @@ import {
   clampScrollOffset,
   codexCardRects,
   maxScrollOffset,
-  visiblePartOf,
   wrapByChars,
   type CodexEntry,
 } from './codexLogic';
+import {
+  attachViewportMask,
+  drawViewportClip,
+  fullyOutside,
+  type ViewportRect,
+} from './viewportMask';
 import { scrollBarGeometry } from './scrollWindow';
 import type { TranslateFn } from '../i18n/translator';
 
@@ -75,7 +80,19 @@ export class CodexScreen {
 
   private readonly options: CodexScreenOptions;
   private readonly bg: Graphics;
+  /**
+   * **卡片层**（2026-10-22）：卡片与卡片文字全在这里，整层被一块矩形
+   * `mask` 裁到视口里 ⇒ 滚动时**按像素**切（HTML 的 `overflow: hidden`）。
+   *
+   * ⚠️ 与 AGENTS.md §3e 的关系写在 `viewportMask` 的文件头（那条规则的
+   * 唯一理由是 headless 截图，用户已明确要求 HTML 式滚动）。
+   */
+  private readonly cardsLayer: Container;
+  private readonly maskGfx: Graphics;
+  /** 卡片形状画层（在 `cardsLayer` 里，跟着 mask 被裁）。 */
   private readonly gfx: Graphics;
+  /** 滚动条那一层（**在 mask 外面** —— 它自己不该被裁）。 */
+  private readonly overlayGfx: Graphics;
   private readonly title: Label;
   private readonly summary: Label;
   private readonly hint: Label;
@@ -104,7 +121,16 @@ export class CodexScreen {
     this.bg = new pixi.Graphics();
     this.bg.rect(0, 0, LOGICAL.width, LOGICAL.height).fill({ color: PALETTE.bgTop });
     this.gfx = new pixi.Graphics();
-    this.root.addChild(this.bg, this.gfx);
+    this.cardsLayer = new pixi.Container();
+    this.cardsLayer.addChild(this.gfx);
+    /**
+     * 遮罩：一次性装配（`attachViewportMask` 会把它加进 `cardsLayer` 并
+     * 赋给 `mask`），每帧只**重画几何**（`drawViewportClip`）。
+     */
+    this.maskGfx = new pixi.Graphics();
+    attachViewportMask(this.maskGfx, this.cardsLayer);
+    this.overlayGfx = new pixi.Graphics();
+    this.root.addChild(this.bg, this.cardsLayer, this.overlayGfx);
 
     this.title = new Label(pixi, {
       x: LOGICAL.width / 2,
@@ -177,11 +203,21 @@ export class CodexScreen {
   back(): void {
     this.options.onBack();
   }
-  /** 卡片视口：`firstCardY` 到提示行之上。 */
-  private viewport(): { readonly top: number; readonly height: number } {
+  /**
+   * 卡片视口：`firstCardY` 到提示行之上、横跨卡片区。
+   *
+   * ⚠️ 它是**遮罩的矩形**（`ViewportRect`，含 x/w）—— 不只是"上下界"：
+   * 遮罩要画成一整块矩形，`top/height` 那种形状还得再推一次 x/w ✗。
+   */
+  private viewport(): ViewportRect {
+    const cols = CODEX_LAYOUT.cols;
+    const totalW = cols * CODEX_LAYOUT.cardW + (cols - 1) * CODEX_LAYOUT.gapX;
     return {
-      top: CODEX_LAYOUT.firstCardY,
-      height: Math.max(1, CODEX_LAYOUT.hintY - 16 - CODEX_LAYOUT.firstCardY),
+      x: Math.round((CODEX_LAYOUT.width - totalW) / 2),
+      y: CODEX_LAYOUT.firstCardY,
+      w: totalW,
+      /** ⚠️ 多留 2px：卡片的描边与光标环压在边界上，被裁掉一像素就像"卡缺了角"。 */
+      h: Math.max(1, CODEX_LAYOUT.hintY - 16 - CODEX_LAYOUT.firstCardY + 2),
     };
   }
 
@@ -196,7 +232,7 @@ export class CodexScreen {
 
   /** 滚一段（滚轮 / 拖拽 / 键盘都走它）。@returns 有没有真的滚 */
   scrollBy(deltaY: number): boolean {
-    const max = maxScrollOffset(this.contentHeight(), this.viewport().height);
+    const max = maxScrollOffset(this.contentHeight(), this.viewport().h);
     const next = clampScrollOffset(this.scrollOffset + deltaY, max);
     if (next === this.scrollOffset) return false;
     this.scrollOffset = next;
@@ -208,7 +244,7 @@ export class CodexScreen {
   isOnScrollable(_px: number, py: number): boolean {
     if (!this.root.visible) return false;
     const view = this.viewport();
-    return py >= view.top && py <= view.top + view.height;
+    return py >= view.y && py <= view.y + view.h;
   }
 
   /** 滚轮：滚卡片区。 */
@@ -252,7 +288,7 @@ export class CodexScreen {
     const entries = this.options.getEntries();
     const rects = codexCardRects(entries.length);
     const view = this.viewport();
-    const maxScroll = maxScrollOffset(this.contentHeight(), view.height);
+    const maxScroll = maxScrollOffset(this.contentHeight(), view.h);
     this.scrollOffset = clampScrollOffset(this.scrollOffset, maxScroll);
 
     this.title.set(t('screen.codex.title'));
@@ -268,122 +304,99 @@ export class CodexScreen {
     );
 
     this.gfx.clear();
+    this.overlayGfx.clear();
+    /**
+     * 遮罩几何 = 视口矩形（每帧重画：布局变了它跟着变）。
+     * ⚠️ 只重画、不重复 `addChild` / 不重复赋 `mask`（那是装配，见构造函数）。
+     */
+    drawViewportClip(this.maskGfx, view);
     this.ensureLabels(entries.length);
 
     entries.forEach((entry, index) => {
       const card = rects[index];
       const nameLabel = this.nameLabels[index];
       const stateLabel = this.stateLabels[index];
+      const conditionLabel = this.conditionLabels[index];
       if (card === undefined || nameLabel === undefined || stateLabel === undefined) return;
 
       /**
-       * **滚动**：卡片按偏移整体上移，然后只画**落在视口里的那一段**
-       * （`visiblePartOf`）—— 边缘那一行因此是**半张卡** ✓
-       * （Pixi 的 `mask` 在 headless 里不生效，AGENTS §3e ⇒ 几何求交）。
+       * **滚动 = 整层位移**（2026-10-22 用户："我要的是类似 html 那种滚动效果"）。
+       *
+       * ⚠️ 与上一版的区别（那条路是错的，别再走回去）：
+       *   - 上一版：卡片与视口**求交**，只画交集 ⇒ 边缘那张变成"矮一截的卡" ✗
+       *   - 再上一版：**整卡要么全画要么不画** ⇒ 边缘整张消失 ✗
+       * 现在：卡片**按完整尺寸画**（`shifted`），越界的像素由 `mask` 切掉
+       * —— 与浏览器的 `overflow: hidden` 同一套行为 ✓
        */
       const shifted = { ...card, y: card.y - this.scrollOffset };
+
       /**
-       * ⚠️ **整张卡要么完整画、要么不画**（2026-10-22 用户："滚动时，第一行
-       * 看着像卡片变小了…一段话 要么完全显示 要么完全不显示"）。
-       *
-       * 上一版把卡片按视口求交（只画交集）—— 于是边缘那一行变成**矮一截的
-       * 卡片**，看起来像"卡片被压扁了" ✗。现在改成**整项可见性**：
-       * 只有整张卡都在视口里才画；被切到的一行**完全不画**。
+       * ⚠️ **完全在视口外 ⇒ 不画**。这是**性能判据**（省掉文字重建），
+       * 不是裁剪本身 —— 部分露出的卡片照画，交给遮罩切。
        */
-      const rect = visiblePartOf(shifted, view);
-      if (rect === undefined || rect.h !== shifted.h) {
+      if (fullyOutside(shifted, view)) {
         nameLabel.root.visible = false;
         stateLabel.root.visible = false;
-        this.conditionLabels[index]!.root.visible = false;
+        if (conditionLabel !== undefined) conditionLabel.root.visible = false;
         return;
       }
-      /** 被切过的那几张画**平边**（否则切口处会是圆角，看起来像浮在空中）。 */
-      const cut = rect.h !== shifted.h;
-      const radius = cut ? 0 : CARD_RADIUS;
 
       /**
        * 卡片皮肤：**所有卡片同一种**（2026-10-20 用户："黄色的是初始就能
        * 解锁的？**不需要这种区别**"）。
-       *
-       * 状态已经由**文字**说清了（名字 vs ？？？、已解锁 / 未解锁、解锁条件），
-       * 再给已解锁的卡片换一套暖色皮肤只是多一层"这只在首页/图鉴里才有"的
-       * 视觉语言 —— 图鉴是清单，不是选择界面。
        */
       const skin = cardSkin({ developing: false, cursored: false, selected: false });
       this.gfx
-        .roundRect(rect.x, rect.y, rect.w, rect.h, radius)
+        .roundRect(shifted.x, shifted.y, shifted.w, shifted.h, CARD_RADIUS)
         .fill({ color: skin.fillColor, alpha: skin.fillAlpha });
       this.gfx
-        .roundRect(rect.x, rect.y, rect.w, rect.h, radius)
+        .roundRect(shifted.x, shifted.y, shifted.w, shifted.h, CARD_RADIUS)
         .stroke({ color: skin.strokeColor, width: skin.strokeWidth });
 
-      nameLabel.root.x = rect.x + rect.w / 2;
+      nameLabel.root.x = shifted.x + shifted.w / 2;
       nameLabel.root.y = shifted.y + shifted.h * 0.24;
       nameLabel.set(entry.nameKey === undefined ? t('screen.codex.locked') : t(entry.nameKey));
       nameLabel.setColor(entry.nameKey === undefined ? PALETTE.textDim : PALETTE.text);
+      nameLabel.root.visible = true;
 
-      stateLabel.root.x = rect.x + rect.w / 2;
+      stateLabel.root.x = shifted.x + shifted.w / 2;
       stateLabel.root.y = shifted.y + shifted.h * 0.5;
       stateLabel.set(
         entry.unlocked ? t('screen.codex.unlocked') : t('screen.codex.notUnlocked'),
       );
       /**
-       * ⚠️ 卡片很矮时（池子 21 条 = 5 行，`codexCardRects` 会把卡片压到 ~66）
-       * **不画状态行** —— 否则它和下面那行条件会叠在一起（实测叠了 ✗）。
-       * "已解锁 / 未解锁"的信息仍然在：名字是否 ？？？ 就说清了。
+       * ⚠️ 卡片很矮时不画状态行（它会和下面那行条件叠在一起）——
+       * "已解锁 / 未解锁"仍由"名字 vs ？？？"表达。
        */
-      /**
-       * ⚠️ **文字只在卡片"完整可见"时画**（2026-10-22 用户："文字还是出了
-       * 他们该待的框框"）—— 被切过的那几张只画卡片本身（半张卡），不写字。
-       *
-       * 为什么不用 `mask` 裁：Pixi 的 `mask` 在 headless 里不生效
-       * （AGENTS §3e），所以"文字别出框"这件事**只能靠逐项判可见性**。
-       * 判据用 `rect.h === shifted.h`（= 这张卡没被切）+ 行带在视口内。
-       */
-      const wholeCard = rect.h === shifted.h;
-      const lineInside = (ratio: number): boolean => {
-        const centerY = shifted.y + shifted.h * ratio;
-        return centerY >= view.top + 4 && centerY <= view.top + view.height - 4;
-      };
-      nameLabel.root.visible = wholeCard && lineInside(0.24);
-      stateLabel.root.visible = wholeCard && shifted.h >= 84 && lineInside(0.5);
+      stateLabel.root.visible = shifted.h >= 84;
 
-      const conditionLabel = this.conditionLabels[index];
       if (conditionLabel !== undefined) {
-        conditionLabel.root.x = rect.x + rect.w / 2;
-        conditionLabel.root.y = rect.y + rect.h - 30;
+        conditionLabel.root.x = shifted.x + shifted.w / 2;
+        conditionLabel.root.y = shifted.y + shifted.h * 0.78;
         /**
-         * ⚠️ 中文按 `FONT.small`（13，`ui/layout.ts` 的下限）画，一行约 15 字；
-         * 长条件（"同时满足：…"）折两行，再长就省略 —— 不许压到邻卡上。
-         */
-        /**
-         * ⚠️ 卡片矮的时候（池子长了，`codexCardRects` 会按行数压矮）只给**一行**
-         * 条件 —— 两行会压到状态行上（实测 19 条时就是这样叠在一起的 ✗）。
-         */
-        /**
-         * ⚠️ 两行条件要求卡片**够高**（今天 `cardH = 108` ⇒ 一律一行）——
-         * 否则第二行会掉到卡片外面（实测「弹中生波」就是这样出框的 ✗）。
+         * 两行条件要求卡片**够高**（否则第二行会掉到卡片外面）；
+         * 超长的条件按字数折行 + 省略号。
          */
         const lines = shifted.h >= 120 ? 2 : 1;
         conditionLabel.set(
           wrapByChars(entry.unlockText, { perLine: 12, maxLines: lines }).join('\n'),
         );
         conditionLabel.setColor(PALETTE.textDim);
-        conditionLabel.root.visible = wholeCard && lineInside(0.78);
+        conditionLabel.root.visible = true;
       }
     });
 
     /** 滚动条（内容比视口高时才画）。 */
     if (maxScroll > 0) {
       const thumb = scrollBarGeometry({
-        viewportPx: view.height,
+        viewportPx: view.h,
         maxScrollPx: maxScroll,
         scrollPx: this.scrollOffset,
-        trackLenPx: view.height,
+        trackLenPx: view.h,
       });
       const trackX = CODEX_LAYOUT.width / 2 + 5 * CODEX_LAYOUT.cardW / 2 + 40;
-      this.gfx
-        .roundRect(trackX, view.top + thumb.offset, 4, Math.max(8, thumb.length), 2)
+      this.overlayGfx
+        .roundRect(trackX, view.y + thumb.offset, 4, Math.max(8, thumb.length), 2)
         .fill({ color: PALETTE.textDim, alpha: 0.35 });
     }
 
@@ -434,7 +447,7 @@ export class CodexScreen {
         anchorX: 0.5,
         anchorY: 0.5,
       });
-      this.root.addChild(name.root, state.root, condition.root);
+      this.cardsLayer.addChild(name.root, state.root, condition.root);
       this.nameLabels.push(name);
       this.stateLabels.push(state);
       this.conditionLabels.push(condition);

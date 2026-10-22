@@ -56,7 +56,7 @@ import {
   type PrepareSelection,
 } from './prepareLogic';
 import { PREPARE_LAYOUT, type PrepareHitArea, type PrepareLayout } from './prepareLayout';
-import { cardGrid, rowTopsOf } from './prepareGeometry';
+
 
 /**
  * 选角色屏的布局。
@@ -87,6 +87,75 @@ export const CHARACTER_SELECT_LAYOUT: PrepareLayout = {
 };
 
 /**
+ * **选角色屏的卡片几何**（2026-10-22 重做，用户原话）：
+ *
+ * > 这个页面应该是3个和**人物详情等宽**的卡片，然后 hover 哪个哪个就展开…
+ * > 我要的是人物名字的小卡片**展开成人物详情**。
+ *
+ * ==================================================================
+ * 数是怎么来的（全部推出来，没有手调）
+ * ==================================================================
+ *
+ * ```
+ *   卡宽   = 详情区宽（`detailRect().w` = 296）   ← 用户："与人物详情等宽"
+ *   间距   = 12
+ *   左右边 = (960 − 3×296 − 2×12) / 2 = 24
+ *   卡高   = 96（只有名字 + 状态行）
+ *   行顶   = 卡片行在标题与提示之间**纵向居中**
+ * ```
+ *
+ * ⚠️ **展开的终点就是 `detailRect()`**（x 624 宽 296 通高）—— 所以"卡片
+ * 长成详情"这件事是**同一块矩形从 A 插值到 B**，不是两套布局 ✗。
+ * 卡片宽 = 详情宽 是这条能成立的前提（宽度不跳变，只有位置/高度在动）。
+ */
+export const CHARACTER_CARD_LAYOUT = {
+  /** ⚠️ 与详情区**同宽**（`PREPARE_LAYOUT.detailW`）：这是"卡片长成详情"的前提。 */
+  cardW: PREPARE_LAYOUT.detailW,
+  cardH: 96,
+  gap: 12,
+  /** 左右边距（推导见上）。 */
+  marginX: Math.round((960 - 3 * PREPARE_LAYOUT.detailW - 2 * 12) / 2),
+  /** 卡片行的顶边：在标题区之下、底部提示之上的那一段里居中。 */
+  topY: 236,
+} as const;
+
+/** 一张小卡片的矩形（渲染与命中测试**共用这一份**）。 */
+export interface CharacterCardRect {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+}
+
+/**
+ * 三张卡片的矩形（顺序 = 角色顺序；横向等距）。
+ *
+ * @param count 角色数（今天 3；`CHARACTER_CARD_LAYOUT` 的边距是按 3 张推的，
+ *   不是 3 张时**仍然居中**：用实际张数重新摊开）
+ */
+export function characterSelectCardRects(
+  count: number,
+  L: typeof CHARACTER_CARD_LAYOUT = CHARACTER_CARD_LAYOUT,
+): readonly CharacterCardRect[] {
+  if (count <= 0) return [];
+  const totalW = count * L.cardW + (count - 1) * L.gap;
+  const left = Math.round((960 - totalW) / 2);
+  return Array.from({ length: count }, (_unused, index) => ({
+    x: left + index * (L.cardW + L.gap),
+    y: L.topY,
+    w: L.cardW,
+    h: L.cardH,
+  }));
+}
+
+/**
+ * 卡片命中区域。
+ *
+ * ⚠️ 2026-10-22 起**直接用 `characterSelectCardRects`**（与渲染同一份）——
+ * 之前走 `cardGrid`，那是"备战屏的列布局"，而这一屏现在是"三张与详情等宽的
+ * 大卡"，两套几何会漂（画在一处、点在一处）。
+ */
+/**
  * 卡片命中区域。
  *
  * 直接复用 `prepareHitAreas(players, [])` 的几何（空 Boss 行 → 只剩人物卡
@@ -97,26 +166,15 @@ export const CHARACTER_SELECT_LAYOUT: PrepareLayout = {
  */
 export function characterSelectHitAreas(
   players: readonly PrepareOption[],
-  L: PrepareLayout = CHARACTER_SELECT_LAYOUT,
+  _L: PrepareLayout = CHARACTER_SELECT_LAYOUT,
 ): readonly PrepareHitArea[] {
-  /**
-   * ⚠️ **直接算几何**（不再经过 `prepareHitAreas`，因为那一份还要开始键与
-   * 炁机行）：选角色屏只有人物卡一行，而"开始"是回车。
-   */
-  /** ⚠️ 行顶由 `rowTopsOf` 给（与备战屏**同一个**推导，见那边的说明）。 */
-  const top = rowTopsOf({ players: players.length, bosses: 0, qiji: 0 }, 'player', L).player;
-  return cardGrid(players.length, top, L, {
-    colW: L.playerColW,
-    columns: L.playerColumns,
-    h: L.cardH,
-    /**
-     * ⚠️ 这一屏画的是**人物卡**（有头像），所以取下限 `cardMinW` ——
-     * 与备战屏的人物那一块同一个数（`cardGrid` 的 `minW` 由调用方给，
-     * 因为炁机卡没有头像、下限更窄）。
-     */
-    minW: L.cardMinW,
-  }).map((rect, i) => ({ kind: 'player' as const, id: players[i]!.id, ...rect }));
+  return characterSelectCardRects(players.length).map((rect, i) => ({
+    kind: 'player' as const,
+    id: players[i]!.id,
+    ...rect,
+  }));
 }
+
 
 /**
  * 指针划过时**详情区该显示谁**（hover 的命中判据）。

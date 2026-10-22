@@ -1,3 +1,5 @@
+import { characterSelectCardRects } from '../../src/ui/characterSelectLogic';
+import { PREPARE_LAYOUT } from '../../src/ui/prepareLayout';
 import { describe, expect, it } from 'vitest';
 import {
   CHARACTER_SELECT_LAYOUT,
@@ -11,7 +13,7 @@ import {
   pickCharacter,
   tapCharacterIntent,
 } from '../../src/ui/characterSelectLogic';
-import { NO_SCROLL, prepareHitAreas, type PrepareOption } from '../../src/ui/prepareLogic';
+import type { PrepareOption } from '../../src/ui/prepareLogic';
 import { PLAYER_ROSTER, isDeveloping } from '../../src/data/roster';
 
 /**
@@ -33,21 +35,17 @@ describe('命中区域：复用备战界面的几何，但没有「开始」槽�
     expect(areas.map((a) => a.id)).toEqual(['player', 'kaili', 'daixuan']);
   });
 
-  it('几何与 `prepareHitAreas(players, [])` 的人物那部分**逐字相同**', () => {
-    const select = characterSelectHitAreas(players);
+  it('⚠️ 2026-10-22 起**不再**跟着备战屏的网格走（三张与详情等宽的大卡）', () => {
     /**
-     * ⚠️ 第五个参数是 `scroll`（这一屏不滚，给 `NO_SCROLL`）、**第六个**才是
-     * 布局表 —— 滚动参数插在 `expanded` 与 `L` 之间（见 `prepareHitAreas`）。
+     * 用户重做了这一屏："这个页面应该是3个和**人物详情等宽**的卡片"。
+     * 所以这条断言**反过来**钉新口径：命中区 = `characterSelectCardRects`
+     * （与渲染同一份），而**不再**等于 `prepareHitAreas` 那张列网格。
      */
-    const prepare = prepareHitAreas(
-      players,
-      [],
-      [],
-      'player',
-      NO_SCROLL,
-      CHARACTER_SELECT_LAYOUT,
-    ).filter((a) => a.kind === 'player');
-    expect(select).toEqual(prepare);
+    const select = characterSelectHitAreas(players);
+    const rects = characterSelectCardRects(players.length);
+    expect(select.map((a) => ({ x: a.x, y: a.y, w: a.w, h: a.h }))).toEqual([...rects]);
+    /** 三张卡各自**与详情等宽**（这条是"卡片长成详情"的前提）。 */
+    for (const area of select) expect(area.w).toBe(PREPARE_LAYOUT.detailW);
   });
 
   it('三张卡等分、不重叠、都在屏幕内', () => {

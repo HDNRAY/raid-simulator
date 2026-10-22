@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  clampScrollOffset,
-  maxScrollOffset,
-  visiblePartOf,
-} from '../../src/ui/codexLogic';
+import { clampScrollOffset, maxScrollOffset } from '../../src/ui/codexLogic';
+import { fullyOutside, verticalSpan } from '../../src/ui/viewportMask';
 
 /**
  * **图鉴滚动**（2026-10-22，用户："图鉴应该支持 滚动，如果 pixi 不支持显示行的
@@ -32,27 +29,36 @@ describe('滚动范围的上下界', () => {
   });
 });
 
-describe('可见部分：**能显示半张卡**', () => {
-  const viewport = { top: 100, height: 200 };
+describe('裁切：像素级（遮罩切），几何只判"要不要画"', () => {
+  /**
+   * ⚠️ 2026-10-22 口径变更：**边缘那一行不是"藏起来"，是被遮罩切一半**。
+   *
+   * 所以这里不再算"可见子矩形"（`visiblePartOf` 已删）—— 只钉两件事：
+   *   ① 完全在视口外 ⇒ **不画**（性能判据）
+   *   ② 部分可见 ⇒ **照画**（交给 `mask` 切）
+   */
+  const viewport = { x: 0, y: 100, w: 300, h: 200 };
   const card = { x: 10, y: 0, w: 100, h: 80 };
 
   it('完全在视口上方 ⇒ 不画', () => {
-    expect(visiblePartOf({ ...card, y: 0 }, viewport)).toBeUndefined();
+    expect(fullyOutside({ ...card, y: 0 }, viewport)).toBe(true);
   });
 
   it('完全在视口下方 ⇒ 不画', () => {
-    expect(visiblePartOf({ ...card, y: 320 }, viewport)).toBeUndefined();
+    expect(fullyOutside({ ...card, y: 320 }, viewport)).toBe(true);
   });
 
-  it('完全在视口内 ⇒ 原样', () => {
-    expect(visiblePartOf({ ...card, y: 120 }, viewport)).toEqual({ x: 10, y: 120, w: 100, h: 80 });
+  it('完全在视口内 ⇒ 画', () => {
+    expect(fullyOutside({ ...card, y: 120 }, viewport)).toBe(false);
   });
 
-  it('⚠️ 上边缘被切 ⇒ 只画下半截（这就是"半张卡"）', () => {
-    expect(visiblePartOf({ ...card, y: 60 }, viewport)).toEqual({ x: 10, y: 100, w: 100, h: 40 });
+  it('⚠️ 上边缘跨过视口顶 ⇒ **照画**（遮罩会切掉上半截 = 半张卡）', () => {
+    expect(fullyOutside({ ...card, y: 60 }, viewport)).toBe(false);
+    expect(verticalSpan({ ...card, y: 60 }, viewport)).toEqual({ top: 100, height: 40 });
   });
 
-  it('⚠️ 下边缘被切 ⇒ 只画上半截', () => {
-    expect(visiblePartOf({ ...card, y: 260 }, viewport)).toEqual({ x: 10, y: 260, w: 100, h: 40 });
+  it('⚠️ 下边缘跨过视口底 ⇒ **照画**（遮罩切掉下半截）', () => {
+    expect(fullyOutside({ ...card, y: 260 }, viewport)).toBe(false);
+    expect(verticalSpan({ ...card, y: 260 }, viewport)).toEqual({ top: 260, height: 40 });
   });
 });
