@@ -56,11 +56,12 @@ describe('解锁条件的文案（从结构推导）', () => {
   });
 
   it('`always` ⇒ 「解锁条件：无」（用户 2026-10-22 的口径）', () => {
-    expect(unlockTextOf({ kind: 'always', of: [] }, deps)).toBe('解锁条件：无');
+    /** ⚠️ 2026-10-22：前缀**不带冒号、后面换行**。 */
+    expect(unlockTextOf({ kind: 'always', of: [] }, deps)).toBe('解锁条件\n无');
   });
 
   it('⚠️ 空 `all` 也按「解锁条件：无」（它的语义就是真）', () => {
-    expect(unlockTextOf({ kind: 'all', of: [] }, deps)).toBe('解锁条件：无');
+    expect(unlockTextOf({ kind: 'all', of: [] }, deps)).toBe('解锁条件\n无');
   });
 
   it('数值与技能名**从数据来**（把 3 改成 3 —— 那条炁机写的就是 3）', () => {

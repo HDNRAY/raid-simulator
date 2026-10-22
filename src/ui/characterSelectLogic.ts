@@ -149,6 +149,35 @@ export function characterSelectCardRects(
 }
 
 /**
+ * **展开后的那张卡**（2026-10-22 第二轮，用户纠正）：
+ *
+ * > 我说的是 **人物小卡 展开**，**不是在右边有一个单独的模块**。
+ *
+ * 所以终点是"**这张卡自己在纵向上长高**"，不是右侧那块 `detailRect()`
+ * （那是"另一个模块"的矩形 ✗）：
+ *
+ * ```
+ *   起点 = 这张卡自己的槽位  (24|332|640, 236, 296, 96)
+ *   终点 = (同一 x, 详情区的 y/宽/高) = (x, 88, 296, 371)
+ * ```
+ *
+ * ⚠️ **宽度不变**（296 == 详情宽）⇒ 详情面板的排版可以直接搬进这块矩形
+ * （不用缩放、不用重排），而视觉上是"这一张卡长高了" ✓
+ * ⚠️ 终点**包含起点**（同一个 x、y 从 236 往上长到 88、高从 96 变成 371）
+ * ⇒ 从左/中/右哪张长出来，看起来都是"这张卡长了" ✓
+ * ⚠️ 另外两张卡**留在原槽位**（只是压暗到 30%）—— 于是它们仍然 hover 得到、
+ * 点得到（换人靠它）✓ 没有"展开卡覆盖整行"的冲突 ✓
+ */
+export function expandedCardRect(card: CharacterCardRect): CharacterCardRect {
+  return {
+    x: card.x,
+    y: PREPARE_LAYOUT.detailY,
+    w: PREPARE_LAYOUT.detailW,
+    h: PREPARE_LAYOUT.detailH,
+  };
+}
+
+/**
  * 卡片命中区域。
  *
  * ⚠️ 2026-10-22 起**直接用 `characterSelectCardRects`**（与渲染同一份）——

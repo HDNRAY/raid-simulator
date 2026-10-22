@@ -82,7 +82,16 @@ export function unlockTextOf(unlock: QijiUnlock, d: UnlockTextDeps): string {
    * '解锁条件：'几个字"）—— 加在这一层而不是每个模板里：模板会越来越多，
    * 一个漏了前缀就会让那一行看起来不像条件 ✗。
    */
-  return `${d.translate('screen.codex.unlock.prefix')}${unlockBodyOf(unlock, d)}`;
+  /**
+   * ⚠️ **前缀后面换行、不带冒号**（用户 2026-10-22："解锁条件 后面换一行
+   * 不需要 冒号了"）⇒ 卡片上是两行：
+   *
+   * ```
+   * 解锁条件
+   * 局内用「斩」3 次
+   * ```
+   */
+  return `${d.translate('screen.codex.unlock.prefix')}\n${unlockBodyOf(unlock, d)}`;
 }
 
 /** 一句条件（不含前缀）—— 组合条件递归时用它，避免前缀重复。 */

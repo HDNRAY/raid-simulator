@@ -83,7 +83,10 @@ import {
   canStartRun,
   characterCursorTarget,
   characterHoverTarget,
+  characterSelectCardRects,
   characterSelectHitAreas,
+  expandedCardRect,
+  type CharacterCardRect,
   characterSelection,
   confirmCharacter,
   cycleCharacter,
@@ -410,7 +413,22 @@ export class CharacterSelectScreen {
    */
   isOnScrollable(px: number, py: number): boolean {
     if (this.expandAnim.progress < 0.5) return false;
-    return this.detailPanel.isOnDetail(px, py);
+    const card = this.expandedSlot();
+    if (card === undefined) return false;
+    /**
+     * ⚠️ 判据用**长大的那张卡**的矩形，不用 `detailPanel.isOnDetail` ——
+     * 面板已经被平移到那张卡上了，而它自己的命中测试仍然用固定的
+     * `detailRect()`（那是"导航坐标"，不是"画在哪"）。
+     */
+    const grown = expandedCardRect(card);
+    return px >= grown.x && px <= grown.x + grown.w
+      && py >= grown.y && py <= grown.y + grown.h;
+  }
+
+  /** 当前正在展开的那张卡的**槽位**（没有在展开 ⇒ `undefined`）。 */
+  private expandedSlot(): CharacterCardRect | undefined {
+    if (this.expandCard === undefined || this.expandCard < 0) return undefined;
+    return characterSelectCardRects(this.players.length)[this.expandCard];
   }
 
   /** **滚轮**：滚详情正文。@returns 有没有真的滚 */
@@ -518,7 +536,7 @@ export class CharacterSelectScreen {
        * "这一张长成了详情、其余退到后面"✓
        */
       const dimmed = this.expandCard !== undefined && i !== this.expandCard;
-      const cardAlpha = dimmed ? Math.max(0.15, 1 - 0.85 * easeOutCubic(this.expandAnim.progress)) : 1;
+      const cardAlpha = dimmed ? Math.max(0.3, 1 - 0.7 * easeOutCubic(this.expandAnim.progress)) : 1;
       card.name.root.alpha = cardAlpha;
       card.status.root.alpha = cardAlpha;
 
@@ -579,7 +597,21 @@ export class CharacterSelectScreen {
      * `progress` 走 —— 展开到 1 时它完全是详情、收起时它一点都看不见。
      * 于是"卡片长成详情"是**同一块区域**在变，不是左右两块各画一份 ✗。
      */
-    this.detailPanel.root.alpha = easeOutCubic(this.expandAnim.progress);
+    const panelAlpha = easeOutCubic(this.expandAnim.progress);
+    this.detailPanel.root.alpha = panelAlpha;
+    /**
+     * **把详情面板挪到那张长大的卡上**（平移，**不缩放** —— 宽度恒等 296，
+     * 所以字体与行距原样，读起来还是那份详情）✓
+     */
+    if (focusIndex >= 0) {
+      const slot = characterSelectCardRects(this.players.length)[focusIndex];
+      if (slot !== undefined) {
+        const grown = expandedCardRect(slot);
+        const base = detailRect();
+        this.detailPanel.root.x = grown.x - base.x;
+        this.detailPanel.root.y = grown.y - base.y;
+      }
+    }
 
     this.detailPanel.update(characterCursorTarget(this.selection, this.players));
   }
@@ -603,7 +635,11 @@ export class CharacterSelectScreen {
     const player = this.players[cardIndex];
     if (from === undefined || player === undefined) return;
 
-    const to = detailRect();
+    /**
+     * ⚠️ 终点是**这张卡自己长高**（`expandedCardRect`），不是右侧那块
+     * `detailRect()` —— 用户 2026-10-22 纠正："不是在右边有一个单独的模块"。
+     */
+    const to = expandedCardRect(from);
     const rect = lerpRect(from, to, easeOutCubic(this.expandAnim.progress));
     /**
      * ⚠️ **不淡出**（2026-10-22）：这张卡是"正在长成详情"的那一块 —— 它

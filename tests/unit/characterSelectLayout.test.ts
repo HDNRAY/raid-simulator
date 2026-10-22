@@ -4,9 +4,10 @@ import {
   CHARACTER_CARD_LAYOUT,
   characterSelectCardRects,
   characterSelectHitAreas,
+  expandedCardRect,
 } from '../../src/ui/characterSelectLogic';
 import { PREPARE_LAYOUT } from '../../src/ui/prepareLayout';
-import { detailRect } from '../../src/ui/prepareGeometry';
+
 import { easeOutCubic, lerpRect } from '../../src/ui/expandTween';
 
 /**
@@ -56,20 +57,50 @@ describe('三张卡：与详情等宽、横排不重叠、在画布内', () => {
   });
 });
 
-describe('展开动画：终点就是详情矩形', () => {
-  it('progress 0 ⇒ 还是那张小卡；progress 1 ⇒ 正好是 detailRect', () => {
+describe('展开 = **这张卡自己长高**（不是右边的模块）', () => {
+  it('终点是"同一 x + 详情的高"：**包含原来的槽位**，宽度不变', () => {
+    for (const slot of characterSelectCardRects(3)) {
+      const grown = expandedCardRect(slot);
+      /** 同一个 x / 同一个宽 ⇒ 就是这张卡在那儿长高。 */
+      expect(grown.x).toBe(slot.x);
+      expect(grown.w).toBe(slot.w);
+      /** 长高之后**完整包住**原来的槽位（y 从 88 起、高 371）。 */
+      expect(grown.y).toBeLessThanOrEqual(slot.y);
+      expect(grown.y + grown.h).toBeGreaterThanOrEqual(slot.y + slot.h);
+    }
+  });
+
+  it('三张的展开矩形都在画布内（最右一张 640 + 296 = 936 ≤ 960）', () => {
+    for (const slot of characterSelectCardRects(3)) {
+      const grown = expandedCardRect(slot);
+      expect(grown.x).toBeGreaterThanOrEqual(0);
+      expect(grown.x + grown.w).toBeLessThanOrEqual(960);
+    }
+  });
+
+  it('另外两张卡**留在原槽位**（所以仍然 hover 得到、点得到）', () => {
+    const rects = characterSelectCardRects(3);
+    /** 展开某一张不改变别的槽位 —— 槽位是纯几何，与展开状态无关。 */
+    const again = characterSelectCardRects(3);
+    expect(again).toEqual(rects);
+  });
+});
+
+describe('展开动画：终点 = 长大的那张卡（旧口径：detailRect）', () => {
+  it('progress 0 ⇒ 还是那张小卡；progress 1 ⇒ 正好是长大的那张卡', () => {
     const slot = characterSelectCardRects(3)[0];
-    const target = detailRect();
+    if (slot === undefined) return;
+    const target = expandedCardRect(slot);
     expect(slot).toBeDefined();
     if (slot === undefined) return;
     expect(lerpRect(slot, target, easeOutCubic(0))).toEqual(slot);
     expect(lerpRect(slot, target, easeOutCubic(1))).toEqual(target);
   });
 
-  it('宽度不变（卡宽 = 详情宽 ⇒ 只有位置与高度在动）', () => {
+  it('宽度不变（卡宽 = 详情宽 ⇒ 只有高度在动）', () => {
     const slot = characterSelectCardRects(3)[0];
-    const target = detailRect();
     if (slot === undefined) return;
+    const target = expandedCardRect(slot);
     for (const t of [0, 0.25, 0.5, 0.75, 1]) {
       expect(lerpRect(slot, target, t).w).toBeCloseTo(target.w, 5);
     }
