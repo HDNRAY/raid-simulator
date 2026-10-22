@@ -105,27 +105,30 @@ export function wrapMarked(
 }
 
 export function splitRuns(text: string): readonly RichRun[] {
-  if (text === '') return [];
+  /**
+   * **数字自动上色**（2026-10-22 用户："我之前的意思是 **数字 数字 数字** ——
+   * 你现在搞了一堆有的没的"）。
+   *
+   * ⇒ 判据不再是"作者手写 `**…**`"，而是**文字里出现数字就上色**：
+   * `30` / `1.2秒` / `100%` / `3 ~ 5秒` / `10/秒` / `−15` 里的数字部分。
+   * 作者写文案时**不用管强调标记** ✓。
+   *
+   * ⚠️ 兼容：若文本里仍有 `**`（老文案 / 参数模板），先**抹掉**再切 ——
+   * 否则那些星号会被当成正文字符画出来 ✗。
+   */
+  const plain = text.replaceAll('**', '');
+  if (plain === '') return [];
+  /** 数字段：连续的 数字 / 小数点 / 百分号（`3 ~ 5` 里的 `3` 与 `5` 各自成段）。 */
+  const NUMBER = /[0-9]+(?:\.[0-9]+)?%?/g;
   const runs: RichRun[] = [];
-  let rest = text;
-  while (rest !== '') {
-    const open = rest.indexOf('**');
-    if (open < 0) {
-      runs.push({ text: rest, emphasis: false });
-      break;
-    }
-    const close = rest.indexOf('**', open + 2);
-    if (close < 0) {
-      /** 未闭合：整段按普通文本（保留星号，让写错的人一眼看见）。 */
-      runs.push({ text: rest, emphasis: false });
-      break;
-    }
-    if (open > 0) runs.push({ text: rest.slice(0, open), emphasis: false });
-    const inner = rest.slice(open + 2, close);
-    /** 连续 `****` 切成空的强调段 —— 直接跳过，别造空 Label。 */
-    if (inner !== '') runs.push({ text: inner, emphasis: true });
-    rest = rest.slice(close + 2);
+  let cursor = 0;
+  for (const match of plain.matchAll(NUMBER)) {
+    const at = match.index ?? 0;
+    if (at > cursor) runs.push({ text: plain.slice(cursor, at), emphasis: false });
+    runs.push({ text: match[0], emphasis: true });
+    cursor = at + match[0].length;
   }
+  if (cursor < plain.length) runs.push({ text: plain.slice(cursor), emphasis: false });
   return runs;
 }
 
@@ -137,7 +140,8 @@ export interface RichLineOptions {
   /** 强调段颜色（`**…**` 里的数字）。 */
   readonly emphasisColor: number;
   /**
-   * 每行**最多几段**；超过就整行退回单段（不配色）。
+   * 每行**最多几段**；超过就整行退回单段（不配色）。缺省 **12**
+   * （「缠低于**20**时，每**5**秒回**10**缠」这种一行就有 7 段）。
    *
    * ⚠️ 这是**上限保护**：正常说明一行最多 2~3 个数字，但内容写错时
    * （比如满屏 `**`）不该让一张卡造出几十个 Label ✗。
@@ -175,7 +179,7 @@ export class RichLine {
    * @param lineH 行高
    */
   layout(lines: readonly string[], x: number, y: number, lineH: number): void {
-    const cap = this.options.maxRunsPerLine ?? 4;
+    const cap = this.options.maxRunsPerLine ?? 8;
     const centered = this.options.align === 'center';
     let used = 0;
     let cursorY = y;

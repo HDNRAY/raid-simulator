@@ -74,14 +74,22 @@ function harvestAbility(ability: unknown): AbilityHarvest {
     seconds?: string;
   } = {};
   if (ability === null || typeof ability !== 'object') return out;
-  const a = ability as { kind?: string; hit?: { effects?: readonly unknown[] }; resource?: { delta?: number }; buff?: unknown };
+  const a = ability as {
+    kind?: string;
+    hit?: { effects?: readonly unknown[] };
+    /** `resource` 能力的量是**顶层** `delta`（不是 `resource.delta`）。 */
+    delta?: number;
+    resource?: { delta?: number };
+    buff?: unknown;
+  };
   if (a.kind === 'deal') {
     for (const effect of a.hit?.effects ?? []) {
       const e = effect as { kind?: string; damage?: { base?: number } };
       if (e.kind === 'damage' && typeof e.damage?.base === 'number') out.damage = e.damage.base;
     }
   }
-  if (a.kind === 'resource' && typeof a.resource?.delta === 'number') out.amount = a.resource.delta;
+  const resourceDelta = a.kind === 'resource' ? (a.delta ?? a.resource?.delta) : undefined;
+  if (typeof resourceDelta === 'number') out.amount = resourceDelta;
   const buff = a.buff as { maxStacks?: number; duration?: number; modifiers?: readonly { value?: number }[] } | undefined;
   if (buff !== undefined) {
     if (typeof buff.maxStacks === 'number') out.stacks = buff.maxStacks;
@@ -125,6 +133,16 @@ export function qijiDescParamsOf(qiji: QijiEntity): QijiDescParams {
   const onUse = harvestAbility(tweak?.onUse);
   if (onUse.amount !== undefined) params.amount = String(onUse.amount);
   if (onUse.percent !== undefined) params.percent = onUse.percent;
+
+  /**
+   * **`abilities[].modifier`** 那一条（「固本培元」生命上限 +30 /「周天运转」
+   * 炁回复 +10）—— 它们不是 buff，是整局属性修正，所以要从 `abilities` 里读。
+   */
+  const modifierAbility = qiji.abilities?.find((a) => a.kind === 'modifier');
+  if (modifierAbility?.kind === 'modifier') {
+    const value = modifierAbility.modifier.value;
+    if (typeof value === 'number' && Number.isFinite(value)) params.amount = String(value);
+  }
 
   const buff = qiji.passiveBuffs?.[0];
   const trigger = buff?.triggers?.[0];

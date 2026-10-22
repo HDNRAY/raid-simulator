@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { qijiDescParamsOf } from '../../src/app/qijiDescParams';
 import { ALL_QIJI, QIJI_BREATH, QIJI_JIE_STRIKE, QIJI_VITALITY, qijiById } from '../../src/data/qiji';
 import { flattenCatalog } from '../../src/i18n/translator';
 import { zhCN } from '../../src/i18n/locales/zh-CN';
@@ -190,7 +191,18 @@ describe('说明与内容的推导关系（名字的字数 / 字面值不测）'
        * ⚠️ 2026-10-22：文案里的 `+30` 改成「**增加 30**」（用户："不要用 +，
        * 用**增加**"）⇒ 断言只认**那个数**，符号/措辞怎么改都不该红。
        */
-      expect(desc, `${id} 的说明里没有内容用的数值 ${String(value)}：${desc}`).toContain(String(value));
+      /**
+       * ⚠️ 2026-10-22 起说明是**模板**（`{amount}`，值从定义读）⇒ 断言要
+       * **先渲染**再比数：`app/qijiDescParams` 填参，然后"渲染结果含那个数"。
+       * 这样调平衡不红、措辞不红，"说明与定义脱钩"才红 ✓。
+       */
+      const qiji = ALL_QIJI.find((q) => q.id === id);
+      if (qiji === undefined) throw new Error(`炁机不存在：${id}`);
+      const rendered = desc.replace(/\{(\w+)\}/g, (whole, key: string) => {
+        const params: Readonly<Record<string, string>> = qijiDescParamsOf(qiji);
+        return params[key] ?? whole;
+      });
+      expect(rendered, `${id} 的说明里没有内容用的数值 ${String(value)}：${rendered}`).toContain(String(value));
       /** ⚠️ 自由模式的炁机卡是开关 —— 说明里不许再出现"可叠 N 层"。 */
       expect(desc, `${id} 的说明里又写回了层数：${desc}`).not.toContain('可叠');
     }
@@ -519,6 +531,15 @@ describe('三条新炁机的说明与内容**对得上**', () => {
     const boostDesc = QIJI_CATALOG.get('qiji.ningShenRuDao.desc') ?? '';
     const override = qijiById('ningShenRuDao')?.skillTweak?.buffOverrides?.[0]?.modifiers[0]?.value;
     /** 2026-10-22 用户：数字前后不留空格 ⇒ 文案是 `变为100%`（只认数值）。 */
-    expect(boostDesc).toContain(`${String(override)}%`);
+    /**
+     * ⚠️ 2026-10-22 起是模板 `{override}` ⇒ 渲染后再比（值来自 `buffOverrides`）。
+     */
+    const ruDao = ALL_QIJI.find((q) => q.id === 'ningShenRuDao');
+    if (ruDao === undefined) throw new Error('炁机不存在：ningShenRuDao');
+    const renderedBoost = QIJI_CATALOG.get('qiji.ningShenRuDao.desc')?.replace(/\{(\w+)\}/g, (whole, key: string) => {
+      const params: Readonly<Record<string, string>> = qijiDescParamsOf(ruDao);
+      return params[key] ?? whole;
+    }) ?? '';
+    expect(renderedBoost).toContain(`${String(override)}`);
   });
 });

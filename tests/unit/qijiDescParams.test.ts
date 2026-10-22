@@ -1,15 +1,36 @@
 /**
- * **炁机说明里的数值 = 从定义读出来的**（2026-10-22，用户："炁机的数字是写死的
- * 还是读的代码？应该读代码"）。
+ * **炁机说明里的数值 = 从定义里读出来的**（2026-10-22，用户："炁机的数字是写死的
+ * 还是读的代码？**应该读代码**"）。
  *
- * ⚠️ 这里断言的是**机制**（"说明里的数 == 定义里的数"），不是字面值 ⇒
- * 调平衡（改 `deal` 伤害 / 改 `costDeltas`）时**不会红** ✓；只有"说明与定义
- * 脱钩"才会红 ✓（AGENTS §4b 的左右列判据）。
+ * 这里断言的是**机制**（"模板里的每个占位符都能从定义取到值" + "改定义 ⇒ 说明跟着变"），
+ * **不是字面值** ⇒ 调平衡时不会红 ✓；只有"说明与定义脱钩"才会红 ✓
+ * （AGENTS §4b 的左右列判据）。
  */
 import { describe, expect, it } from 'vitest';
 import { qijiDescParamsOf } from '../../src/app/qijiDescParams';
 import { ALL_QIJI } from '../../src/data/qiji';
+import { zhCN } from '../../src/i18n/locales/zh-CN';
 import type { QijiEntity } from '../../src/core/types/qiji';
+
+/**
+ * 取某条炁机的说明模板（`qiji.<id>.desc`）。
+ *
+ * ⚠️ 用**类型守卫**而不是 `as unknown as`（AGENTS §1 禁止那个逃生舱，
+ * `lintRules` 会扫描 tests/）：
+ */
+const templateOf = (qiji: QijiEntity): string => {
+  const key = String(qiji.descKey).split('.')[1] ?? '';
+  const group: unknown = (zhCN as { qiji?: unknown }).qiji;
+  if (group === null || typeof group !== 'object') return '';
+  const entry: unknown = (group as Record<string, unknown>)[key];
+  if (entry === null || typeof entry !== 'object') return '';
+  const desc: unknown = (entry as { desc?: unknown }).desc;
+  return typeof desc === 'string' ? desc : '';
+};
+
+/** 用参数把模板填起来（与渲染层 `t(key, params)` 同一语义：缺参就留着占位符）。 */
+const render = (template: string, params: Readonly<Record<string, string>>): string =>
+  template.replace(/\{(\w+)\}/g, (whole, key: string) => params[key] ?? whole);
 
 const byId = (id: string): QijiEntity => {
   const found = ALL_QIJI.find((q) => q.id === id);
@@ -17,46 +38,55 @@ const byId = (id: string): QijiEntity => {
   return found;
 };
 
-/** 模板里的占位符（`{xxx}`）。 */
-const placeholdersOf = (template: string): readonly string[] =>
-  [...template.matchAll(/\{(\w+)\}/g)].map((m) => m[1] ?? '');
-
 describe('炁机说明的数值来自定义', () => {
+  it('**每一条**炁机的每个占位符都能从定义里取到值（不是 undefined）', () => {
+    const missing: string[] = [];
+    for (const qiji of ALL_QIJI) {
+      const params = qijiDescParamsOf(qiji);
+      for (const match of templateOf(qiji).matchAll(/\{(\w+)\}/g)) {
+        const key = match[1] ?? '';
+        if (params[key] === undefined) missing.push(`${qiji.id}:{${key}}`);
+      }
+    }
+    /** 缺参 ⇒ 界面上会直接显示 `{amount}` 这种东西（静默坏）✗ */
+    expect(missing).toEqual([]);
+  });
+
   it('凝神斩意：{damage} == 触发器 deal 里的伤害', () => {
     const qiji = byId('ningShenZhanYi');
-    const params = qijiDescParamsOf(qiji);
-    expect(params.damage).toBeDefined();
-    /** 定义里那条 `deal` 的 damage 值，必须与说明里的数一致 */
-    const deal = qiji.passiveBuffs?.[0]?.triggers?.[0]?.then?.[0];
-    const base = deal?.kind === 'deal'
-      ? deal.hit.effects.find((e) => e.kind === 'damage')?.damage?.base
+    const then = qiji.passiveBuffs?.[0]?.triggers?.[0]?.then?.[0];
+    const base = then?.kind === 'deal'
+      ? then.hit.effects.find((e) => e.kind === 'damage')?.damage?.base
       : undefined;
-    expect(params.damage).toBe(String(base));
+    expect(qijiDescParamsOf(qiji).damage).toBe(String(base));
+    expect(render(templateOf(qiji), qijiDescParamsOf(qiji))).toContain(String(base));
   });
 
-  it('炁能回收 / 聚气凝神：{delta} == costDeltas 的绝对值', () => {
-    for (const id of ['qiNengHuiShou', 'ningShenJuQi']) {
+  it('聚气凝神 / 炁能回收：{delta} == |costDeltas.delta|', () => {
+    for (const id of ['ningShenJuQi', 'qiNengHuiShou']) {
       const qiji = byId(id);
-      expect(qijiDescParamsOf(qiji).delta).toBe(
-        String(Math.abs(qiji.skillTweak?.costDeltas?.[0]?.delta ?? NaN)),
-      );
+      const delta = qiji.skillTweak?.costDeltas?.[0]?.delta ?? Number.NaN;
+      expect(qijiDescParamsOf(qiji).delta).toBe(String(Math.abs(delta)));
+      expect(render(templateOf(qiji), qijiDescParamsOf(qiji))).toContain(String(Math.abs(delta)));
     }
   });
 
-  it('已改成模板的 desc，占位符都能从定义里取到值（不许出现 undefined）', () => {
-    const converted = ['ningShenZhanYi', 'baoLieHuDun', 'chanJinHuanSheng', 'qiNengHuiShou', 'ningShenJuQi'];
-    for (const id of converted) {
-      const qiji = byId(id);
-      const params = qijiDescParamsOf(qiji);
-      /**
-       * ⚠️ 这里只查"**定义里已有**的字段都给了值"：`qijiDescParamsOf` 读不到
-       * 的字段本来就不会出现在模板里（见那个文件的文件头：不猜、不默认成 0）。
-       */
-      for (const key of Object.keys(params)) {
-        expect(String(params[key])).not.toBe('undefined');
-        expect(String(params[key])).not.toBe('');
-      }
-      expect(placeholdersOf(`{${Object.keys(params).join('}{')}}`).length).toBeGreaterThan(0);
-    }
+  it('⚡ 变异：把「聚气凝神」的代价减量改掉，说明**跟着变**（机制真的接通了）', () => {
+    const original = byId('ningShenJuQi');
+    const delta = original.skillTweak?.costDeltas?.[0]?.delta;
+    if (delta === undefined) throw new Error('聚气凝神没有 costDeltas');
+    /** 造一份"改过数值"的定义（只动那一个数）——不写回内容池 */
+    const mutated: QijiEntity = {
+      ...original,
+      skillTweak: {
+        ...original.skillTweak,
+        costDeltas: [{ resource: 'douqi', delta: delta - 7 }],
+      } as QijiEntity['skillTweak'],
+    };
+    const before = render(templateOf(original), qijiDescParamsOf(original));
+    const after = render(templateOf(mutated), qijiDescParamsOf(mutated));
+    expect(before).toContain(String(Math.abs(delta)));
+    expect(after).toContain(String(Math.abs(delta - 7)));
+    expect(after).not.toBe(before);
   });
 });

@@ -14,15 +14,15 @@ describe('splitRuns（`**` → run 切分）', () => {
     expect(splitRuns('没有强调')).toEqual([{ text: '没有强调', emphasis: false }]);
   });
 
-  it('未闭合的 `**` 不抛错，整段按普通文本（星号留着让人看见）', () => {
-    expect(splitRuns('造成**3 层')).toEqual([{ text: '造成**3 层', emphasis: false }]);
+  it('数字自动上色（不再依赖 `**` 标记）', () => {
+    const runs = splitRuns('造成3层，每5秒回10缠。');
+    expect(runs.map((r) => r.text)).toEqual(['造成', '3', '层，每', '5', '秒回', '10', '缠。']);
+    expect(runs.filter((r) => r.emphasis).map((r) => r.text)).toEqual(['3', '5', '10']);
   });
 
-  it('连续的 `****` 不产生空强调段', () => {
-    expect(splitRuns('a****b')).toEqual([
-      { text: 'a', emphasis: false },
-      { text: 'b', emphasis: false },
-    ]);
+  it('百分号 / 小数 / 负数都算数字段', () => {
+    const runs = splitRuns('增加100%，减少1.5秒');
+    expect(runs.filter((r) => r.emphasis).map((r) => r.text)).toEqual(['100%', '1.5']);
   });
 
   it('空串 ⇒ 空数组', () => {
