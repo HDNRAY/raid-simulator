@@ -33,6 +33,21 @@ export type StackingRule =
  */
 export interface BuffFlags {
   readonly invulnerable?: boolean;
+  /**
+   * **消耗式护盾的层数**（2026-10-22，黛玄的「盾」）。
+   *
+   * 每层**吃掉一次完整的来袭结算**：伤害 + 它附带的所有效果
+   * （含控制技 —— 这一条是需求原文"可以无视 1 次技能效果，**包括控制技**"）。
+   * 它**连必中的招也吃**（`avoidable: false` 挡不住它）：这就是"包括控制技"
+   * 的实现 —— 懒惰的「催眠」是必中+控制，盾必须能吃掉它。
+   *
+   * ⚠️ 与 `invulnerable` 的区别：无敌是**期间内每击都免**（持续型），
+   * 这个**每层只免一次**（消耗型）；与「卸」的 `damageThreshold` 也不同
+   * （那是每次按点数判，不消耗）。
+   * ⚠️ 聚合是**求和**（层数相加）—— 与 `invulnerable` 的"任意一个来源"不同，
+   * 因为"能挡几次"本来就是可叠加的数量。
+   */
+  readonly negateHits?: number;
   readonly damageReduce?: number;
   /**
    * **阈值抵消**（林晚风「卸」）。

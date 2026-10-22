@@ -102,8 +102,19 @@ export const DEFAULT_BINDINGS: readonly KeyBinding[] = [
   /** G = 林晚风的按住防御。 */
   { key: 'g', skillId: 'guard' },
   /**
-   * ⚠️ **「破」不在这张表里**（2026-10-12 第二次重标定）—— 它是黛玄的
-   * 待接线技能，**不属于任何角色**，所以也不该出现在设置页。
+   * **黛玄（2026-10-22）**：弹 / 波 / 破 / 盾 / 愈。
+   *
+   * ⚠️ 「破」从**这一版起进表了** —— 它原来在 `PENDING_SKILLS` 里（"待接线：
+   * 黛玄还没做"），现在归她，所以设置页/触屏都应该看得到、绑得上 ✓。
+   * 键位挑的是**不和另外两人撞**的：Z / X / C / V / B（左手区，与 QWER/ASDF 分开）。
+   */
+  { key: 'z', skillId: 'dan' },
+  { key: 'x', skillId: 'bo' },
+  { key: 'c', skillId: 'break' },
+  { key: 'v', skillId: 'dun' },
+  { key: 'b', skillId: 'yu' },
+  /**
+   * ⚠️ 下面这条注释留着当历史：「破」曾经因为"没有角色"而不在表里。
    * 见 `data/kits/reserved.ts` 的文件头与 `tests/unit/playerKits.test.ts`。
    * 上一版这里有一条 `{ key: '', skillId: 'break' }`（默认不绑键、但会
    * 显示在设置页）—— 那正是"没有角色的技能也能绑键"的来源。

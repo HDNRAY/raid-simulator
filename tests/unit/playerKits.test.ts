@@ -432,35 +432,27 @@ describe('「击」（派生技）：产出者是**炁机**（P3 已接回）', 
  * 判据与三分法见 `data/kits/reserved.ts` 的文件头；
  * 规程写在 `docs/specs/2026-10-12-player-kits.md` §6。
  */
-describe('「破」：黛玄的待接线技能（保留 + 标注，但不属于任何角色）', () => {
-  const pending = PENDING_SKILLS.find((p) => p.skill.id === 'break');
-
-  it('在 `PENDING_SKILLS` 里，且标注了归属与原因', () => {
-    expect(pending).toBeDefined();
-    expect(pending?.pendingFor).toBe('daixuan');
-    expect(pending?.blockedBy).toBe('owner-not-implemented');
-    /** 归属的角色是真实存在的，而且确实**还没做完**（`DEVELOPING`）。 */
-    expect(PLAYER_ROSTER.some((e) => e.id === pending?.pendingFor)).toBe(true);
-    expect(isDeveloping(pending?.pendingFor ?? '')).toBe(true);
+describe('「破」：2026-10-22 起归**黛玄**（她做完了）', () => {
+  /**
+   * ⚠️ 这一节原来断言"破在 `PENDING_SKILLS` 里、不属于任何角色、不可绑键"。
+   * 2026-10-22 黛玄做完（弹/波/破/盾/愈）⇒ 那条世界结束了：破**是**她的技能，
+   * 可绑键、进设置页。现在反过来钉"它真的归了她、而且不再挂在待接线桶里"。
+   */
+  it('不再挂在 `PENDING_SKILLS` 里（那个桶现在是空的）', () => {
+    expect(PENDING_SKILLS.some((p) => p.skill.id === 'break')).toBe(false);
+    expect(PENDING_SKILLS).toHaveLength(0);
   });
 
-  it('不属于任何角色 —— 两个已完成角色的技能表里都没有它', () => {
-    for (const id of ['player', 'kaili']) {
-      expect(playerSkillIdsFor(id).has('break'), `${id} 不该带「破」`).toBe(false);
-    }
-    /** 也不在"某个角色带哪一套"的定义表里。 */
-    for (const kit of Object.values(PLAYER_KITS)) {
-      expect(kit.some((s) => s.id === 'break')).toBe(false);
-    }
+  it("是黛玄的技能：skillsForPlayer('daixuan') 里有它、可绑键", () => {
+    expect(playerSkillIdsFor('daixuan').has('break')).toBe(true);
+    expect(PLAYER_SKILL_IDS.has('break')).toBe(true);
+    expect(PLAYER_KITS.daixuan?.some((s) => s.id === 'break')).toBe(true);
   });
 
-  it('不在玩家技能**全集**里（设置页/可绑的判据就是它）', () => {
-    expect(PLAYER_SKILL_IDS.has('break')).toBe(false);
-    expect(PLAYER_SKILLS.some((s) => s.id === 'break')).toBe(false);
-  });
-
-  it('定义仍在注册表里 —— 引擎按 id 解析得到，接线时不用重建', () => {
-    expect(ALL_SKILLS.some((s) => s.id === 'break')).toBe(true);
+  it('黛玄不再是"开发中"（`DEVELOPING` 已清空）', () => {
+    expect(isDeveloping('daixuan')).toBe(false);
+    expect(isDeveloping('player')).toBe(false);
+    expect(isDeveloping('kaili')).toBe(false);
   });
 });
 

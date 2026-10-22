@@ -314,6 +314,8 @@ export function buffRemainingMs(
  */
 export function aggregateFlags(combatant: Combatant): BuffFlags {
   let invulnerable = false;
+  /** 消耗式护盾的**层数**（求和，见 `BuffFlags.negateHits`）。 */
+  let negateHits = 0;
   let damageReduce = 0;
   let damageThreshold = 0;
   /**
@@ -351,6 +353,8 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
     if (!def?.flags) continue;
     const f = def.flags;
     if (f.invulnerable) invulnerable = true;
+    /** 层数求和（每层挡一次，见 `BuffFlags.negateHits`）。 */
+    if (f.negateHits !== undefined) negateHits += f.negateHits * buff.stacks;
     if (f.damageReduce !== undefined) damageReduce = Math.max(damageReduce, f.damageReduce);
     if (f.damageThreshold !== undefined) {
       damageThreshold = Math.max(damageThreshold, f.damageThreshold);
@@ -378,6 +382,7 @@ export function aggregateFlags(combatant: Combatant): BuffFlags {
 
   return {
     ...(invulnerable ? { invulnerable: true } : {}),
+    ...(negateHits > 0 ? { negateHits } : {}),
     ...(damageReduce > 0 ? { damageReduce } : {}),
     ...(damageThreshold > 0 ? { damageThreshold } : {}),
     ...(flatDamageReduce === undefined ? {} : { flatDamageReduce }),

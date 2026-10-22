@@ -43,6 +43,7 @@ import type {
 import { aggregateFlags, applyBuff } from '../buffs';
 import { runAbilities, runTriggers } from './triggers';
 import { absorbedByOf, withAbsorbedByBuffId } from './avoidedSource';
+import { consumeNegateCharge } from './negateCharge';
 import { casterGainsDouqiFromDamage, gainsDouqiOnHitTaken } from './holds';
 import {
   actsOnVictim, absorbShieldDamage, firePostHitHooks, applyStunEffect,
@@ -182,49 +183,44 @@ export function resolveHit(
     /**
      * **这一击是不是被「卸」的阈值完全挡下了**（`伤害 ≤ N`）。
      *
-     * ==================================================================
-     * 为什么是"整次命中一个判据"
-     * ==================================================================
+    /**
+     * 「卸」的阈值判定（`≤N` 整击作废 / `>N` 平减 N）。
      *
-     * 用户的规则是两句：
-     *   `≤N` → 完全抵消，且【连它带的效果一起免】（如眩晕）
-     *   `>N`  → 伤害 − N，效果【照吃】
-     *
-     * 而"效果一起免"在引擎里**已经有实现** —— `avoided` 通路：
-     * `applyHitEffects` 里对"作用在挨打者身上的效果"直接跳过
-     * （那条注释记录了"我闪躲了还是倒地了"这个真实 bug）。
-     *
-     * 所以这里**不新写一套免效果逻辑**，只回答一个问题：
-     * "这一击够不够低，低到整击作废？" —— 答是，就让它走同一条
-     * `avoided` 通路，于是"连眩晕一起免"是天然的。
-     *
-     * ⚠️ 多个伤害效果时取**全部都要 ≤N 才算挡住**：只要有一段超过，
-     * 那一段就要吃 `伤害−N`，而"效果照吃"是整次命中的约定 ——
-     * 一半免效果一半不免会造出一个没人能预期的中间状态。
-     *
-     * ⚠️ 判据用 `crit: false`：这里问的是"**基础伤害**够不够低"，
-     * 而当前内容全部 `canCrit: false`，所以两者本来就相等。
-     * 更重要的是**不在这里调 `rollCrit`** —— 那会消耗随机数，
-     * 而"这次卸力判没判"不该影响后面的暴击结果（重放会因此变得
-     * 极难推理，与 `rollCrit` 自己的短路理由同源）。
+     * 判据本身在 `damage.flatBlocked`（"全部段都要 ≤N"、`crit: false` 与
+     * 不消耗随机数的理由都在那里）；这里只用结果，让"挡下整击"走 `avoided`
+     * 通路 —— 于是"连眩晕一起免"是天然的，不新写一套免效果逻辑。
      */
     const guardBlocked =
       victimFlags.invulnerable !== true &&
       flatBlocked(damageSpecs, casterStats, victimFlags, { crit: false, multiplier: 1 });
 
     /**
-     * 这次命中**有没有碰到人**。
-     *
-     * ⚠️ **在循环之前判定一次**，不要在每个效果里现算：
-     * 判据属于"整次命中"，与效果的顺序、种类都无关（见 `applyHitEffects`
-     * 里那段"我闪躲了还是倒地了"的说明）。
-     *
-     * ⚠️ 两个来源：无敌（`invulnerable`）与「卸」的阈值（`guardBlocked`）。
-     * 后者也算"没碰到人"，所以它带的效果同样被免掉 —— 这正是需求。
+     * 这次命中**有没有碰到人**（在循环之前判一次：判据属于"整次命中"）。
+     * 三个来源：无敌 / 「卸」阈值 / 消耗式护盾 —— 三者都"没碰到人"，
+     * 所以它们带的效果同样被免掉（见 `applyHitEffects`）。
      */
     /** ⚠️ `avoidable: false` = **这一段必中**（理由写在 `HitDef.avoidable` 上）。 */
     const unavoidable = hit.avoidable === false;
-    const avoided = !unavoidable && (victimFlags.invulnerable === true || guardBlocked);
+
+    /**
+     * **消耗式护盾（黛玄的「盾」，2026-10-22）**：每层免一次完整结算。
+     *
+     * ⚠️ 它排在 `unavoidable` **前面** —— "包括控制技"就是这么实现的
+     * （懒惰的「催眠」是必中+控制，盾要能吃掉它）。
+     * 免效果复用 `avoided` 通路（与「卸」挡下整击同一套）。
+     * 与「卸」的区别见 `BuffFlags.negateHits`。
+     */
+    const negateCharge = victimFlags.negateHits ?? 0;
+    const negated = negateCharge > 0 && (hit.effects.length > 0 || hit.avoidable !== false);
+
+    /** 挡下这一次之后**扣掉一层**（工具在 `negateCharge.ts`，见那里的说明）。 */
+    if (negated) {
+      const { buffs } = consumeNegateCharge(target);
+      ctx.replaceCombatant({ ...target, buffs });
+    }
+
+    const avoided =
+      negated || (!unavoidable && (victimFlags.invulnerable === true || guardBlocked));
 
     /**
      * **是谁吸收的这一击**（`avoided.viaBuffId` / `damage.viaBuffId` 的来源）。

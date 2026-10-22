@@ -142,19 +142,20 @@ describe('能不能开一局：开发中的角色**不能**', () => {
 
   it('名单说开发中 → 不能开始', () => {
     /**
-     * ⚠️ 用**真正的开发中**角色（黛玄）测这条规则。
-     * 2026-10-12 之前这里是 `kaili`，但她已经有自己的 5 招了，
-     * 不再是开发中（见 `data/roster.ts`）—— 断言会因此失败，
-     * 而那正是这条测试该被更新的信号。
+     * ⚠️ 这条**不再用真实名单**（2026-10-22 黛玄出师 ⇒ `DEVELOPING` 空了）：
+     * 它测的是**规则本身**（"名单说开发中就不能开始"），所以喂一个
+     * **测试自己的**判据即可 —— 真实名单那件事由下面那条覆盖。
      */
-    expect(canStartRun(characterSelection('daixuan'), isDeveloping)).toBe(false);
+    const developing = (id: string): boolean => id === 'daixuan';
+    expect(canStartRun(characterSelection('daixuan'), developing)).toBe(false);
+    expect(canStartRun(characterSelection('player'), developing)).toBe(true);
   });
 
-  it('真实名单：林晚风与凯丽都能开一局（2026-10-12 凯丽出师）', () => {
+  it('真实名单：**三个人都能开一局**（2026-10-22 黛玄出师）', () => {
     const playable = PLAYER_ROSTER.filter((entry) => !isDeveloping(entry.id)).map((e) => e.id);
-    expect(playable).toEqual(['player', 'kaili']);
-    /** 黛玄仍然在名单里，但灰着。 */
-    expect(isDeveloping('daixuan')).toBe(true);
+    expect(playable).toEqual(['player', 'kaili', 'daixuan']);
+    /** ⚠️ 2026-10-22 起黛玄**不灰了** —— 她的 5 招做完了（见 `roster.ts`）。 */
+    expect(isDeveloping('daixuan')).toBe(false);
   });
 
   it('判定看的是**已确定的角色**，不是光标', () => {

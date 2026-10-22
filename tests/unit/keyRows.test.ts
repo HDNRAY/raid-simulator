@@ -286,14 +286,14 @@ describe('行的内容：没有战斗快照时也要有结构化信息', () => {
    * （`registry` 能解析），但它**不在** `PLAYER_SKILLS` —— 而设置页的行
    * 来自 `PLAYER_SKILL_IDS`，所以它是**结构性**消失的，不是特判。
    */
-  it('⚠️ 「破」不在行里 —— 它是黛玄的待接线技能，不可绑', () => {
+  it('「破」**在**行里 —— 2026-10-22 起它是黛玄的技能（可绑）', () => {
     const rows = rowsWithoutSnapshot();
-    expect(rows.some((r) => r.skillId === 'break'), '「破」不该出现在设置页').toBe(false);
-    /** 但它**还在定义里**（注册表能解析）—— 删除会丢设计，见 reserved.ts。 */
+    expect(rows.some((r) => r.skillId === 'break'), '「破」应该出现在设置页').toBe(true);
+    /** 定义仍在注册表里（`ALL_SKILLS`），而且**现在可绑** —— 它归黛玄。 */
     expect(ALL_SKILLS.some((s) => s.id === 'break')).toBe(true);
-    expect(isBindablePlayerSkill(activeSkillOf(ALL_SKILLS.find((s) => s.id === 'break'), 'break'))).toBe(false);
-    /** 也不在默认键位表里 —— 否则 `bindingsForPlayer` 之外还会漏出它。 */
-    expect(DEFAULT_BINDINGS.some((b) => b.skillId === 'break')).toBe(false);
+    expect(isBindablePlayerSkill(activeSkillOf(ALL_SKILLS.find((s) => s.id === 'break'), 'break'))).toBe(true);
+    /** ⚠️ 2026-10-22 起它也有默认键位（C）—— 它的归属就是黛玄。 */
+    expect(DEFAULT_BINDINGS.some((b) => b.skillId === 'break')).toBe(true);
   });
 
   it('有冷却的技能要显示冷却', () => {

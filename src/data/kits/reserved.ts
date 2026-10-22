@@ -152,13 +152,9 @@ export interface PendingSkill {
  * 不可绑键。判据与"为什么不是删掉"见文件头。
  */
 export const PENDING_SKILLS: readonly PendingSkill[] = [
-  {
-    /**
-     * 黛玄还没做（她在 `data/roster.ts` 的 `DEVELOPING` 里），她的技能表
-     * 不存在，所以「破」今天没有产出者 —— 这正是它进待接线桶的原因。
-     */
-    skill: BREAK,
-    pendingFor: 'daixuan',
-    blockedBy: 'owner-not-implemented',
-  },
+  /**
+   * ⚠️ **2026-10-22 起是空的**：「破」已经搬进 `kits/daixuan.ts` 并归黛玄
+   * （她做完了）。这套机制保留 —— 下一个"设计好但没有归属"的技能放进来，
+   * `playerKits.test.ts` 会继续检查 `pendingFor` 是否是一个真实角色。
+   */
 ];

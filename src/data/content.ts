@@ -58,6 +58,7 @@ import {
   KAILI_SKILLS,
   SUNDER_DEBUFF,
 } from './kits/kaili';
+import { DAIXUAN_BUFFS, DAIXUAN_SKILLS } from './kits/daixuan';
 import {
   DODGE_IFRAME,
   GUARD_THRESHOLD_BUFF,
@@ -211,6 +212,7 @@ export const DOUQI_MAX = 100;
 export const PLAYER_SKILLS: readonly SkillDef[] = [
   ...LIN_WANFENG_SKILLS,
   ...dedupeSkills(KAILI_SKILLS),
+  ...DAIXUAN_SKILLS,
   /**
    * ⚠️ 「击」在这里（技能全集），但**不在任何角色的技能表里** ——
    * 它是派生技，靠 `combo-window` 出现。放在合集里是为了让
@@ -351,6 +353,8 @@ export const PLAYER_KITS: Readonly<Record<string, readonly SkillDef[]>> = {
   /** ⚠️ key 是**历史遗留**的 `'player'`（roster 里的 id），不是角色名。 */
   player: [...LIN_WANFENG_SKILLS],
   kaili: [...KAILI_SKILLS],
+  /** 黛玄（2026-10-22）：弹 / 波 / 破 / 盾 / 愈。 */
+  daixuan: [...DAIXUAN_SKILLS],
 };
 
 /**
@@ -427,5 +431,6 @@ export const ALL_BUFFS: readonly BuffDef[] = [
    */
   COMBO_WINDOW,
   /** ⚠️ 「恶魔低语」自己带的 buff（与技能同一条理由：抽到才用，但必须注册）。 */
+  ...DAIXUAN_BUFFS,
   ...WHISPER_BUFFS,
 ];

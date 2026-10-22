@@ -86,6 +86,8 @@ export const PLAYER_BASE: Partial<Record<StatKey, number>> = {
 const PLAYER_HP_BY_ID: Readonly<Record<string, number>> = {
   player: LIN_WANFENG_HP,
   kaili: KAILI_HP,
+  /** 黛玄（2026-10-22）：魔导士，血量 100 —— 三人里最脆。 */
+  daixuan: 100,
 };
 
 /**

@@ -417,8 +417,11 @@ describe('能不能开战：开发中的单位灰掉且**不能开战**', () => 
     expect(canStartBattle(s, developing)).toBe(true);
   });
 
-  it('真实名单：开发中的仍然不能开战（2026-10-12 凯丽出师）', () => {
+  it('真实名单：**三个人都能开战**（2026-10-22 黛玄出师，开发中名单已空）', () => {
     const real = (id: string): boolean => isDeveloping(id);
+    /** ⚠️ 2026-10-22：黛玄的 5 招做完了 ⇒ `DEVELOPING` 为空 ⇒ 三人都能开战。 */
+    expect(isDeveloping('daixuan')).toBe(false);
+    expect(canStartBattle(sel({ playerId: 'daixuan', focus: 'start' }), real)).toBe(true);
     /** 两个做完的人物、六个做完的 Boss —— 任意组合都能开战。 */
     expect(canStartBattle(sel({ focus: 'start' }), real)).toBe(true);
     expect(canStartBattle(sel({ playerId: 'kaili', focus: 'start' }), real)).toBe(true);
@@ -435,10 +438,15 @@ describe('能不能开战：开发中的单位灰掉且**不能开战**', () => 
       expect(canStartBattle(sel({ bossId, focus: 'start' }), real)).toBe(false);
     }
     /**
-     * ⚠️ **只剩黛玄**：她的 5 招里「盾」需要引擎还没有的机制，
-     * 所以她还灰着（见 `data/roster.ts` 的 `DEVELOPING`）。
+     * ⚠️ 2026-10-22：**三个角色都能开战了** —— 黛玄的「盾」靠新加的
+     * `BuffFlags.negateHits`（消耗式护盾）落地，`DEVELOPING` 已清空。
+     * 这里留一条"空名单"的反向断言：拿一个**测试自己的**判据说"灰着"
+     * 仍然会拦住开战（规则本身没坏）。
      */
-    expect(canStartBattle(sel({ playerId: 'daixuan', focus: 'start' }), real)).toBe(false);
+    expect(canStartBattle(sel({ playerId: 'daixuan', focus: 'start' }), real)).toBe(true);
+    expect(
+      canStartBattle(sel({ playerId: 'daixuan', focus: 'start' }), (id) => id === 'daixuan'),
+    ).toBe(false);
   });
 });
 
