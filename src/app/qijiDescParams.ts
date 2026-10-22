@@ -86,8 +86,10 @@ function harvestAbility(ability: unknown): AbilityHarvest {
   if (buff !== undefined) {
     if (typeof buff.maxStacks === 'number') out.stacks = buff.maxStacks;
     const value = buff.modifiers?.[0]?.value;
-    if (typeof value === 'number') out.percent = percentOf(value);
-    out.seconds = secondsOf(buff.duration);
+    const percent = typeof value === 'number' ? percentOf(value) : undefined;
+    if (percent !== undefined) out.percent = percent;
+    const seconds = secondsOf(buff.duration);
+    if (seconds !== undefined) out.seconds = seconds;
   }
   return out;
 }
@@ -130,8 +132,12 @@ export function qijiDescParamsOf(qiji: QijiEntity): QijiDescParams {
   const modifier = buff?.modifiers?.[0]?.value;
   if (typeof modifier === 'number' && Number.isFinite(modifier)) {
     /** 0.2 ⇒ 20%（百分比语义）；整数（如 30）是**点数**，走 `amount`。 */
-    if (Number.isInteger(modifier)) params.amount = String(modifier);
-    else params.percent = percentOf(modifier);
+    if (Number.isInteger(modifier)) {
+      params.amount = String(modifier);
+    } else {
+      const percent = percentOf(modifier);
+      if (percent !== undefined) params.percent = percent;
+    }
   }
 
   if (typeof buff?.maxStacks === 'number' && Number.isFinite(buff.maxStacks)) {
