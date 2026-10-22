@@ -50,8 +50,11 @@ export interface CodexLayout {
   readonly height: number;
   /** 标题中心 y。 */
   readonly titleY: number;
-  /** 摘要（已解锁 N / 共 M）中心 y。 */
-  readonly summaryY: number;
+  /**
+   * ⚠️ 2026-10-22：摘要从"标题下方那行"挪到**底部那一行的右端**
+   * （用户："已解锁多少条那一行 挪到右下角，和 提示一行"）——
+   * 所以这里**没有** `summaryY` 了，摘要与提示共用 `hintY`。
+   */
   /** 第一行卡片的上边缘。 */
   readonly firstCardY: number;
   readonly cardW: number;
@@ -67,9 +70,9 @@ export interface CodexLayout {
 export const CODEX_LAYOUT: CodexLayout = {
   width: 960,
   height: 540,
-  titleY: 56,
-  summaryY: 92,
-  firstCardY: 132,
+  titleY: 52,
+  /** 摘要挪走之后卡片区上移（否则标题与卡片之间空一大块）。 */
+  firstCardY: 104,
   /**
    * ⚠️ 2026-10-20：卡片加高（104 → 132）—— 多了一行"解锁条件"
    * （用户："要显示 炁机解锁条件"）。5 列 × 2 行仍然装得下（高 280）。
@@ -234,6 +237,22 @@ export const CODEX_LINE_H = 17;
  * inset**，数字只有这一个。
  */
 export const CARD_TEXT_INSET = 12;
+
+/**
+ * 卡片网格的**宽度**与**左边缘**（横跨整个网格，不是某一行）。
+ *
+ * ⚠️ 唯一一份：卡片视口（遮罩 / 命中 / `maxScroll`）与**底部那一行**
+ * （左：提示，右：摘要）必须对齐同一条左右基线 —— 两处各算一次，`cols` /
+ * `cardW` 一改就会错位（用户 2026-10-22："和提示一行"）。
+ */
+export function codexGridWidth(L: CodexLayout = CODEX_LAYOUT): number {
+  return L.cols * L.cardW + (L.cols - 1) * L.gapX;
+}
+
+/** 网格左边缘（水平居中）。 */
+export function codexGridLeft(L: CodexLayout = CODEX_LAYOUT): number {
+  return Math.round((L.width - codexGridWidth(L)) / 2);
+}
 /** 卡片内边距（上下各留一点，不然描边会贴字）。 */
 const CARD_PAD_TOP = 10;
 const CARD_PAD_BOTTOM = 10;

@@ -48,6 +48,8 @@ import {
   clampScrollOffset,
   cardTextPlan,
   codexCardRects,
+  codexGridLeft,
+  codexGridWidth,
   maxScrollOffset,
   wrapByChars,
   wrapHardLines,
@@ -150,20 +152,26 @@ export class CodexScreen {
       anchorY: 0.5,
       kai: true,
     });
+    /**
+     * 摘要（已解锁 N / 共 M）：**底部那一行的右端**，与提示同一行
+     * （用户 2026-10-22："已解锁多少条那一行 挪到右下角，和提示一行"）。
+     * 右对齐到**卡片网格右边缘**（`codexGridLeft + codexGridWidth`）。
+     */
     this.summary = new Label(pixi, {
-      x: LOGICAL.width / 2,
-      y: CODEX_LAYOUT.summaryY,
-      size: FONT.body,
-      color: PALETTE.textDim,
-      anchorX: 0.5,
-      anchorY: 0.5,
-    });
-    this.hint = new Label(pixi, {
-      x: LOGICAL.width / 2,
+      x: codexGridLeft() + codexGridWidth(),
       y: CODEX_LAYOUT.hintY,
       size: FONT.small,
       color: PALETTE.textDim,
-      anchorX: 0.5,
+      anchorX: 1,
+      anchorY: 0.5,
+    });
+    /** 提示：**左下角**、左对齐到卡片网格左边缘（与卡片左基线同一条）。 */
+    this.hint = new Label(pixi, {
+      x: codexGridLeft(),
+      y: CODEX_LAYOUT.hintY,
+      size: FONT.small,
+      color: PALETTE.textDim,
+      anchorX: 0,
       anchorY: 0.5,
     });
     this.root.addChild(this.title.root, this.summary.root, this.hint.root);
@@ -219,12 +227,10 @@ export class CodexScreen {
    * 遮罩要画成一整块矩形，`top/height` 那种形状还得再推一次 x/w ✗。
    */
   private viewport(): ViewportRect {
-    const cols = CODEX_LAYOUT.cols;
-    const totalW = cols * CODEX_LAYOUT.cardW + (cols - 1) * CODEX_LAYOUT.gapX;
     return {
-      x: Math.round((CODEX_LAYOUT.width - totalW) / 2),
+      x: codexGridLeft(),
       y: CODEX_LAYOUT.firstCardY,
-      w: totalW,
+      w: codexGridWidth(),
       /** ⚠️ 多留 2px：卡片的描边与光标环压在边界上，被裁掉一像素就像"卡缺了角"。 */
       h: Math.max(1, CODEX_LAYOUT.hintY - 16 - CODEX_LAYOUT.firstCardY + 2),
     };
