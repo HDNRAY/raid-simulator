@@ -284,8 +284,15 @@ export const CHONG_WINDOW: BuffDef = {
   hidden: true,
   /** 3 秒内可用 —— 够按一下，不够攒两发。 */
   duration: logicMs(30),
-  maxStacks: 1,
-  stacking: { mode: 'refresh' },
+  /**
+   * **最多 2 层**（2026-10-22 用户："加一个炁机 使用5次冲解锁，**冲按2次才消失**"）。
+   *
+   * - 没有那条炁机时：窗口只挂 **1 层** ⇒ 一次就用完（旧行为）✓
+   * - 有「冲波再起」时：窗口一次挂 **2 层** ⇒ 连按两次 ✓
+   * ⚠️ 用 `stack` 而不是 `refresh`：`refresh` 只刷新时长、**不加层数** ✗。
+   */
+  maxStacks: 2,
+  stacking: { mode: 'stack', max: 2 },
   /**
    * ⚠️ **不挂 `flags.comboWindow`**：那个旗标是"渲染层把派生技画在源技能上方"
    * 的提示，而它会被内容校验器当作"引用了一个技能"来检查（`MISSING_SKILL`）。
@@ -312,7 +319,11 @@ export const CHONG: ActiveSkillDef = {
   descKey: 'skill.chong.desc',
   icon: 'char_magic2',
   abilities: [
-    { kind: 'removeBuff', target: { mode: 'self' }, buffId: CHONG_WINDOW.id },
+    /**
+     * ⚠️ **只减 1 层**（`stacks: 1`），不是整条摘掉：窗口可能有 2 层
+     * （「冲波再起」给的）⇒ 用完一次还剩一次 ✓。层数减到 0 时引擎自己摘掉。
+     */
+    { kind: 'removeBuff', target: { mode: 'self' }, buffId: CHONG_WINDOW.id, stacks: 1 },
   ],
   castTime: 0,
   cooldown: 0,

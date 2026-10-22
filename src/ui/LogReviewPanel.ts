@@ -70,6 +70,7 @@ import type { BattleSnapshotView } from '../render/viewModel';
 import { FONT } from './layout';
 import { Label, Panel, type PixiCtor } from './primitives';
 import { PALETTE } from '../render/theme';
+import { paintScrollBar } from './scrollBarPaint';
 import {
   CATEGORY_COLORS,
   REVIEW_FOOTER_H,
@@ -91,7 +92,6 @@ import {
   scrollFraction,
   scrollOffset,
   resultStatCells,
-  scrollThumbRatio,
   secondsAt,
   tailOffset,
   visibleWindow,
@@ -448,15 +448,20 @@ export class LogReviewPanel {
     }
 
     /* ---- 滚条（只有真的滚得动才画） ---- */
-    if (total > REVIEW_ROWS) {
-      const trackX = REVIEW_RECT.x + REVIEW_RECT.w - SCROLLBAR_W - 6;
-      const trackY = REVIEW_ROWS_Y;
-      const trackH = REVIEW_ROWS * REVIEW_ROW_H;
-      g.rect(trackX, trackY, SCROLLBAR_W, trackH).fill({ color: PALETTE.panelLine, alpha: 0.6 });
-      const thumbH = Math.max(SCROLLBAR_MIN_H, trackH * scrollThumbRatio(total, REVIEW_ROWS));
-      const thumbY = trackY + (trackH - thumbH) * scrollFraction(offset, total, REVIEW_ROWS);
-      g.rect(trackX, thumbY, SCROLLBAR_W, thumbH).fill({ color: PALETTE.textDim, alpha: 0.95 });
-    }
+    /**
+     * **画滚动条 = 共用画笔**（2026-10-22，用户："请统一"）：这里也是**行式**
+     * 滚动，所以三个入参用"行"当单位（`scrollBarGeometry` 是比例运算，
+     * 与像素式逐位等价 ✓）。从此"画"只有 `ui/scrollBarPaint` 一份。
+     */
+    paintScrollBar({
+      gfx: g,
+      track: { x: REVIEW_RECT.x + REVIEW_RECT.w - SCROLLBAR_W - 6, top: REVIEW_ROWS_Y, len: REVIEW_ROWS * REVIEW_ROW_H },
+      viewportPx: REVIEW_ROWS,
+      maxScrollPx: Math.max(0, total - REVIEW_ROWS),
+      scrollPx: offset,
+      width: SCROLLBAR_W,
+      minLengthPx: SCROLLBAR_MIN_H,
+    });
 
     /* ---- 页脚 ---- */
     this.hint.set(

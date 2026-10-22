@@ -622,10 +622,8 @@ describe('AGENTS.md §2：滑块几何只有 scrollWindow 一份', () => {
      * 不在这张表里而红。这张表只会**变短**（等哪天行 / 像素两套真能合成
      * 同一个具名入参，就把对应条目删掉）。
      */
-    const ROW_BASED_ALLOWED: readonly string[] = [
-      'src/ui/LogReviewPanel.ts',
-      'src/ui/settings/SkillDetail.ts',
-    ];
+    /** ⚠️ **2026-10-22 起为空**：两条行式滚动条已改用共用画笔（只许变短）。 */
+    const ROW_BASED_ALLOWED: readonly string[] = [];
 
     /**
      * 剥掉注释**和字符串字面量**（与 §1 的扫描同一做法）：

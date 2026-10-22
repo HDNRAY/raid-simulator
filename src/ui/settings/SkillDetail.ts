@@ -72,6 +72,7 @@ import { FONT } from '../layout';
 import { Label, type PixiCtor } from '../primitives';
 import { wrapText, type MeasureText } from './wrapText';
 import { FONT_FAMILY, PALETTE, css } from '../../render/theme';
+import { paintScrollBar } from '../scrollBarPaint';
 import {
   currentSettingsMetrics,
   detailContentRect,
@@ -82,9 +83,7 @@ import { DESC_MAX_LINES } from './detailWindow';
 import { attachViewportMask, drawViewportClip, fullyOutside } from '../viewportMask';
 import {
   clampOffset,
-  scrollFraction,
   scrollOffset,
-  scrollThumbRatio,
 } from '../../ui/scrollWindow';
 import type { KeyRow } from './rows';
 import type { TranslateFn } from '../../i18n/translator';
@@ -607,13 +606,25 @@ export class SkillDetail {
      * 以为"下面还有东西"（那是"看不出到底有没有更多"的反面：画了却没有）。
      */
     if (!this.scrollable()) return;
-    const trackX = vp.x + vp.w - SCROLLBAR_W - 2;
-    g.rect(trackX, vp.y + 2, SCROLLBAR_W, vp.h - 4).fill({ color: PALETTE.panelLine, alpha: 0.6 });
-    const trackH = vp.h - 4;
-    const thumbH = Math.max(SCROLLBAR_MIN_H, trackH * scrollThumbRatio(this.totalRows, viewRows()));
-    const thumbY =
-      vp.y + 2 + (trackH - thumbH) * scrollFraction(this.offset, this.totalRows, viewRows());
-    g.rect(trackX, thumbY, SCROLLBAR_W, thumbH).fill({ color: PALETTE.textDim, alpha: 0.95 });
+    /**
+     * **画滚动条 = 共用画笔**（2026-10-22，用户："请统一"）。
+     *
+     * ⚠️ 这一条是**行式**滚动（按行算位置），而画笔的入参叫 `…Px` ——
+     * 但 `scrollBarGeometry` 本质是**比例**运算，所以 **三个入参都用"行"
+     * 当单位**传进去，结果与按像素算逐位相同 ✓（这与备战卡片区那条像素式
+     * 调用共用**同一份**几何和**同一份**画法，只是单位不同）。
+     * 于是这里不再自己算 `scrollThumbRatio` / `scrollFraction` ✗
+     * —— 那正是用户说的"各自画"。
+     */
+    paintScrollBar({
+      gfx: g,
+      track: { x: vp.x + vp.w - SCROLLBAR_W - 2, top: vp.y + 2, len: vp.h - 4 },
+      viewportPx: viewRows(),
+      maxScrollPx: Math.max(0, this.totalRows - viewRows()),
+      scrollPx: this.offset,
+      width: SCROLLBAR_W,
+      minLengthPx: SCROLLBAR_MIN_H,
+    });
   }
 
   /** 每帧刷新（面板 `redraw` 时调；可见性由页决定）。 */

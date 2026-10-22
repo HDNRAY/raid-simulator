@@ -449,6 +449,7 @@ import {
   QIJI_THICK_SHIELD,
   QIJI_YU_ENERGY,
 } from './qijiExtra';
+import { QIJI_CHONG_STACK, QIJI_STRIKE_INTERRUPT } from './qijiDerived';
 
 export const ALL_QIJI: readonly QijiEntity[] = [
   QIJI_VITALITY,
@@ -473,6 +474,8 @@ export const ALL_QIJI: readonly QijiEntity[] = [
   QIJI_HOLD_WAVE,
   QIJI_CHAN_REGEN,
   QIJI_BLAST_ECHO,
+  QIJI_CHONG_STACK,
+  QIJI_STRIKE_INTERRUPT,
 ];
 
 /** 按 id 取一个炁机（`chosen` 里存的是 id，记录 / UI 要还原定义）。 */

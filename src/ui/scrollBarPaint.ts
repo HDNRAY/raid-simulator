@@ -37,6 +37,15 @@ export interface ScrollBarPaint {
   readonly scrollPx: number;
   /** 条的粗细（默认 3）。 */
   readonly width?: number;
+  /**
+   * 滑块的**最小长度**（像素/单位；默认交给 `scrollBarGeometry` 的 24）。
+   *
+   * ⚠️ 加这个参数是为了让「设置页技能详情」那条**行式**滚动条也能用同一份
+   * 画笔：它原来的最小长度是 20，而 `scrollBarGeometry` 的缺省是 24。
+   * 与其让它在调用点自己算一遍（那正是"第二份画法"的来源），不如把差异
+   * 收进画笔的**参数**里。
+   */
+  readonly minLengthPx?: number;
 }
 
 /**
@@ -52,6 +61,7 @@ export function paintScrollBar(p: ScrollBarPaint): boolean {
     maxScrollPx: p.maxScrollPx,
     scrollPx: p.scrollPx,
     trackLenPx: p.track.len,
+    ...(p.minLengthPx === undefined ? {} : { minLengthPx: p.minLengthPx }),
   });
   p.gfx
     .roundRect(p.track.x, p.track.top, width, p.track.len, width / 2)

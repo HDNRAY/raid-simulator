@@ -402,6 +402,9 @@ export function sectionScrollbar(
   readonly thumbTop: number;
   /** 还能滚多远（0 = 不用滚）。 */
   readonly maxPx: number;
+  /** 画笔要的三个原始入参（**单位 = 像素**）—— 见 `ui/scrollBarPaint`。 */
+  readonly viewportPx: number;
+  readonly scrollPx: number;
 } {
   const view = sectionViewport(kind, counts, scroll, L);
   const trackX = L.pad + colWOf(kind, L) - 3;
@@ -425,6 +428,16 @@ export function sectionScrollbar(
   });
   const thumbH = thumb.length;
   const thumbTop = trackTop + thumb.offset;
-  return { trackX, trackTop, trackW: 3, trackH, thumbH, thumbTop, maxPx: view.maxPx };
+  return {
+    trackX,
+    trackTop,
+    trackW: 3,
+    trackH,
+    thumbH,
+    thumbTop,
+    maxPx: view.maxPx,
+    viewportPx: view.viewPx,
+    scrollPx: view.offsetPx,
+  };
 }
 

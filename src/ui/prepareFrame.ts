@@ -52,7 +52,7 @@
 import type { Graphics } from 'pixi.js';
 import type { Label } from './primitives';
 import type { TranslateFn } from '../i18n/translator';
-import { PALETTE } from '../render/theme';
+import { paintScrollBar } from './scrollBarPaint';
 import { SECTION_ORDER, type PrepareCounts } from './prepareLayout';
 import {
   foldRect,
@@ -194,13 +194,19 @@ function drawScrollBars(
      * 职责 —— 让 `sectionScrollbar` 自己读它会造出几何文件之间的环。
      */
     const bar = sectionScrollbar(kind, counts, state.scroll, tops[kind]);
-    if (bar.maxPx <= 0) continue;
-    gfx
-      .roundRect(bar.trackX, bar.trackTop, bar.trackW, bar.trackH, 1.5)
-      .fill({ color: PALETTE.panelLine, alpha: 0.35 });
-    gfx
-      .roundRect(bar.trackX, bar.thumbTop, bar.trackW, bar.thumbH, 1.5)
-      .fill({ color: PALETTE.textDim, alpha: 0.9 });
+    /**
+     * **画滚动条 = 共用画笔**（2026-10-22，用户："请统一"）：与图鉴、
+     * 详情正文、设置页技能详情**同一份**画法（粗细/颜色/圆角/什么时候画
+     * 都在 `ui/scrollBarPaint` 里），几何仍是 `scrollBarGeometry` 那唯一一份。
+     */
+    paintScrollBar({
+      gfx,
+      track: { x: bar.trackX, top: bar.trackTop, len: bar.trackH },
+      viewportPx: bar.viewportPx,
+      maxScrollPx: bar.maxPx,
+      scrollPx: bar.scrollPx,
+      width: bar.trackW,
+    });
   }
 }
 
