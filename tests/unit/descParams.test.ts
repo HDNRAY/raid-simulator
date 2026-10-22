@@ -318,28 +318,29 @@ describe('时长：从技能授予自己的 buff 推', () => {
  * ================================================================== */
 
 describe('傲慢的招式说明：全部回到 `SkillDef`', () => {
+    /**
+     * ⚠️ **2026-10-22 起说明里不再写前摇 / 冷却 / 代价的数值** —— 那三项由
+     * 详情面板的**结构化数值行**显示（`app/skillStats` 从内容字段算），
+     * 说明里再写一遍就是"同一件事两处显示"。所以下面**不再**断言
+     * "desc 含 castTime / cooldown 的数字"（那条守卫的对象已经不存在了）；
+     * 伤害 / 眩晕 / 回血这些**只出现在说明里**的数仍然照旧断言。
+     */
   it('「轻蔑」的前摇 / 伤害 / 冷却都从 `SkillDef` 推', () => {
     const skill = skillOf('boss-scorn');
     const text = render(skill);
-    expect(text, '前摇来自 `castTime`').toContain(String(displaySeconds(skill.castTime)));
     expect(text, '伤害来自 `damage.base`').toContain(String(damageOf(skill)));
-    expect(text, '冷却来自 `cooldown`').toContain(String(displaySeconds(skill.cooldown)));
   });
 
   it('「呵斥」同理，且"10 炁换 N 伤"里的 N 也是推的', () => {
     const skill = skillOf('boss-rebuke');
     const text = render(skill);
-    expect(text, '前摇来自 `castTime`').toContain(String(displaySeconds(skill.castTime)));
     expect(text, '伤害来自 `damage.base`').toContain(String(damageOf(skill)));
-    expect(text, '冷却来自 `cooldown`').toContain(String(displaySeconds(skill.cooldown)));
   });
 
   it('「碾压」：前摇 / 伤害 / 冷却 + **倒地时长**（从挂上去的 buff 推）', () => {
     const skill = skillOf('boss-heavy');
     const text = render(skill);
-    expect(text, '前摇来自 `castTime`').toContain(String(displaySeconds(skill.castTime)));
     expect(text, '伤害来自 `damage.base`').toContain(String(damageOf(skill)));
-    expect(text, '冷却来自 `cooldown`').toContain(String(displaySeconds(skill.cooldown)));
     expect(text, '倒地时长来自能锁住目标的 buff').toContain(String(stunSecondsOf(skill)));
     /**
      * ⚠️ 「倒地」用的是 `restrictToTags` 而**不是** `actionLock`
@@ -354,7 +355,6 @@ describe('傲慢的招式说明：全部回到 `SkillDef`', () => {
     const skill = skillOf('boss-mend');
     const text = render(skill, bossHpFor('meiichiro'));
     const heal = selfHealOf(skill);
-    expect(text, '前摇来自 `castTime`').toContain(String(displaySeconds(skill.castTime)));
     expect(text, '比例 = 回血量 / 上限').toContain(
       String(Math.round((heal / bossHpFor('meiichiro')) * 100)),
     );
@@ -388,32 +388,30 @@ describe('色欲的招式说明：数值写的是数据里的值', () => {
   it('「轻吟」的前摇 / 伤害 / 冷却都从 `SkillDef` 推', () => {
     const skill = skillOf('lust-hum');
     const text = render(skill);
-    expect(text, '前摇来自 `castTime`').toContain(String(displaySeconds(skill.castTime)));
     expect(text, '伤害来自 `damage.base`').toContain(String(damageOf(skill)));
-    expect(text, '冷却来自 `cooldown`').toContain(String(displaySeconds(skill.cooldown)));
   });
 
   it('「缠绕」同理（前摇 / 伤害 / 冷却）', () => {
     const skill = skillOf('lust-entangle');
     const text = render(skill);
-    expect(text, '前摇来自 `castTime`').toContain(String(displaySeconds(skill.castTime)));
     expect(text, '伤害来自 `damage.base`').toContain(String(damageOf(skill)));
-    expect(text, '冷却来自 `cooldown`').toContain(String(displaySeconds(skill.cooldown)));
   });
 
   it('「魅惑」：前摇 / 眩晕时长 / 冷却都从内容推', () => {
     const skill = skillOf('lust-charm');
     const text = render(skill);
-    expect(text, '前摇来自 `castTime`').toContain(String(displaySeconds(skill.castTime)));
     expect(text, '眩晕时长来自挂上去的 buff').toContain(String(stunSecondsOf(skill)));
-    expect(text, '冷却来自 `cooldown`').toContain(String(displaySeconds(skill.cooldown)));
   });
 
   it('⚠️ 变异：轻吟冷却与伤害改了 → 文案跟着变', () => {
     const base = withDamage(skillOf('lust-hum'), 55);
     const mutated: ActiveSkillDef = { ...base, cooldown: 12_000 };
     const text = render(mutated);
-    expect(text, '冷却要跟随被改过的值').toContain('12');
+    /**
+     * ⚠️ 冷却**不再写进说明**（结构化数值行负责）⇒ 这里只留伤害那条；
+     * 冷却的"跟着内容走"由 `app/skillStats` 的单测覆盖。
+     */
+    expect(text, '说明里不该再出现冷却数值').not.toContain('12 秒冷却');
     expect(text, '伤害要跟随被改过的值').toContain('55');
   });
 });
