@@ -70,6 +70,8 @@ import { PALETTE } from '../render/theme';
 import { isDeveloping, type RosterEntry } from '../data/roster';
 import { CARD_RADIUS, PREPARE_SKIN, cardSkin } from './prepareRender';
 import { detailRect } from './prepareGeometry';
+import { placeExpandedPanel } from './selectExpandView';
+import { attachViewportMask } from './viewportMask';
 import {
   easeOutCubic,
   initialExpand,
@@ -165,26 +167,15 @@ export class CharacterSelectScreen {
    * **两张同时跑**（上一版只有一份状态 ⇒ "旧卡瞬间收、新卡瞬间开" ✗）。
    */
   private expandStates: ExpandState[] = [];
-  /**
-   * **指针停在空白处**（或离开画布）—— 2026-10-22 用户："hover 哪个哪个就
-   * 展开，**移开就收起**"。
-   *
-   * 判据只在两个地方改：`hover()` 命中/落空、以及**键盘移光标**（`cycle`）。
-   * 指针落空 ⇒ 全部收起；键盘一动 ⇒ 重新跟着光标展开（键盘用户也要看得到
-   * 详情 —— 那正是"hover 优先、其次光标"那条老规矩）。
-   */
+  /** 指针停在空白处 / 离开画布（用户："hover 哪个哪个就展开，移开就收起"）。 */
   private hoverAway = false;
-  /**
-   * **指针停在谁身上**（`undefined` = 没停在任何卡上）。
-   *
-   * ⚠️ 屏幕必须自己记这一份：`PrepareDetailController` 的 hover 是它**内部**
-   * 的状态（`characterCursorTarget` 只读光标），而"哪张卡在展开"要跟着
-   * **hover** 走 —— 拿光标当判据就成了"永远展开光标那张"✗（实测过）。
-   */
+  /** 指针停在谁身上（屏幕自己记：控制器的 hover 是它内部状态，读不到）。 */
   private hoveredId: string | undefined;
   /** 正在展开的是第几张卡（`undefined` = 没有在展开）。 */
   private expandCard: number | undefined;
   private readonly expandGfx: Graphics;
+  /** 正文遮罩（动画中把正文裁在"正在长大的那张卡"里，见 `selectExpandView`）。 */
+  private readonly detailMask: Graphics;
   private readonly expandTitle: Label;
   /** 上一帧的时间戳（动画的 `dt`；0 = 还没有上一帧）。 */
   private lastFrameMs = 0;
@@ -270,6 +261,9 @@ export class CharacterSelectScreen {
       context: options.detailContext({ on: () => false }),
       parent: this.root,
     });
+
+    /** 正文遮罩：挂在面板自己身上（面板局部坐标 ⇒ 面板平移时遮罩跟着走）。 */
+    this.detailMask = attachViewportMask(new pixi.Graphics(), this.detailPanel.root);
 
     /**
      * **展开中的那张卡**：加在详情面板**之后**（= 画在它上面）—— 视觉上是
@@ -628,14 +622,15 @@ export class CharacterSelectScreen {
     const panelAlpha = easeOutCubic(this.progressOf(focusIndex));
     this.detailPanel.root.alpha = panelAlpha;
     /** 详情面板**平移到那张长大的卡上**（不缩放：宽度恒等 296）。 */
-    if (focusIndex >= 0) {
-      const slot = characterSelectCardRects(this.players.length)[focusIndex];
-      if (slot !== undefined) {
-        const grown = expandedCardRect(slot);
-        const base = detailRect();
-        this.detailPanel.root.x = grown.x - base.x;
-        this.detailPanel.root.y = grown.y - base.y;
-      }
+    const slot = focusIndex >= 0 ? characterSelectCardRects(this.players.length)[focusIndex] : undefined;
+    if (slot !== undefined) {
+      /** ⚠️ 位置与遮罩都跟着这一帧的**进度**走（用终态会让正文画到卡外 ✗）。 */
+      placeExpandedPanel({
+        panel: this.detailPanel.root,
+        mask: this.detailMask,
+        slot,
+        progress: this.progressOf(focusIndex),
+      });
     }
 
     this.detailPanel.update(focus);
@@ -687,7 +682,8 @@ export class CharacterSelectScreen {
       .stroke({ color: skin.strokeColor, width: skin.strokeWidth });
 
     /** 名字跟着卡片走（字号不插值：中文 >= 13 的下限比"大小连贯"更重要）。 */
-    this.expandTitle.root.visible = this.progressOf(cardIndex) < 0.5;
+    /** ⚠️ 一直不显示：详情面板**自带**标题，这张临时名字会和它叠字（实测）。 */
+    this.expandTitle.root.visible = false;
     this.expandTitle.root.alpha = alpha;
     this.expandTitle.set(this.options.translate(player.nameKey));
     this.expandTitle.root.x = rect.x + 18;
