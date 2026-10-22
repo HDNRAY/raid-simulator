@@ -16,6 +16,7 @@ import { Label, Panel, type PixiCtor } from '../primitives';
 import { PALETTE } from '../../render/theme';
 import type { TranslateFn } from '../../i18n/translator';
 import { ALL_SETTINGS_TABS, CLOSE_BUTTON, SETTINGS_PANEL, mnemonicKeyOf, tabRect } from './logic';
+import { TextButton } from '../TextButton';
 import { currentSettingsMetrics, scaledFont } from './settingsScale';
 /**
  * ⚠️ **可见的 tab 是参数**（首页只有「通用」）：外框不能自己去算，
@@ -120,16 +121,18 @@ export class SettingsFrame {
      * **底部「回主菜单」**（2026-10-22）：一颗描边小按钮。点了**不直接走**
      * —— 由面板转手给 `ui/ConfirmDialog`（二次确认）。
      */
-    this.exitGfx = new pixi.Graphics();
-    this.exitLabel = new Label(pixi, {
-      x: 0,
-      y: 0,
+    this.exitButton = new TextButton({
+      pixi,
+      rect: exitButtonRect(),
+      label: this.translate('settings.backToMenu'),
+      /** ⚠️ 键名**不进 i18n**（AGENTS §3b）：助记键从 `MNEMONIC_KEYS` 反查后给组件。 */
+      keyHint: mnemonicKeyOf('exitToHome'),
+      kind: 'secondary',
       size: FONT.small,
-      color: PALETTE.textDim,
-      anchorX: 0.5,
-      anchorY: 0.5,
+      kai: false,
+      radius: 6,
     });
-    this.root.addChild(this.exitGfx, this.exitLabel.root);
+    this.root.addChild(this.exitButton.root);
 
     /* ---- tab 按钮 ---- */
     /**
@@ -188,9 +191,12 @@ export class SettingsFrame {
    *   焦点 = 回车会作用在谁身上（一圈描边）
    * 两者可能同时在同一个 tab 上，也可能分开（焦点移走了但 tab 没切）。
    */
-  /** 底部「回主菜单」那颗（2026-10-22）：画一个描边小按钮。 */
-  private readonly exitGfx: Graphics;
-  private readonly exitLabel: Label;
+  /**
+   * 底部「回主菜单」那颗 —— 用共用组件 `ui/TextButton`（2026-10-22：
+   * "这个按钮和其他界面的其他按钮风格保持一致"）。设置页里是**次级**变体 +
+   * 小字号 + 小圆角，视觉参数由构造处给出，画法在组件里只有一份。
+   */
+  private readonly exitButton: TextButton;
 
   update(
     /** **可见的 tab 表**（首页只有「通用」）—— 由调用方从 `visibleTabs` 取。 */
@@ -211,27 +217,11 @@ export class SettingsFrame {
      */
     showKeyHints = true,
   ): void {
-    /** 底部那颗（不参与焦点环 —— 它只靠点击 / 触屏；键盘走 `Esc` 关面板）。 */
-    const exit = exitButtonRect();
-    this.exitGfx.clear();
-    this.exitGfx
-      .roundRect(exit.x, exit.y, exit.w, exit.h, 6)
-      .fill({ color: PALETTE.panelLine, alpha: 0.35 })
-      .stroke({ color: PALETTE.textDim, width: 1 });
     /**
-     * ⚠️ 用**正常文字色**（用户 2026-10-22："目前一直是灰色的"）——
-     * `textDim` 在这个仓库里是"禁用 / 次要"的含义，放主操作上会被读成不可点 ✗。
-     * 快捷键从 `MNEMONIC_KEYS` 反查后拼上（键位不进 i18n，AGENTS §3b）。
+     * 底部那颗：**只更新矩形**（面板尺寸跟着 UI 缩放走），画法与状态全在
+     * `TextButton` 里。它不参与焦点环 —— 只靠点击 / 触屏，键盘走 `Esc` 关面板。
      */
-    const exitMnemonic = mnemonicKeyOf('exitToHome');
-    this.exitLabel.set(
-      exitMnemonic === undefined
-        ? this.translate('settings.backToMenu')
-        : `${this.translate('settings.backToMenu')} (${exitMnemonic})`,
-    );
-    this.exitLabel.setColor(PALETTE.text);
-    this.exitLabel.root.x = exit.x + exit.w / 2;
-    this.exitLabel.root.y = exit.y + exit.h / 2;
+    this.exitButton.setRect(exitButtonRect());
 
     for (const [i, button] of this.tabButtons.entries()) {
       /** ⚠️ 不可见的 tab **整个不画**（也不可点 —— 命中测试同样按可见表来）。 */

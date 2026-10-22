@@ -121,9 +121,45 @@ export const PORTRAITS: readonly PortraitAsset[] = [
   { id: 'daixuan', number: '011' },
 ];
 
-/** 某个单位的对话头像（没有就 `undefined` —— 调用方画占位）。 */
+/**
+ * **七个 Boss 的对话头像**（2026-10-22 用户："boss的头像 也从 fd2 里拿过来
+ * 显示一下吧"）。
+ *
+ * ⚠️ **挑脸是开发时的一次性外观选择，不要为它写测试**（用户 2026-10-13
+ * 拍板的口径，见文件头那段长注释）。下面每条的注释就是"当时的理由"。
+ *
+ * | 我们的 Boss | 素材编号 | 素材方的名字 | 挑它的理由 |
+ * |---|---|---|---|
+ * | 傲慢 `meiichiro` | `007` | 蘭斯洛特 | 素材里最"骑士/贵族"的一张脸，傲慢是刀客型 Boss |
+ * | 色欲 `lust` | `018` | 蜜蒂 | 媚态最明显的一张女性脸 |
+ * | 嫉妒 `envy` | `022` | 卡里斯 | 冷、带刺的眼神，贴"嫉恨" |
+ * | 暴食 `gluttony` | `024` | 希爾法 | 最壮最粗的一张脸（兽人感），贴"饕餮" |
+ * | 暴怒 `wrath` | `081` | 狂戰士 | 蓝面獠牙的狂战士 —— 名字与本质都对 |
+ * | 懒惰 `sloth` | `006` | 萊汀 | 半睁眼、松松垮垮的一张脸，贴"沉眠" |
+ * | 贪婪 `greed` | `097` | 盜賊頭目 | 蒙面盗贼头目 —— 敛财/掠夺的 Boss |
+ *
+ * ⚠️ 与玩家的表**分开**：`PORTRAITS` 是"三个可玩角色"，这里是"七个 Boss"
+ * —— 分开之后"谁是玩家"这件事仍然一眼可见，而 `portraitFor` 两张表都查
+ * （调用方不需要知道分表的存在）。
+ */
+export const BOSS_PORTRAITS: readonly PortraitAsset[] = [
+  { id: 'meiichiro', number: '007' },
+  { id: 'lust', number: '018' },
+  { id: 'envy', number: '022' },
+  { id: 'gluttony', number: '024' },
+  { id: 'wrath', number: '081' },
+  { id: 'sloth', number: '006' },
+  { id: 'greed', number: '097' },
+];
+
+/**
+ * 某个单位的对话头像（**玩家表 + Boss 表都查**；没有就 `undefined`）。
+ *
+ * ⚠️ 两张表合成一个出口，调用方（详情区 / 顶栏 / 卡片）不需要知道
+ * "这个 id 属于玩家还是 Boss" —— 那正是"谁配哪张脸"这件事该待的地方。
+ */
 export function portraitFor(id: string): PortraitAsset | undefined {
-  return PORTRAITS.find((p) => p.id === id);
+  return PORTRAITS.find((p) => p.id === id) ?? BOSS_PORTRAITS.find((p) => p.id === id);
 }
 
 /** 一张对话头像的 URL（`public/game-art/portraits/DATO_000_m0.png`）。 */

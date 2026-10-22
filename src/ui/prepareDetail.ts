@@ -416,7 +416,12 @@ function bossDetail(id: string, ctx: DetailContext): DetailModel | undefined {
       key: 'roster.ui.detail.hpMax',
       params: { hp: ctx.bossHp(id) },
     },
-    /** ⚠️ 不设 `portraitId`：Boss 没有配对的对话头像（见文件头）。 */
+    /**
+     * **Boss 也有头像了**（2026-10-22）：`portraitFor` 现在同时查玩家表与
+     * Boss 表（`BOSS_PORTRAITS`），所以这里给 id 就行 —— 没配对时它会
+     * 自己回退到"不显示"（渲染层的 `asset === undefined` 分支）。
+     */
+    portraitId: id,
     /**
      * ⚠️ **不再分「招式」「被动」两节**（用户 2026-10-14："**不用分 招式和被动，
      * 直接写每个能力就好**"）。

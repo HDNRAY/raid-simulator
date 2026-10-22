@@ -53,6 +53,7 @@
 import type { Container, Graphics } from 'pixi.js';
 import { FONT, LOGICAL } from './layout';
 import { Label, type PixiCtor } from './primitives';
+import { TextButton } from './TextButton';
 import { ScreenChrome } from './ScreenChrome';
 import { PALETTE } from '../render/theme';
 import { isDeveloping, type RosterEntry } from '../data/roster';
@@ -124,8 +125,13 @@ export class CharacterSelectScreen {
    * 入口：点卡片 = 只选中（看详情），点这个按钮 = 开局 ✓（与 `Enter` 同一个
    * 动作：`confirm()`）。
    */
-  private readonly startGfx: Graphics;
-  private readonly startLabel: Label;
+  /**
+   * **「开始游戏」按钮** —— 用共用组件 `ui/TextButton`（2026-10-22 用户：
+   * "这个按钮和其他界面的其他按钮风格保持一致，如果没有抽出来做单独的组件，
+   * 现在抽"）。视觉（圆角 / 焦点 / 禁用 / 键位拼接）都在那一个文件里，
+   * 这一屏只管"放在哪、什么时候可点"。
+   */
+  private readonly startButton: TextButton;
   /** 按钮矩形（渲染与命中共用——两处各算一遍必然错位）。 */
   private readonly startRect: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   /** 三张卡的视图（顺序 = `players` 顺序）。 */
@@ -221,17 +227,18 @@ export class CharacterSelectScreen {
       w: startW,
       h: startH,
     };
-    this.startGfx = new pixi.Graphics();
-    this.startLabel = new Label(pixi, {
-      x: this.startRect.x + startW / 2,
-      y: this.startRect.y + startH / 2,
+    this.startButton = new TextButton({
+      pixi,
+      rect: this.startRect,
+      label: options.translate('screen.characterSelect.start'),
+      /** ⚠️ 键名**不进 i18n**（AGENTS §3b），由 `keyLabel` 反查后交给组件拼。 */
+      keyHint: keyLabel('Enter', ''),
+      kind: 'primary',
       size: FONT.body,
-      color: PALETTE.text,
-      anchorX: 0.5,
-      anchorY: 0.5,
-      kai: true,
+      /** 点它 = 与 `Enter` 同一个动作（`confirm()`）。 */
+      onPress: () => this.confirm(),
     });
-    this.root.addChild(this.startGfx, this.startLabel.root);
+    this.root.addChild(this.startButton.root);
 
     /** 齿轮 + 返回箭头（最后加 = 最上层）。 */
     this.chrome = new ScreenChrome({
@@ -431,11 +438,9 @@ export class CharacterSelectScreen {
      * 禁用态（没选中 / 选中的是开发中角色）点了什么也不做，但仍**消费**
      * 这次点击 —— 否则它会穿透到下面的卡片上（点"开始"却换了人 ✗）。
      */
-    if (
-      px >= this.startRect.x && px <= this.startRect.x + this.startRect.w
-      && py >= this.startRect.y && py <= this.startRect.y + this.startRect.h
-    ) {
-      this.confirm();
+    if (this.startButton.contains(px, py)) {
+      /** ⚠️ 禁用时**仍然消费**这次点击（否则会穿透到下面的卡片上 ✗）。 */
+      this.startButton.press(px, py);
       return true;
     }
 
@@ -533,25 +538,20 @@ export class CharacterSelectScreen {
      * "选中" = `focusId()` 有值（指针停在某张卡上，或键盘接管后指着某个角色）。
      */
     const canStart = this.focusId() !== undefined && canStartRun(this.selection, isDeveloping);
-    this.startGfx.clear();
-    this.startGfx
-      .roundRect(this.startRect.x, this.startRect.y, this.startRect.w, this.startRect.h, 8)
-      .fill({ color: canStart ? PALETTE.douqi.base : PALETTE.panelLine, alpha: canStart ? 0.85 : 0.35 });
-    this.startGfx
-      .roundRect(this.startRect.x, this.startRect.y, this.startRect.w, this.startRect.h, 8)
-      .stroke({ color: canStart ? PALETTE.text : PALETTE.textFaint, width: canStart ? 2 : 1 });
+    this.startButton.setEnabled(canStart);
     /**
      * 按钮文案（2026-10-22 用户："为什么不拼？这个页面就不需要底部的交互
      * 信息了"）：**「开始游戏 (Enter)」** —— 键名从 `keyLabel` 反查
      * （键名不进 i18n，AGENTS §3b）；i18n 里只放「开始游戏」。
      * ⚠️ 选中"开发中"的角色时改写成那条反馈（底部提示行已删，反馈得有家）。
      */
-    this.startLabel.set(
-      developing
-        ? t('roster.ui.developingHint')
-        : `${t('screen.characterSelect.start')} (${keyLabel('Enter', '')})`,
+    /**
+     * 文案：正常是「开始游戏」（组件自己拼 `(Enter)`）；选中"开发中"的角色时
+     * 改写成那条反馈 —— 底部提示行已删，反馈得有家。
+     */
+    this.startButton.setLabel(
+      developing ? t('roster.ui.developingHint') : t('screen.characterSelect.start'),
     );
-    this.startLabel.setColor(canStart ? PALETTE.text : PALETTE.textFaint);
 
     /** 每张卡各自的目标：选中那张 1、其余 0 ⇒ 换选中时两张同时跑。 */
     for (const [index, card] of this.cards.entries()) {
