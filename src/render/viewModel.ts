@@ -129,6 +129,17 @@ export interface SlotCost {
   readonly suffix?: string;
 }
 
+/**
+ * **按下状态**（`SkillSlotView.pressed` / `holding` 的来源）。
+ *
+ * 由 `app/battleLoop` 的 `pressStateOf()` 生产：`pressed` = 这一 tick 刚按下，
+ * `holding` = 正被按住（键鼠与触屏两路合并）。渲染层只读它 ✓
+ */
+export interface SlotPressState {
+  readonly pressed: ReadonlySet<string>;
+  readonly holding: ReadonlySet<string>;
+}
+
 export interface SkillSlotView {
   readonly index: number;
   /** 物理按键（如 '1' / 'q'） */
@@ -183,6 +194,16 @@ export interface SkillSlotView {
    * 状态提示区用它取文案。
    */
   readonly blockedKey?: string;
+  /**
+   * 这一格**刚被按下**（2026-10-22，用户："按了一下，和按住，都需要有"）。
+   *
+   * ⚠️ 由输入层给出（`BattleLoop.pressStateOf()`），渲染层不自己监听 DOM ✗。
+   * 瞬发技也要有 —— 所以它是"按下那一刻起、至少持续到下一次快照"的灯，
+   * 而不是"正在按住"。
+   */
+  readonly pressed?: boolean;
+  /** 这一格**正被按住**（按住型技能持续施放中）。见 `pressed`。 */
+  readonly holding?: boolean;
 }
 
 /**

@@ -52,7 +52,7 @@ import { Label } from '../ui/primitives';
 import { FONT } from '../ui/layout';
 import { PALETTE } from './theme';
 import { RESOURCE_COLORS } from './skillBar';
-import { slotLookOf } from './slotLook';
+import { slotVisualOf, holdingPulse } from './slotLook';
 import type { TranslateFn } from '../i18n/translator';
 import {
   BADGE_OFFSET_RATIO,
@@ -285,7 +285,7 @@ export class TouchButtonLayer {
   }
 
   /** 每帧按快照更新文本（⚠️ **不碰 `root.visible`** —— 见文件头）。 */
-  update(view: BattleSnapshotView): void {
+  update(view: BattleSnapshotView, tick = 0): void {
     /**
      * **派生技不进扇形**：它作为"环"挂在**源按钮**上（见 `ButtonView.ring`）。
      * 所以这里先从快照里挑出派生技，再把它配给源按钮。
@@ -293,7 +293,7 @@ export class TouchButtonLayer {
     const derived = view.skills.find((s) => s.derivedFrom !== undefined);
     for (const button of this.buttons.values()) {
       const slot = view.skills.find((s) => s.skillId === button.skillId);
-      this.applySlot(button, slot);
+      this.applySlot(button, slot, tick);
       const attached =
         derived !== undefined && derived.derivedFrom === button.skillId ? derived : undefined;
       button.derivedSkillId = attached?.skillId ?? '';
@@ -302,7 +302,7 @@ export class TouchButtonLayer {
     }
   }
 
-  private applySlot(button: ButtonView, slot: SkillSlotView | undefined): void {
+  private applySlot(button: ButtonView, slot: SkillSlotView | undefined, tick: number): void {
     /**
      * ================================================================
      * 圆钮的底色 = **与技能栏同一套**状态配色（用户 2026-10-12："统一"）
@@ -315,11 +315,27 @@ export class TouchButtonLayer {
      * ⚠️ 形状不同（圆 vs 圆矩形）是**有意的**，但"什么状态配什么色"一致：
      * 可用最亮、读条中一档、买不起最暗。
      */
-    const look = slotLookOf(slot);
+    /**
+     * **按下 / 按住**（2026-10-22，用户："触屏也一样要有按下反馈"）：
+     * 与技能栏**同一个** `slotVisualOf`（优先级也同一条），
+     * 形状仍是圆 ⇒ 色相变化 + 按住时一圈呼吸描边。
+     */
+    const look = slotVisualOf(slot, {
+      pressed: slot?.pressed === true,
+      holding: slot?.holding === true,
+    });
     const radius = TOUCH_BUTTON_DIAMETER / 2;
     button.gfx.clear();
     button.gfx.circle(0, 0, radius).fill({ color: look.fill, alpha: 0.92 });
     button.gfx.circle(0, 0, radius).stroke({ color: look.line, width: 2 });
+    if (look.holding) {
+      /** 呼吸：与技能栏同一函数（`holdingPulse`），避免两处各写一套节奏 ✗ */
+      button.gfx.circle(0, 0, radius + 3).stroke({
+        color: 0xffffff,
+        width: 2,
+        alpha: holdingPulse(tick),
+      });
+    }
 
     if (slot === undefined) {
       /**

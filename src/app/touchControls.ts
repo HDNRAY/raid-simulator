@@ -390,6 +390,8 @@ export function createTouchControls(options: TouchControlsOptions): TouchControl
           layout.current().map((b) => b.skillId),
           options.staticSlot,
         ),
+        /** ⚠️ 传 tick：按住时的呼吸用**战斗 tick**（与技能栏同一个函数），不用墙钟。 */
+        view.tick,
       );
     },
 

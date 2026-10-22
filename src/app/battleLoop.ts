@@ -118,6 +118,14 @@ export class BattleLoop {
   private ownedInput = false;
   /** 最近一帧的渲染快照 */
   private view: BattleSnapshotView | undefined;
+  /**
+   * **每个技能最近一次"按下"发生在哪个战斗 tick**（2026-10-22，用户："按住
+   * 「弹」……按钮也没有按住的视觉反馈"）。
+   *
+   * ⚠️ 用 `Map` 而不是布尔：瞬发技的按下要亮**至少到下一次快照**，
+   * 所以记"哪一 tick 按的"，由 `pressStateOf()` 折算成"现在还亮不亮"。
+   */
+  private readonly pressTick = new Map<string, number>();
   private paused = false;
   private restartRequested = false;
   /** 键位表可变（按键设置会改它） */
@@ -131,6 +139,7 @@ export class BattleLoop {
       options.engineOptions.skills,
       options.translate,
       options.roguelike === true,
+      () => this.pressStateOf(),
     );
     /**
      * 日志格式化器。
@@ -204,6 +213,49 @@ export class BattleLoop {
    * ⚠️ 走 `ViewAdapter.slotViewOf`：与技能栏**同一段构造**，不另写一份
    * 静态近似（那会漂成"按钮亮着、按下去没反应"）。见那边的说明。
    */
+  /**
+   * **按下状态**（2026-10-22，用户："按住「弹」……按钮也没有按住的视觉反馈，
+   * 按了一下，和按住，都需要有"）。
+   *
+   * - `pressed`：这一 tick 或上一 tick 按下过（≈100~200ms 的灯，瞬发技也看得见）
+   * - `holding`：`InputSource.isHeld()` 为真 —— 按住型技能持续亮
+   *
+   * ⚠️ 判据只有输入层那一份（`isHeld`），渲染层不自己监听 DOM ✗。
+   * ⚠️ 键鼠与触屏**合并**：触屏的合成 key 是 `touch:{skillId}`（见 `touchInput`）。
+   */
+  pressStateOf(): { readonly pressed: ReadonlySet<string>; readonly holding: ReadonlySet<string> } {
+    const state = this.engine.snapshot;
+    const pressed = new Set<string>();
+    for (const [id, tick] of this.pressTick) {
+      if (state.tick - tick <= 1) pressed.add(id);
+    }
+    /** 太老的记录清掉（否则 Map 会一直长） */
+    for (const [id, tick] of this.pressTick) {
+      if (state.tick - tick > 2) this.pressTick.delete(id);
+    }
+    /**
+     * ⚠️ `holding` **只对按住型技能**有意义（「弹」这种 `holdDrain`）——
+     * 瞬发技的键被按住并不代表"正在持续施放" ✗，把它算进 holding 会让
+     * 「破」这类技能看着像"按住了"（错的语义）。所以这里过一道 `holdDrain`。
+     */
+    const isHoldType = (skillId: string): boolean => {
+      const skill = this.engine.skillOf(skillId);
+      return skill?.kind === 'activeSkill' && skill.holdDrain !== undefined;
+    };
+    const holding = new Set<string>();
+    for (const binding of this.bindings) {
+      if (isHoldType(binding.skillId) && this.input?.isHeld(binding.key) === true) {
+        holding.add(binding.skillId);
+      }
+    }
+    for (const binding of this.touchInput?.bindings() ?? []) {
+      if (isHoldType(binding.skillId) && this.touchInput?.isHeld(`touch:${binding.skillId}`) === true) {
+        holding.add(binding.skillId);
+      }
+    }
+    return { pressed, holding };
+  }
+
   slotViewOf(skillId: string, index: number): SkillSlotView | undefined {
     return this.adapter.slotViewOf(this.engine, skillId, index);
   }
@@ -420,6 +472,12 @@ export class BattleLoop {
      * 已经由 `drain()` 投递了，首 tick 不该再由它补。
      * 后续 tick 的按住连发完全不受影响。
      */
+    /** 这一 tick 的**按下**（`useSkill` / `hold` 都算：瞬发与按住型一样要点亮） */
+    for (const action of fromInput) {
+      if (action.type === 'useSkill' || action.type === 'hold') {
+        this.pressTick.set(action.skillId, state.tick);
+      }
+    }
     const requestedThisTick = new Set(
       fromInput
         .filter((a) => a.type === 'useSkill' || a.type === 'hold')

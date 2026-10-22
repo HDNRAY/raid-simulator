@@ -42,6 +42,7 @@ import type {
   FloatingTextView,
   ResultView,
   SkillSlotView,
+  SlotPressState,
 } from '../render/viewModel';
 
 /**
@@ -102,6 +103,12 @@ export class ViewAdapter {
      * "再来一次"）。**由开局时传一次**，不在渲染层猜 ✗。
      */
     private readonly roguelike = false,
+    /**
+     * **按下状态**（2026-10-22）：由输入层提供（键鼠 + 触屏），每帧取一次。
+     * 缺省 ⇒ 没有任何按下反馈（单测 / 无输入的场合）。
+     * ⚠️ 传**函数**而不是快照：按下是每 tick 变的。
+     */
+    private readonly pressState: (() => SlotPressState) | undefined = undefined,
   ) {
     for (const [id, skill] of skills) this.skillNameKeys.set(id, skill.nameKey);
   }
@@ -422,7 +429,7 @@ export class ViewAdapter {
      * 所以不会出现"技能栏说能用、按下去被拒"。
      */
     const { slots: derivedSlots } = deriveSlots(resolvedSlots, playerRaw.buffs, this.skills);
-    const skills = derivedSlots
+    const builtSkills = derivedSlots
       .map((slot) =>
         buildSlotView(
           this.skills,
@@ -435,6 +442,18 @@ export class ViewAdapter {
         ),
       )
       .filter((s): s is SkillSlotView => s !== undefined);
+    /**
+     * **按下 / 按住**（2026-10-22）：给每一格贴上"刚按下"与"正被按住"。
+     * 没有输入来源时原样返回（不产生新数组，避免无谓的 GC 抖动）。
+     */
+    const press = this.pressState?.();
+    const skills = press === undefined
+      ? builtSkills
+      : builtSkills.map((slot) => ({
+          ...slot,
+          pressed: press.pressed.has(slot.skillId),
+          holding: press.holding.has(slot.skillId),
+        }));
 
     const result =
       state.status === 'running' ? undefined : this.buildResult(engine, state.tick);

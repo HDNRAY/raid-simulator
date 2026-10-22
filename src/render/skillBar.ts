@@ -15,7 +15,7 @@ import type { ResourceKeyName, SkillSlotView } from './viewModel';
  * 状态 → 配色抽到了 `./slotLook`（**技能栏与触屏圆钮共用**，需求：
  * "触屏圆钮跟技能栏统一"）。这里只转发 `slotStateOf`，调用点不变。
  */
-import { SLOT_LOOKS, slotStateOf } from './slotLook';
+import { holdingPulse, slotVisualOf } from './slotLook';
 import type { FrameContext, FramePart, TranslateFn } from './sceneTypes';
 
 /**
@@ -280,10 +280,10 @@ export class SkillBarView implements FramePart {
    * 变成部件自己取。这一行就是"注册机制"与"场景逐个调用"的分界。
    */
   render(ctx: FrameContext): void {
-    this.draw(ctx.view.skills, ctx.showKeyHints);
+    this.draw(ctx.view.skills, ctx.showKeyHints, ctx.view.tick);
   }
 
-  private draw(skills: readonly SkillSlotView[], showKeyHints: boolean): void {
+  private draw(skills: readonly SkillSlotView[], showKeyHints: boolean, tick: number): void {
     this.ensure(skills.length, skills.filter((s) => s.derivedFrom !== undefined).length);
 
     for (let i = 0; i < this.slots.length; i += 1) {
@@ -310,7 +310,14 @@ export class SkillBarView implements FramePart {
         : derivedRect(s.rect, view.key, skills);
       const { x, y, w, h } = rect;
       const g = s.gfx;
-      const look = SLOT_LOOKS[slotStateOf(view)];
+      /**
+       * **按下 / 按住**（2026-10-22）：状态配色 + 按下反馈一起算（见
+       * `slotLook.slotVisualOf` 的优先级说明）。
+       */
+      const look = slotVisualOf(view, {
+        pressed: view.pressed === true,
+        holding: view.holding === true,
+      });
       const radius = this.cornerRadius();
       const lineW = this.lineWidth();
       /**
@@ -366,6 +373,20 @@ export class SkillBarView implements FramePart {
          */
         const barH = Math.max(1, Math.round(SLOT_COOLDOWN_BAR_H * view.cooldownRatio));
         g.roundRect(x, y + h - barH, w, barH, radius).fill({ color: 0xffffff, alpha: 0.55 });
+      }
+      /**
+       * **按住中**：底部一条高亮条 + 呼吸（`holdingPulse`）。
+       *
+       * ⚠️ 为什么用"底部条"而不是让整格闪：整格闪会和**冷却遮罩**（也是
+       * 从底部长出来的白色条）撞语义 —— 玩家会以为在冷却 ✗。焦点色 + 只在
+       * 按住时出现 ⇒ 与冷却条（白）和常态（石板）都能一眼分开 ✓。
+       */
+      if (look.holding) {
+        const barH = Math.max(2, Math.round(3 * this.uiScale));
+        g.roundRect(x, y + h - barH, w, barH, radius).fill({
+          color: PALETTE.focus,
+          alpha: holdingPulse(tick),
+        });
       }
       /**
        * 描边**最后画**（盖在冷却遮罩之上）：否则冷却时格子的下半边
