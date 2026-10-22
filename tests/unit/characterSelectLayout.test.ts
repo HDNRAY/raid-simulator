@@ -51,13 +51,20 @@ describe('三张"详情卡"：等宽、横排、底边对齐', () => {
     }
   });
 
-  it('**底边对齐在同一条线上**（展开向上长、收起向下缩）', () => {
+  it('⚠️ **每张卡各自垂直居中**（中心线不动 ⇒ 切换时整排不跳）', () => {
     for (const col of characterSelectColumns(3)) {
       for (const progress of [0, 0.3, 1]) {
         const rect = characterCardRect(col, progress);
-        expect(rect.y + rect.h).toBe(CHARACTER_CARD_LAYOUT.bottomY);
+        const center = rect.y + rect.h / 2;
+        expect(Math.abs(center - CHARACTER_CARD_LAYOUT.centerY)).toBeLessThanOrEqual(0.5);
       }
     }
+  });
+
+  it('收起的两张短条**同高对齐**（都居中 ⇒ 顶边/底边一致）', () => {
+    const rects = characterSelectColumns(3).map((col) => characterCardRect(col, 0));
+    const ys = new Set(rects.map((rect) => rect.y));
+    expect(ys.size).toBe(1);
   });
 });
 
@@ -99,9 +106,12 @@ describe('命中区：与动画无关、且包含收起态', () => {
     if (col === undefined) return;
     const hot = characterCardHotRect(col);
     expect(hot.h).toBe(CHARACTER_CARD_LAYOUT.fullH);
-    expect(hot.y + hot.h).toBe(CHARACTER_CARD_LAYOUT.bottomY);
-    /** 包含收起的短条（短条在底部）。 */
-    expect(hot.y).toBeLessThanOrEqual(CHARACTER_CARD_LAYOUT.bottomY - CHARACTER_CARD_LAYOUT.barH);
+    /** 命中区与"画出来的展开卡"逐字相同（不会错位）。 */
+    expect(hot).toEqual(characterCardRect(col, 1));
+    /** 包住收起态（短条居中 ⇒ 在它的范围内）。 */
+    const bar = characterCardRect(col, 0);
+    expect(hot.y).toBeLessThanOrEqual(bar.y);
+    expect(hot.y + hot.h).toBeGreaterThanOrEqual(bar.y + bar.h);
   });
 
   it('`characterSelectCardRects` 与命中区**同一份**（渲染/点选不会漂）', () => {

@@ -127,21 +127,21 @@ export const CHARACTER_CARD_LAYOUT = {
   fullH: PREPARE_LAYOUT.detailH,
   gap: 12,
   /**
-   * **三张共用的底边**（= 展开后那条带子的下沿）。
+   * **内容区的垂直中心线**（2026-10-22 用户："还是没有居中… 改成每张卡
+   * 各自垂直居中"）。
    *
-   * ⚠️ 2026-10-22 用户："整排卡片要垂直居中，别贴到底部" +
-   * "同一条基准线不动…切换时整排不要上下跳" ⇒ 以**展开高度**（371）为
-   * 基准在内容区里居中，短条（96）挂在这条带子的**底部**：
+   * ⚠️ 上一版是"底边固定、按展开高度算一条带子居中" ⇒ **短条全贴在带子
+   * 底部**，视觉上整排偏下 ✗。现在每张卡**各自**以这条线为中心：
    *
    * ```
-   *   内容区 = [TITLE_BOTTOM, HINT_TOP]，带子高 = fullH
-   *   bandTop = CONTENT_TOP + (CONTENT_H − fullH) / 2
-   *   bottomY = bandTop + fullH
+   *   y = centerY - h / 2      （h = 这一张当前的高度）
    * ```
-   * 于是"展开 / 收起"只改高度、不改底边 ⇒ 切换时整排不动 ✓
+   *
+   * 于是收起时短条在中间、展开时向**上下同时**长；中心线不动 ⇒ 切换时
+   * 整排不上下跳 ✓，两张短条也自然**同高对齐** ✓。
    */
-  get bottomY(): number {
-    return CONTENT_TOP + Math.round((CONTENT_H - PREPARE_LAYOUT.detailH) / 2) + PREPARE_LAYOUT.detailH;
+  get centerY(): number {
+    return CONTENT_TOP + Math.round(CONTENT_H / 2);
   },
 } as const;
 
@@ -189,7 +189,8 @@ export function characterCardRect(
 ): CharacterCardRect {
   const k = Math.min(1, Math.max(0, progress));
   const h = Math.round(L.barH + (L.fullH - L.barH) * k);
-  return { x: column.x, y: L.bottomY - h, w: L.w, h };
+  /** ⚠️ **每张卡各自垂直居中**（中心线不动 ⇒ 切换时整排不跳）。 */
+  return { x: column.x, y: L.centerY - Math.round(h / 2), w: L.w, h };
 }
 
 /**
@@ -198,12 +199,14 @@ export function characterCardRect(
  * ⚠️ 它**与动画无关**（动画矩形每帧在变，拿它当命中区会让指针忽进忽出 ✗），
  * 而且**包含**收起态 ✓ —— 指针停在收起那张卡的上方（那片"将来会长上来"的
  * 区域）也算选中它，于是"hover 哪张哪张长上来"从第一帧就成立 ✓。
+ * ⚠️ 展开矩形的垂直位置同样以 `centerY` 为中心（与 `characterCardRect`
+ * 的 progress=1 **逐字相同**），所以"命中区"与"画出来的展开卡"不会错位。
  */
 export function characterCardHotRect(
   column: CharacterCardColumn,
   L: typeof CHARACTER_CARD_LAYOUT = CHARACTER_CARD_LAYOUT,
 ): CharacterCardRect {
-  return { x: column.x, y: L.bottomY - L.fullH, w: L.w, h: L.fullH };
+  return { x: column.x, y: L.centerY - Math.round(L.fullH / 2), w: L.w, h: L.fullH };
 }
 
 /**

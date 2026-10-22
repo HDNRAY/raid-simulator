@@ -41,7 +41,7 @@
  *   - 指针划到某张卡上：选中它（hover 优先于光标）
  *   - 指针离开所有卡：选中回落到**光标**那一张
  *   - `Enter` / 点卡片：以选中的角色开局（点"已确定"的那张 = 一步开局，
- *     点别的 = 先选中它，见 `tapCharacterIntent`）
+ *     点卡片 = **只选中**（开局走「开始游戏」按钮，见 `hitTest`））
  *   - `Shift + ↑ ↓`：滚展开那张卡的详情正文（`app/loopWiring.ts` 已接好）
  *   - 滚轮 / 拖拽 / 触屏拖动：同上（`canvasInput` 的"可滚屏"那条流水）
  *
@@ -56,12 +56,6 @@ import { Label, type PixiCtor } from './primitives';
 import { ScreenChrome } from './ScreenChrome';
 import { PALETTE } from '../render/theme';
 import { isDeveloping, type RosterEntry } from '../data/roster';
-import { CARD_RADIUS } from './prepareRender';
-import { PORTRAIT_PIXELS } from '../render/portraitAssets';
-import { PortraitSprite } from '../render/portraitSprite';
-import { portraitFor } from '../render/portraitAssets';
-import { detailRect } from './prepareGeometry';
-import { drawViewportClip } from './viewportMask';
 import {
   easeInOutCubic,
   initialExpand,
@@ -69,11 +63,9 @@ import {
   stepExpand,
   type ExpandState,
 } from './expandTween';
-import { PrepareDetailController } from './prepareDetailController';
 import {
   CHARACTER_CARD_LAYOUT,
   canStartRun,
-  characterCardRect,
   characterCardHotRect,
   characterCursorTarget,
   characterHoverTarget,
@@ -84,9 +76,9 @@ import {
   confirmCharacter,
   cycleCharacter,
   pickCharacter,
-  tapCharacterIntent,
-  type CharacterCardColumn,
 } from './characterSelectLogic';
+import { buildCardViews, paintCard, type CardView } from './selectCards';
+import { keyLabel } from './settings/keyNames';
 import type { DetailContext } from './prepareDetail';
 import type { PrepareSelection, PrepareTarget } from './prepareLogic';
 import type { TranslateFn } from '../i18n/translator';
@@ -119,45 +111,25 @@ export interface CharacterSelectScreenOptions {
   readonly onStart: (playerId: string) => void;
 }
 
-/** 键名提示（键名不进 i18n，见 AGENTS §3b）。 */
-const SELECT_KEY_HINT = '← → · Enter';
-
-/**
- * 一张卡的**视图部件**（每张卡一套；没有"共享的详情面板"）。
- *
- * ⚠️ 为什么中间多一层 `detailHolder`：`PrepareDetailController` 按**备战的
- * 绝对坐标**（`detailRect()` = x624,y88）画内容，而卡片容器的局部原点在
- * 卡片左上角。这一层只做**坐标平移**（每帧按当前高度算，见 `redraw`），
- * 于是详情渲染仍然只有一份实现，三张卡只是把它摆到三个位置。
- */
-interface CardView {
-  readonly id: string;
-  readonly column: CharacterCardColumn;
-  /** 卡片容器（局部原点 = 卡片左上角）。 */
-  readonly holder: Container;
-  /** 卡片底色 + 边框。 */
-  readonly skin: Graphics;
-  /** 收起时那个短条上的名字。 */
-  readonly name: Label;
-  /** 收起时短条上的**小头像**（与详情面板同一个 `PortraitSprite`）。 */
-  readonly portrait: PortraitSprite | undefined;
-  /** 详情内容的平移层。 */
-  readonly detailHolder: Container;
-  readonly panel: PrepareDetailController;
-  /** 详情内容的遮罩（每帧重画成"这张卡现在的矩形"）。 */
-  readonly mask: Graphics;
-  /** 这张卡自己的展开进度。 */
-  state: ExpandState;
-}
-
 export class CharacterSelectScreen {
   readonly root: Container;
 
   private readonly bg: Graphics;
   private readonly title: Label;
-  private readonly hint: Label;
+  /**
+   * **「开始游戏」按钮**（2026-10-22 用户："移动端怎么办…在卡片上或者哪里加个
+   * 开始游戏的按钮吧"）。
+   *
+   * ⚠️ 触屏没有 `Enter`，所以它**不是**给键盘用的补充，而是那条路的**唯一**
+   * 入口：点卡片 = 只选中（看详情），点这个按钮 = 开局 ✓（与 `Enter` 同一个
+   * 动作：`confirm()`）。
+   */
+  private readonly startGfx: Graphics;
+  private readonly startLabel: Label;
+  /** 按钮矩形（渲染与命中共用——两处各算一遍必然错位）。 */
+  private readonly startRect: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   /** 三张卡的视图（顺序 = `players` 顺序）。 */
-  private readonly cards: readonly CardView[];
+  private readonly cards: readonly (CardView & { state: ExpandState })[];
   /**
    * **本屏自己的边角控件**：右上角齿轮 + 左上角返回箭头。
    *
@@ -219,87 +191,47 @@ export class CharacterSelectScreen {
     });
     this.root.addChild(this.title.root);
 
-    /** 底部提示：**落在卡片区下方**（卡片底边 = 详情区下缘，提示要更下）。 */
-    this.hint = new Label(pixi, {
-      x: LOGICAL.width / 2,
-      y: CHARACTER_CARD_LAYOUT.bottomY + 40,
-      size: FONT.small,
-      color: PALETTE.textDim,
-      anchorX: 0.5,
-      anchorY: 0.5,
-    });
-    this.root.addChild(this.hint.root);
 
     /**
-     * **三张详情卡**（每张一套部件 + 一个详情驱动器）。
-     *
-     * ⚠️ 遮罩挂在 `detailHolder` 上：**只裁详情内容**，不裁卡片底色与
-     * 短条名字（它们本来就在卡片矩形内）。
+     * **三张详情卡**：部件装配整块在 `./selectCards`（`buildCardViews`）——
+     * 这一屏只负责"谁被选中 / 每张的进度"，卡长什么样在那边。
      */
     const context = options.detailContext({ on: () => false });
     const columns = characterSelectColumns(this.players.length);
-    this.cards = this.players.map((player, index) => {
-      const column = columns[index] ?? { x: 0, w: CHARACTER_CARD_LAYOUT.w };
-      const holder = new pixi.Container();
-      holder.x = column.x;
-      this.root.addChild(holder);
+    this.cards = buildCardViews({
+      pixi,
+      parent: this.root,
+      translate: options.translate,
+      context,
+      players: this.players.map((player) => ({ id: player.id, nameKey: player.nameKey })),
+      columns,
+    }).map((card) => ({ ...card, state: initialExpand() }));
 
-      const skin = new pixi.Graphics();
-      holder.addChild(skin);
-
-      /**
-       * **收起态的小头像**（2026-10-22 用户："收起时也要显示头像"）。
-       * ⚠️ 复用详情面板那颗 `PortraitSprite`（**唯一**的头像渲染），
-       * 只是 box 小一些 —— 不另找一份素材表/自己画图片。
-       */
-      const asset = portraitFor(player.id);
-      const portrait = asset === undefined
-        ? undefined
-        : new PortraitSprite(pixi, holder, asset, Math.round(PORTRAIT_PIXELS * 0.6));
-
-      const name = new Label(pixi, {
-        x: 0,
-        y: 0,
-        size: FONT.title,
-        color: PALETTE.text,
-        anchorX: 0,
-        anchorY: 0.5,
-        kai: true,
-      });
-      holder.addChild(name.root);
-
-      const detailHolder = new pixi.Container();
-      holder.addChild(detailHolder);
-      const panel = new PrepareDetailController({
-        pixi,
-        translate: options.translate,
-        context,
-        parent: detailHolder,
-      });
-      const mask = new pixi.Graphics();
-      /**
-       * ⚠️ 遮罩**住在卡片容器里**、而不是 `detailHolder` 自己身上：
-       * `detailHolder` 被平移了 (-624, -88) 去对齐详情内容，把遮罩挂进去
-       * 等于让它跟着平移 ⇒ 遮罩落到画布外、把内容整块裁掉（实测：展开后
-       * 一片空白 ✗）。遮罩矩形是**卡片局部坐标**（0,0,w,h），所以它的
-       * 父节点必须是"卡片容器"。
-       */
-      holder.addChild(mask);
-      detailHolder.mask = mask;
-
-      return {
-        id: player.id,
-        column,
-        holder,
-        skin,
-        name,
-        portrait,
-        detailHolder,
-        panel,
-        mask,
-        state: initialExpand(),
-      };
+    /**
+     * 「开始游戏」：**卡片区下方、水平居中**（不挡卡片）。
+     *
+     * ⚠️ 文案走 i18n，**不拼键位**（触屏没有键名提示，用户在触屏上看到
+     * "(Enter)" 只会困惑）。
+     */
+    const startW = 160;
+    const startH = 40;
+    this.startRect = {
+      x: Math.round((LOGICAL.width - startW) / 2),
+      y: CHARACTER_CARD_LAYOUT.centerY + Math.round(CHARACTER_CARD_LAYOUT.fullH / 2) + 8,
+      w: startW,
+      h: startH,
+    };
+    this.startGfx = new pixi.Graphics();
+    this.startLabel = new Label(pixi, {
+      x: this.startRect.x + startW / 2,
+      y: this.startRect.y + startH / 2,
+      size: FONT.body,
+      color: PALETTE.text,
+      anchorX: 0.5,
+      anchorY: 0.5,
+      kai: true,
     });
+    this.root.addChild(this.startGfx, this.startLabel.root);
 
     /** 齿轮 + 返回箭头（最后加 = 最上层）。 */
     this.chrome = new ScreenChrome({
@@ -493,10 +425,24 @@ export class CharacterSelectScreen {
   hitTest(px: number, py: number): boolean {
     /** ⚠️ 齿轮 / 返回箭头先于卡片（顺序即优先级）。 */
     if (this.chrome.hitTest(px, py)) return true;
+
+    /**
+     * **「开始游戏」按钮**（2026-10-22）：与 `Enter` **同一个**动作。
+     * 禁用态（没选中 / 选中的是开发中角色）点了什么也不做，但仍**消费**
+     * 这次点击 —— 否则它会穿透到下面的卡片上（点"开始"却换了人 ✗）。
+     */
+    if (
+      px >= this.startRect.x && px <= this.startRect.x + this.startRect.w
+      && py >= this.startRect.y && py <= this.startRect.y + this.startRect.h
+    ) {
+      this.confirm();
+      return true;
+    }
+
+    /** 点卡片 = **只选中**（看详情），开局交给按钮 / `Enter`。 */
     const hit = characterHoverTarget(this.players, px, py);
     if (hit === undefined) return false;
-    if (tapCharacterIntent(this.selection, hit.id) === 'start') this.pick(hit.id);
-    else this.select(hit.id);
+    this.select(hit.id);
     return true;
   }
 
@@ -581,90 +527,46 @@ export class CharacterSelectScreen {
     const focusIndex = this.focusIndex();
 
     this.title.set(t('screen.characterSelect.title'));
+
     /**
-     * 提示 = 标签 + （键名）；**选中开发中的角色时换成"开发中"**
-     * （需求："不能开始战斗……或给明确反馈"）。
+     * 「开始游戏」：**只有选中了角色才可点**（用户："没选中 ⇒ 灰/禁用"）。
+     * "选中" = `focusId()` 有值（指针停在某张卡上，或键盘接管后指着某个角色）。
      */
-    const label = developing ? t('roster.ui.developingHint') : t('screen.characterSelect.hint');
-    const keys = !developing && this.options.showKeyHints()
-      ? t('screen.keyHint', { keys: SELECT_KEY_HINT })
-      : '';
-    this.hint.set(`${label}${keys}`);
+    const canStart = this.focusId() !== undefined && canStartRun(this.selection, isDeveloping);
+    this.startGfx.clear();
+    this.startGfx
+      .roundRect(this.startRect.x, this.startRect.y, this.startRect.w, this.startRect.h, 8)
+      .fill({ color: canStart ? PALETTE.douqi.base : PALETTE.panelLine, alpha: canStart ? 0.85 : 0.35 });
+    this.startGfx
+      .roundRect(this.startRect.x, this.startRect.y, this.startRect.w, this.startRect.h, 8)
+      .stroke({ color: canStart ? PALETTE.text : PALETTE.textFaint, width: canStart ? 2 : 1 });
+    /**
+     * 按钮文案（2026-10-22 用户："为什么不拼？这个页面就不需要底部的交互
+     * 信息了"）：**「开始游戏 (Enter)」** —— 键名从 `keyLabel` 反查
+     * （键名不进 i18n，AGENTS §3b）；i18n 里只放「开始游戏」。
+     * ⚠️ 选中"开发中"的角色时改写成那条反馈（底部提示行已删，反馈得有家）。
+     */
+    this.startLabel.set(
+      developing
+        ? t('roster.ui.developingHint')
+        : `${t('screen.characterSelect.start')} (${keyLabel('Enter', '')})`,
+    );
+    this.startLabel.setColor(canStart ? PALETTE.text : PALETTE.textFaint);
 
     /** 每张卡各自的目标：选中那张 1、其余 0 ⇒ 换选中时两张同时跑。 */
     for (const [index, card] of this.cards.entries()) {
       card.state = retarget(card.state, index === focusIndex ? 1 : 0);
     }
 
-    const detail = detailRect();
+    /** 每张卡交给 `./selectCards` 画（几何/底色/短条/详情/遮罩都在那边）。 */
     for (const [index, card] of this.cards.entries()) {
-      const eased = easeInOutCubic(this.progressOf(index));
-      const rect = characterCardRect(card.column, eased);
-
-      /** 卡片容器：x 固定（列），y 由"底边固定、向上长"给出。 */
-      card.holder.x = card.column.x;
-      card.holder.y = rect.y;
-
-      /**
-       * 底色 + 边框。
-       * ⚠️ **金边只属于"展开"那张**（用户 2026-10-22："黄/金边框只出现在
-       * 展开那张卡上"）：按 `eased` 插值透明度，收起态必须是 0。
-       */
-      const focused = index === focusIndex;
-      card.skin.clear();
-      card.skin
-        .roundRect(0, 0, rect.w, rect.h, CARD_RADIUS)
-        .fill({
-          color: focused ? PALETTE.panel : PALETTE.panelLine,
-          alpha: focused ? 0.55 : 0.35,
-        });
-      if (eased > 0.02) {
-        card.skin
-          .roundRect(0, 0, rect.w, rect.h, CARD_RADIUS)
-          .stroke({ color: PALETTE.douqi.base, width: 2, alpha: eased });
-      } else {
-        /** 收起的两张：中性细边（不是金色，也不是"光标框"）。 */
-        card.skin
-          .roundRect(0, 0, rect.w, rect.h, CARD_RADIUS)
-          .stroke({ color: PALETTE.panelLine, width: 1 });
-      }
-
-      /**
-       * 短条上的名字：展开时淡出（详情自带标题，不能叠字）。
-       * y 放在**卡片底部那条短条的中心**（底边固定 ⇒ 它不跟着长高跑）。
-       */
-      const barCenterY = rect.h - CHARACTER_CARD_LAYOUT.barH / 2;
-      /** 短条排版：头像在左（12 起）、名字在它右边（12 + 头像 48 + 12）。 */
-      const portraitBox = card.portrait === undefined ? 0 : Math.round(PORTRAIT_PIXELS * 0.6);
-      const barLeft = 14;
-      if (card.portrait !== undefined) {
-        card.portrait.root.x = barLeft + portraitBox / 2;
-        card.portrait.root.y = barCenterY;
-        card.portrait.root.alpha = 1 - eased;
-        card.portrait.root.visible = eased < 0.98;
-      }
-      card.name.root.x = barLeft + (portraitBox === 0 ? 0 : portraitBox + 14);
-      card.name.root.y = barCenterY;
-      card.name.root.alpha = 1 - eased;
-      card.name.root.visible = eased < 0.98;
-      const player = this.players[index];
-      if (player !== undefined) card.name.set(t(player.nameKey));
-
-      /**
-       * 详情内容：底部对齐到卡片底边（`h - fullH`），再减掉它自己的绝对
-       * 原点 `detailRect()` ⇒ 内容在卡片局部坐标里正好铺满整张卡。
-       */
-      card.detailHolder.x = -detail.x;
-      card.detailHolder.y = rect.h - detail.h - detail.y;
-      card.detailHolder.alpha = eased;
-
-      /** 遮罩 = 这张卡**现在**的矩形（局部坐标；每帧重画）。 */
-      drawViewportClip(card.mask, { x: 0, y: 0, w: rect.w, h: rect.h });
-
-      /** 每张卡固定显示**自己**那个人（不跟 hover / 光标）。 */
-      if (player !== undefined) {
-        card.panel.update({ kind: 'player', id: player.id });
-      }
+      paintCard({
+        card,
+        progress: easeInOutCubic(this.progressOf(index)),
+        focused: index === focusIndex,
+        nameKey: this.players[index]?.nameKey ?? 'roster.ui.developing',
+        translate: t,
+      });
     }
   }
 }
