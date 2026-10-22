@@ -230,16 +230,36 @@ export class LogFormatter {
          * 属性对调着读才通顺（"傲慢 受到 12 点反伤"）。
          */
         if (event.reflect === true) {
+          /**
+           * ⚠️ 2026-10-22 用户实测："**8 点反伤，未知来源**"。
+           *
+           * 反伤走 `skillId: ''`（不是技能打的）⇒ 按招式表查不到 ⇒ 落到
+           * `log.unknownSource` ✗。玩家要看的是"**被什么弹的**"：「缚」的
+           * 荆棘还是「污堕印记」。
+           *
+           * 所以：`reflectBuffId` 有值 ⇒ 用 buff 的名字（`（荆棘）`）；
+           * 没有 ⇒ 用**不提来源**的那句（`受到 8 点反伤`），**绝不**说"未知来源" ✗。
+           */
+          const source = event.reflectBuffId;
+          if (source !== undefined) {
+            return {
+              tick,
+              category: 'take',
+              level: 'major',
+              key: 'log.reflect',
+              params: {
+                actor: this.actorKey(event.sourceId),
+                skill: this.buffKey(source),
+                amount: event.amount,
+              },
+            };
+          }
           return {
             tick,
             category: 'take',
             level: 'major',
-            key: 'log.reflect',
-            params: {
-              actor: this.actorKey(event.sourceId),
-              skill: this.skillKey(event.skillId),
-              amount: event.amount,
-            },
+            key: 'log.reflectShort',
+            params: { actor: this.actorKey(event.sourceId), amount: event.amount },
           };
         }
         const onBoss = event.targetId !== 'player';

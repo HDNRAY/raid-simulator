@@ -31,6 +31,7 @@
 import { type EvalContext } from '../expr/eval';
 import { aggregateFlags, applyBuff } from '../buffs';
 import { resolveCombatantIn } from './battleStateTypes';
+import { reflectBuffIdOf, withReflectBuffId } from './avoidedSource';
 import { applyDamage, changeResource, evaluateCondition, type CombatContext } from './index';
 import type { HitResolutionContext } from './hitResolution';
 import type {
@@ -267,6 +268,11 @@ export function applyThornReflect(args: {
   const reflected = Math.round(taken * fraction);
   if (reflected <= 0) return;
 
+  /**
+   * ⚠️ **先算"是谁弹的"再结算**：这一击的效果可能改动 buff 列表，
+   * 事后回读会指向别的 buff（与 `absorbedByOf` 同一条纪律）。
+   */
+  const reflectBuffId = reflectBuffIdOf(victim);
   const applied = applyDamage(
     ctx.current(attacker.id),
     { amount: reflected, absorbed: 0, thinned: 0, crit: false, avoided: false },
@@ -276,7 +282,7 @@ export function applyThornReflect(args: {
     true,
   );
   ctx.replaceCombatant(applied.combatant);
-  pushEvents(ctx.events, applied.events);
+  pushEvents(ctx.events, withReflectBuffId(applied.events, reflectBuffId));
 }
 
 /* ================================================================== *

@@ -66,7 +66,12 @@ describe('日志的分量与新增事件', () => {
       { kind: 'damage', tick: 1, sourceId: 'player', targetId: 'meiichiro', amount: 12, skillId: 'attack', crit: false, absorbed: 0, thinned: 0, overkill: 0, reflect: true },
     ]);
     const [e] = f.all();
-    expect(e!.key).toBe('log.reflect');
+    /**
+     * ⚠️ 2026-10-22：**没有来源 buff** 的反伤走 `log.reflectShort`
+     * （"受到 N 点反伤"，不提来源）—— 原先这里写的是 `log.reflect`，
+     * 而那会把 `skillId: ''` 查成「未知来源」✗（用户实测报的就是那条）。
+     */
+    expect(e!.key).toBe('log.reflectShort');
     expect(e!.params?.actor).toBeDefined();
     expect(e!.params?.amount).toBe(12);
     /** ⚠️ 反伤没有 `{target}` —— 挨打的就是出招的人。 */

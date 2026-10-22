@@ -189,6 +189,7 @@ describe('emptyProbe：备战阶段（还没有战斗）', () => {
       playerHp: -1,
       playerHpCap: -1,
       playerDouqi: -1,
+      playerEnergy: -1,
       playerCooldowns: {},
       playerCasts: -1,
       bossHp: -1,

@@ -494,7 +494,8 @@ export class BattleEngine {
     this.beginWork();
 
     // 1. 动作生效
-    this.applyActions(actions, actorId ?? 'player');
+    /** ⚠️ 不写死 `'player'`（角色 id 就是 id）—— 见 `defaultActorIdOf` 的说明。 */
+    this.applyActions(actions, actorId);
     runAi(this.aiContext());
 
     // 2. 读条推进

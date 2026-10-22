@@ -94,6 +94,20 @@ export function clampStart(combatant: Combatant): Combatant['resources'] {
  * 从 `battleState.ts` 搬出来：它是**纯函数**（只看 `combatants`），
  * 而那个文件顶在 700 行上限上 —— 移出纯逻辑而不是压注释。
  */
+/**
+ * 这一批动作的**默认执行者**：活着的那一个我方单位。
+ *
+ * ⚠️ **不要在调用处写死 `'player'`**（2026-10-22 实测的真 bug）：
+ * 出战单位的 id 就是**角色 id**（`makePlayer('daixuan')` ⇒ `'daixuan'`），
+ * 所以写死 `'player'` 时，黛玄 / 凯丽的每一个动作都落在一个**不存在的 id** 上：
+ * `current()` 会退化到"第一个战斗者的临时可变副本"（不进 `work`），
+ * 于是**写着成功、实际被丢弃**。
+ *
+ * 症状是"按住「弹」炁一点不掉"：`activeHold` 写在那个临时副本上，
+ * 下一次 tick 就没了 ⇒ `tickHolds` 永远没有可扣的东西。
+ * `tick()` 原来就是 `actorId ?? 'player'`，现在改成把 `undefined` 直接
+ * 交给 `applyActions`（由本函数按阵营推断）。
+ */
 export function defaultActorIdOf(combatants: readonly Combatant[]): string {
   const ally = combatants.find((c) => c.side === 'ally' && c.alive);
   return (ally ?? combatants[0])?.id ?? 'player';

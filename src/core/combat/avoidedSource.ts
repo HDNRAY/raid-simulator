@@ -152,3 +152,51 @@ export function withAbsorbedByBuffId(
     return event;
   });
 }
+
+/* ================================================================== *
+ * 反伤"是谁弹的"（2026-10-22：日志里那条"8 点反伤 · 未知来源"）
+ * ================================================================== */
+
+/**
+ * **是哪个 buff 把这一击反弹回来的**。
+ *
+ * 判据必须与 `aggregateFlags` 同源：那里对 `reflectFraction` 取**最大值**
+ * （多个来源取最强），所以"是谁弹的"也取最大 —— 否则日志会指向一条
+ * 更弱的荆棘，而实际数值来自另一条。
+ *
+ * 找不到（这一击不是反伤）就返回 `undefined` ⇒ 事件里那个键不写。
+ */
+export function reflectBuffIdOf(target: Combatant): string | undefined {
+  let best: BuffInstance | undefined;
+  let bestFraction = 0;
+  for (const buff of target.buffs) {
+    const fraction = buff.def?.flags?.reflectFraction;
+    if (fraction === undefined || !(fraction > 0)) continue;
+    if (fraction > bestFraction) {
+      best = buff;
+      bestFraction = fraction;
+    }
+  }
+  return best?.defId;
+}
+
+/**
+ * 给**反伤**那几条 `damage` 事件补上"是谁弹的"。
+ *
+ * ⚠️ 与 `withAbsorbedByBuffId` 同一条纪律：只碰 `reflect === true` 的事件，
+ * 其它原样返回（返回新数组，不改入参）。
+ *
+ * ⚠️ `reflectBuffId` 缺省时**不写这个键**：`''` 会与"id 恰好是空串"混淆
+ * （与 `interruptSuccess.sourceSkillId` 同一条约定）。
+ */
+export function withReflectBuffId(
+  events: readonly EventDef[],
+  reflectBuffId: string | undefined,
+): readonly EventDef[] {
+  if (reflectBuffId === undefined) return events;
+  return events.map((event) =>
+    event.kind === 'damage' && event.reflect === true
+      ? { ...event, reflectBuffId }
+      : event,
+  );
+}

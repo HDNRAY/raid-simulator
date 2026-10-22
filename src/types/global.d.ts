@@ -13,6 +13,20 @@
  */
 import type { SettingsTab } from '../ui/settings/logic';
 
+/**
+ * 圣光弹播放器的读数（调试用；实现在 `render/spellBurst.ts` 的 `debug()`）。
+ */
+export interface SpellDebugSnapshot {
+  readonly ready: boolean;
+  readonly frames: number;
+  readonly textures: number;
+  readonly groups: readonly number[];
+  readonly lastError: string | undefined;
+  readonly playing: number | undefined;
+  readonly hasSprite: boolean;
+  readonly seq: number;
+}
+
 declare global {
   interface Window {
     /** 战斗探针：验证"战斗真的在推进" */
@@ -65,6 +79,12 @@ declare global {
       touchButtonCenter(skillId: string): { readonly x: number; readonly y: number } | null;
       /** Pixi 根容器（调试用：读取渲染层实际写入的文本） */
       stage: unknown;
+      /**
+       * **圣光弹的调试读数**（2026-10-22）：`ready` 为假时 `lastError` 指出
+       * 卡在哪一帧；`groups` 是切出来的帧组起点；`hasSprite` 说明精灵有没有
+       * 被造出来。截图分不清"没画"与"画了看不见"，这一个读数能分辨。
+       */
+      spell(): SpellDebugSnapshot | null;
       /** 设置界面（调试用：headless 下模拟点击不可靠） */
       settings: {
         open(tab?: SettingsTab): void;
@@ -156,6 +176,8 @@ declare global {
         playerHp: number;
         playerHpCap: number;
         playerDouqi: number;
+        /** 玩家当前炁（按住型技能的代价，2026-10-22 补的观测口）。 */
+        playerEnergy: number;
         playerCooldowns: Record<string, number>;
         playerCasts: number;
         bossHp: number;

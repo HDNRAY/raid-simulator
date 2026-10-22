@@ -136,7 +136,13 @@ export interface HitResolutionContext {
    * ⚠️ 它会**再派发一次** `onHitTaken`（设计决定：反伤算受击、要进日志与
    * 飘字）。终止靠"内容不构成环" + `triggers.ts` 的 `DEPTH_LIMIT`。
    */
-  dealDamageFromTrigger(actorId: string, targetId: string, hit: HitDef): void;
+  /** `sourceBuffId` = 发这条触发器的 buff（日志要说清"是谁弹的"）。 */
+  dealDamageFromTrigger(
+    actorId: string,
+    targetId: string,
+    hit: HitDef,
+    sourceBuffId?: string,
+  ): void;
 }
 
 /**

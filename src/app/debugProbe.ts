@@ -74,6 +74,14 @@ export interface ProbeSnapshot {
   readonly playerHpCap: number;
   /** 玩家当前缠（**活**：每个 tick 都可能变）。 */
   readonly playerDouqi: number;
+  /**
+   * 玩家当前**炁**（**活**）。
+   *
+   * ⚠️ 2026-10-22 补：排查"按住「弹」炁不掉"时发现探针里**没有炁** ✗ ——
+   * 只能看血 / 缠，于是"扣没扣"只能靠猜。按住型技能的代价正是炁，
+   * 这条读数是它唯一的观测口。
+   */
+  readonly playerEnergy: number;
   /** 玩家**剩余冷却 tick 数**（`0` = 已可用；**活**，随 tick 递减）。见 `remainingCooldowns`。 */
   readonly playerCooldowns: Readonly<Record<string, number>>;
   /** 玩家当前**正在读的条数**（**活**；`0` = 没在读条）。 */
@@ -164,6 +172,7 @@ export function buildProbe(
     playerHp: player?.resources.hp ?? -1,
     playerHpCap: player?.caps.hp ?? -1,
     playerDouqi: player?.resources.douqi ?? -1,
+    playerEnergy: player?.resources.energy ?? -1,
     playerCooldowns: remainingCooldowns(player?.cooldowns ?? {}, state.tick),
     playerCasts: player?.casts.length ?? -1,
     bossHp: boss?.resources.hp ?? -1,
@@ -215,6 +224,7 @@ export function emptyProbe(frameCount: number, runtimeErrors: readonly string[])
     playerHp: -1,
     playerHpCap: -1,
     playerDouqi: -1,
+    playerEnergy: -1,
     playerCooldowns: {},
     playerCasts: -1,
     bossHp: -1,

@@ -1334,6 +1334,13 @@ export const zhCN = {
     damage: '{actor}用「{skill}」击中{target}，造成 {amount} 点伤害',
     /**反伤：属性对调着读（打出去的人自己挨了），所以没有 `{target}`。 */
     reflect: '{actor}受到 {amount} 点反伤（{skill}）',
+    /**
+     * 反伤但**说不出来源**时的兜底（2026-10-22）。
+     *
+     * ⚠️ 不许退回 `unknownSource`（"未知来源"）✗ —— 那是一句"我不知道"，
+     * 而玩家需要的是"这一下是被弹回来的"。来源查得到时用上面那条（带名字）。
+     */
+    reflectShort: '{actor}受到 {amount} 点反伤',
     avoided: '{actor}闪开了{source}的「{skill}」',
     immune: '{actor}对「{skill}」免疫',
     castInterrupted: '{actor}的「{skill}」被打断（{reason}）',

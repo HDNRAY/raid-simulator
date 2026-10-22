@@ -216,7 +216,7 @@ export function runTriggers(
         );
       }
 
-      runAbilities(ctx, ownerId, trigger.then, { ...payload, depth: depth + 1 });
+      runAbilities(ctx, ownerId, trigger.then, { ...payload, depth: depth + 1 }, def?.id);
       fired += 1;
     }
   }
@@ -285,6 +285,14 @@ export function runAbilities(
   ownerId: string,
   abilities: readonly Ability[],
   payload: TriggerPayload,
+  /**
+   * 发这批能力的 **buff**（只有"触发器产出的反伤"需要它）。
+   *
+   * 日志要回答"**是被什么弹的**"：反伤沿用的是 `skillId: ''`（不是技能打的），
+   * 只按 skillId 查名字会得到「未知来源」✗。这个 id 会写进
+   * `damage.reflectBuffId`（观测字段，不参与判定）。
+   */
+  sourceBuffId?: string,
 ): void {
   for (const ability of abilities) {
     /**
@@ -350,7 +358,7 @@ export function runAbilities(
 
       case 'deal': {
         const who = whoOf(ctx, ownerId, ability.target, payload);
-        if (who !== undefined) ctx.dealDamageFromTrigger(ownerId, who, ability.hit);
+        if (who !== undefined) ctx.dealDamageFromTrigger(ownerId, who, ability.hit, sourceBuffId);
         break;
       }
 
