@@ -336,3 +336,39 @@ describe('`onTick` + `cooldownRangeMs`：按时间来的触发器（「弱点」
     expect(gap).toBeLessThanOrEqual(3 * 60 + 2);
   });
 });
+
+/* ==================================================================
+ * 加算语义（2026-10-22：`damageMultBoost` 删掉，只留 `damageBoost`）
+ * ================================================================== */
+describe('增伤只有一种表示：`damageBoost`（加算）', () => {
+  /**
+   * ⚠️ 这条是"统一成加算"的**语义证据**：+100% 与 +50% 叠起来是 **+150%**
+   * （`damageBoost` = 150），而不是乘算的 ×3。旧字段 `damageMultBoost`
+   * 实现的是后者 —— 两种语义并存正是"文案与数值对不上"的温床。
+   */
+  it('+100% 与 +50% 叠加 = +150%（加算，不是 ×3）', () => {
+    const boostA: BuffDef = {
+      id: 'test-boost-a',
+      nameKey: 'buff.heishanWindow.name',
+      icon: 'char_attack',
+      polarity: 'buff',
+      duration: 999,
+      maxStacks: 1,
+      stacking: { mode: 'refresh' },
+      modifiers: [
+        { stat: 'damageBoost', op: 'addPercent', value: 100, sourceKey: 'buff.heishanWindow.name' },
+      ],
+    };
+    const boostB: BuffDef = {
+      ...boostA,
+      id: 'test-boost-b',
+      modifiers: [
+        { stat: 'damageBoost', op: 'addPercent', value: 50, sourceKey: 'buff.heishanWindow.name' },
+      ],
+    };
+    let boss = withBuff({}, boostA, 1);
+    boss = withBuff(boss, boostB, 1);
+    const e = engineWith({ player: {}, boss, skills: [] });
+    expect(statsOf(e, 'boss').damageBoost).toBeCloseTo(150, 6);
+  });
+});
