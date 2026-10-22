@@ -53,12 +53,19 @@ export interface CanvasHost {
   readonly codex: {
     frame(): void;
     back(): void;
+    /**
+     * **Shift + ↑ ↓ = 滚正文**（2026-10-22 用户："图鉴那里也是，或者说所有
+     * 激活的滚动都应该有这个统一的交互"）—— 与备战 / 确认屏同一个约定。
+     */
+    scrollDetail(dir: 'up' | 'down'): void;
   };
   /** 选角色屏（肉鸽模式的第一屏）。 */
   readonly select: {
     frame(): void;
     cycle(delta: number): void;
     confirm(): void;
+    /** **Shift + ↑ ↓ = 滚人物详情**（与其它可滚屏统一，2026-10-22）。 */
+    scrollDetail(dir: 'up' | 'down'): void;
   };
   /** 自由模式（原备战界面；`frame()` / 键盘分发用）。 */
   readonly prepare: {
@@ -502,6 +509,14 @@ export function wireLoop(o: WireOptions): void {
       if (layer === 'codex') {
         if (event.key === 'Enter' || event.key === ' ' || event.key === 'Backspace') {
           host.codex.back();
+          return;
+        }
+        /**
+         * **Shift + ↑ ↓ = 滚图鉴的卡片区**（2026-10-22：与备战 / 确认屏的
+         * "Shift+↑↓ 滚正文"同一套约定 —— 用户要求"所有激活的滚动统一交互"）。
+         */
+        if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && event.shiftKey) {
+          host.codex.scrollDetail(event.key === 'ArrowUp' ? 'up' : 'down');
         }
         return;
       }
@@ -544,6 +559,15 @@ export function wireLoop(o: WireOptions): void {
         }
       }
       if (layer === 'characterSelect') {
+        /**
+         * **Shift + ↑ ↓ = 滚人物详情**（2026-10-22，用户："人物详情可以滚动，
+         * 而且要需要支持键盘 之前我们好像是 shift+上下"）—— 与备战 / 确认屏 /
+         * 图鉴**同一个**约定。
+         */
+        if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && event.shiftKey) {
+          host.select.scrollDetail(event.key === 'ArrowUp' ? 'up' : 'down');
+          return;
+        }
         switch (event.key) {
           case 'ArrowLeft':
             host.select.cycle(-1);

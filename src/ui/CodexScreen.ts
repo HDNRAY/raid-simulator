@@ -255,6 +255,17 @@ export class CodexScreen {
     return true;
   }
 
+  /**
+   * **Shift + ↑ ↓ 的键盘滚动**（2026-10-22）：与备战 / 确认屏 / 选人屏**同一个**
+   * 约定 —— 一步 = 一行卡片的高度（比滚轮的一格大，键盘按起来才不磨人）。
+   * ⚠️ 它只是 `scrollBy` 的一层按键包装：范围、夹取、遮罩全在那一处，
+   * 键盘不是第二条滚动实现。
+   */
+  scrollDetail(dir: 'up' | 'down'): void {
+    const step = 120;
+    this.scrollBy(dir === 'up' ? -step : step);
+  }
+
   /** 这个点是不是落在卡片视口里（拖拽 / 滚轮的判据）。 */
   isOnScrollable(_px: number, py: number): boolean {
     if (!this.root.visible) return false;
