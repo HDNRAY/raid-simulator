@@ -186,7 +186,11 @@ describe('说明与内容的推导关系（名字的字数 / 字面值不测）'
       const desc = QIJI_CATALOG.get(`qiji.${id}.desc`) ?? '';
       const value = modifierValueOf(id);
       expect(value, `${id} 没有 modifier 数值`).toBeDefined();
-      expect(desc, `${id} 的说明里没有内容用的数值 ${String(value)}：${desc}`).toContain(`+${String(value)}`);
+      /**
+       * ⚠️ 2026-10-22：文案里的 `+30` 改成「**增加 30**」（用户："不要用 +，
+       * 用**增加**"）⇒ 断言只认**那个数**，符号/措辞怎么改都不该红。
+       */
+      expect(desc, `${id} 的说明里没有内容用的数值 ${String(value)}：${desc}`).toContain(String(value));
       /** ⚠️ 自由模式的炁机卡是开关 —— 说明里不许再出现"可叠 N 层"。 */
       expect(desc, `${id} 的说明里又写回了层数：${desc}`).not.toContain('可叠');
     }
