@@ -70,7 +70,8 @@ describe('解锁条件的文案（从结构推导）', () => {
     if (unlock?.kind !== 'statAtLeast') return;
     const text = unlockTextOf(unlock, deps);
     expect(text).toContain(String(unlock.value));
-    expect(text).toContain('本局');
+    /** ⚠️ 2026-10-22：文案从「本局」改成「局内」（用户口径）。 */
+    expect(text).toContain('局内');
     /** ⚠️ 只有技能级维度才有 `skillId`（`dodges` / `battlesWon` 那些没有）。 */
     if ('skillId' in unlock.stat) {
       expect(text).toContain(skillName(unlock.stat.skillId));
