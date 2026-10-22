@@ -51,6 +51,14 @@ export interface QijiView {
   readonly id: string;
   readonly nameKey: string;
   readonly descKey?: string;
+  /**
+   * **说明模板的参数**（2026-10-22 修的 bug：这一屏取说明时没传参数，
+   * 界面上直接出现了 `{amount}` ✗）。
+   *
+   * ⚠️ 由 `app/` 层从炁机**定义**算出来（`qijiDescParamsOf`）——
+   * 渲染层不认识 `QijiEntity`，也不该在这里"猜"数字。
+   */
+  readonly descParams?: Readonly<Record<string, string>>;
   /** 图标名（`render/icons.ts` 的 `IconName`）。 */
   readonly icon: string;
 }

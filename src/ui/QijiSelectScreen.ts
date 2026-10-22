@@ -49,6 +49,7 @@ import { ScreenChrome } from './ScreenChrome';
 import { PALETTE } from '../render/theme';
 import { CARD_RADIUS, CARD_STROKE, CURSOR_RING_GAP, cardSkin } from './prepareRender';
 import { RichLine } from './richLine';
+import { descTextOf } from './descText';
 import {
   QIJI_SELECT_LAYOUT,
   QIJI_SELECT_SLOTS,
@@ -367,7 +368,14 @@ export class QijiSelectScreen {
        * 说明：按内容里的 `\n` 切行（见文件头"卡片排版"那段），
        * 再**逐行**切 run 上色（数字用金色）。
        */
-      const desc = candidate.qiji.descKey === undefined ? '' : t(candidate.qiji.descKey);
+      /**
+       * ⚠️ **必须带参数**（2026-10-22 用户："我看到了 {amount}"）：模板里的
+       * `{amount}` / `{seconds}` 由 `app/` 从炁机定义算好塞进 `descParams`。
+       */
+      const desc =
+        candidate.qiji.descKey === undefined
+          ? ''
+          : descTextOf(t, candidate.qiji.descKey, candidate.qiji.descParams);
       card.desc.layout(desc.split('\n'), centerX, area.y + 72, 20);
       card.desc.setVisible(true);
     });

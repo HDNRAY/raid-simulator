@@ -37,6 +37,7 @@ import type { RunState } from '../core/run/index';
 import { runLengthOf } from '../core/run/index';
 import { createRunSession } from './runSession';
 import type { QijiCandidateView, QijiView } from '../ui/qijiSelectLogic';
+import { qijiDescParamsOf } from './qijiDescParams';
 import { switchPlayerProfile } from './playerKeys';
 import { phaseFromEscape, phaseAfterAdvance, RUN_BATTLE_ENTRY, RUN_BATTLE_ENTRY_AFTER_QIJI, screenVisibilityOf } from './phaseLogic';
 import type { Phase, ShiftTarget } from './phaseLogic';
@@ -538,6 +539,12 @@ export function createPhaseFlow(d: PhaseFlowDeps): {
         nameKey: candidate.qiji.nameKey,
         icon: candidate.qiji.icon,
         ...(candidate.qiji.descKey === undefined ? {} : { descKey: candidate.qiji.descKey }),
+        /**
+         * ⚠️ **说明的参数在这里算**（2026-10-22 修的 bug：不传的话界面上会
+         * 直接出现 `{amount}`）。渲染层不认识 `QijiEntity`，所以只能在这一层
+         * 用 `qijiDescParamsOf` 从定义里读。
+         */
+        descParams: qijiDescParamsOf(candidate.qiji),
       };
       return { qiji };
     });

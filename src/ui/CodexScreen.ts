@@ -64,6 +64,7 @@ import {
 } from './viewportMask';
 import { paintScrollBar } from './scrollBarPaint';
 import { RichLine, wrapMarked } from './richLine';
+import { descTextOf } from './descText';
 import type { TranslateFn } from '../i18n/translator';
 
 export interface CodexScreenOptions {
@@ -453,7 +454,7 @@ export class CodexScreen {
       const desc = entry.descKey === undefined
         ? undefined
         /** ⚠️ 带参数取词（值来自内容定义 —— 见 `app/qijiDescParams`）。 */
-        : t(entry.descKey, entry.descParams);
+        : descTextOf(t, entry.descKey, entry.descParams);
       if (desc === undefined || desc === '') {
         descLine.setVisible(false);
       } else {
