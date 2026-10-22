@@ -36,6 +36,7 @@ import type { Container, Graphics } from 'pixi.js';
 import { FONT } from './layout';
 import { Label, type PixiCtor } from './primitives';
 import { PALETTE } from '../render/theme';
+import { CARD_RADIUS, startSkin } from './prepareRender';
 
 /** 一个矩形（逻辑坐标）。 */
 export interface ButtonRect {
@@ -56,6 +57,15 @@ export interface ButtonRect {
  * ⚠️ 只有这两个变体：多一个变体就多一处"这个按钮为什么比那个亮"的解释。
  */
 export type ButtonKind = 'primary' | 'secondary';
+
+/**
+ * `primary` 的**默认圆角**（= 调用方没显式传 `radius` 时的哨兵值）。
+ *
+ * 为什么不用 `undefined` 再判：`primary` 的圆角必须跟 `startSkin` 的调用点
+ * （`CARD_RADIUS`）一致，而"没传"与"传了 8"在 `exactOptionalPropertyTypes`
+ * 下是两种写法 —— 用一个哨兵常量最省事，且意图写在名字上。
+ */
+const DEFAULT_PRIMARY_RADIUS = 8;
 
 export interface TextButtonOptions {
   readonly pixi: PixiCtor;
@@ -210,22 +220,37 @@ export class TextButton {
   private draw(): void {
     const r = this.rect;
     const disabled = !this.enabled;
-    const primary = this.kind === 'primary';
 
-    const fill = disabled
-      ? PALETTE.panelLine
-      : primary
-        ? PALETTE.douqi.base
-        : 0xffffff;
-    const fillAlpha = disabled ? 0.35 : primary ? 0.85 : this.focused ? 0.16 : 0.08;
-    const stroke = disabled
-      ? PALETTE.textFaint
-      : primary
-        ? PALETTE.text
-        : this.focused
-          ? PALETTE.douqi.bright
-          : 0x6a6c80;
-    const strokeWidth = disabled ? 1 : this.focused || primary ? 2 : 1;
+    /**
+     * ⚠️ **`primary` 直接用 `prepareRender.startSkin`**（2026-10-22 用户：
+     * "选人的按钮···还是跟别的不一样啊"）—— 备战屏 / 确认屏的「开始战斗」
+     * 都是它画的（深底 + 金描边 + `CARD_RADIUS`，**只有焦点在它上面时才
+     * 换光标皮肤**），选人屏的「开始游戏」如果自己写一套金色填充，两颗按钮
+     * 在同一台机器上就不是一套 ✗。现在**代码路径也同一条**：
+     *
+     *   `cursored` ← `focused`、`developing` ← `!enabled`（禁用/开发中同一个观感）
+     */
+    if (this.kind === 'primary') {
+      const skin = startSkin({ developing: disabled, cursored: this.focused });
+      const radius = this.radius === DEFAULT_PRIMARY_RADIUS ? CARD_RADIUS : this.radius;
+      this.gfx.clear();
+      this.gfx.roundRect(r.x, r.y, r.w, r.h, radius).fill({
+        color: skin.fillColor,
+        alpha: skin.fillAlpha,
+      });
+      this.gfx.roundRect(r.x, r.y, r.w, r.h, radius).stroke({
+        color: skin.strokeColor,
+        width: skin.strokeWidth,
+      });
+      this.label.setColor(skin.labelColor);
+      return;
+    }
+
+    /** `secondary`：设置页那种小钮（极淡白底 + 灰描边；焦点换金描边）。 */
+    const fill = disabled ? PALETTE.panelLine : 0xffffff;
+    const fillAlpha = disabled ? 0.35 : this.focused ? 0.16 : 0.08;
+    const stroke = disabled ? PALETTE.textFaint : this.focused ? PALETTE.douqi.bright : 0x6a6c80;
+    const strokeWidth = disabled ? 1 : this.focused ? 1.5 : 1;
 
     this.gfx.clear();
     this.gfx.roundRect(r.x, r.y, r.w, r.h, this.radius).fill({ color: fill, alpha: fillAlpha });

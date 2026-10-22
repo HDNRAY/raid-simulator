@@ -65,13 +65,14 @@
  * 而它**常驻**（不是点了才出现），所以玩家在点之前就看得见为什么点不动。
  */
 
-import type { Container, Graphics } from 'pixi.js';
+import type { Container } from 'pixi.js';
 import { FONT, LOGICAL } from './layout';
 import { Label, type PixiCtor } from './primitives';
 import { PALETTE } from '../render/theme';
 import { PREPARE_LAYOUT } from './prepareLayout';
-import { footerHintSlot, startCenterX, startRect } from './prepareGeometry';
-import { CARD_RADIUS, PREPARE_SKIN, startSkin } from './prepareRender';
+import { footerHintSlot, startRect } from './prepareGeometry';
+import { PREPARE_SKIN } from './prepareRender';
+import { TextButton } from './TextButton';
 import type { TranslateFn } from '../i18n/translator';
 
 export interface PrepareFooterOptions {
@@ -159,8 +160,8 @@ export function prepareHintOf(
 }
 
 export class PrepareFooter {
-  private readonly gfx: Graphics;
-  private readonly startLabel: Label;
+  /** 「开始战斗」—— 共用组件（三处「开始」同源：选人 / 确认 / 备战）。 */
+  private readonly startButton: TextButton;
   private readonly hint: Label;
   private readonly notice: Label;
   /**
@@ -175,7 +176,6 @@ export class PrepareFooter {
 
   constructor(private readonly options: PrepareFooterOptions) {
     const { pixi, parent } = options;
-    this.gfx = new pixi.Graphics();
     this.start = startRect();
     this.hintSlot = footerHintSlot();
     /**
@@ -183,15 +183,19 @@ export class PrepareFooter {
      * —— 见文件头：这一条就是"错位"那个 bug 的修法，而且是**可单测**的
      * （`tests/unit/prepareLayout.test.ts` 断言"文字中心 = 矩形中心"）。
      */
-    const centerX = startCenterX();
 
-    this.startLabel = new Label(pixi, {
-      x: centerX,
-      y: this.start.y + this.start.h / 2,
+    this.startButton = new TextButton({
+      pixi,
+      rect: this.start,
+      label: options.translate('roster.ui.start'),
+      kind: 'primary',
       size: FONT.body,
-      color: PALETTE.text,
-      anchorX: 0.5,
-      anchorY: 0.5,
+      kai: false,
+      /**
+       * ⚠️ **不绑 `onPress`**：这一屏的点击由 `PrepareScreen.hitTest` 用
+       * `startRect()` 判（那是它原本就有的路径，含"开发中不给开局"的判据），
+       * 这里只负责**画**。绑一份会让"点一下执行两次"。
+       */
     });
     this.hint = new Label(pixi, {
       /** ⚠️ 贴在按钮**右边那一格**的左端（`anchorX: 0` = 左对齐）。 */
@@ -225,7 +229,7 @@ export class PrepareFooter {
       anchorY: 0.5,
     });
 
-    parent.addChild(this.gfx, this.startLabel.root, this.hint.root, this.notice.root);
+    parent.addChild(this.startButton.root, this.hint.root, this.notice.root);
   }
 
   /**
@@ -237,17 +241,9 @@ export class PrepareFooter {
    */
   draw(cursored: boolean, developing: boolean): void {
     const translate = this.options.translate;
-    const sr = this.start;
-    const skin = startSkin({ developing, cursored });
-    this.gfx.clear();
-    this.gfx
-      .roundRect(sr.x, sr.y, sr.w, sr.h, CARD_RADIUS)
-      .fill({ color: skin.fillColor, alpha: skin.fillAlpha });
-    this.gfx
-      .roundRect(sr.x, sr.y, sr.w, sr.h, CARD_RADIUS)
-      .stroke({ color: skin.strokeColor, width: skin.strokeWidth });
-    this.startLabel.setColor(skin.labelColor);
-    this.startLabel.set(translate('roster.ui.start'));
+    /** ⚠️ `developing` → `setEnabled(false)`：组件用 `startSkin` 的禁用皮肤 ✓。 */
+    this.startButton.setEnabled(!developing);
+    this.startButton.setFocused(cursored);
     /**
      * ⚠️ **两种模式两句话**（用户："触屏底部的提示 显示触屏的版本"）：
      *

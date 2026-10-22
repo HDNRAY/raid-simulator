@@ -75,11 +75,11 @@ import { FONT, LOGICAL } from './layout';
 import { Label, type PixiCtor } from './primitives';
 import { ScreenChrome } from './ScreenChrome';
 import { PALETTE } from '../render/theme';
-import { CARD_RADIUS, startSkin } from './prepareRender';
 import { PrepareDetailPanel } from './prepareDetailPanel';
 import { PrepareFoldBars, type FoldBarDraw } from './prepareFoldBars';
 import { foldSummaryOf, type FoldSummary } from './prepareFold';
-import { foldTextMaxChars, footerHintSlot, startCenterX, startRect } from './prepareGeometry';
+import { foldTextMaxChars, footerHintSlot, startRect } from './prepareGeometry';
+import { TextButton } from './TextButton';
 import {
   detailModelOf,
   runConfirmDetailTarget,
@@ -168,14 +168,14 @@ export class RunConfirmScreen {
   readonly root: Container;
 
   private readonly bg: Graphics;
-  private readonly startGfx: Graphics;
+  /** 「开始战斗」—— 共用组件（与选人屏「开始游戏」同一份皮肤/画法）。 */
+  private readonly startButton: TextButton;
   private readonly title: Label;
   private readonly progress: Label;
   private readonly qijiLabel: Label;
   private readonly bossLabel: Label;
   /** 「恶魔低语」那一行的栏目标题（永远在，见 `RunConfirmInfo.whisper`）。 */
   private readonly whisperLabel: Label;
-  private readonly startLabel: Label;
   private readonly hint: Label;
   /**
    * 两行**只读块头**（复用备战屏那一支画笔）。
@@ -272,14 +272,15 @@ export class RunConfirmScreen {
 
     /** 「开始战斗」：矩形 / 提示格 / 文字中心全部来自备战屏那一套几何。 */
     const start = startRect();
-    this.startGfx = new pixi.Graphics();
-    this.startLabel = new Label(pixi, {
-      x: startCenterX(),
-      y: start.y + start.h / 2,
+    this.startButton = new TextButton({
+      pixi,
+      rect: start,
+      label: options.translate('roster.ui.start'),
+      kind: 'primary',
       size: FONT.body,
-      color: PALETTE.text,
-      anchorX: 0.5,
-      anchorY: 0.5,
+      kai: false,
+      /** 点它 = 与 `Enter` **同一个**动作。 */
+      onPress: () => this.confirm(),
     });
     this.hint = new Label(pixi, {
       x: footerHintSlot().x,
@@ -289,7 +290,7 @@ export class RunConfirmScreen {
       anchorX: 0,
       anchorY: 0.5,
     });
-    this.root.addChild(this.startGfx, this.startLabel.root, this.hint.root);
+    this.root.addChild(this.startButton.root, this.hint.root);
 
     this.chrome = new ScreenChrome({
       pixi,
@@ -580,18 +581,8 @@ export class RunConfirmScreen {
     this.panel.setVisible(true);
     this.panel.update(model);
 
-    /** 「开始战斗」：只有焦点在它上面时才是**光标皮肤**（与备战屏同一条）。 */
-    const sr = startRect();
-    const skin = startSkin({ developing: false, cursored: this.selection.focus === 'start' });
-    this.startGfx.clear();
-    this.startGfx
-      .roundRect(sr.x, sr.y, sr.w, sr.h, CARD_RADIUS)
-      .fill({ color: skin.fillColor, alpha: skin.fillAlpha });
-    this.startGfx
-      .roundRect(sr.x, sr.y, sr.w, sr.h, CARD_RADIUS)
-      .stroke({ color: skin.strokeColor, width: skin.strokeWidth });
-    this.startLabel.set(t('roster.ui.start'));
-    this.startLabel.setColor(skin.labelColor);
+    /** 「开始战斗」：焦点在它上面时换光标皮肤（`startSkin` 在组件里 ✓）。 */
+    this.startButton.setFocused(this.selection.focus === 'start');
 
     /**
      * 操作提示：**触屏为空**。
