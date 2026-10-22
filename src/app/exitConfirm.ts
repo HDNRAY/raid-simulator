@@ -39,6 +39,13 @@ export function createExitConfirm(d: ExitConfirmDeps): ExitConfirm {
   d.app.stage.addChild(dialog.root);
   return Object.assign(dialog, {
     open: (): void => {
+      /**
+       * ⚠️ **每次打开都把对话框挪到最上层**：它是在游戏启动时加的，而
+       * **设置面板**是后来才加进 stage 的 ⇒ 对话框会被压在面板下面
+       * （症状：按 `M` / 点「回主菜单」**看起来没反应**，其实框开了、被挡住了 ✗）。
+       * `addChild` 一个已在树上的节点 = 移到末尾 = 最上层 ✓。
+       */
+      d.app.stage.addChild(dialog.root);
       dialog.open({
         title: d.translate('settings.backToMenuConfirmTitle'),
         message: d.translate('settings.backToMenuConfirmMessage'),
