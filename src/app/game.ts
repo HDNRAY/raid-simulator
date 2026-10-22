@@ -177,7 +177,8 @@ export function createGame(o: CreateGameDeps): GameHandle {
      */
     createChrome: (pixi) =>
       createBattleChrome({ pixi, translate: translateSafe, f1Label, showKeyHints: showKeyHintsNow,
-        onGear: () => settingsToggle.toggle(), battle }),
+        /** ⚠️ 必须包成箭头：`const battle` 在本函数后面才声明，直接写 `battle` 会在 TDZ 里读它（黑屏）。 */
+    onGear: () => settingsToggle.toggle(), battle: () => battle() }),
   });
 
   /* ---------- UI 缩放 ---------- */

@@ -66,7 +66,13 @@ export function createBattleChrome(d: BattleChromeDeps): ScreenChrome {
     /** ⚠️ 非开发模式**不传** ⇒ `ScreenChrome` 不构建那颗按钮（见文件头）。 */
     ...(dev
       ? {
-          f2Label: () => d.translate('dev.clearKey'),
+          /**
+           * ⚠️ 这里是**键位显示名**（`F2`），不是动作文案 —— 与齿轮那颗
+           * `f1Label`（`settings.openKey` = `F1`）同一个约定。
+           * 曾经写成 `dev.clearKey`（=「过关」）⇒ 按钮上显示的是动作名、
+           * 键位提示反而没有 ✗（截图抓到的）。
+           */
+          f2Label: () => d.translate('settings.clearKey'),
           onDevClear: () => void d.battle()?.devClear(),
         }
       : {}),
