@@ -48,6 +48,7 @@ import { Label, type PixiCtor } from './primitives';
 import { ScreenChrome } from './ScreenChrome';
 import { PALETTE } from '../render/theme';
 import { CARD_RADIUS, CARD_STROKE, CURSOR_RING_GAP, cardSkin } from './prepareRender';
+import { RichLine } from './richLine';
 import {
   QIJI_SELECT_LAYOUT,
   QIJI_SELECT_SLOTS,
@@ -96,7 +97,11 @@ const QIJI_KEY_HINT = '← → · Enter';
 interface QijiCardLabels {
   readonly name: Label;
   /** 说明最多两行（第二行常驻、空着就不显示字）。 */
-  readonly desc: readonly [Label, Label];
+  /**
+   * **说明**（`RichLine`）：`**…**` 里的数字用强调色 —— 用户 2026-10-22
+   * 就是在这一屏问"炁机里的数字为什么没颜色"。居中排版（见 `align`）。
+   */
+  readonly desc: RichLine;
 }
 
 export class QijiSelectScreen {
@@ -279,22 +284,20 @@ export class QijiSelectScreen {
       kai: true,
       anchorX: 0.5,
     });
-    const desc0 = new Label(pixi, {
-      x: 0,
-      y: 0,
+    /**
+     * **说明**（`RichLine`，居中）：普通段 `textDim`、`**…**` 里的数字用
+     * `PALETTE.douqi`（金）—— 与图鉴卡片同一套（用户 2026-10-22：
+     * "炁机里的数字才要改"）。
+     */
+    const desc = new RichLine({
+      pixi,
       size: FONT.tiny,
-      color: PALETTE.textDim,
-      anchorX: 0.5,
+      baseColor: PALETTE.textDim,
+      emphasisColor: PALETTE.douqi.base,
+      align: 'center',
     });
-    const desc1 = new Label(pixi, {
-      x: 0,
-      y: 0,
-      size: FONT.tiny,
-      color: PALETTE.textDim,
-      anchorX: 0.5,
-    });
-    this.root.addChild(name.root, desc0.root, desc1.root);
-    return { name, desc: [desc0, desc1] };
+    this.root.addChild(name.root, desc.root);
+    return { name, desc };
   }
 
   private redraw(): void {
@@ -323,8 +326,7 @@ export class QijiSelectScreen {
       /** 超出候选张数 / 超过 Label 槽位的卡片：全部藏起来（不画、不留字）。 */
       if (area === undefined || candidate === undefined) {
         card.name.set('');
-        card.desc[0].set('');
-        card.desc[1].set('');
+        card.desc.setVisible(false);
         return;
       }
 
@@ -361,15 +363,13 @@ export class QijiSelectScreen {
       card.name.root.x = centerX;
       card.name.root.y = area.y + 30;
 
-      /** 说明：按内容里的 `\n` 切行（见文件头"卡片排版"那段）。 */
+      /**
+       * 说明：按内容里的 `\n` 切行（见文件头"卡片排版"那段），
+       * 再**逐行**切 run 上色（数字用金色）。
+       */
       const desc = candidate.qiji.descKey === undefined ? '' : t(candidate.qiji.descKey);
-      const lines = desc.split('\n');
-      card.desc[0].set(lines[0] ?? '');
-      card.desc[1].set(lines[1] ?? '');
-      card.desc[0].root.x = centerX;
-      card.desc[0].root.y = area.y + 72;
-      card.desc[1].root.x = centerX;
-      card.desc[1].root.y = area.y + 92;
+      card.desc.layout(desc.split('\n'), centerX, area.y + 72, 20);
+      card.desc.setVisible(true);
     });
   }
 }

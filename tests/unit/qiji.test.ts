@@ -508,7 +508,13 @@ describe('三条新炁机的说明与内容**对得上**', () => {
      * 数字贴中文）⇒ 断言从"含『减少 20』"放宽成"**含那个数**"：数值必须
      * 从内容推导（改平衡时这里跟着变），措辞怎么改都不该红。
      */
-    expect(costDesc).toContain(String(Math.abs(reduction ?? 0)));
+    /**
+     * ⚠️ 2026-10-22：数值改成**从定义读**（模板里是 `{delta}`，渲染时由
+     * `app/qijiDescParams` 填）⇒ 断言从"含那个数"改成"**用占位符**"，
+     * 值与定义一致由 `tests/unit/qijiDescParams.test.ts` 管。
+     */
+    expect(costDesc).toContain('{delta}');
+    expect(Math.abs(reduction ?? 0)).toBeGreaterThan(0);
 
     const boostDesc = QIJI_CATALOG.get('qiji.ningShenRuDao.desc') ?? '';
     const override = qijiById('ningShenRuDao')?.skillTweak?.buffOverrides?.[0]?.modifiers[0]?.value;

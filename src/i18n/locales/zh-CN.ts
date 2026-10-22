@@ -1796,7 +1796,7 @@ export const zhCN = {
      */
     ningShenZhanYi: {
       name: '凝神斩意',
-      desc: '「凝」期间，「斩」**额外造成6点伤害**。',
+      desc: '「凝」期间，「斩」**额外造成{damage}点伤害**。',
     },
     /**
      * **重击流**（"劈回缠，闪避也回缠"）。
@@ -1830,7 +1830,7 @@ export const zhCN = {
     },
     baoLieHuDun: {
       name: '爆裂护盾',
-      desc: '盾**每被打破一层**，对 Boss 造成**10点伤害**。',
+      desc: '盾**每被打破一层**，对 Boss 造成**{damage}点伤害**。',
     },
     /**
      * 2026-10-22 第三轮：两条派生技的炁机。
@@ -1860,12 +1860,12 @@ export const zhCN = {
     },
     chanJinHuanSheng: {
       name: '缠尽还生',
-      desc: '缠低于**20**时，每**5秒**回**10缠**。',
+      desc: '缠低于**{threshold}**时，每**{seconds}秒**回**{damage}缠**。',
     },
     /** **炁能回收**：减少「缠」的消耗。 */
     qiNengHuiShou: {
       name: '炁能回收',
-      desc: '「波」的缠消耗**减少15**。',
+      desc: '「波」的缠消耗**减少{delta}**。',
     },
     chongJiHuiChan: {
       /** ⚠️ 2026-10-20 用户："2最后2个炁机换换名字"（原「重击回缠」）。 */
@@ -1945,7 +1945,7 @@ export const zhCN = {
     /** 「凝」3 次 → 缠消耗 −20（与下一条**同一个条件**）。 */
     ningShenJuQi: {
       name: '聚气凝神',
-      desc: '「凝」的缠消耗**减少20**。',
+      desc: '「凝」的缠消耗**减少{delta}**。',
     },
     /** 「凝」3 次 → 增伤**变成** 100%（覆盖，不是 +100%）。 */
     ningShenRuDao: {

@@ -63,8 +63,7 @@ import {
   type ViewportRect,
 } from './viewportMask';
 import { paintScrollBar } from './scrollBarPaint';
-import { stripEmphasis } from './emphasis';
-import { RichLine } from './richLine';
+import { RichLine, wrapMarked } from './richLine';
 import type { TranslateFn } from '../i18n/translator';
 
 export interface CodexScreenOptions {
@@ -451,7 +450,10 @@ export class CodexScreen {
        * （`…\n…`），而这里按卡片宽度重折 —— 两套折行叠在一起会出现第 3 行
        * （实测「游刃有余」就是这样溢到条件行上的 ✗）。
        */
-      const desc = entry.descKey === undefined ? undefined : t(entry.descKey);
+      const desc = entry.descKey === undefined
+        ? undefined
+        /** ⚠️ 带参数取词（值来自内容定义 —— 见 `app/qijiDescParams`）。 */
+        : t(entry.descKey, entry.descParams);
       if (desc === undefined || desc === '') {
         descLine.setVisible(false);
       } else {
@@ -459,12 +461,13 @@ export class CodexScreen {
          * ⚠️ 折行按**纯文本**算（`wrapByChars`；它保证不把 `100%` 拆开），
          * 颜色只在这一行**画**的时候按 run 切 —— 折行结果不受颜色影响 ✓。
          */
-        const flat = stripEmphasis(desc).replaceAll('\n', ' ');
+        /** ⚠️ **不要 strip**（2026-10-22 的 bug：strip 之后 `RichLine` 没有标记可切 ⇒ 数字不上色）。 */
+        const flat = desc.replaceAll('\n', ' ');
         if (plan.descLines <= 0) {
           descLine.setVisible(false);
         } else {
           descLine.layout(
-            wrapByChars(flat, { perLine, maxLines: plan.descLines }),
+            wrapMarked(flat, { perLine, maxLines: plan.descLines }, wrapByChars),
             textX,
             shifted.y + plan.descTop,
             CODEX_LINE_H,

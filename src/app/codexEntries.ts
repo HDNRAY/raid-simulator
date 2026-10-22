@@ -37,6 +37,14 @@ export function codexEntriesOf(args: {
   readonly devMode: boolean;
   /** 解锁条件 → 人话（`app/unlockText.unlockTextOf`；注入是为了可测）。 */
   readonly unlockText: (unlock: QijiUnlock) => string;
+  /** 说明模板里要的数值（从炁机定义读，见 `app/qijiDescParams`）。 */
+  /**
+   * 说明模板里要的数值（从炁机定义读）。
+   *
+   * ⚠️ **可选**：老的调用点（测试里的假 pool）不传也能跑 —— 缺省就"没有参数"，
+   * 模板里的占位符会原样留在文字里（那种调用点本来就没有真实内容）。
+   */
+  readonly descParams?: (qiji: QijiEntity) => Readonly<Record<string, string>>;
 }): readonly CodexEntry[] {
   return args.pool.map((qiji) => {
     const unlocked = args.stats === undefined
@@ -47,6 +55,7 @@ export function codexEntriesOf(args: {
       id: qiji.id,
       nameKey: show ? qiji.nameKey : undefined,
       descKey: show ? qiji.descKey : undefined,
+      descParams: show ? args.descParams?.(qiji) : undefined,
       unlocked,
       unlockText: args.unlockText(qiji.unlock),
     };

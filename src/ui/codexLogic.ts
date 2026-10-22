@@ -31,6 +31,15 @@ export interface CodexEntry {
   /** 已解锁的名字 key；未解锁是 `undefined`（界面画「？？？」）。 */
   readonly nameKey: string | undefined;
   readonly descKey: string | undefined;
+  /**
+   * **说明里的数值参数**（2026-10-22 用户："炁机的数字是写死的还是读的代码？
+   * 应该读代码"）。
+   *
+   * ⚠️ 模板里写 `{percent}` 这类占位符，值由 `app/qijiDescParams` **从炁机定义
+   * 里读出来**（`modifiers[].value` / `then[].deal.damage` / `cooldownMs`…），
+   * 这样调平衡时说明跟着变，不会出现"文案 20%、实际 30%"✗。
+   */
+  readonly descParams?: Readonly<Record<string, string>> | undefined;
   readonly unlocked: boolean;
   /**
    * **解锁条件的人话**（2026-10-20，用户："要显示 炁机解锁条件"）。

@@ -45,6 +45,7 @@ import { RunOverScreen } from '../ui/RunOverScreen';
 import { CodexScreen } from '../ui/CodexScreen';
 import { codexEntriesOf } from './codexEntries';
 import { unlockTextOf } from './unlockText';
+import { qijiDescParamsOf } from './qijiDescParams';
 import { ALL_SKILLS } from '../data/content';
 import { ALL_QIJI } from '../data/qiji';
 import { DEV_MODE } from './config';
@@ -310,6 +311,7 @@ export function buildScreens(d: ScreenSetupDeps): Screens {
         pool: ALL_QIJI,
         stats,
         devMode: DEV_MODE || readUrlParams(globalThis.location.search).dev,
+        descParams: (qiji) => qijiDescParamsOf(qiji),
         unlockText: (unlock) =>
           unlockTextOf(unlock, {
             translate: translateSafe,
