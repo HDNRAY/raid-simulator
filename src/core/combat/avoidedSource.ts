@@ -181,22 +181,25 @@ export function reflectBuffIdOf(target: Combatant): string | undefined {
 }
 
 /**
- * 给**反伤**那几条 `damage` 事件补上"是谁弹的"。
+ * 给 `damage` 事件补上"**是哪个 buff 造成的**"（`sourceBuffId`）。
  *
- * ⚠️ 与 `withAbsorbedByBuffId` 同一条纪律：只碰 `reflect === true` 的事件，
- * 其它原样返回（返回新数组，不改入参）。
+ * ⚠️ 2026-10-22 起它**不只服务反伤**：任何"buff 产出的伤害"都该说清来源
+ * （「弹」的节奏、「爆裂护盾」、「印记」……）。原先只给 `reflect === true`
+ * 的事件补，于是「弹」的 8 点伤害在日志里既没有技能名、也没有来源 ✗，
+ * 而且被误标成"反伤" ✗（详见 `events.ts` 的 `sourceBuffId`）。
  *
- * ⚠️ `reflectBuffId` 缺省时**不写这个键**：`''` 会与"id 恰好是空串"混淆
- * （与 `interruptSuccess.sourceSkillId` 同一条约定）。
+ * ⚠️ 与 `withAbsorbedByBuffId` 同一条纪律：返回**新数组**、不改入参；
+ * `sourceBuffId` 缺省时**不写这个键**（`''` 会与"id 恰好是空串"混淆）。
+ *
+ * ⚠️ 它**只**在"这一条事件确实没有 skillId"时才值得调 —— 有技能时
+ * 日志本来就按技能名显示，再塞 buff 名只会两处说同一件事。
  */
-export function withReflectBuffId(
+export function withSourceBuffId(
   events: readonly EventDef[],
-  reflectBuffId: string | undefined,
+  sourceBuffId: string | undefined,
 ): readonly EventDef[] {
-  if (reflectBuffId === undefined) return events;
+  if (sourceBuffId === undefined) return events;
   return events.map((event) =>
-    event.kind === 'damage' && event.reflect === true
-      ? { ...event, reflectBuffId }
-      : event,
+    event.kind === 'damage' && event.skillId === '' ? { ...event, sourceBuffId } : event,
   );
 }

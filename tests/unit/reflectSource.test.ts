@@ -83,7 +83,7 @@ describe('荆棘反伤：日志说得出"是被什么弹的"', () => {
     const reflect = events.find((e) => e.kind === 'damage' && e.reflect === true);
     expect(reflect).toBeDefined();
     if (reflect?.kind !== 'damage') throw new Error('没有反伤事件');
-    expect(reflect.reflectBuffId).toBe(LUST_BIND_THORNS.id);
+    expect(reflect.sourceBuffId).toBe(LUST_BIND_THORNS.id);
   });
 
   it('没有 buff 来源时**不写** `unknownSource`，而是"受到 N 点反伤"', () => {
@@ -134,7 +134,7 @@ describe('荆棘反伤：日志说得出"是被什么弹的"', () => {
         overkill: 0,
         skillId: '',
         reflect: true,
-        reflectBuffId: LUST_BIND_THORNS.id,
+        sourceBuffId: LUST_BIND_THORNS.id,
       },
     ]);
     const entry = formatter.all()[0];
@@ -150,5 +150,65 @@ describe('荆棘反伤：日志说得出"是被什么弹的"', () => {
     });
     expect(text).not.toContain('未知');
     expect(text).toContain('缚');
+  });
+});
+
+describe('「弹」的伤害：日志里必须点名「弹」，而且**不是反伤**', () => {
+  it('按住「弹」时的节奏伤害：日志出现「弹」造成 N 点伤害（reflect=false）', () => {
+    const player = makePlayer('daixuan');
+    const engine = battle(player);
+    /** 按住 1 秒 —— 节奏 buff 每 300ms 打一次。 */
+    engine.tick([{ type: 'hold', skillId: 'dan', atTick: 0 }]);
+    const events = [...engine.drainEvents()];
+    for (let t = 1; t < TICKS_PER_SECOND; t += 1) {
+      engine.tick();
+      events.push(...engine.drainEvents());
+    }
+    const hits = events.filter(
+      (e): e is Extract<typeof e, { kind: 'damage' }> => e.kind === 'damage' && e.amount > 0,
+    );
+    expect(hits.length).toBeGreaterThan(0);
+    for (const hit of hits) {
+      /** ⚠️ 触发器产出的伤害**不是**反伤（2026-10-22 前一律标成反伤 ✗） */
+      expect(hit.reflect).not.toBe(true);
+      /** 来源要说得出是「弹」的节奏 buff —— 否则日志只能写"未知来源" ✗ */
+      expect(hit.sourceBuffId).toBe('daixuan-tan-rhythm');
+    }
+  });
+
+  it('日志渲染：点名「弹」，不含"未知来源"、不含"反伤"', () => {
+    const formatter = new LogFormatter({
+      buffNameKeys: new Map([['daixuan-tan-rhythm', 'skill.dan.name']]),
+      combatantNameKey: (id) => (id === 'wrath' ? 'wrath.name' : 'roster.daixuan.name'),
+    });
+    formatter.consume([
+      {
+        kind: 'damage',
+        tick: 1,
+        sourceId: 'daixuan',
+        targetId: 'wrath',
+        amount: 8,
+        crit: false,
+        absorbed: 0,
+        thinned: 0,
+        overkill: 0,
+        skillId: '',
+        sourceBuffId: 'daixuan-tan-rhythm',
+      },
+    ]);
+    const entry = formatter.all()[0];
+    if (entry === undefined) throw new Error('没有日志条目');
+    expect(entry.key).toBe('log.buffDamage');
+    const params = entry.params ?? {};
+    expect(params['skill']).toBe('skill.dan.name');
+    const text = translator.t(entry.key as never, {
+      actor: translator.t(String(params['actor']) as never),
+      target: translator.t(String(params['target']) as never),
+      skill: translator.t(String(params['skill']) as never),
+      amount: params['amount'] as number,
+    });
+    expect(text).toContain('弹');
+    expect(text).not.toContain('未知');
+    expect(text).not.toContain('反伤');
   });
 });

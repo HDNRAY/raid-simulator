@@ -229,18 +229,22 @@ export class LogFormatter {
          * **反伤**单独一条：它不是"谁打谁"，而是"打出去的人自己挨了" ——
          * 属性对调着读才通顺（"傲慢 受到 12 点反伤"）。
          */
+        /**
+         * **不是技能打的伤害**（`skillId === ''`）—— 两种形态，都得说清来源：
+         *
+         * | 形态 | 判定 | 日志 |
+         * |---|---|---|
+         * | 荆棘**反伤** | `reflect === true` | `受到 8 点反伤（荆棘）` |
+         * | buff 造成的伤害 | 有 `sourceBuffId` | `受到 8 点伤害（弹）` |
+         *
+         * ⚠️ 2026-10-22 的两条实测都出在这里：
+         *   ① "8 点反伤，未知来源" —— 没有名字可用（现在用 buff 名）
+         *   ② "打傲慢为什么会有反伤" + "没有弹的伤害 log" —— **同一件事**：
+         *      触发器产出的伤害原先**一律**标成 `reflect: true` ✗，
+         *      于是「弹」的 8 点被显示成"反伤·未知来源" ✗
+         */
+        const source = event.sourceBuffId;
         if (event.reflect === true) {
-          /**
-           * ⚠️ 2026-10-22 用户实测："**8 点反伤，未知来源**"。
-           *
-           * 反伤走 `skillId: ''`（不是技能打的）⇒ 按招式表查不到 ⇒ 落到
-           * `log.unknownSource` ✗。玩家要看的是"**被什么弹的**"：「缚」的
-           * 荆棘还是「污堕印记」。
-           *
-           * 所以：`reflectBuffId` 有值 ⇒ 用 buff 的名字（`（荆棘）`）；
-           * 没有 ⇒ 用**不提来源**的那句（`受到 8 点反伤`），**绝不**说"未知来源" ✗。
-           */
-          const source = event.reflectBuffId;
           if (source !== undefined) {
             return {
               tick,
@@ -260,6 +264,20 @@ export class LogFormatter {
             level: 'major',
             key: 'log.reflectShort',
             params: { actor: this.actorKey(event.sourceId), amount: event.amount },
+          };
+        }
+        if (source !== undefined && event.skillId === '') {
+          return {
+            tick,
+            category: event.targetId === 'player' ? 'take' : 'deal',
+            level: 'major',
+            key: 'log.buffDamage',
+            params: {
+              actor: this.actorKey(event.sourceId),
+              target: this.actorKey(event.targetId),
+              skill: this.buffKey(source),
+              amount: event.amount,
+            },
           };
         }
         const onBoss = event.targetId !== 'player';

@@ -1341,6 +1341,12 @@ export const zhCN = {
      * 而玩家需要的是"这一下是被弹回来的"。来源查得到时用上面那条（带名字）。
      */
     reflectShort: '{actor}受到 {amount} 点反伤',
+    /**
+     * **buff 造成的伤害**（不是技能打的、也不是反伤）——「弹」的节奏、
+     * 「爆裂护盾」、「印记」这一类。2026-10-22 前它们会说"未知来源"✗，
+     * 或者被误标成"反伤"✗（见 `logFormat` 那段说明）。
+     */
+    buffDamage: '{actor}的「{skill}」对{target}造成 {amount} 点伤害',
     avoided: '{actor}闪开了{source}的「{skill}」',
     immune: '{actor}对「{skill}」免疫',
     castInterrupted: '{actor}的「{skill}」被打断（{reason}）',

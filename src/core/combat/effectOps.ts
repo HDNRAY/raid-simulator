@@ -31,7 +31,7 @@
 import { type EvalContext } from '../expr/eval';
 import { aggregateFlags, applyBuff } from '../buffs';
 import { resolveCombatantIn } from './battleStateTypes';
-import { reflectBuffIdOf, withReflectBuffId } from './avoidedSource';
+import { reflectBuffIdOf, withSourceBuffId } from './avoidedSource';
 import { applyDamage, changeResource, evaluateCondition, type CombatContext } from './index';
 import type { HitResolutionContext } from './hitResolution';
 import type {
@@ -282,7 +282,7 @@ export function applyThornReflect(args: {
     true,
   );
   ctx.replaceCombatant(applied.combatant);
-  pushEvents(ctx.events, withReflectBuffId(applied.events, reflectBuffId));
+  pushEvents(ctx.events, withSourceBuffId(applied.events, reflectBuffId));
 }
 
 /* ================================================================== *

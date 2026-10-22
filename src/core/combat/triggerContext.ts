@@ -23,6 +23,7 @@ import type { BuffDef, Combatant, EventDef, SkillDef } from '../types';
 import { aggregateFlags, applyBuff } from '../buffs';
 import { applyDamage, changeResource, computeDamage } from './index';
 import { interruptCasts } from './interrupt';
+import { withSourceBuffId } from './avoidedSource';
 import type { HitPayload } from '../types/triggers';
 
 /**
@@ -169,7 +170,7 @@ export function triggerContextFor(host: TriggerHost, roll: () => number): Trigge
      * 否则"哪一次攻击会暴击"会取决于前面有没有触发过反伤，重放会变得
      * 很难推理（与 `rollCrit` 的短路规则同一考虑）。
      */
-    dealDamageFromTrigger: (actorId, targetId, hit) => {
+    dealDamageFromTrigger: (actorId, targetId, hit, sourceBuffId) => {
       for (const effect of hit.effects) {
         /**
          * **`interrupt` 也走这里**（2026-10-22）：原先只处理 `damage`，
@@ -202,9 +203,27 @@ export function triggerContextFor(host: TriggerHost, roll: () => number): Trigge
          * 不标的话日志里反伤和普通伤害长得一样（都是"受到 18 伤害"），
          * 玩家会以为 Boss 有个自己不知道的 18 点技能。
          */
-        const applied = applyDamage(target, result, actorId, '', host.combat.currentTick(), true);
+        /**
+         * ⚠️ **`reflect` 只在这个 buff 真的是荆棘时才为真**（2026-10-22 修）。
+         *
+         * 原先这里**无条件**传 `true` ⇒ 所有触发器伤害在日志里都成了"反伤" ✗：
+         * 用户实测的"打傲慢为什么会有反伤"其实就是**自己的「弹」**（它的节奏
+         * 伤害也是 `deal`）被标成了反伤，而来源只有 `skillId: ''` ⇒
+         * "未知来源" ✗。判据与 `aggregateFlags` 同源：`reflectFraction > 0`。
+         */
+        const ownerDef = sourceBuffId === undefined ? undefined : host.combat.buffDef(sourceBuffId);
+        const isReflect = (ownerDef?.flags?.reflectFraction ?? 0) > 0;
+        const applied = applyDamage(
+          target,
+          result,
+          actorId,
+          '',
+          host.combat.currentTick(),
+          isReflect,
+        );
         host.replaceCombatant(applied.combatant);
-        host.events.push(...applied.events);
+        /** 来源照填（荆棘 / 「弹」 / 「印记」都要说得出是谁）—— 纯观测字段。 */
+        host.events.push(...withSourceBuffId(applied.events, sourceBuffId));
       }
     },
   };

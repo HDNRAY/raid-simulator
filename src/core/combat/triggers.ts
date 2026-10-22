@@ -290,7 +290,7 @@ export function runAbilities(
    *
    * 日志要回答"**是被什么弹的**"：反伤沿用的是 `skillId: ''`（不是技能打的），
    * 只按 skillId 查名字会得到「未知来源」✗。这个 id 会写进
-   * `damage.reflectBuffId`（观测字段，不参与判定）。
+   * `damage.sourceBuffId`（观测字段，不参与判定）。
    */
   sourceBuffId?: string,
 ): void {
