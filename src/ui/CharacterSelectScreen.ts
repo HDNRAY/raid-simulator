@@ -426,11 +426,7 @@ export class CharacterSelectScreen {
     if (this.expandAnim.progress < 0.5) return false;
     const card = this.expandedSlot();
     if (card === undefined) return false;
-    /**
-     * ⚠️ 判据用**长大的那张卡**的矩形，不用 `detailPanel.isOnDetail` ——
-     * 面板已经被平移到那张卡上了，而它自己的命中测试仍然用固定的
-     * `detailRect()`（那是"导航坐标"，不是"画在哪"）。
-     */
+    /** ⚠️ 判据用**长大的那张卡**的矩形（面板已被平移，它的命中仍用固定矩形）。 */
     const grown = expandedCardRect(card);
     return px >= grown.x && px <= grown.x + grown.w
       && py >= grown.y && py <= grown.y + grown.h;
@@ -542,20 +538,12 @@ export class CharacterSelectScreen {
       const cursored = cursorAt !== undefined && cursorAt.id === entry.id;
       const soon = isDeveloping(entry.id);
       const skin = cardSkin({ developing: soon, cursored, selected });
-      /**
-       * ⚠️ **没被展开的那两张随进度淡出**（2026-10-22）：长大的那张会盖住
-       * 右边的邻居，不淡出看起来像"两张卡叠在一起"✗。淡出之后读起来是
-       * "这一张长成了详情、其余退到后面"✓
-       */
+      /** ⚠️ 没被展开的那两张压暗到 30%（仍可见、仍 hover 得到）。 */
       const dimmed = this.expandCard !== undefined && i !== this.expandCard;
       const cardAlpha = dimmed ? Math.max(0.3, 1 - 0.7 * easeOutCubic(this.expandAnim.progress)) : 1;
       card.name.root.alpha = cardAlpha;
       card.status.root.alpha = cardAlpha;
-      /**
-       * ⚠️ **被展开的那张不再画自己的名字/状态**：详情里已经有名字了，
-       * 而它的槽位会被长大的卡片盖住 —— 留着会从面板半透明底色下透出来
-       * （实测"凯丽"两处重影 ✗）。
-       */
+      /** ⚠️ 被展开的那张不画自己的名字（详情里已有；否则会透出重影）。 */
       const selfLabel = !dimmed && this.expandAnim.progress > 0.15;
       card.name.root.visible = !selfLabel;
       card.status.root.visible = !selfLabel;
@@ -579,11 +567,7 @@ export class CharacterSelectScreen {
        * （实测"凯丽/黛玄"两块压在详情正文上 ✗）。底色仍留在 `cardGfx`
        * （内容要压在底色之上）。
        */
-      /**
-       * ⚠️ 被展开的那张**只画底色**：它的**描边要跟着"长大后的矩形"**
-       * （由 `drawExpand` 画进 `expandGfx`）—— 在这里画槽位的框会留下一个
-       * 旧位置的小框（实测"卡片下面还有个小框"✗）。
-       */
+      /** ⚠️ 被展开的那张只画底色；描边由 `drawExpand` 画在长大后的矩形上。 */
       this.cardGfx
         .roundRect(area.x, area.y, area.w, area.h, CARD_RADIUS)
         .fill({ color: skin.fillColor, alpha: skin.fillAlpha * cardAlpha });
@@ -638,10 +622,7 @@ export class CharacterSelectScreen {
      */
     const panelAlpha = easeOutCubic(this.expandAnim.progress);
     this.detailPanel.root.alpha = panelAlpha;
-    /**
-     * **把详情面板挪到那张长大的卡上**（平移，**不缩放** —— 宽度恒等 296，
-     * 所以字体与行距原样，读起来还是那份详情）✓
-     */
+    /** 详情面板**平移到那张长大的卡上**（不缩放：宽度恒等 296）。 */
     if (focusIndex >= 0) {
       const slot = characterSelectCardRects(this.players.length)[focusIndex];
       if (slot !== undefined) {
