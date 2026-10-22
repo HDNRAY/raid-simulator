@@ -194,7 +194,16 @@ export class PlayerActorPart implements FramePart {
      */
     const actor = this.actor;
     if (actor !== undefined) {
-      actor.show(ctx.view.tick, ctx.view.player.cast, ctx.view.status !== 'running');
+      /**
+       * ⚠️ 第四个参数 = **按住型技能正在施放**（2026-10-22 用户："按住弹的时候，
+       * 角色本身也要播放攻击帧···一直用攻击帧"）。
+       *
+       * 来源是 `view.skills[].holding` —— 那是引擎侧 `pressStateOf()` 的既有事实
+       * （玩家按住某个技能键），**没有新造判据** ✓。按住多久就一直播攻击帧，
+       * 松开自然回 idle（`holding` 变假 ⇒ 攻击段淡出）。
+       */
+      const holding = ctx.view.skills.some((slot) => slot.holding === true);
+      actor.show(ctx.view.tick, ctx.view.player.cast, ctx.view.status !== 'running', holding);
       if (actor.ready) this.playerAnim.visible = false;
       const frame: ActorSpriteFrame = { tint, squashY: pose * fb.squashY };
       actor.apply(frame);

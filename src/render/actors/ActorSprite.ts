@@ -47,7 +47,34 @@
 
 import { Assets, Sprite, type Container, type Texture } from 'pixi.js';
 import { animUrls, type CharacterSprite } from '../spriteAssets';
-import { frameAtProgress, loopProgress } from '../spriteAnim';
+import { frameAtProgress, loopProgress, type FrameWeights } from '../spriteAnim';
+
+/**
+ * **这一帧该画哪一段、第几帧**（纯函数，单测直接测它）。
+ *
+ * 判据顺序：
+ * 1. **有读条** ⇒ 攻击段按 `cast.progress` 播（原行为）
+ * 2. **按住型技能在施放**（`holding`）⇒ 攻击段**循环**播（"一直用攻击帧" ✓）
+ * 3. 都没有 ⇒ idle（调用方负责把攻击段淡出）
+ */
+export function actorPoseOf(input: {
+  readonly tick: number;
+  readonly cast: { readonly progress: number } | undefined;
+  readonly holding: boolean;
+  /** 攻击段的帧权重（`FrameWeights`，与 `frameAtProgress` 同一个输入）。 */
+  readonly attack: FrameWeights;
+}): { readonly pool: 'idle' | 'attack'; readonly index: number } {
+  if (input.attack.length > 0) {
+    if (input.cast !== undefined) {
+      return { pool: 'attack', index: frameAtProgress(input.attack, input.cast.progress) };
+    }
+    if (input.holding) {
+      /** 循环：按住多久就一直播，看起来是"持续施法"而不是定格 ✓ */
+      return { pool: 'attack', index: frameAtProgress(input.attack, loopProgress(input.attack, input.tick)) };
+    }
+  }
+  return { pool: 'idle', index: 0 };
+}
 
 /** 一张贴图的加载状态。 */
 export type SpritePhase = 'none' | 'ready';
@@ -266,6 +293,9 @@ export class ActorSprite {
   /**
    * 按快照选段选帧（每帧调一次）。
    *
+   * @param holding **按住型技能正在施放**（「弹」这类 `holdDrain` 技能）——
+   *   见 `actorPoseOf` 的说明。
+   *
    * @param tick `BattleSnapshotView.tick`（驱动 idle 循环与淡出）
    * @param cast 该单位的读条视图；`undefined` = 没在读条
    * @param finished 战斗是否已经结束（`view.status !== 'running'`）——
@@ -275,23 +305,27 @@ export class ActorSprite {
     tick: number,
     cast: { readonly progress: number } | undefined,
     finished = false,
+    holding = false,
   ): void {
     if (this.phase !== 'ready') return;
 
-    if (cast !== undefined && this.attack.length > 0) {
-      /**
-       * ⚠️ 每帧都记一下 tick：读条**消失**的那一刻要靠它算淡出进度。
-       * 新 cast 一开始 `progress` 就回到 0 → **动画自然从头播**
-       *（"连续施放就重启动画"不需要额外的状态）。
-       */
+    /**
+     * ⚠️ **按住型技能也要走攻击帧**（2026-10-22 用户："按住弹的时候，角色本身
+     * 也要播放攻击帧···一直用攻击帧"）。按住不是"读条"（`holdDrain` 技能没有
+     * `cast` 记录）⇒ 之前一直停在 idle ✗。
+     *
+     * 帧策略：**让攻击段循环**（`loopProgress`，与 idle 同一套节奏）——
+     * 定格在第一帧会像"卡住了"，循环播放才读得出"在持续施法" ✓。
+     */
+    const pose = actorPoseOf({ tick, cast, holding, attack: this.source.attack });
+    if (pose.pool === 'attack') {
       this.lastCastTick = tick;
       this.idleSprite.visible = false;
       this.attackSprite.visible = true;
       this.attackSprite.alpha = 1;
-      this.paint('attack', frameAtProgress(this.source.attack, cast.progress));
+      this.paint('attack', pose.index);
       return;
     }
-
     /** 没有读条：idle 打底（循环），attack 段在它上面淡出。 */
     this.idleSprite.visible = true;
     this.paint('idle', frameAtProgress(this.source.idle, loopProgress(this.source.idle, tick)));
