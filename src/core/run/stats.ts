@@ -109,6 +109,14 @@ export interface BattleStats {
   /** **成功打断**的次数（按 `interruptSuccess.sourceSkillId` 分）。 */
   readonly skillInterrupts: SkillCounts;
   /**
+   * **累计消耗的资源**（按资源名分：`douqi` / `energy`），只数**负向**
+   * `resourceChanged`（2026-10-22，为「缠尽还生」的解锁加）。
+   *
+   * ⚠️ 与 `skillUses` 不是一回事：一个技能可以花 40 缠，也可以花 0 ——
+   * "累计消耗了多少缠"只有事件流知道。
+   */
+  readonly resourceSpent: Readonly<Record<string, number>>;
+  /**
    * **成功用出来的防御**次数（按 `avoided.viaBuffId` 分：`guard` / `flash-iframe`…）。
    *
    * ==================================================================
@@ -180,6 +188,7 @@ export const EMPTY_BATTLE_STATS: BattleStats = {
   skillHits: {},
   skillInterrupts: {},
   skillAvoids: {},
+  resourceSpent: {},
   dodges: {},
   ticks: 0,
   battles: [],
@@ -249,6 +258,7 @@ export function reduceBattleStats(
   const skillHits: Record<string, number> = {};
   const skillInterrupts: Record<string, number> = {};
   const skillAvoids: Record<string, number> = {};
+  const resourceSpent: Record<string, number> = {};
   const dodges: Record<string, number> = {};
   let ticks = 0;
 
@@ -294,6 +304,17 @@ export function reduceBattleStats(
           (skillInterrupts[event.sourceSkillId] ?? 0) + 1;
         break;
       }
+      case 'resourceChanged': {
+        /**
+         * 只数**花出去**的（delta < 0），且只数**这个视角的人**——
+         * 与其它维度同一条"按 actorId 过滤"的口径。
+         */
+        if (event.targetId === scope.actorId && event.delta < 0) {
+          const key = String(event.resource);
+          resourceSpent[key] = (resourceSpent[key] ?? 0) + -event.delta;
+        }
+        break;
+      }
       case 'avoided': {
         if (event.targetId !== scope.actorId) break;
         dodges[event.reason] = (dodges[event.reason] ?? 0) + 1;
@@ -331,6 +352,7 @@ export function reduceBattleStats(
     skillHits,
     skillInterrupts,
     skillAvoids,
+    resourceSpent,
     dodges,
     ticks,
   };
@@ -351,6 +373,8 @@ export function mergeBattleStats(a: BattleStats, b: BattleStats): BattleStats {
     skillHits: addCounts(a.skillHits, b.skillHits),
     skillInterrupts: addCounts(a.skillInterrupts, b.skillInterrupts),
     skillAvoids: addCounts(a.skillAvoids, b.skillAvoids),
+    /** 累计量按资源名相加（与其它 `*Counts` 同一条）。 */
+    resourceSpent: addCounts(a.resourceSpent, b.resourceSpent),
     dodges: addCounts(a.dodges, b.dodges),
     ticks: a.ticks + b.ticks,
     battles: [...(a.battles ?? []), ...(b.battles ?? [])],

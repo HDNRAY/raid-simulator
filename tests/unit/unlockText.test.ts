@@ -36,7 +36,12 @@ function makeTranslate(): (key: string, params?: Readonly<Record<string, string 
 const translate = makeTranslate();
 const skillName = (id: string): string =>
   translate(ALL_SKILLS.find((skill) => skill.id === id)?.nameKey ?? `skill.${id}.name`);
-const deps = { translate, skillName };
+/** 资源名（与 `screenSetup` 注入的同一个 key 形状：`resource.<key>`）。 */
+const resourceName = (resource: string): string => {
+  const table = (zhCN as { resource?: Record<string, string> }).resource ?? {};
+  return table[resource] ?? resource;
+};
+const deps = { translate, skillName, resourceName };
 
 describe('解锁条件的文案（从结构推导）', () => {
   it('**池子里每一条**都有非空的解锁说明', () => {

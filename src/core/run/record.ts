@@ -406,6 +406,8 @@ function parseBattleStats(raw: unknown): BattleStats | undefined {
     skillHits,
     skillInterrupts,
     skillAvoids,
+    /** ⚠️ 老存档没有这一项 ⇒ 空表（**不需要迁移**：少一个维度的统计就是 0）。 */
+    resourceSpent: parseSkillCounts(source['resourceSpent'], false) ?? {},
     dodges,
     ticks,
     battles,

@@ -313,6 +313,7 @@ export function buildScreens(d: ScreenSetupDeps): Screens {
         unlockText: (unlock) =>
           unlockTextOf(unlock, {
             translate: translateSafe,
+            resourceName: (resource) => translateSafe(`resource.${resource}`),
             skillName: (skillId) => {
               const skill = ALL_SKILLS.find((each) => each.id === skillId);
               return translateSafe(skill?.nameKey ?? `skill.${skillId}.name`);

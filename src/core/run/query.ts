@@ -71,6 +71,7 @@
  */
 
 import type { SkillId } from '../types/ids';
+import type { ResourceKey } from '../types/resources';
 import type { BattleOutcomeRecord } from './outcome';
 import type { BattleStats, SkillCounts } from './stats';
 
@@ -126,7 +127,12 @@ export function isSkillStatId(value: unknown): value is SkillStatId {
 /** `BattleStatQuery` 里"带 `scope` 的"那一支（技能级 + `dodges`）。 */
 type ScopedStatQuery =
   | { readonly s: SkillStatId; readonly skillId: SkillId; readonly scope: StatScope }
-  | { readonly s: 'dodges'; readonly scope: StatScope };
+  | { readonly s: 'dodges'; readonly scope: StatScope }
+  /**
+   * **累计消耗的资源**（2026-10-22）。`resource` 是资源名（`douqi` / `energy`）。
+   * 用途：「缠尽还生」的解锁 = 累计消耗 500 缠。
+   */
+  | { readonly s: 'resourceSpent'; readonly resource: ResourceKey | string; readonly scope: StatScope };
 
 /**
  * 对统计的**一次查询**（§5.2 修正后的形状）。
@@ -245,6 +251,8 @@ export function readBattleStat(
     case 'skillInterrupts':
     case 'skillAvoids':
       return skillStatValue(readSkillCounts(stats, query.s), query.skillId);
+    case 'resourceSpent':
+      return stats.resourceSpent[String(query.resource)] ?? 0;
     case 'dodges':
       /**
        * ⚠️ 只数 `dodged`，**不数 `immune`**。

@@ -26,6 +26,8 @@ export interface UnlockTextDeps {
   readonly translate: TranslateFn;
   /** 技能 id → 显示名（`skill.<id>.name` 那些）。 */
   readonly skillName: (skillId: string) => string;
+  /** 资源名（缠 / 炁 / 血）。 */
+  readonly resourceName: (resource: string) => string;
 }
 
 /** 作用域：`run` = 整局，`battle` = 这一场。 */
@@ -53,6 +55,11 @@ function statText(stat: BattleStatQuery, value: number, d: UnlockTextDeps): stri
       return d.translate('screen.codex.unlock.skillAvoids', {
         ...params,
         skill: d.skillName(stat.skillId),
+      });
+    case 'resourceSpent':
+      return d.translate('screen.codex.unlock.resourceSpent', {
+        ...params,
+        resource: d.resourceName(stat.resource),
       });
     case 'dodges':
       return d.translate('screen.codex.unlock.dodges', params);

@@ -1536,6 +1536,8 @@ export const zhCN = {
         /** 「挡下」：真的挡下了几击（不是"按了几次"）。 */
         skillAvoids: '{scope}用「{skill}」挡下 {value} 次',
         dodges: '{scope}闪避 {value} 次',
+        /** 「累计消耗 500 缠」那类（2026-10-22 新增的统计维度）。 */
+        resourceSpent: '{scope}累计消耗 {value} 点{resource}',
         battlesWon: '{scope}赢下 {value} 场',
         flawlessBattles: '{scope}满血赢下 {value} 场',
         all: '同时满足：{parts}',

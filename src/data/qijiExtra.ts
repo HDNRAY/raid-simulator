@@ -529,15 +529,11 @@ export const QIJI_CHAN_REGEN: QijiEntity = {
   icon: 'char_focus',
   category: 'utility',
   rarity: 'rare',
-  /**
-   * ⚠️ 用户要求的是"**累计消耗 500 缠**"，而今天 `BattleStatQuery` **没有**
-   * "资源累计消耗"这个维度 ⇒ 先用"放 15 次波"（≈600 缠）当代理条件，
-   * 并在这里写明：加 `{ s: 'resourceSpent', resource, scope }` 之后改成它。
-   */
+  /** 「累计消耗 500 缠」（2026-10-22 加了这个统计维度之后按用户原话落）。 */
   unlock: {
     kind: 'statAtLeast',
-    stat: { s: 'skillUses', skillId: 'bo', scope: 'run' },
-    value: 15,
+    stat: { s: 'resourceSpent', resource: 'douqi', scope: 'run' },
+    value: 500,
   },
   abilities: [],
   passiveBuffs: [
