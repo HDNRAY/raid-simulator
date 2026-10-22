@@ -33,6 +33,14 @@ declare global {
        */
       devClear(): boolean;
       /**
+       * **切到备战屏并停在那里**（2026-10-22，dev-only）。
+       *
+       * 截图验收用：正常流程 `characterSelect.pick()` 会直接 advance 进确认屏，
+       * 拍不到"hover 改了白框、黄底没变"那三张图。
+       * @returns 挂了这条入口并切换过（生产模式没有它 ⇒ `false`）
+       */
+      gotoPrepare(): boolean;
+      /**
        * 当前键位表（顶层探针）。
        *
        * 端到端脚本用它来"按某个技能"，而不是把键位写死在脚本里。

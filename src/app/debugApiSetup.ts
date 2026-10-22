@@ -62,6 +62,14 @@ type RaidBattleGlobal = NonNullable<Window['__raidBattle']>;
 /** 探针与界面入口要读的那些东西。 */
 export interface DebugApiDeps {
   readonly state: GameState;
+  /**
+   * **切到备战屏并停在那里**（2026-10-22，dev-only）。
+   *
+   * 用途：截图验收"hover 只动白框、黄底要点击才变"那三张图 —— 走正常流程
+   * 会一路 advance（选角色 `pick()` 直接进确认屏 ✗），拍不到备战屏。
+   * ⚠️ 只走既有相位切换（`switchTo('prepare')`），不是第二套流程。
+   */
+  readonly gotoPrepare?: () => void;
   /** 场景（复盘那一层要读它）。 */
   readonly scene: {
     /**
@@ -201,6 +209,12 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
      * 玩家点它时发生的事 —— 不是另一套"脚本专用"的作弊路径。
      */
     devClear: () => state.loop?.devClear() ?? false,
+    /** 切到备战屏并停住（见 `DebugApiDeps.gotoPrepare`）；没挂就是 `false`。 */
+    gotoPrepare: () => {
+      if (d.gotoPrepare === undefined) return false;
+      d.gotoPrepare();
+      return true;
+    },
     /**
      * 当前键位表（顶层探针）。
      *
