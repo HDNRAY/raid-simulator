@@ -103,7 +103,8 @@ import { PortraitSprite } from '../render/portraitSprite';
 import { DetailViewport } from './prepareDetailViewport';
 import { attachViewportMask, drawViewportClip, fullyOutside } from './viewportMask';
 import { stripEmphasis } from './emphasis';
-import { detailRowText, estimatedHeightOf, measuredHeightOf } from './detailText';
+import { drawHeaderSeparator } from './prepareDetailSeparator';
+import { detailRowText, estimatedHeightOf, lineHeightOf, measuredHeightOf } from './detailText';
 import {
   DETAIL_ROW_POOL,
   METRICS,
@@ -229,7 +230,7 @@ export class PrepareDetailPanel {
       size: METRICS.titleSize,
       color: PALETTE.text,
       kai: true,
-      wrap: { width: innerW },
+      wrap: { width: innerW }, lineHeight: METRICS.titleLine,
     });
     this.subtitle = new Label(pixi, {
       x: innerX,
@@ -241,14 +242,14 @@ export class PrepareDetailPanel {
        * 字号已经比正文大一档，再加粗与正文拉开层级。
        */
       bold: true,
-      wrap: { width: innerW },
+      wrap: { width: innerW }, lineHeight: METRICS.valueLine,
     });
     this.placeholder = new Label(pixi, {
       x: innerX,
       y: rect.y + rect.h / 2,
       size: FONT.body,
       color: PALETTE.textFaint,
-      wrap: { width: innerW },
+      wrap: { width: innerW }, lineHeight: METRICS.bodyLine,
     });
 
     /** 人物 / Boss 的大头像（复用卡片上那颗的素材表），摆在顶栏**右端**。 */
@@ -270,13 +271,14 @@ export class PrepareDetailPanel {
         size: METRICS.nameSize,
         color: PALETTE.text,
         wrap: { width: innerW },
+        lineHeight: METRICS.nameLine,
       });
       const body = new Label(pixi, {
         x: innerX,
         y: 0,
         size: METRICS.bodySize,
         color: PALETTE.textDim,
-        wrap: { width: innerW },
+        wrap: { width: innerW }, lineHeight: METRICS.bodyLine,
       });
       const stats = new DetailStatsLine(pixi);
       stats.attach((child) => this.rowsLayer.addChild(child));
@@ -393,10 +395,7 @@ export class PrepareDetailPanel {
     }
 
     /** 分隔线：顶栏与正文之间的那道（画在 gfx 上，不新开对象）。 */
-    this.gfx
-      .moveTo(innerX, bodyTop - METRICS.rowGap / 2)
-      .lineTo(innerX + innerW, bodyTop - METRICS.rowGap / 2)
-      .stroke({ color: PALETTE.panelLine, width: 1, alpha: 0.6 });
+    drawHeaderSeparator(this.gfx, model.kind, rect, innerX, innerW);
 
     /**
      * ⚠️ 顺序：**先摆行（量出内容底边）→ 再让视口按这一帧的底边算** →
@@ -662,8 +661,9 @@ export class PrepareDetailPanel {
     return detailRowText(row, this.translate);
   }
 
+  /** 一行的高度：**实测与估算取大**（理由见 `detailText.lineHeightOf`）。 */
   private measuredHeight(label: Label, fallback: number): number {
-    return measuredHeightOf(label.root, fallback);
+    return lineHeightOf(measuredHeightOf(label.root, 0), fallback);
   }
 
   private estimatedHeight(label: Label): number {

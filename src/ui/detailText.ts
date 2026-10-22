@@ -51,6 +51,19 @@ export function estimatedHeightOf(text: TextLike, bodySize: number, bodyLine: nu
   return estimateLines(text, bodySize) * bodyLine;
 }
 
+/**
+ * 一行该占多高：**实测与估算取大**。
+ *
+ * ⚠️ Pixi 的 `Text.height` / `getLocalBounds()` 对**折行**的说明只报一行的行高
+ * （2026-10-22 实测：一段折成 2~3 行的说明，`height` 恒为 `lineHeight`，
+ * 与字号 / UI 缩放都无关 ✗）⇒ 直接拿它推进 y，会把两行正文摆到同一处
+ * （用户："uiScale≠1 时正文两行叠在一起"）。估算只会偏大（`ceil` + `\n`
+ * 多算），方向安全（多留空 vs 叠字）✓。
+ */
+export function lineHeightOf(measured: number, estimated: number): number {
+  return Math.max(measured > 0 ? measured : 0, estimated);
+}
+
 /** 实测高度（`prepareDetailViewport.measuredHeight` 的转发：只读 Pixi 的盒高）。 */
 export function measuredHeightOf(text: TextLike, fallback: number): number {
   return measuredHeight(text.height, fallback);
