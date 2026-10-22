@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { CODEX_LINE_H, cardTextPlan, wrapHardLines } from '../../src/ui/codexLogic';
+import { CODEX_LINE_H, cardTextPlan, wrapByChars, wrapHardLines } from '../../src/ui/codexLogic';
 
 /**
  * **图鉴卡片里三行字怎么排**（2026-10-22，用户："卡片可以高一点，写不下的
@@ -89,5 +89,19 @@ describe('跨卡一致（用户 2026-10-22："不同炁机卡 左上坐标不统
     const descTops = new Set(plans.map((p) => p.descTop));
     expect(nameTops.size).toBe(1);
     expect(descTops.size).toBe(1);
+  });
+});
+
+describe('折行不拆数字（2026-10-22 截图：100% 被切成 100 / %）', () => {
+  it('断点落在 ASCII 串中间时往前挪到串首', () => {
+    /**
+     * 取 `perLine = 14`：「「凝」的增伤变为 100%」共 15 个码点 ⇒ 断点落在
+     * `100%` 内部（`…变为 1` / `00%`）—— 修好之前会切出 `0%` 这种碎片。
+     */
+    const text = '「凝」的增伤变为 100%';
+    const lines = wrapByChars(text, { perLine: 14 });
+    expect(lines.join('')).toBe(text);
+    /** 任何一行都不该以 `%` / `+3` 这种"半个数"收尾 */
+    expect(lines.some((l) => /[0-9]$/.test(l) && l.includes('%') === false)).toBe(false);
   });
 });

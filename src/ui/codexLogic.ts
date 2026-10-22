@@ -180,8 +180,22 @@ export function wrapByChars(text: string, args: {
   const maxLines = Math.max(1, Math.trunc(args.maxLines ?? Number.MAX_SAFE_INTEGER));
   const chars = [...text];
   const lines: string[] = [];
-  for (let i = 0; i < chars.length; i += perLine) {
-    lines.push(chars.slice(i, i + perLine).join(''));
+  for (let i = 0; i < chars.length;) {
+    /**
+     * ⚠️ **尽量别把 ASCII 词/数字拆到两行**（2026-10-22 截图里 `100%` 被切成
+     * `100` / `%`、`+30%` 被切成 `+3` / `0%` ✗）。做法：这一行本来会在
+     * `i + perLine` 处截断，若那个位置落在"ASCII 串中间"，就把断点**往前**
+     * 挪到串首（挪不动就照原样切，避免死循环）。
+     */
+    let end = Math.min(chars.length, i + perLine);
+    const isAscii = (ch: string | undefined): boolean => ch !== undefined && /[0-9A-Za-z%.+\-]/.test(ch);
+    if (end < chars.length && isAscii(chars[end]) && isAscii(chars[end - 1])) {
+      let cut = end;
+      while (cut > i + 1 && isAscii(chars[cut - 1])) cut -= 1;
+      if (cut > i) end = cut;
+    }
+    lines.push(chars.slice(i, end).join(''));
+    i = end;
     if (lines.length === maxLines) break;
   }
   if (lines.length === maxLines && chars.length > perLine * maxLines) {
