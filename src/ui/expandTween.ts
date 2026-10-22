@@ -66,6 +66,21 @@ export function expandAnimating(state: ExpandState): boolean {
   return state.progress !== state.target;
 }
 
+/**
+ * **`easeInOutCubic`**（2026-10-22 用户："动画速度记得要用曲线"）。
+ *
+ * 与 `easeOutCubic` 的区别：两端都平缓（起步慢、收尾也慢），适合"展开 / 收起"
+ * 这种**双向**动画 —— 单用 `easeOutCubic` 时收起会"猛地一缩然后拖尾" ✗。
+ *
+ * ⚠️ 与 `easeOutCubic` 一样，它只作用在**画**的时候（把线性的 progress 映射成
+ * 视觉位置）；运动本身仍是恒速的 `stepExpand` ⇒ 中断时只要换目标就能从当前
+ * 进度反着跑（曲线在这里不会造成跳变，因为映射是连续的 ✓）。
+ */
+export function easeInOutCubic(t: number): number {
+  const x = Math.min(1, Math.max(0, t));
+  return x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2;
+}
+
 /** 视觉缓动（`easeOutCubic`）：只在**画**的时候用，不参与运动本身。 */
 export function easeOutCubic(t: number): number {
   const x = Math.min(1, Math.max(0, t));

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   EXPAND_DURATION_MS,
+  easeInOutCubic,
   easeOutCubic,
   expandAnimating,
   initialExpand,
@@ -83,5 +84,16 @@ describe('矩形插值（"卡片 → 详情面板"的形状）', () => {
   it('中点是两个方向的中间（宽高一起插值）', () => {
     const mid = lerpRect({ x: 0, y: 0, w: 10, h: 10 }, { x: 100, y: 50, w: 210, h: 110 }, 0.5);
     expect(mid).toEqual({ x: 50, y: 25, w: 110, h: 60 });
+  });
+});
+
+describe('easeInOutCubic（双向缓动）', () => {
+  it('两端为 0 / 1，中点为 0.5，且两端比中间慢', () => {
+    expect(easeInOutCubic(0)).toBe(0);
+    expect(easeInOutCubic(1)).toBe(1);
+    expect(easeInOutCubic(0.5)).toBeCloseTo(0.5, 6);
+    /** 起步（0.1）与收尾（0.9）都比线性更靠近端点 ⇒ 两头慢 ✓ */
+    expect(easeInOutCubic(0.1)).toBeLessThan(0.1);
+    expect(easeInOutCubic(0.9)).toBeGreaterThan(0.9);
   });
 });
