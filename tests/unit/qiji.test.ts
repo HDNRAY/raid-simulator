@@ -497,7 +497,7 @@ describe('三条新炁机的说明与内容**对得上**', () => {
     const charge = (DODGE_CHARGE.modifiers ?? []).find((m) => m.stat === 'damageBoost');
     const multiplier = 1 + (typeof charge?.value === 'number' ? charge.value : 0) / 100;
     expect(multiplier).toBe(2);
-    expect(dodgeDesc).toContain('伤害翻倍');
+    expect(dodgeDesc).toContain('增加100%');
     /** 旧文案的"回复 20 缠"不许留（它已经不是那条炁机的效果了）。 */
     expect(dodgeDesc).not.toContain('回复');
 
