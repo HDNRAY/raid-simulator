@@ -207,7 +207,8 @@ export function initialSelection(
  * / `pickQiji` 全走它）：焦点落在某一块上就展开那一块；落在「开始战斗」上
  * 时展开块**不动**（见 `PrepareSelection.expanded`）。
  */
-function withFocus(sel: PrepareSelection, focus: PrepareFocus): PrepareSelection {
+/** 把 `focus` 写进选择（**导出**是为了 `prepareFocusOnly` 复用同一条规则，不复制实现）。 */
+export function withFocus(sel: PrepareSelection, focus: PrepareFocus): PrepareSelection {
   const expanded: PrepareSectionKind = focus === 'start' ? sel.expanded : focus;
   if (focus === sel.focus && expanded === sel.expanded) return sel;
   return { ...sel, focus, expanded };

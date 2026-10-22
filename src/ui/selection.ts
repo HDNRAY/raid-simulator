@@ -57,10 +57,29 @@ export interface SelectionInput {
  *
  * @returns 选中项的 id；`undefined` = 这一刻没有任何一项被选中
  */
-export function selectedIdOf(input: SelectionInput): string | undefined {
+/**
+ * **焦点**（白框）：指针/键盘此刻正指着谁。
+ *
+ * ⚠️ 2026-10-22 用户把模型拆成两个概念之后，这个函数的语义**只剩白框**：
+ *
+ * > 白框和黄底 都由 hover 决定了 ··· ⇒ 白框 = 焦点、黄底 = **已选**
+ *
+ * 黄底（"我确定要这个"）**只有点击 / `Enter` 才变**，见 `committedId`。
+ */
+export function focusedIdOf(input: SelectionInput): string | undefined {
   if (input.keyboardActive) return input.cursor;
   if (input.pointerInside) return input.hovered;
   return input.cursor;
+}
+
+/**
+ * **焦点**（白框）的旧名字：保留为别名，调用点不用全改。
+ *
+ * ⚠️ 新代码请用 `focusedIdOf` —— 这个名字会让人以为它同时决定"已选" ✗
+ * （那正是这次 bug 的措辞源头）。
+ */
+export function selectedIdOf(input: SelectionInput): string | undefined {
+  return focusedIdOf(input);
 }
 
 /**
@@ -70,6 +89,19 @@ export function selectedIdOf(input: SelectionInput): string | undefined {
  * （指针一动 ⇒ 键盘接管结束；键盘一动 ⇒ 键盘接管开始）。各屏各写一遍，
  * 迟早有一屏忘了把 `keyboardActive` 置回 `false` ⇒ "鼠标划过去没反应" ✗。
  */
+/**
+ * **已选**（黄底）：我确定要的那一个。
+ *
+ * ⚠️ **hover 不许改它** ✗ —— 这正是"hover 和选择又绑在一起了"那个 bug 的根因
+ * （`pickOption` 把 `playerId` / `bossId` 一起改了，于是鼠标划过 = 换了出战的
+ * 人 ✗）。已选只由 `commit()`（点击 / `Enter`）改变。
+ */
+export function committedIdOf(input: {
+  readonly committed: string | undefined;
+}): string | undefined {
+  return input.committed;
+}
+
 export interface SelectionState {
   /** 指针进入某一项（`undefined` = 指针在画面内但不在任何项上）。 */
   hover(id: string | undefined): void;
@@ -77,6 +109,15 @@ export interface SelectionState {
   leave(): void;
   /** 键盘移动了光标（自动进入"键盘接管"）。 */
   keyboardMove(cursor: string | undefined): void;
+  /**
+   * **提交**（点击 / `Enter`）：把"已选"改成当前焦点那一项（或显式给一个 id）。
+   *
+   * ⚠️ hover / 键盘移动**都不许**调它 —— 只有真正的"确定"才调（这是黄底与
+   * 白框分开的唯一保证）。
+   */
+  commit(id?: string): void;
+  /** 当前**已选**（黄底）那一项。 */
+  readonly committed: () => string | undefined;
   /** 当前选中谁。 */
   readonly selected: () => string | undefined;
   /** 当前三个事实（调试读数 / 各屏要自己判"要不要重画"时用）。 */
@@ -89,6 +130,8 @@ export function createSelectionState(initialCursor: string | undefined = undefin
   let pointerInside = false;
   let keyboardActive = false;
   let cursor = initialCursor;
+  /** 已选（黄底）：初值 = 初始光标那一项（"进屏时黄底就在默认项上"）。 */
+  let committed: string | undefined = initialCursor;
   return {
     hover: (id) => {
       hovered = id;
@@ -108,7 +151,11 @@ export function createSelectionState(initialCursor: string | undefined = undefin
       cursor = next;
       keyboardActive = true;
     },
-    selected: () => selectedIdOf({ hovered, pointerInside, keyboardActive, cursor }),
+    commit: (id) => {
+      committed = id ?? focusedIdOf({ hovered, pointerInside, keyboardActive, cursor });
+    },
+    committed: () => committed,
+    selected: () => focusedIdOf({ hovered, pointerInside, keyboardActive, cursor }),
     facts: () => ({ hovered, pointerInside, keyboardActive, cursor }),
   };
 }

@@ -94,6 +94,7 @@ import {
   type PrepareSelection,
   type PrepareTarget,
 } from './prepareLogic';
+import { focusOnly } from './prepareFocusOnly';
 import { drawPrepareFrame } from './prepareFrame';
 import { detailModelOf, type DetailContext } from './prepareDetail';
 import { PrepareDetailController } from './prepareDetailController';
@@ -422,10 +423,11 @@ export class PrepareScreen {
      * 都不是一张卡 —— 把详情区切到它们身上会让玩家"划一下鼠标，面板空了"。
      */
     /** 2026-10-22：**hover 就是"选中"**（判据同 `ui/selection`）—— 指针落在哪张卡上，光标就移到那张卡（白框跟着走、只有一个框 ✓）；落在空白上什么都不改 ✓。 */
+    /** ⚠️ hover **只动白框（焦点）**，不提交黄底（已选）—— 用 `focusOnly`，不用 `pickOption` ✗（2026-10-22 用户报的正是"hover 把选择也改了"）。 */
     if (intent.kind === 'qiji') {
-      this.apply(pickQiji(this.selection, this.qiji, intent.id));
+      this.apply(focusOnly(this.selection, this.players, this.bosses, 'qiji', intent.id));
     } else if (intent.kind === 'pick') {
-      this.apply(pickOption(this.selection, this.players, this.bosses, intent.option, intent.id));
+      this.apply(focusOnly(this.selection, this.players, this.bosses, intent.option, intent.id));
     }
     return intent.kind !== 'none';
   }
