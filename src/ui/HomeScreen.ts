@@ -256,6 +256,35 @@ export class HomeScreen {
     this.options.onPick(homeActionAt(this.state));
   }
 
+  /**
+   * **悬停 = 选中**（2026-10-22，用户："好多地方，鼠标 hover 和键盘的选中，
+   * 都应该是一件事，一个交互，一个白色框"，并明确"包括首页也是"）。
+   *
+   * ⇒ 指针落在哪个入口上，**光标就移到哪个入口**：框跟着走、只有一个框 ✓。
+   * 落在空白处 ⇒ 什么都不改（保持光标那一项，不闪烁 ✓；判据与
+   * `ui/selection` 的 `selectedIdOf` 同一条）。
+   *
+   * @returns 有没有落在某个入口上（供调用方判"要不要重画"）
+   */
+  hover(px: number, py: number): boolean {
+    const action = homeActionAtPoint(px, py);
+    if (action === undefined) return false;
+    const index = homeHitAreas().findIndex((a) => a.action === action);
+    if (index >= 0 && this.state.cursor !== index) {
+      this.state = { cursor: index };
+      this.redraw();
+    }
+    return true;
+  }
+
+  /**
+   * 指针离开画布：**什么都不做**（`hover` 就是选中 ⇒ 选中项由光标持有，
+   * 移开指针不该让框消失，判据同 `ui/selection`）。
+   */
+  clearHover(): void {
+    /* 有意为空：见上。 */
+  }
+
   /** 点一下（逻辑坐标）。 */
   hitTest(px: number, py: number): boolean {
     /**

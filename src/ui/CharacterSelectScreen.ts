@@ -83,6 +83,7 @@ import { keyLabel } from './settings/keyNames';
 import type { DetailContext } from './prepareDetail';
 import type { PrepareSelection, PrepareTarget } from './prepareLogic';
 import type { TranslateFn } from '../i18n/translator';
+import { selectedIdOf } from './selection';
 
 export interface CharacterSelectScreenOptions {
   readonly pixi: PixiCtor;
@@ -491,7 +492,16 @@ export class CharacterSelectScreen {
    */
   private focusId(): string | undefined {
     /** 键盘接管 ⇒ 跟光标（指针停在哪都不影响）。 */
-    if (this.keyboardActive) return characterCursorTarget(this.selection, this.players)?.id;
+    /**
+     * ⚠️ 2026-10-22：判据抽到 `ui/selection.selectedIdOf`（**全仓库只一处**），
+     * 本屏不再自己写一遍"keyboardActive ? cursor : (pointerInside ? hovered : cursor)"。
+     */
+    return selectedIdOf({
+      hovered: this.hoveredId,
+      pointerInside: this.pointerInside,
+      keyboardActive: this.keyboardActive,
+      cursor: characterCursorTarget(this.selection, this.players)?.id,
+    });
     /** 指针在画布内 ⇒ **只看它有没有落在卡上**（落在空白则全收起）。 */
     if (this.pointerInside) return this.hoveredId;
     return characterCursorTarget(this.selection, this.players)?.id;

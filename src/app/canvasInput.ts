@@ -91,7 +91,8 @@ export interface HoverScreen {
 export interface CanvasInputTargets {
   readonly canvas: HTMLCanvasElement;
   /** 首页（默认入口；含它自己的齿轮）。 */
-  readonly home: ScreenHitTarget;
+  /** 首页三个入口：`hover` 与键盘光标是**同一个状态**（见 `ui/selection`）。 */
+  readonly home: ScreenHitTarget & HoverScreen;
   /**
    * 选角色屏（肉鸽模式的第一屏；含它自己的齿轮与返回箭头）。
    *
@@ -331,6 +332,7 @@ export function wireCanvasPointer(t: CanvasInputTargets): () => void {
    */
   const hoverScreen = (): HoverScreen | undefined => {
     if (t.settingsOpen()) return undefined;
+    if (t.phase() === 'home') return t.home;
     if (t.phase() === 'prepare') return t.prepare;
     if (t.phase() === 'characterSelect') return t.select;
     return undefined;

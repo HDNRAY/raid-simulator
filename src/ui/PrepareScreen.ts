@@ -421,19 +421,24 @@ export class PrepareScreen {
      * ⚠️ 只有"点在**一张卡**上"才更新悬停：「开始战斗」「块头」「没点中」
      * 都不是一张卡 —— 把详情区切到它们身上会让玩家"划一下鼠标，面板空了"。
      */
-    const next =
-      intent.kind === 'qiji'
-        ? { kind: 'qiji' as const, id: intent.id }
-        : intent.kind === 'pick'
-          ? { kind: intent.option, id: intent.id }
-          : undefined;
-    if (this.detailPanel.hoverAt(next)) this.draw();
+    /** 2026-10-22：**hover 就是"选中"**（判据同 `ui/selection`）—— 指针落在哪张卡上，光标就移到那张卡（白框跟着走、只有一个框 ✓）；落在空白上什么都不改 ✓。 */
+    if (intent.kind === 'qiji') {
+      this.apply(pickQiji(this.selection, this.qiji, intent.id));
+    } else if (intent.kind === 'pick') {
+      this.apply(pickOption(this.selection, this.players, this.bosses, intent.option, intent.id));
+    }
     return intent.kind !== 'none';
   }
 
-  /** 指针离开画布：清掉悬停（否则详情区会一直停在最后划过的那一项）。 */
+  /**
+   * 指针离开画布：**什么都不做**（2026-10-22 之后 hover 就是选中 ⇒ 选中项
+   * 由光标持有，指针移开不该让框消失、也不该让详情闪一下 ✗）。
+   *
+   * 保留这个方法是因为 `canvasInput` 的指针路由会调它（`pointerleave` 与
+   * `pointercancel` 都要当成"离开"）—— 未来若真需要在离开时做事，落点在这。
+   */
   clearHover(): void {
-    if (this.detailPanel.clearHover()) this.draw();
+    /* 有意为空：见上面那段说明。 */
   }
 
   /**
