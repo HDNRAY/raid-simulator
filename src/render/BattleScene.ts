@@ -63,6 +63,11 @@ export type { BattleSceneOptions, TranslateFn } from './sceneTypes';
 export class BattleScene {
   readonly root: Container;
 
+  /** 圣光弹的调试读数（转发 `SceneStage.spellDebug`；`__raidBattle.spell()` 读它）。 */
+  spellDebug(): ReturnType<SceneStage['spellDebug']> {
+    return this.stage.spellDebug();
+  }
+
   /** 战场层（背景 / 角色 / 闪光）——**不随 UI 缩放**（见 `SceneStage`）。 */
   private readonly stage: SceneStage;
   /** Boss 顶栏。 */

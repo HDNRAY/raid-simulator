@@ -190,7 +190,17 @@ export class ViewAdapter {
              * 渲染层"播下一组"圣光弹。判据是**技能 id**（弹 / 波），
              * 不是"谁打的" —— 同一角色以后加新法术只改这一行。
              */
-            if (event.skillId === 'dan' || event.skillId === 'bo') this.spellSeq += 1;
+            /**
+             * ⚠️ 2026-10-22 第二次修：判据从"**技能 id**"改成"**谁在打**"。
+             *
+             * 原因是实测发现：黛玄的「弹」本身**不造成伤害**，真正掉血的是它
+             * 挂的那条隐藏节拍（`daixuan-tan-rhythm`）⇒ `event.skillId` 根本
+             * 不是 `dan` ⇒ 旧判据一次都不成立（`seq` 一直是 0）✗。
+             *
+             * 现在按"**黛玄对 Boss 造成的伤害**"触发 —— 她所有进攻手段
+             * （弹的节拍 / 波 / 冲）都会让圣光弹亮一下，这正是想要的观感。
+             */
+            if (this.lastPlayerId === 'daixuan') this.spellSeq += 1;
             this.damageDealt += event.amount;
           } else {
             this.playerFlash = 1;

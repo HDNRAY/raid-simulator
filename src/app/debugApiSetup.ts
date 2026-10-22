@@ -84,6 +84,11 @@ export interface DebugApiDeps {
       /** 滚动位置比例（0 = 第一行，1 = 最后一行；截图前后对比用）。 */
       pointerRatio(): number;
     };
+    /**
+     * **圣光弹的调试读数**（2026-10-22）：回答"素材读到几帧 / 纹理成功几张 /
+     * 帧组切出几个 / 第一次失败原因" —— 这些在截图里看不出来。
+     */
+    spellDebug(): ReturnType<typeof import('../render/spellBurst').SpellBurstPlayer.prototype.debug> | undefined;
   };
   /**
    * **落实一次 UI 缩放**（`game.ts` 的 `applyUiScale`：场景 + 四屏齿轮）。
@@ -262,6 +267,11 @@ export function installDebugApi(d: DebugApiDeps): RaidBattleGlobal {
     ...homeDebugApi(d.home),
     ...characterSelectDebugApi(d.select),
     ...prepareDebugApi(d.prepare),
+    /**
+     * **圣光弹的读数**（只读）：`ready` 为假时，`lastError` 会指出卡在哪一帧。
+     * 与 `probe()` 一样，它不是"另一套实现"，只是把内部状态摊平。
+     */
+    spell: () => d.scene.spellDebug() ?? null,
     ...qijiDebugApi(d.qijiSelect, d.runOver),
     ...runConfirmDebugApi(d.runConfirm),
     /**

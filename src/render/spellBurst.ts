@@ -82,6 +82,12 @@ export class SpellBurstPlayer {
   private lastSeq = 0;
   private lastGroup: number | undefined;
   private disposed = false;
+  /** 第一次加载失败的原因（`debug()` 用它回答"到底是哪一步挂的"）。 */
+  private lastError: string | undefined;
+  /** `load()` 走到哪一步了（调试读数：`start` → `assets` → `textures` → `done`）。 */
+  private loadStage = 'idle';
+  /** 第一次 `loadOne` 收到的 URL（调试：确认路径拼接对不对）。 */
+  private firstUrl: string | undefined;
 
   constructor(options: SpellBurstOptions) {
     this.options = options;
@@ -89,26 +95,40 @@ export class SpellBurstPlayer {
   }
 
   private async load(): Promise<void> {
+    this.loadStage = 'start';
     const assets = await loadSpellAssets(this.options.assetBase);
-    if (this.disposed || assets === undefined) return;
+    this.loadStage = assets === undefined ? 'assets-failed' : 'assets-ok';
+    if (assets === undefined) {
+      if (this.lastError === undefined) this.lastError = `assets-json-missing: ${this.options.assetBase}animation.json`;
+      return;
+    }
+    if (this.disposed) return;
     /**
      * **逐帧加载，失败的那一帧单独丢掉**（素材是 gitignore 的、可能缺几张）：
      * 丢帧之后 `frames` / `delays` / `textures` **必须同步裁掉同一批下标**，
      * 否则时间轴与画面会错位 ✗。
      */
+    /**
+     * ⚠️ **并行加载**（2026-10-22 第二次修）：串行 32 帧实测要 ~7 秒 ⇒ 开局
+     * 前几秒根本没有动画 ✗。并行之后总耗时 ≈ 最慢的那一帧。
+     */
+    const textures = await Promise.all(assets.urls.map((url) => this.loadOne(assets.base + url)));
     const loaded: { frame: SpellFrameGeometry; delay: number; texture: Texture | undefined }[] = [];
-    for (const [index, url] of assets.urls.entries()) {
+    for (const [index, texture] of textures.entries()) {
       const frame = assets.frames[index];
-      if (frame === undefined) continue;
-      const texture = await this.loadOne(assets.base + url);
-      if (texture === undefined) continue;
+      if (frame === undefined || texture === undefined) continue;
       loaded.push({ frame, delay: assets.delays[index] ?? 1, texture });
     }
-    if (this.disposed || loaded.length === 0) return;
+    if (loaded.length === 0) {
+      if (this.lastError === undefined) this.lastError = `all-frames-failed: tried ${assets.urls.length}`;
+      return;
+    }
+    if (this.disposed) return;
     this.frames = loaded.map((entry) => entry.frame);
     this.delays = loaded.map((entry) => entry.delay);
     this.textures = loaded.map((entry) => entry.texture);
     this.groupStarts = spellFrameGroupStarts(this.frames);
+    this.loadStage = 'done';
   }
 
   /**
@@ -116,14 +136,65 @@ export class SpellBurstPlayer {
    * `textureFor`（单测里就是直接给纹理）。**任何异常都只丢这一帧**。
    */
   private async loadOne(url: string): Promise<Texture | undefined> {
+    if (this.firstUrl === undefined) this.firstUrl = url;
     const { loadTexture, textureFor } = this.options;
     if (loadTexture === undefined) return textureFor(url);
     try {
-      return await loadTexture(url);
-    } catch {
+      const texture = await loadTexture(url);
+      if (texture === undefined && this.lastError === undefined) this.lastError = `${url} → undefined`;
+      return texture;
+    } catch (error) {
       /** 缺帧 / 只有一半素材 / 网络失败 —— 一律降级成"这一帧不画" ✓ */
+      if (this.lastError === undefined) this.lastError = `${url} -> ${String(error)}`;
       return undefined;
     }
+  }
+
+  /**
+   * **调试读数**（2026-10-22）：把"圣光弹到底卡在哪一步"摊成纯数据。
+   *
+   * 为什么必须有它：之前三轮都是"看截图猜" —— 而"没画"与"画了但看不见"
+   * 在截图里长得一样。现在能直接读到：素材读到了几帧、纹理加载成功几张、
+   * 帧组切出几个、第一次失败的原因、这一帧在播第几组。
+   */
+  debug(): {
+    readonly ready: boolean;
+    readonly frames: number;
+    readonly textures: number;
+    readonly groups: readonly number[];
+    readonly lastError: string | undefined;
+    readonly playing: number | undefined;
+    readonly hasSprite: boolean;
+    readonly seq: number;
+    readonly sprite: { readonly x: number; readonly y: number; readonly w: number; readonly h: number; readonly visible: boolean; readonly alpha: number } | undefined;
+    readonly loadStage: string;
+    readonly firstUrl: string | undefined;
+    readonly assetBase: string;
+  } {
+    return {
+      ready: this.ready,
+      loadStage: this.loadStage,
+      firstUrl: this.firstUrl,
+      assetBase: this.options.assetBase,
+      frames: this.frames.length,
+      textures: this.textures.length,
+      groups: [...this.groupStarts],
+      lastError: this.lastError,
+      playing: this.burst === undefined ? undefined : this.lastGroup,
+      hasSprite: this.sprite !== undefined,
+      seq: this.lastSeq,
+      sprite:
+        this.sprite === undefined
+          ? undefined
+          : {
+              x: Math.round(this.sprite.x),
+              y: Math.round(this.sprite.y),
+              w: Math.round(this.sprite.width),
+              h: Math.round(this.sprite.height),
+              visible: this.sprite.visible,
+              alpha: this.sprite.alpha,
+            },
+    };
   }
 
   /** 素材准备好了吗（调试 / 验收读数）。 */
@@ -197,10 +268,18 @@ export class SpellBurstPlayer {
      * 这里按"该帧自己的左上角"摆回去，并把锚点归一化到**这一帧的中心**，
      * 于是四组（x/y 各不同）看起来是同一门法术的四次出手 ✓。
      */
-    sprite.position.set(
-      this.options.anchor.x + (frame.width / 2 - frame.x) * 0.5,
-      this.options.anchor.y + (frame.height / 2 - frame.y) * 0.5,
-    );
+    /**
+     * ⚠️ **直接画在锚点上**（2026-10-22 第二次修）。
+     *
+     * 旧版按 `anchor + (frame.width/2 - frame.x) * 0.5` 摆 —— 那套是给
+     * "整张画布里的子矩形"用的，而 `prepare_fdother.py` 合出来的
+     * `fNN.png` 是**已经裁好的小图**（f00 只有 122×42）⇒ 再加一次原图
+     * 绝对坐标的偏移，精灵会跑到 Boss 左边很远的地方 ✗（实测 x=325，
+     * 而 Boss 在 393 附近）。
+     *
+     * 现在每一帧都**居中画在锚点**上：裁好的帧本来就以自身为中心 ✓。
+     */
+    sprite.position.set(this.options.anchor.x, this.options.anchor.y);
   }
 
   private createSprite(texture: Texture): Sprite | undefined {
@@ -208,7 +287,12 @@ export class SpellBurstPlayer {
     if (make === undefined) return undefined;
     const sprite = make(texture);
     sprite.anchor?.set(0.5, 0.5);
-    sprite.scale?.set(0.5);
+    /**
+     * ⚠️ 缩放 **1**（2026-10-22 第二次修）：原先是 0.5 ⇒ 裁好的帧只有
+     * 20~60px，在战斗画面里像一粒白点 ✗。原始导出的画布约 299px 宽，
+     * 按 1:1 摆在 Boss 身上才是"一发圣光弹"的体量 ✓。
+     */
+    sprite.scale?.set(0.7);
     this.options.container.addChild(sprite);
     this.sprite = sprite;
     return sprite;

@@ -18,7 +18,7 @@
  * （AGENTS.md §3：抽取时连带注释一起搬）。
  */
 
-import { Assets, Sprite, Texture, type Container, type Graphics } from 'pixi.js';
+import { Sprite, Texture, type Container, type Graphics } from 'pixi.js';
 import { LOGICAL } from '../ui/layout';
 import type { PixiCtor } from '../ui/primitives';
 import { BossSprite } from './actors/BossSprite';
@@ -89,6 +89,10 @@ export class SceneStage {
 
   /** 圣光弹播放器（懒加载素材；缺素材时静默）。 */
   private spellBurst: SpellBurstPlayer | undefined;
+  /** 圣光弹的调试读数（`__raidBattle.spell()`；见 `spellBurst.debug`）。 */
+  spellDebug(): ReturnType<SpellBurstPlayer['debug']> | undefined {
+    return this.spellBurst?.debug();
+  }
   /** 上一帧的时间戳（给法术动画算 `dt`）。 */
   private lastSpellMs = 0;
 
@@ -107,11 +111,58 @@ export class SceneStage {
       container: this.root,
       textureFor: (url) => Texture.from(url),
       /**
-       * ⚠️ **必须先 `Assets.load` 再取纹理**（2026-10-22 修的 bug：只 `Texture.from`
-       * 会拿到一张空的 1×1，控制台刷 `Asset id … was not found in the Cache`，
-       * 动画永远不出现 ✗）。失败就抛给 `SpellBurstPlayer`，它只丢那一帧。
+       * **加载一帧的纹理**（2026-10-22 第二次修）。
+       *
+       * 演进：
+       * - ① 只用 `Texture.from(url)` ⇒ 立刻拿到一张**还没就绪**的纹理，
+       *   控制台刷 `Asset id … was not found in the Cache` ✗
+       * - ② 改成 `await Assets.load(url)` ⇒ **在战斗装配期会一直挂着**
+       *   （实测 `loadStage` 停在 `assets-ok`：`Assets.load` 的 promise
+       *   在 `Assets` 尚未 init / 渲染器尚未就绪时既不 resolve 也不 reject ✗）
+       * - ③ 现在：`Texture.from(url)` **启动**加载，然后等它的 source
+       *   `update` 事件；`error` 或 3 秒兜底 ⇒ 这一帧不可用（不挂、不报错）
+       *
+       * ⚠️ 3 秒兜底是必须的：素材是 gitignore 的，缺文件时不能让"加载动画"
+       * 变成一个永远 pending 的 promise（那会把 `load()` 卡死 ✗）。
        */
-      loadTexture: async (url) => (await Assets.load<Texture>(url)) ?? undefined,
+      /**
+       * **加载一帧的纹理**（2026-10-22 第三次修，前两次都失败）：
+       *
+       * | 方案 | 结果 |
+       * |---|---|
+       * | `Texture.from(url)` 直接当纹理用 | 拿到的是**空纹理**，控制台刷 `Asset id … was not found in the Cache` ✗ |
+       * | `await Assets.load(url)` | 在战斗装配期**永远 pending**（`loadStage` 停在 `assets-ok`）✗ |
+       * | `Texture.from(url)`（相对路径）| 直接返回 `undefined`（`reading 'source' of undefined`）✗ |
+       *
+       * 现在**自己把图 load 成 `HTMLImageElement`**，再用 `Texture.from(image)`
+       * —— 成败只有两个分支，而且都在我们手里（`onload` / `onerror`）：
+       * 缺文件 ⇒ 这一帧返回 `undefined` ⇒ 播放器丢掉这一帧 ✓（不挂、不报错）。
+       */
+      loadTexture: async (url) => {
+        if (typeof Image === 'undefined' || typeof document === 'undefined') return undefined;
+        const absolute = new URL(url, document.baseURI).href;
+        return await new Promise<Texture | undefined>((resolve) => {
+          let settled = false;
+          const finish = (value: Texture | undefined): void => {
+            if (settled) return;
+            settled = true;
+            resolve(value);
+          };
+          const element = new Image();
+          element.crossOrigin = 'anonymous';
+          element.onload = () => {
+            finish(Texture.from(element));
+          };
+          element.onerror = () => finish(undefined);
+          element.src = absolute;
+          /**
+           * ⚠️ **兜底 3 秒**：实测在新版 Chrome 里，某些帧的 `Image` 既不
+           * `load` 也不 `error`（promise 永远 pending ⇒ `load()` 卡死在
+           * 第一帧、`frames` 永远是 0 ✗）。给一个上限，超时就当这一帧不可用。
+           */
+          setTimeout(() => finish(undefined), 3000);
+        });
+      },
       assetBase: 'fd2/animations/FDOTHER_028/',
       anchor: { x: ACTOR_POS.boss.x, y: ACTOR_POS.boss.y - 40 },
       createSprite: (texture) => new Sprite(texture),

@@ -31,6 +31,31 @@ import { BOSS_PORTRAITS, portraitFor } from '../portraitAssets';
 import { PortraitSprite } from '../portraitSprite';
 
 /** Boss 顶栏区域。 */
+/**
+ * **Boss 头像的边长**（纯函数，导出是为了单测能钉住"不压血条"那条不变量）。
+ *
+ * ```
+ * 可用高度 = 血条上沿 − 顶栏上沿 − 2
+ * box = min(名字字号 + 9, 可用高度)
+ * ```
+ *
+ * ⚠️ 用"血条上沿"当硬上限：头像**永远**不会压到血条、也不会越过上边距
+ * （用户 2026-10-22："盖住了血条、顶住了视图顶部"）。
+ */
+export function bossPortraitBox(): number {
+  const bb = LAYOUT.bossBar;
+  const hp = LAYOUT.bossHp;
+  const available = Math.max(8, hp.y - bb.y - 2);
+  return Math.min(FONT.title + 9, available);
+}
+
+/** 头像的**中心**（与 `bossPortraitBox` 同一份几何 —— 渲染与测试都用它）。 */
+export function bossPortraitCenter(): { readonly x: number; readonly y: number } {
+  const bb = LAYOUT.bossBar;
+  const box = bossPortraitBox();
+  return { x: bb.x + box / 2 + 2, y: bb.y + box / 2 };
+}
+
 export class BossHeader {
   /** HUD 层上的根容器。`(0,0)` 让内部的逻辑坐标保持不变。 */
   readonly root: Container;
@@ -131,13 +156,20 @@ export class BossHeader {
   }
 
   /**
-   * 头像边长（逻辑像素）= 名字字号 + 一点余量。
+   * 头像边长（逻辑像素）—— **算出来的**，不是手调：
    *
-   * ⚠️ 由**顶栏自己的字号**推出来（不写死）：`setUiScale` 会改字号，
-   * 头像跟着同一套比例走，两者不会一大一小。
+   * ```
+   * 可用高度 = 血条上沿 − 顶栏上沿 − 2（留一点缝）
+   * box = min(名字字号 + 9, 可用高度)
+   * ```
+   *
+   * ⚠️ 2026-10-22 第二次修：原来是 `FONT.title + 9`（≈33）⇒ 头像下端压到
+   * **血条那一行**（`LAYOUT.bossHp.y`），上端几乎顶到画布 0 ✗（用户：
+   * "盖住了血条、顶住了视图顶部"）。现在用"血条上沿"当硬上限 ⇒ 永远
+   * 不会压到血条、也不会越过上边距 ✓。
    */
   private portraitBox(): number {
-    return FONT.title + 9;
+    return bossPortraitBox();
   }
 
   /**
@@ -154,9 +186,12 @@ export class BossHeader {
     }
     this.portrait?.setAsset(asset);
     this.portrait?.setVisible(true);
-    const bb = LAYOUT.bossBar;
-    const box = this.portraitBox();
-    this.portrait?.root.position.set(bb.x + box / 2, bb.y + FONT.title / 2 + 1);
+    const center = bossPortraitCenter();
+    /**
+     * ⚠️ **垂直居中在"顶栏上沿 → 血条上沿"这条带子里**（不是按字号推）——
+     * 这样它既贴不到画布 0，也压不到血条 ✓（见 `portraitBox` 的注释）。
+     */
+    this.portrait?.root.position.set(center.x, center.y);
   }
 
   /** 挂上本区域的每帧部件（顶栏文本 / 血条 / 两条图标条）。 */
