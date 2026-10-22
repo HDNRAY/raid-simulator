@@ -68,7 +68,7 @@ import { Label, type PixiCtor } from './primitives';
 import { ScreenChrome } from './ScreenChrome';
 import { PALETTE } from '../render/theme';
 import { isDeveloping, type RosterEntry } from '../data/roster';
-import { CARD_RADIUS, CARD_STROKE, CURSOR_RING_GAP, PREPARE_SKIN, cardSkin } from './prepareRender';
+import { CARD_RADIUS, PREPARE_SKIN, cardSkin } from './prepareRender';
 import { detailRect } from './prepareGeometry';
 import {
   easeOutCubic,
@@ -160,7 +160,11 @@ export class CharacterSelectScreen {
    * 插值到右侧详情面板的矩形（`detailRect()`），边变边淡出。
    * 打断语义全在 `expandTween`（值不动、只换目标 ⇒ 从当前进度往回跑）。
    */
-  private expandAnim: ExpandState = initialExpand();
+  /**
+   * **每张卡各自一份进度**（2026-10-22）：换人时 A 的 target 变 0、B 的变 1，
+   * **两张同时跑**（上一版只有一份状态 ⇒ "旧卡瞬间收、新卡瞬间开" ✗）。
+   */
+  private expandStates: ExpandState[] = [];
   /**
    * **指针停在空白处**（或离开画布）—— 2026-10-22 用户："hover 哪个哪个就
    * 展开，**移开就收起**"。
@@ -307,7 +311,7 @@ export class CharacterSelectScreen {
   expand(): { readonly card: number | null; readonly progress: number } {
     return {
       card: this.expandCard === undefined ? null : this.expandCard,
-      progress: Math.round(this.expandAnim.progress * 1000) / 1000,
+      progress: Math.round(this.progressOf(this.expandCard ?? 0) * 1000) / 1000,
     };
   }
 
@@ -423,7 +427,7 @@ export class CharacterSelectScreen {
    * 在卡片上滚轮不该动详情（会让人以为"卡片自己能滚"）。
    */
   isOnScrollable(px: number, py: number): boolean {
-    if (this.expandAnim.progress < 0.5) return false;
+    if (this.progressOf(this.expandCard ?? -1) < 0.5) return false;
     const card = this.expandedSlot();
     if (card === undefined) return false;
     /** ⚠️ 判据用**长大的那张卡**的矩形（面板已被平移，它的命中仍用固定矩形）。 */
@@ -432,10 +436,24 @@ export class CharacterSelectScreen {
       && py >= grown.y && py <= grown.y + grown.h;
   }
 
+  /** 第 `index` 张卡此刻的进度（缺省 0 = 收着）。 */
+  private progressOf(index: number): number {
+    return this.expandStates[index]?.progress ?? 0;
+  }
+
   /** 当前正在展开的那张卡的**槽位**（没有在展开 ⇒ `undefined`）。 */
   private expandedSlot(): CharacterCardRect | undefined {
     if (this.expandCard === undefined || this.expandCard < 0) return undefined;
     return characterSelectCardRects(this.players.length)[this.expandCard];
+  }
+
+  /**
+   * **键盘滚动**：`Shift + ↑ / ↓`（`loopWiring` 已按同一约定接好）。
+   * ⚠️ **只在展开到位时才滚**（收起时那张还是小卡，滚它没有意义）。
+   */
+  scrollDetail(dir: 'up' | 'down'): void {
+    if (this.progressOf(this.expandCard ?? -1) < 0.5) return;
+    this.detailPanel.scrollStep(dir);
   }
 
   /** **滚轮**：滚详情正文。@returns 有没有真的滚 */
@@ -478,7 +496,8 @@ export class CharacterSelectScreen {
       const now = performance.now();
       const dt = this.lastFrameMs === 0 ? 0 : now - this.lastFrameMs;
       this.lastFrameMs = now;
-      this.expandAnim = stepExpand(this.expandAnim, dt);
+      /** ⚠️ **每一张**都要推进（换人时 A 收、B 开是同时跑的）。 */
+      this.expandStates = this.expandStates.map((state) => stepExpand(state, dt));
       this.redraw();
       this.chrome.update();
     }
@@ -521,7 +540,6 @@ export class CharacterSelectScreen {
     this.hint.setColor(developing ? PREPARE_SKIN.selectionText : PALETTE.textDim);
 
     const areas = characterSelectHitAreas(this.players);
-    const cursorAt = characterCursorTarget(this.selection, this.players);
 
     this.cardGfx.clear();
     this.expandGfx.clear();
@@ -535,16 +553,16 @@ export class CharacterSelectScreen {
        * 皮肤来自 `prepareRender.cardSkin()`（纯函数、有单测）。
        */
       const selected = entry.id === this.selection.playerId;
-      const cursored = cursorAt !== undefined && cursorAt.id === entry.id;
       const soon = isDeveloping(entry.id);
-      const skin = cardSkin({ developing: soon, cursored, selected });
+      /** ⚠️ 不传 `cursored`：用户"不需要白色光标了"（焦点只由展开态表达）。 */
+      const skin = cardSkin({ developing: soon, cursored: false, selected });
       /** ⚠️ 没被展开的那两张压暗到 30%（仍可见、仍 hover 得到）。 */
       const dimmed = this.expandCard !== undefined && i !== this.expandCard;
-      const cardAlpha = dimmed ? Math.max(0.3, 1 - 0.7 * easeOutCubic(this.expandAnim.progress)) : 1;
+      const cardAlpha = dimmed ? Math.max(0.3, 1 - 0.7 * easeOutCubic(this.progressOf(this.expandCard ?? 0))) : 1;
       card.name.root.alpha = cardAlpha;
       card.status.root.alpha = cardAlpha;
       /** ⚠️ 被展开的那张不画自己的名字（详情里已有；否则会透出重影）。 */
-      const selfLabel = !dimmed && this.expandAnim.progress > 0.15;
+      const selfLabel = !dimmed && this.progressOf(i) > 0.15;
       card.name.root.visible = !selfLabel;
       card.status.root.visible = !selfLabel;
 
@@ -576,22 +594,6 @@ export class CharacterSelectScreen {
           .roundRect(area.x, area.y, area.w, area.h, CARD_RADIUS)
           .stroke({ color: skin.strokeColor, width: skin.strokeWidth, alpha: cardAlpha });
       }
-      /**
-       * 外环：光标 + 选择同一张卡（卡片本身是金的，环标出光标）、
-       * 或光标落在开发中的卡上（那张卡整体压暗，没有环看不出来）——
-       * 与 `PrepareScreen` 同一段理由，见 `prepareRender.CardSkin.ring`。
-       */
-      if (skin.ring) {
-        this.cardGfx
-          .roundRect(
-            area.x - CURSOR_RING_GAP,
-            area.y - CURSOR_RING_GAP,
-            area.w + CURSOR_RING_GAP * 2,
-            area.h + CURSOR_RING_GAP * 2,
-            CARD_RADIUS + CURSOR_RING_GAP,
-          )
-          .stroke({ color: skin.ringColor, width: CARD_STROKE.cursor });
-      }
     });
 
     /**
@@ -613,14 +615,17 @@ export class CharacterSelectScreen {
     const focus = focusId === undefined ? undefined : { kind: 'player' as const, id: focusId };
     const focusIndex = this.players.findIndex((p) => p.id === focus?.id);
     if (focusIndex !== this.expandCard) this.expandCard = focusIndex;
-    this.expandAnim = retarget(this.expandAnim, focusIndex >= 0 ? 1 : 0);
+    /** **每张卡各自的目标**：焦点那张 1、其余 0（于是换人时两张同时跑）。 */
+    this.expandStates = this.players.map((_entry, index) =>
+      retarget(this.expandStates[index] ?? initialExpand(), index === focusIndex ? 1 : 0),
+    );
     this.drawExpand(focusIndex);
     /**
      * **详情内容 = 展开后的那张卡的内容**（2026-10-22）：面板的透明度跟着
      * `progress` 走 —— 展开到 1 时它完全是详情、收起时它一点都看不见。
      * 于是"卡片长成详情"是**同一块区域**在变，不是左右两块各画一份 ✗。
      */
-    const panelAlpha = easeOutCubic(this.expandAnim.progress);
+    const panelAlpha = easeOutCubic(this.progressOf(focusIndex));
     this.detailPanel.root.alpha = panelAlpha;
     /** 详情面板**平移到那张长大的卡上**（不缩放：宽度恒等 296）。 */
     if (focusIndex >= 0) {
@@ -651,7 +656,7 @@ export class CharacterSelectScreen {
      * 画进同一个 Graphics 了（见那里的说明），这里只负责名字标签。
      */
     this.expandTitle.root.visible = false;
-    if (cardIndex < 0 || this.expandAnim.progress <= 0) return;
+    if (cardIndex < 0 || this.progressOf(cardIndex) <= 0) return;
 
     const areas = characterSelectHitAreas(this.players);
     const from = areas[cardIndex];
@@ -663,7 +668,7 @@ export class CharacterSelectScreen {
      * `detailRect()` —— 用户 2026-10-22 纠正："不是在右边有一个单独的模块"。
      */
     const to = expandedCardRect(from);
-    const rect = lerpRect(from, to, easeOutCubic(this.expandAnim.progress));
+    const rect = lerpRect(from, to, easeOutCubic(this.progressOf(cardIndex)));
     /**
      * ⚠️ **不淡出**（2026-10-22）：这张卡是"正在长成详情"的那一块 —— 它
      * 一直实心，到 progress=1 时正好与详情面板重合，看起来就是"卡片变成了
@@ -682,7 +687,7 @@ export class CharacterSelectScreen {
       .stroke({ color: skin.strokeColor, width: skin.strokeWidth });
 
     /** 名字跟着卡片走（字号不插值：中文 >= 13 的下限比"大小连贯"更重要）。 */
-    this.expandTitle.root.visible = this.expandAnim.progress < 0.5;
+    this.expandTitle.root.visible = this.progressOf(cardIndex) < 0.5;
     this.expandTitle.root.alpha = alpha;
     this.expandTitle.set(this.options.translate(player.nameKey));
     this.expandTitle.root.x = rect.x + 18;
