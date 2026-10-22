@@ -141,9 +141,15 @@ describe('说明与内容的推导关系（名字的字数 / 字面值不测）'
       const sourceName = QIJI_CATALOG.get(`skill.${String(source)}.name`);
       expect(sourceName, `skill.${String(source)}.name 不在语言包`).toBeDefined();
       const desc = QIJI_CATALOG.get(qiji.descKey ?? '') ?? '';
+      /**
+       * ⚠️ 2026-10-22 起断言改成"**说明里点明了源技能**"而不是"以它开头"：
+       * 用户把文案收紧成一句"<条件>后可以接「击」"，其中「卸」那条写成
+       * "成功使用「卸」防御后…"（不是以「卸」打头）。只要**点到了**源技能名
+       * 与「击」，这条保险费就还在（技能改名时说明不会跟着变 ⇒ 红）。
+       */
       expect(
-        desc.startsWith(`「${String(sourceName)}」`),
-        `${qiji.id} 的说明没有以源技能「${String(sourceName)}」开头：${desc}`,
+        desc.includes(`「${String(sourceName)}」`),
+        `${qiji.id} 的说明没有点明源技能「${String(sourceName)}」：${desc}`,
       ).toBe(true);
       /** 派生出来的是「击」（同一个技能，变的只是它从谁那儿派出来）。 */
       expect(desc).toContain('「击」');
@@ -493,7 +499,12 @@ describe('三条新炁机的说明与内容**对得上**', () => {
 
     const costDesc = QIJI_CATALOG.get('qiji.ningShenJuQi.desc') ?? '';
     const reduction = qijiById('ningShenJuQi')?.skillTweak?.costDeltas?.[0]?.delta;
-    expect(costDesc).toContain(`减少 ${String(Math.abs(reduction ?? 0))}`);
+    /**
+     * ⚠️ 2026-10-22 文案收紧成 `「凝」的缠消耗 −20。`（用户要求一句到底、
+     * 数字贴中文）⇒ 断言从"含『减少 20』"放宽成"**含那个数**"：数值必须
+     * 从内容推导（改平衡时这里跟着变），措辞怎么改都不该红。
+     */
+    expect(costDesc).toContain(String(Math.abs(reduction ?? 0)));
 
     const boostDesc = QIJI_CATALOG.get('qiji.ningShenRuDao.desc') ?? '';
     const override = qijiById('ningShenRuDao')?.skillTweak?.buffOverrides?.[0]?.modifiers[0]?.value;
