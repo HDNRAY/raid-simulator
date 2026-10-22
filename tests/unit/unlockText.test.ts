@@ -55,12 +55,12 @@ describe('解锁条件的文案（从结构推导）', () => {
     }
   });
 
-  it('`always` ⇒ 「开局即可选」', () => {
-    expect(unlockTextOf({ kind: 'always', of: [] }, deps)).toBe('开局即可选');
+  it('`always` ⇒ 「解锁条件：无」（用户 2026-10-22 的口径）', () => {
+    expect(unlockTextOf({ kind: 'always', of: [] }, deps)).toBe('解锁条件：无');
   });
 
-  it('⚠️ 空 `all` 也按「开局即可选」（它的语义就是真）', () => {
-    expect(unlockTextOf({ kind: 'all', of: [] }, deps)).toBe('开局即可选');
+  it('⚠️ 空 `all` 也按「解锁条件：无」（它的语义就是真）', () => {
+    expect(unlockTextOf({ kind: 'all', of: [] }, deps)).toBe('解锁条件：无');
   });
 
   it('数值与技能名**从数据来**（把 3 改成 3 —— 那条炁机写的就是 3）', () => {
@@ -80,7 +80,8 @@ describe('解锁条件的文案（从结构推导）', () => {
 
   it('组合条件：`all` / `any` / `not` 都能翻译（递归）', () => {
     const leaf = { kind: 'statAtLeast', stat: { s: 'dodges', scope: 'run' }, value: 2 } as const;
-    expect(unlockTextOf({ kind: 'all', of: [leaf, leaf] }, deps)).toContain('同时满足');
+    /** ⚠️ 2026-10-22：文案从「同时满足」改成「全部达成」。 */
+    expect(unlockTextOf({ kind: 'all', of: [leaf, leaf] }, deps)).toContain('全部达成');
     expect(unlockTextOf({ kind: 'any', of: [leaf, leaf] }, deps)).toContain('任意一条');
     expect(unlockTextOf({ kind: 'not', of: leaf }, deps)).toContain('不满足');
   });

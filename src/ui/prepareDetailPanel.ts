@@ -99,8 +99,10 @@ import { detailRect } from './prepareGeometry';
 import type { DetailModel, DetailRow } from './prepareDetail';
 import { PORTRAITS, portraitFor } from '../render/portraitAssets';
 import { PortraitSprite } from '../render/portraitSprite';
-import { DetailViewport, measuredHeight } from './prepareDetailViewport';
+import { DetailViewport } from './prepareDetailViewport';
 import { attachViewportMask, drawViewportClip, fullyOutside } from './viewportMask';
+import { stripEmphasis } from './emphasis';
+import { detailRowText, estimatedHeightOf, measuredHeightOf } from './detailText';
 import {
   DETAIL_ROW_POOL,
   METRICS,
@@ -138,18 +140,6 @@ interface PlacedRow {
   readonly bodyTop: number;
   /** 这一行的**底边**（不含 `rowGap`）—— 裁剪判据读它。 */
   readonly endTop: number;
-}
-
-/**
- * 去掉说明里的**强调标记**（`**…**`）。
- *
- * ⚠️ 内容表用 `**` 标重点（例如「碾压」的"读条全程**霸体**"），而 Pixi 的
- * 一段 `Text` 做不了**行内**加粗 —— 设置页的技能详情早就用
- * `replaceAll('**', '')` 处理过（见 `settings/SkillDetail.ts`）。
- * 详情区这一版**漏了那一步**，于是面板上原样显示 `**霸体**`（截图实测）。
- */
-function stripEmphasis(text: string): string {
-  return text.replaceAll('**', '');
 }
 
 export class PrepareDetailPanel {
@@ -650,48 +640,17 @@ export class PrepareDetailPanel {
     }
   }
 
+  /** 见 `./detailText`（那一半是"这一行显示什么字、多高"，与摆位无关）。 */
   private textOf(row: DetailRow): string {
-    /**
-     * ⚠️ **`text` 行也要过 `stripEmphasis`**（2026-10-16）。
-     *
-     * 语言包里的 `**加粗**` 是**给读源码的人**看的重音标记，画面上不该出现
-     * 星号 —— 技能说明那条路（上面 `stripEmphasis(...)`）一直是这么做的，
-     * 而 `text` 行漏了：肉鸽确认屏的「恶魔低语」详情就是这么把
-     * `这一层**没有难度惩罚**…` 原样画到屏上的（截图里一眼可见）。
-     *
-     * 放在这里（而不是"把文案里的 `**` 删掉"）：后者只是**这一次**不出现，
-     * 下一条 `text` 行还会踩同一个坑。
-     */
-    if (row.kind === 'text') return stripEmphasis(this.translate(row.key, row.params));
-    if (row.kind === 'kv') return row.value;
-    return stripEmphasis(this.translate(row.nameKey));
+    return detailRowText(row, this.translate);
   }
 
-  /** 实测高度（`prepareDetailViewport.measuredHeight` 的转发：这里只读 Pixi 的盒高）。 */
   private measuredHeight(label: Label, fallback: number): number {
-    return measuredHeight(label.root.height, fallback);
+    return measuredHeightOf(label.root, fallback);
   }
 
-  /** 估算的文本高度（`estimateLines × bodyLine`）。 */
   private estimatedHeight(label: Label): number {
-    return this.estimateLines(label) * METRICS.bodyLine;
-  }
-
-  /**
-   * 折了几行（**估算**，只作 `measuredHeight` 的兜底）。
-   *
-   * ⚠️ 为什么估算而不是 `getBounds()`：Pixi 的测量在 jsdom 里跑不动
-   * （`PrepareScreen` 与 `prepareRender` 都因为同一条纪律把逻辑抽出去
-   * 了）。这里要的只是**行高**，而中文是方块字 —— `字数 / 每行字数`
-   * 对它是够准的下界。用 `ceil` 而不是 `round`：宁可多留一行空，
-   * 也不让两行文字叠在一起。
-   */
-  private estimateLines(label: Label): number {
-    const text = label.root.text;
-    if (text.length === 0) return 0;
-    const width = label.root.style.wordWrapWidth;
-    const perLine = Math.max(1, Math.floor(width / METRICS.bodySize));
-    return Math.max(1, Math.ceil(text.length / perLine));
+    return estimatedHeightOf(label.root, METRICS.bodySize, METRICS.bodyLine);
   }
 
   /* ---------------------------------------------------------------- *

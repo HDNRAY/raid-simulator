@@ -77,13 +77,23 @@ function statText(stat: BattleStatQuery, value: number, d: UnlockTextDeps): stri
  * 处理（那是"零子条件"的语义，见 `QijiUnlock` 的说明）。
  */
 export function unlockTextOf(unlock: QijiUnlock, d: UnlockTextDeps): string {
+  /**
+   * ⚠️ **统一加「解锁条件：」前缀**（用户 2026-10-22："其他条件也加上
+   * '解锁条件：'几个字"）—— 加在这一层而不是每个模板里：模板会越来越多，
+   * 一个漏了前缀就会让那一行看起来不像条件 ✗。
+   */
+  return `${d.translate('screen.codex.unlock.prefix')}${unlockBodyOf(unlock, d)}`;
+}
+
+/** 一句条件（不含前缀）—— 组合条件递归时用它，避免前缀重复。 */
+function unlockBodyOf(unlock: QijiUnlock, d: UnlockTextDeps): string {
   switch (unlock.kind) {
     case 'always':
       return d.translate('screen.codex.unlock.always');
     case 'statAtLeast':
       return statText(unlock.stat, unlock.value, d);
     case 'all': {
-      const parts = unlock.of.map((child) => unlockTextOf(child, d));
+      const parts = unlock.of.map((child) => unlockBodyOf(child, d));
       /**
        * ⚠️ 空 `all` = **真**（没有任何一项被违反）—— 也就是"开局即可选"。
        * 不写这一支的话，界面会显示一句空的"同时满足："。
@@ -93,9 +103,9 @@ export function unlockTextOf(unlock: QijiUnlock, d: UnlockTextDeps): string {
     }
     case 'any':
       return d.translate('screen.codex.unlock.any', {
-        parts: unlock.of.map((child) => unlockTextOf(child, d)).join(d.translate('common.listSeparator')),
+        parts: unlock.of.map((child) => unlockBodyOf(child, d)).join(d.translate('common.listSeparator')),
       });
     case 'not':
-      return d.translate('screen.codex.unlock.not', { part: unlockTextOf(unlock.of, d) });
+      return d.translate('screen.codex.unlock.not', { part: unlockBodyOf(unlock.of, d) });
   }
 }

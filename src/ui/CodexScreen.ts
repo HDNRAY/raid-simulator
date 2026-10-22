@@ -56,7 +56,8 @@ import {
   fullyOutside,
   type ViewportRect,
 } from './viewportMask';
-import { scrollBarGeometry } from './scrollWindow';
+import { paintScrollBar } from './scrollBarPaint';
+import { stripEmphasis } from './emphasis';
 import type { TranslateFn } from '../i18n/translator';
 
 export interface CodexScreenOptions {
@@ -96,9 +97,14 @@ export class CodexScreen {
   private readonly title: Label;
   private readonly summary: Label;
   private readonly hint: Label;
-  /** 每张卡片的两个 Label（名字 / 状态）；卡片数量按最大池子预建。 */
+  /**
+   * 每张卡片的两个 Label（名字 / 效果说明）—— 卡片数量按最大池子预建。
+   *
+   * ⚠️ **没有"状态行"**（2026-10-22 用户："不需要显示是否已解锁，？？？就
+   * 说明了"）：未解锁的卡片名字已经是「？？？」，再写一行「未解锁」是冗余。
+   */
   private readonly nameLabels: Label[] = [];
-  private readonly stateLabels: Label[] = [];
+  private readonly descLabels: Label[] = [];
   /** 解锁条件那一行（小字、暗色；**未解锁的也照写** —— 那正是玩家要知道的）。 */
   private readonly conditionLabels: Label[] = [];
   readonly chrome: ScreenChrome;
@@ -262,14 +268,21 @@ export class CodexScreen {
 
 
   /**
-   * 点一下：齿轮 / 返回箭头优先；其余位置 = 回首页（只读屏，"点哪都走"）。
+   * 点一下：**只处理边角控件**（齿轮 / 左上角返回箭头）。
    *
-   * ⚠️ 与 `RunOverScreen` 同一条顺序（先问 chrome）—— 否则点齿轮会顺带离开。
+   * ⚠️ 2026-10-22 用户："图鉴不需要点击屏幕任意位置返回，就要按，点击i，esc
+   * 或者 返回键（移动端）"。
+   *
+   * 所以这里**不再**"点哪都 `onBack()`"：
+   *   - 点卡片区 / 空白处 ⇒ **什么都不做**（用户要的是"看内容"，不是"点一下就
+   *     被踢回首页" —— 那一版在滚动时尤其糟：拖到一半松手就退出去了 ✗）
+   *   - 返回只有三条路：`Esc`（`loopWiring`）/ 左上角**返回箭头**（`chrome`，
+   *     也就是移动端的返回键）/ 齿轮
+   *
+   * @returns 有没有被边角控件消费（**不消费** ⇒ 交给滚动流水，见 `canvasInput`）
    */
   hitTest(px: number, py: number): boolean {
-    if (this.chrome.hitTest(px, py)) return true;
-    this.options.onBack();
-    return true;
+    return this.chrome.hitTest(px, py);
   }
 
   frame(): void {
@@ -315,9 +328,9 @@ export class CodexScreen {
     entries.forEach((entry, index) => {
       const card = rects[index];
       const nameLabel = this.nameLabels[index];
-      const stateLabel = this.stateLabels[index];
+      const descLabel = this.descLabels[index];
       const conditionLabel = this.conditionLabels[index];
-      if (card === undefined || nameLabel === undefined || stateLabel === undefined) return;
+      if (card === undefined || nameLabel === undefined || descLabel === undefined) return;
 
       /**
        * **滚动 = 整层位移**（2026-10-22 用户："我要的是类似 html 那种滚动效果"）。
@@ -336,7 +349,7 @@ export class CodexScreen {
        */
       if (fullyOutside(shifted, view)) {
         nameLabel.root.visible = false;
-        stateLabel.root.visible = false;
+        descLabel.root.visible = false;
         if (conditionLabel !== undefined) conditionLabel.root.visible = false;
         return;
       }
@@ -353,57 +366,87 @@ export class CodexScreen {
         .roundRect(shifted.x, shifted.y, shifted.w, shifted.h, CARD_RADIUS)
         .stroke({ color: skin.strokeColor, width: skin.strokeWidth });
 
-      nameLabel.root.x = shifted.x + shifted.w / 2;
-      nameLabel.root.y = shifted.y + shifted.h * 0.24;
+      /**
+       * **三行字**（2026-10-22 用户："卡片要显示炁机效果的说明"）：
+       *
+       * ```
+       *   名字        （一行，未解锁 = ？？？）
+       *   效果说明    （小字，按字数折行，最多 2 行）
+       *   解锁条件    （小字，一行，超长省略）
+       * ```
+       *
+       * ⚠️ 字号下限 `FONT.small`（13，`ui/layout.ts`：中文 >= 13）。
+       * ⚠️ **没有"已解锁 / 未解锁"那一行**（用户："？？？就说明了"）。
+       */
+      const centerX = shifted.x + shifted.w / 2;
+      nameLabel.root.x = centerX;
+      nameLabel.root.y = shifted.y + shifted.h * 0.17;
       nameLabel.set(entry.nameKey === undefined ? t('screen.codex.locked') : t(entry.nameKey));
       nameLabel.setColor(entry.nameKey === undefined ? PALETTE.textDim : PALETTE.text);
       nameLabel.root.visible = true;
 
-      stateLabel.root.x = shifted.x + shifted.w / 2;
-      stateLabel.root.y = shifted.y + shifted.h * 0.5;
-      stateLabel.set(
-        entry.unlocked ? t('screen.codex.unlocked') : t('screen.codex.notUnlocked'),
-      );
       /**
-       * ⚠️ 卡片很矮时不画状态行（它会和下面那行条件叠在一起）——
-       * "已解锁 / 未解锁"仍由"名字 vs ？？？"表达。
+       * 效果说明：**未解锁时没有**（`descKey === undefined` ⇒ 不画）——
+       * "？？？"就是"你还不知道它是什么" ✓（开发模式会把它填上）。
+       *
+       * ⚠️ 折行按**卡片内宽**算（`colW − 2×8`）：中文等宽 + 13px ⇒
+       * 一行放得下 ~11 个字，所以两行能把一条炁机的说明说清楚。
        */
-      stateLabel.root.visible = shifted.h >= 84;
+      const desc = entry.descKey === undefined ? undefined : t(entry.descKey);
+      if (desc === undefined || desc === '') {
+        descLabel.root.visible = false;
+      } else {
+        const perLine = Math.max(6, Math.floor((shifted.w - 16) / FONT.small));
+        /**
+         * ⚠️ 先把文案里的**硬换行**压成空格：语言包的说明是**给窄卡片**写的
+         * 两行（`…\n…`），而这里按卡片宽度重折 —— 两套折行叠在一起会出现
+         * 第 3 行（实测「游刃有余」就是这样溢到条件行上的 ✗）。
+         */
+        const flat = stripEmphasis(desc).replaceAll('\n', ' ');
+        descLabel.set(wrapByChars(flat, { perLine, maxLines: 2 }).join('\n'));
+        descLabel.setColor(PALETTE.textDim);
+        descLabel.root.x = centerX;
+        descLabel.root.y = shifted.y + shifted.h * 0.45;
+        descLabel.root.visible = true;
+      }
 
       if (conditionLabel !== undefined) {
-        conditionLabel.root.x = shifted.x + shifted.w / 2;
-        conditionLabel.root.y = shifted.y + shifted.h * 0.78;
+        conditionLabel.root.x = centerX;
+        conditionLabel.root.y = shifted.y + shifted.h * 0.82;
         /**
-         * 两行条件要求卡片**够高**（否则第二行会掉到卡片外面）；
-         * 超长的条件按字数折行 + 省略号。
+         * 解锁条件：**一行**、超长省略（两行会和效果说明叠在一起 ——
+         * 卡片只有 `CODEX_LAYOUT.cardH` 那么高）。
          */
-        const lines = shifted.h >= 120 ? 2 : 1;
+        const perLine = Math.max(6, Math.floor((shifted.w - 16) / FONT.small));
         conditionLabel.set(
-          wrapByChars(entry.unlockText, { perLine: 12, maxLines: lines }).join('\n'),
+          wrapByChars(entry.unlockText, { perLine, maxLines: 1 }).join('\n'),
         );
         conditionLabel.setColor(PALETTE.textDim);
         conditionLabel.root.visible = true;
       }
     });
 
-    /** 滚动条（内容比视口高时才画）。 */
-    if (maxScroll > 0) {
-      const thumb = scrollBarGeometry({
-        viewportPx: view.h,
-        maxScrollPx: maxScroll,
-        scrollPx: this.scrollOffset,
-        trackLenPx: view.h,
-      });
-      const trackX = CODEX_LAYOUT.width / 2 + 5 * CODEX_LAYOUT.cardW / 2 + 40;
-      this.overlayGfx
-        .roundRect(trackX, view.y + thumb.offset, 4, Math.max(8, thumb.length), 2)
-        .fill({ color: PALETTE.textDim, alpha: 0.35 });
-    }
+    /**
+     * **滚动条**（2026-10-22 用户："现在滚动好了，但是这里没有显示滚动条"）。
+     *
+     * ⚠️ 上一版把 `trackX` 算成 `画布中线 + 5 张卡的半宽 + 40 ≈ 970` ——
+     * 而画布只有 960 ⇒ **画在画布外面**，所以"怎么都不显示" ✗。
+     * 现在贴**卡片网格右边缘 + 8**，并且几何仍走
+     * `scrollWindow.scrollBarGeometry`（唯一一份，`paintScrollBar` 只是画笔）。
+     */
+    const gridRight = view.x + view.w;
+    paintScrollBar({
+      gfx: this.overlayGfx,
+      track: { x: gridRight + 8, top: view.y, len: view.h },
+      viewportPx: view.h,
+      maxScrollPx: maxScroll,
+      scrollPx: this.scrollOffset,
+    });
 
     /** 多余的 Label（池子变小）藏起来。 */
     for (let i = entries.length; i < this.nameLabels.length; i += 1) {
       this.nameLabels[i]?.root && (this.nameLabels[i]!.root.visible = false);
-      this.stateLabels[i]?.root && (this.stateLabels[i]!.root.visible = false);
+      this.descLabels[i]?.root && (this.descLabels[i]!.root.visible = false);
       this.conditionLabels[i]?.root && (this.conditionLabels[i]!.root.visible = false);
     }
 
@@ -430,9 +473,10 @@ export class CodexScreen {
         anchorY: 0.5,
         kai: true,
       });
-      const state = new Label(pixi, {
+      const desc = new Label(pixi, {
         x: 0,
         y: 0,
+        /** 中文下限 13（`FONT.small`）—— 效果说明不能更小。 */
         size: FONT.small,
         color: PALETTE.textDim,
         anchorX: 0.5,
@@ -447,9 +491,9 @@ export class CodexScreen {
         anchorX: 0.5,
         anchorY: 0.5,
       });
-      this.cardsLayer.addChild(name.root, state.root, condition.root);
+      this.cardsLayer.addChild(name.root, desc.root, condition.root);
       this.nameLabels.push(name);
-      this.stateLabels.push(state);
+      this.descLabels.push(desc);
       this.conditionLabels.push(condition);
     }
   }

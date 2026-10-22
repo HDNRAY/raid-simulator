@@ -78,7 +78,8 @@ import {
   detailViewport,
   scaledFont,
 } from './settingsScale';
-import { DESC_MAX_LINES, contentRowVisible } from './detailWindow';
+import { DESC_MAX_LINES } from './detailWindow';
+import { attachViewportMask, drawViewportClip, fullyOutside } from '../viewportMask';
 import {
   clampOffset,
   scrollFraction,
@@ -161,6 +162,11 @@ export class SkillDetail {
   private readonly content: Container;
   /** 滚动条 + 背景框都画在这一层（在文字**下面**）。 */
   private readonly frame: Graphics;
+  /**
+   * **内容层的遮罩**（2026-10-22）：把说明按像素裁在详情区里
+   * （用户："我要的是类似 html 那种滚动效果"）。
+   */
+  private readonly maskGfx: Graphics;
 
   /** 第一条可见的**行号**（与复盘面板的 `offset` 同义）。 */
   private offset = 0;
@@ -202,6 +208,12 @@ export class SkillDetail {
     this.content.x = inner.x;
     this.content.y = inner.y;
     this.root.addChild(this.content);
+    /**
+     * 遮罩：**画在 `content` 自己的局部坐标里**（左上角 = 内容原点），
+     * 所以内容整体上移（滚动）时遮罩不动 ✓ —— 这就是"窗口不动、内容在窗后滚"。
+     */
+    this.maskGfx = new pixi.Graphics();
+    attachViewportMask(this.maskGfx, this.content);
 
     const line = (row: number, size: number, color: number): Label =>
       new Label(pixi, { x: 0, y: row * lineH(), size, color });
@@ -489,18 +501,42 @@ export class SkillDetail {
    * 才变），滚动时反复写同样的字串只会白花测量/重绘的开销。
    */
   private clipToWindow(): void {
+    /**
+     * **遮罩几何 = 内容视口**（`content` 的局部坐标：左上角就是内容原点）。
+     *
+     * ⚠️ 2026-10-22 口径变更：这里**不再**"整行可见才画"（那条会把跨在
+     * 下缘的行整行藏起来 —— 用户："一段话要么完全显示、要么完全不显示"
+     * 这不是我要的）。现在按像素裁：部分露出的行照画，越界的那截由
+     * `mask` 切掉 ✓
+     */
+    const vp = detailContentRect();
+    drawViewportClip(this.maskGfx, { x: 0, y: 0, w: vp.w, h: vp.h });
+
+    /**
+     * ⚠️ 行的**可见性**仍要判一次：**完全滑出视口**的行不必画（性能；而且
+     * `descLines` 是复用池，不藏会带着上一段说明的字留在屏上）。
+     * 判据用"行的上沿 / 下沿 vs 视口"，与内容容器自己的位移（`content.y`）同源。
+     */
     const rows = viewRows();
     const offset = this.offset;
     const descRows = this.descRows();
-    /** ⚠️ 名字（内容行 0）只在**滚到顶**时可见 —— 它跟着内容一起上移。 */
-    const nameVisible = contentRowVisible(0, offset, rows);
-    this.name.root.visible = nameVisible;
-    this.tags.root.visible = nameVisible;
-    this.stats.root.visible = contentRowVisible(1 + descRows, offset, rows);
+    const line = lineH();
+    /**
+     * 视口在**内容坐标**里：`[offset × 行高, 再往下 rows 行)`。
+     * 判据用 `viewportMask.fullyOutside` 的**反面**（与图鉴 / 详情区同一份
+     * "露出来了吗"，没有第二套写法）。
+     */
+    const viewport = { x: 0, y: offset * line, w: vp.w, h: Math.max(1, rows * line) };
+    const visible = (row: number): boolean =>
+      !fullyOutside({ x: 0, y: row * line, w: vp.w, h: line }, viewport);
+
+    this.name.root.visible = visible(0);
+    this.tags.root.visible = visible(0);
+    this.stats.root.visible = visible(1 + descRows);
     for (let i = 0; i < this.descLines.length; i += 1) {
-      const line = this.descLines[i];
-      if (line === undefined) continue;
-      line.visible = contentRowVisible(1 + i, offset, rows);
+      const t = this.descLines[i];
+      if (t === undefined) continue;
+      t.visible = visible(1 + i);
     }
   }
 
